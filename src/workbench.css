@@ -34,17 +34,6 @@ window.workbench-dialog,
     color: @foreground;
 }
 
-.app-mark {
-    min-width: 27px;
-    min-height: 25px;
-    border-radius: 6px;
-    background-color: #283b52;
-    color: #c2d8ff;
-    font-family: monospace;
-    font-size: 13px;
-    font-weight: bold;
-}
-
 .app-title {
     color: @foreground;
     font-size: 13px;

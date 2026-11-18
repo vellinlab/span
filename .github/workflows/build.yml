@@ -46,7 +46,8 @@ jobs:
           extracted="$(mktemp -d)"
           dpkg-deb --info "${package[0]}"
           dpkg-deb --extract "${package[0]}" "$extracted"
-          WORKBENCH_PREVIEW="$PWD/dist/workbench.png" WORKBENCH_TEST_AGENT_SSH=1 \
+          XDG_DATA_DIRS="$extracted/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
+            WORKBENCH_PREVIEW="$PWD/dist/workbench.png" WORKBENCH_TEST_AGENT_SSH=1 \
             bash packaging/test-sftp.sh dbus-run-session -- \
             bash packaging/smoke-test.sh "$extracted/usr/bin/ssh-workbench"
 

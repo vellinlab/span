@@ -3,6 +3,7 @@ use crate::host_dialog;
 use crate::hosts::{self, Host};
 use crate::icons::{Icon, widget as icon};
 use crate::session::{Launch, Session, State};
+use crate::{APP_ID, APP_NAME};
 use gtk::prelude::*;
 use gtk::{gio, glib, pango};
 use std::cell::RefCell;
@@ -29,7 +30,8 @@ struct Workbench {
 pub fn open(app: &gtk::Application) {
     let window = gtk::ApplicationWindow::builder()
         .application(app)
-        .title("SSH Workbench")
+        .title(APP_NAME)
+        .icon_name(APP_ID)
         .default_width(1160)
         .default_height(720)
         .build();
@@ -563,17 +565,20 @@ impl Workbench {
 
 fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
     let header = gtk::HeaderBar::builder()
-        .title("SSH Workbench")
+        .title(APP_NAME)
         .show_close_button(true)
         .has_subtitle(false)
         .build();
     header.style_context().add_class("workbench-header");
 
     let brand = row(8);
-    let mark = text_label(">_", "app-mark");
-    mark.set_xalign(0.5);
+    let logo = gtk::gdk_pixbuf::Pixbuf::from_read(std::io::Cursor::new(include_bytes!(
+        "../packaging/icons/hicolor/24x24/apps/io.github.zyw02.SshWorkbench.png"
+    )))
+    .ok();
+    let mark = gtk::Image::from_pixbuf(logo.as_ref());
     brand.pack_start(&mark, false, false, 0);
-    brand.pack_start(&text_label("SSH Workbench", "app-title"), false, false, 0);
+    brand.pack_start(&text_label(APP_NAME, "app-title"), false, false, 0);
     header.pack_start(&brand);
 
     // Set an empty center widget so the window manager title remains available without repeating it.

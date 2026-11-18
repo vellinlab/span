@@ -5,7 +5,7 @@
 Name:           ssh-workbench
 Version:        %{workbench_version}
 Release:        1%{?dist}
-Summary:        A desktop terminal for local shells and OpenSSH sessions
+Summary:        Hopstride SSH terminal and Codex workspace
 License:        Unspecified and LGPL-3.0-or-later
 URL:            https://github.com/zyw02/ssh-workbench
 Requires:       bash
@@ -20,6 +20,8 @@ Open local shells and OpenSSH sessions in a tabbed GTK workspace.
 %install
 install -Dpm 0755 %{_sourcedir}/target/release/ssh-workbench %{buildroot}%{_bindir}/ssh-workbench
 install -Dpm 0644 %{_sourcedir}/packaging/io.github.zyw02.SshWorkbench.desktop %{buildroot}%{_datadir}/applications/io.github.zyw02.SshWorkbench.desktop
+install -dm 0755 %{buildroot}%{_datadir}/icons
+cp -a %{_sourcedir}/packaging/icons/hicolor %{buildroot}%{_datadir}/icons/
 
 install -Dpm 0755 %{_sourcedir}/target/bundled-vte/libvte-2.91.so.0 %{buildroot}%{_libdir}/ssh-workbench/libvte-2.91.so.0
 install -Dpm 0644 %{_sourcedir}/target/bundled-vte/SOURCE %{buildroot}%{_docdir}/ssh-workbench/VTE-SOURCE
@@ -33,3 +35,4 @@ install -pm 0644 %{_sourcedir}/target/bundled-vte/COPYING.* %{buildroot}%{_licen
 %license %{_licensedir}/ssh-workbench/COPYING.*
 %{_bindir}/ssh-workbench
 %{_datadir}/applications/io.github.zyw02.SshWorkbench.desktop
+%{_datadir}/icons/hicolor/*/apps/io.github.zyw02.SshWorkbench.png

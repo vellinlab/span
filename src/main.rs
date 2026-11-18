@@ -17,10 +17,12 @@ mod workbench;
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 
+const APP_ID: &str = "io.github.zyw02.SshWorkbench";
+const APP_NAME: &str = "Hopstride";
+
 fn main() -> glib::ExitCode {
-    let app = gtk::Application::builder()
-        .application_id("io.github.zyw02.SshWorkbench")
-        .build();
+    glib::set_application_name(APP_NAME);
+    let app = gtk::Application::builder().application_id(APP_ID).build();
     app.connect_startup(|_| {
         let provider = gtk::CssProvider::new();
         if let Err(error) = provider.load_from_data(include_bytes!("workbench.css")) {

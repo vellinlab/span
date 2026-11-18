@@ -1,6 +1,8 @@
-# SSH Workbench
+# Hopstride
 
-用 Rust、GTK3 和 VTE 构建的 Linux 桌面终端。左侧管理 SSH 主机，顶部标签在本地 Bash 和远程会话间切换。
+<img src="packaging/icons/hicolor/128x128/apps/io.github.zyw02.SshWorkbench.png" width="72" height="72" alt="Hopstride 图标">
+
+用 Rust、GTK3 和 VTE 构建的 Linux SSH 终端和 Codex 工作台。左侧管理 SSH 主机，顶部标签在本地 Bash 和远程会话间切换。
 
 ## 安装
 
@@ -9,7 +11,7 @@
 在 GitHub Actions 的 **Build Linux** 成功运行页面下载 `ssh-workbench-el8-x86_64`，解压后安装 RPM。
 
 ```sh
-sudo dnf install ./ssh-workbench-0.6.0-1.el8.x86_64.rpm
+sudo dnf install ./ssh-workbench-0.6.1-1.el8.x86_64.rpm
 ssh-workbench
 ```
 
@@ -20,9 +22,11 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 下载同一构建页面的 `ssh-workbench-linux-amd64` 并解压。
 
 ```sh
-sudo apt install ./ssh-workbench_0.6.0_amd64.deb
+sudo apt install ./ssh-workbench_0.6.1_amd64.deb
 ssh-workbench
 ```
+
+Hopstride 使用 `ssh-workbench` 包名和启动命令，可直接升级此前的 SSH Workbench 安装。日常发布沿用 `0.6.x`，递增第三段版本号。
 
 ## 使用
 

@@ -54,6 +54,7 @@ for line in sys.stdin:
     request_id = request.get("id")
     if method == "initialize":
         assert params["clientInfo"]["name"] == "ssh-workbench"
+        assert params["clientInfo"]["title"] == "Hopstride"
         assert params["capabilities"]["experimentalApi"]
         send({"id": request_id, "result": {"userAgent": "fixture"}})
     elif method == "initialized":

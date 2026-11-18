@@ -404,7 +404,7 @@ impl Agent {
         self.show_status("正在连接 Codex…");
         self.update_controls();
         self.request(Request::Initialize { browse }, "initialize", json!({
-            "clientInfo":{"name":"ssh-workbench","title":"SSH Workbench","version":env!("CARGO_PKG_VERSION")},
+            "clientInfo":{"name":"ssh-workbench","title":crate::APP_NAME,"version":env!("CARGO_PKG_VERSION")},
             "capabilities":{"experimentalApi":true,"requestAttestation":false}
         }));
     }
