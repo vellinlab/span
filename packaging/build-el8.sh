@@ -6,12 +6,12 @@ dnf --enablerepo=powertools --setopt=install_weak_deps=False -y install \
     gtk3-devel vte291-devel librsvg2 openssh-clients dbus-daemon xorg-x11-server-Xvfb xorg-x11-utils \
     gcc-c++ gettext meson ninja-build python39 fribidi-devel gnutls-devel pcre2-devel zlib-devel xz
 
-curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/ssh-workbench-rustup.sh
-bash /tmp/ssh-workbench-rustup.sh -y --profile minimal --default-toolchain 1.98.1 --component rustfmt
+curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/span-rustup.sh
+bash /tmp/span-rustup.sh -y --profile minimal --default-toolchain 1.98.1 --component rustfmt
 export PATH="$HOME/.cargo/bin:$PATH"
 
 cargo fmt --all -- --check
-RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib64/ssh-workbench' cargo build --locked --release
+RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib64/span' cargo build --locked --release
 bash packaging/build-vte-el8.sh
 gcc -o target/verify-osc packaging/verify-osc.c $(pkg-config --cflags --libs gtk+-3.0 vte-2.91)
 
@@ -21,7 +21,7 @@ test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.28"
 pkg-config --exact-version=3.22.30 gtk+-3.0
 pkg-config --exact-version=0.52.4 vte-2.91
 
-binary=target/release/ssh-workbench
+binary=target/release/span
 required_glibc="$(readelf --version-info "$binary" target/bundled-vte/libvte-2.91.so.0 | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -n 1)"
 printf 'Highest glibc symbol required: %s\n' "$required_glibc"
 test "$(printf '%s\n' "$required_glibc" GLIBC_2.28 | sort -V | tail -n 1)" = GLIBC_2.28
@@ -30,19 +30,19 @@ grep -Fq '[libgtk-3.so.0]' <<< "$dependencies"
 grep -Fq '[libvte-2.91.so.0]' <<< "$dependencies"
 
 desktop-file-validate packaging/io.github.zyw02.SshWorkbench.desktop
-version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml)"
+version="$(bash packaging/package-version.sh)"
 topdir="$(mktemp -d)"
 rpmbuild -bb \
     --define "_topdir $topdir" \
     --define "_sourcedir $PWD" \
-    --define "workbench_version $version" \
-    packaging/ssh-workbench.spec
+    --define "span_version $version" \
+    packaging/span.spec
 
 mkdir -p dist
 cp "$topdir"/RPMS/x86_64/*.rpm dist/
-package=(dist/*.rpm)
+package=(dist/span-*.rpm)
 rpm -qp --requires "${package[0]}"
-rpm -Uvh "${package[0]}"
-linked_vte="$(ldd /usr/bin/ssh-workbench | awk '$1 == "libvte-2.91.so.0" { print $3 }')"
-test "$(realpath "$linked_vte")" = /usr/lib64/ssh-workbench/libvte-2.91.so.0
-dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/ssh-workbench target/verify-osc
+bash packaging/test-package-upgrade.sh "${package[0]}"
+linked_vte="$(ldd /usr/bin/span | awk '$1 == "libvte-2.91.so.0" { print $3 }')"
+test "$(realpath "$linked_vte")" = /usr/lib64/span/libvte-2.91.so.0
+dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/span target/verify-osc

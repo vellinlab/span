@@ -36,6 +36,17 @@ PROFILE
 
 if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     unset NO_AT_BRIDGE
+    profile="$XDG_CONFIG_HOME/ssh-workbench/hosts.ini"
+    mkdir -p "$(dirname "$profile")"
+    cat > "$profile" <<'HOSTS'
+[Workbench]
+version=1
+
+[Host 1]
+name=Legacy CI host
+target=legacy-ci-host
+trusted-x11=true
+HOSTS
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
     export PATH="$HOME/bin:$PATH"
     convert -size 340x98 xc:'#233045' -fill '#86b4ff' \
@@ -79,7 +90,7 @@ awk '/^VmRSS:/ { print "Application RSS with one Bash tab (Xvfb): " $2 " KiB" }'
 awk '/^Pss:/ { print "Application PSS with one Bash tab (Xvfb): " $2 " KiB" }' "/proc/$app_pid/smaps_rollup"
 
 if [[ $# -eq 2 ]]; then
-    LD_LIBRARY_PATH=/usr/lib64/ssh-workbench "$2"
+    LD_LIBRARY_PATH=/usr/lib64/span "$2"
 fi
 
 if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
@@ -120,8 +131,10 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers shift+Tab
     xdotool type --clearmodifiers 'CI Host'
     xdotool key --clearmodifiers Return
-    profile="$XDG_CONFIG_HOME/ssh-workbench/hosts.ini"
     wait_until "the saved SSH target" grep -qs '^target=ci-host$' "$profile"
+    grep -qx 'name=Legacy CI host' "$profile"
+    grep -qx 'target=legacy-ci-host' "$profile"
+    grep -qx 'trusted-x11=true' "$profile"
     grep -qx 'name=CI Host' "$profile"
     grep -qx 'trusted-x11=false' "$profile"
 

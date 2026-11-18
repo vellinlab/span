@@ -1,6 +1,6 @@
 [package]
-name = "ssh-workbench"
-version = "0.6.3"
+name = "span"
+version = "0.1.0-rc.1"
 edition = "2024"
 description = "A Linux desktop terminal for local shells and OpenSSH sessions"
 

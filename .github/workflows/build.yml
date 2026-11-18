@@ -42,20 +42,18 @@ jobs:
         run: |
           desktop-file-validate packaging/io.github.zyw02.SshWorkbench.desktop
           bash packaging/package-deb.sh
-          package=(dist/*.deb)
-          extracted="$(mktemp -d)"
+          package=(dist/span_*.deb)
           dpkg-deb --info "${package[0]}"
-          dpkg-deb --extract "${package[0]}" "$extracted"
-          XDG_DATA_DIRS="$extracted/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
-            WORKBENCH_PREVIEW="$PWD/dist/workbench.png" WORKBENCH_TEST_AGENT_SSH=1 \
+          bash packaging/test-package-upgrade.sh "${package[0]}"
+          WORKBENCH_PREVIEW="$PWD/dist/workbench.png" WORKBENCH_TEST_AGENT_SSH=1 \
             bash packaging/test-sftp.sh dbus-run-session -- \
-            bash packaging/smoke-test.sh "$extracted/usr/bin/ssh-workbench"
+            bash packaging/smoke-test.sh /usr/bin/span
 
       - name: Upload Debian package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ssh-workbench-linux-amd64
-          path: dist/*.deb
+          name: span-linux-amd64
+          path: dist/span_*.deb
           if-no-files-found: error
           retention-days: 30
 
@@ -92,8 +90,8 @@ jobs:
       - name: Upload RPM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ssh-workbench-el8-x86_64
-          path: dist/*.rpm
+          name: span-el8-x86_64
+          path: dist/span-*.rpm
           if-no-files-found: error
           retention-days: 30
 
@@ -121,13 +119,13 @@ jobs:
       - name: Download Debian package
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ssh-workbench-linux-amd64
+          name: span-linux-amd64
           path: release
 
       - name: Download EL8 package
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ssh-workbench-el8-x86_64
+          name: span-el8-x86_64
           path: release
 
       - name: Download corresponding VTE source
@@ -146,21 +144,32 @@ jobs:
             printf 'Tag %s does not match Cargo version %s.\n' "$RELEASE_TAG" "$version" >&2
             exit 1
           fi
+          package_version="$(bash packaging/package-version.sh)"
+          rpm_asset="release/span-$version-1.el8.x86_64.rpm"
+          deb_asset="release/span_${version}_amd64.deb"
+          if [[ "$package_version" != "$version" ]]; then
+            mv -- "release/span-$package_version-1.el8.x86_64.rpm" "$rpm_asset"
+            mv -- "release/span_${package_version}_amd64.deb" "$deb_asset"
+          fi
           assets=(
-            "release/ssh-workbench-$version-1.el8.x86_64.rpm"
-            "release/ssh-workbench_${version}_amd64.deb"
+            "$rpm_asset"
+            "$deb_asset"
             "release/vte-0.64.2.tar.xz"
           )
           for asset in "${assets[@]}"; do
             test -s "$asset"
           done
+          flags=()
+          if [[ "$version" == *-* ]]; then
+            flags+=(--prerelease --latest=false)
+          fi
           export GH_REPO="$GITHUB_REPOSITORY"
           if draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"; then
             if [[ "$draft" == false ]]; then
               exit 0
             fi
           else
-            gh release create "$RELEASE_TAG" --verify-tag --title "Span $version" --notes-from-tag --draft
+            gh release create "$RELEASE_TAG" --verify-tag --title "Span $version" --notes-from-tag --draft "${flags[@]}"
           fi
           gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-          gh release edit "$RELEASE_TAG" --draft=false
+          gh release edit "$RELEASE_TAG" --draft=false "${flags[@]}"

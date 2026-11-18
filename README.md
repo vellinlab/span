@@ -8,11 +8,11 @@
 
 ### NewStartOS／EL8 x86_64
 
-从 [GitHub Releases](https://github.com/zyw02/span/releases/latest) 直接下载 `.rpm` 文件并安装。
+从 [GitHub Releases](https://github.com/zyw02/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./ssh-workbench-0.6.3-1.el8.x86_64.rpm
-ssh-workbench
+sudo dnf install ./span-0.1.0-rc.1-1.el8.x86_64.rpm
+span
 ```
 
 CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下启动已安装的 RPM。RPM 带有仅由 Span 加载的 VTE 0.64.2。该版本能忽略 Codex 的 OSC 状态序列。对应源码 `vte-0.64.2.tar.xz` 随 Release 提供。
@@ -22,11 +22,13 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./ssh-workbench_0.6.3_amd64.deb
-ssh-workbench
+sudo apt install ./span_0.1.0-rc.1_amd64.deb
+span
 ```
 
-Span 使用 `ssh-workbench` 包名和启动命令，可直接升级此前的 SSH Workbench 安装。日常发布沿用 `0.6.x`，递增第三段版本号。
+安装包与启动命令均使用 `span`。安装时会替换旧的 `ssh-workbench` 软件包，继续读取已有的主机配置。`ssh-workbench` 启动命令仍可作为兼容别名使用。
+
+带 `-alpha.N`、`-beta.N` 或 `-rc.N` 后缀的版本会标记为预发布，供测试使用。
 
 ## 使用
 
