@@ -27,6 +27,7 @@ PS1='\[\e[38;5;79m\]\u@local\[\e[0m\]:\w\$ '
 PROFILE
 
 if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
+    unset NO_AT_BRIDGE
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
     export PATH="$HOME/bin:$PATH"
     convert -size 340x98 xc:'#233045' -fill '#86b4ff' \
@@ -47,7 +48,7 @@ wait_until() {
     exit 1
 }
 
-Xvfb -displayfd 3 -screen 0 1280x800x24 -nolisten tcp -noreset 3>"$HOME/display" &
+Xvfb -displayfd 3 -screen 0 1360x980x24 -nolisten tcp -noreset 3>"$HOME/display" &
 xvfb_pid=$!
 wait_until "the Xvfb display" test -s "$HOME/display"
 export DISPLAY=":$(cat "$HOME/display")"
@@ -112,6 +113,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     wait_until "returning to the first Bash tab" grep -qsx "$first_bash" "$HOME/current-bash"
 
     xdotool key --clearmodifiers ctrl+shift+a
+    xdotool windowsize "$window" 1250 940
     sleep 0.2
     xdotool key --clearmodifiers Return
     wait_until "the Codex App Server handshake" test -f "$HOME/agent-ready"
@@ -120,10 +122,51 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers ctrl+Return
     wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
     grep -qx 'Show the deployment check' "$HOME/agent-prompt"
+    widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    widget contains 'Which deployment environment?'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-question.png"
+    widget fill-card 'Which deployment environment?' Staging
+    widget click '提交答案'
+    wait_until "the structured answer" test -f "$HOME/agent-answered"
+    widget click '本轮变更 · 查看 diff'
+    widget contains '+passed'
+    widget click '本轮变更 · 查看 diff'
+
+    widget click '复制 CSV'
+    xclip -out -selection clipboard | tr -d '\r' > "$HOME/table.csv"
+    grep -qx 'Integration,12 passed' "$HOME/table.csv"
+    widget click '复制 HTML'
+    xclip -out -selection clipboard -target text/html > "$HOME/table.html"
+    grep -q '<td>12 passed</td>' "$HOME/table.html"
+    widget click '保存 PNG'
+    wait_until "the Save PNG dialog" dialog_open '保存文件'
+    save_dialog="$(xdotool search --onlyvisible --name '^保存文件$' | head -n1)"
+    xdotool windowfocus --sync "$save_dialog"
+    xdotool key --clearmodifiers Escape
+    xdotool windowfocus --sync "$window"
+
+    xdotool key --clearmodifiers ctrl+shift+j
+    sleep 0.25
+    xdotool type --clearmodifiers 'printf "%s\n" "$BASHPID" > "$HOME/drawer-bash"'
+    xdotool key --clearmodifiers Return
+    wait_until "the original Bash in the Agent drawer" grep -qsx "$first_bash" "$HOME/drawer-bash"
     sleep 0.35
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent.png"
+    xdotool key --clearmodifiers ctrl+shift+j
+    xdotool key --clearmodifiers ctrl+shift+h
+    wait_until "the host-scoped session list" test -f "$HOME/agent-catalog"
+    widget contains 'Deployment rollout'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-catalog.png"
+    xdotool type --clearmodifiers 'Deployment'
+    wait_until "the server-side session search" test -f "$HOME/agent-searched"
+    sleep 0.25
+    xdotool key --clearmodifiers Return
+    wait_until "resuming a saved Codex session" test -f "$HOME/agent-resumed"
+    widget click '加载更早的对话'
+    wait_until "loading an older page" test -f "$HOME/agent-older-page"
+    widget contains 'Earlier deployment notes'
     xdotool key --clearmodifiers ctrl+shift+a
-    printf '%s\n' 'Codex session opened, sent a prompt, and received a structured reply.'
+    printf '%s\n' 'The Codex session tested formatted table data, structured questions, diff, drawer, search and paginated history.'
 
     # Check the real OpenSSH client version banner against an isolated loopback listener.
     python3 - "$HOME" <<'PY' &

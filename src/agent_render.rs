@@ -16,7 +16,7 @@ pub struct Context {
     pub socket: Option<PathBuf>,
 }
 
-pub fn response(markdown: &str, context: &Context) -> gtk::Box {
+pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk::Box {
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let mut pending = String::new();
     let mut list_depth: u32 = 0;
@@ -64,7 +64,7 @@ pub fn response(markdown: &str, context: &Context) -> gtk::Box {
                         std::path::Component::Normal(_) | std::path::Component::CurDir
                     )
                 });
-                let automatic = relative && automatic_images < 3;
+                let automatic = preview_images && relative && automatic_images < 3;
                 automatic_images += usize::from(automatic);
                 blocks.add(&image(&dest_url, &alt, context, automatic));
             }
@@ -348,6 +348,8 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
         expand,
         #[weak]
         save,
+        #[strong]
+        decoded,
         move |load| {
             load.set_sensitive(false);
             let target = target.clone();
@@ -468,11 +470,11 @@ fn save_asset(
         Some("保存文件"),
         parent.as_ref(),
         gtk::FileChooserAction::Save,
-        &[
-            ("取消", gtk::ResponseType::Cancel),
-            ("保存", gtk::ResponseType::Accept),
-        ],
     );
+    dialog.add_buttons(&[
+        ("取消", gtk::ResponseType::Cancel),
+        ("保存", gtk::ResponseType::Accept),
+    ]);
     dialog.set_modal(true);
     dialog.set_destroy_with_parent(true);
     dialog.set_do_overwrite_confirmation(true);

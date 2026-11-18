@@ -2,7 +2,7 @@ use crate::agent_catalog::{self, Catalog};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
 use gtk::prelude::*;
-use gtk::{gio, glib, pango};
+use gtk::{glib, pango};
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -870,7 +870,7 @@ impl Agent {
             Some("agentMessage" | "plan") => {
                 self.remove_live();
                 if let Some(text) = item["text"].as_str() {
-                    self.add_agent(text);
+                    self.add_agent(text, loading_history);
                 }
             }
             Some("commandExecution") => {
@@ -895,8 +895,12 @@ impl Agent {
             }
             Some("imageGeneration") => {
                 if let Some(path) = item["savedPath"].as_str() {
-                    let image =
-                        agent_render::image(path, "生成的图片", &self.context.borrow(), true);
+                    let image = agent_render::image(
+                        path,
+                        "生成的图片",
+                        &self.context.borrow(),
+                        !loading_history,
+                    );
                     self.append(&image);
                 }
             }
@@ -1011,10 +1015,11 @@ impl Agent {
                 } else {
                     None
                 };
+                let mut end = buffer.end_iter();
+                let start = end.offset();
+                buffer.insert(&mut end, line);
                 if let Some(tag) = tag {
-                    buffer.insert_with_tags(&mut buffer.end_iter(), line, &[tag]);
-                } else {
-                    buffer.insert(&mut buffer.end_iter(), line);
+                    buffer.apply_tag(tag, &buffer.iter_at_offset(start), &end);
                 }
             }
         }
@@ -1029,7 +1034,7 @@ impl Agent {
         self.append(&label);
     }
 
-    fn add_agent(&self, text: &str) {
+    fn add_agent(&self, text: &str, loading_history: bool) {
         let text = limited(text, 256 * 1024);
         let message = column(6);
         let actions = row(6);
@@ -1041,7 +1046,11 @@ impl Agent {
         rich.connect_clicked(move |_| agent_render::copy_rich(payload.clone()));
         actions.pack_end(&rich, false, false, 0);
         actions.pack_end(&markdown, false, false, 0);
-        message.add(&agent_render::response(&text, &self.context.borrow()));
+        message.add(&agent_render::response(
+            &text,
+            &self.context.borrow(),
+            !loading_history,
+        ));
         message.add(&actions);
         self.append(&message);
     }
