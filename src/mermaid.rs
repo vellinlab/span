@@ -1,5 +1,5 @@
 use gtk::cairo::{self, Context};
-use gtk::{gdk, gdk_pixbuf};
+use gtk::{gdk, gdk_pixbuf, pango};
 use std::collections::HashMap;
 
 const MAX_NODES: usize = 30;
@@ -128,8 +128,6 @@ impl Diagram {
         );
         cr.scale(scale, scale);
         cr.set_line_width(1.5);
-        cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
-        cr.set_font_size(13.0);
 
         match self {
             Self::Flow {
@@ -195,6 +193,11 @@ impl Diagram {
 
     pub fn image(&self) -> Option<gdk_pixbuf::Pixbuf> {
         let (width, height) = self.dimensions();
+        let scale = (2400.0 / f64::from(width))
+            .min(1700.0 / f64::from(height))
+            .min(1.0);
+        let width = (f64::from(width) * scale).round().max(1.0) as i32;
+        let height = (f64::from(height) * scale).round().max(1.0) as i32;
         let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, width, height).ok()?;
         let cr = Context::new(&surface).ok()?;
         self.draw(&cr, width, height);
@@ -277,10 +280,12 @@ fn text(cr: &Context, x: f64, y: f64, text: &str, limit: usize) {
         rendered.push('…');
     }
     cr.set_source_rgb(0.84, 0.88, 0.94);
-    if let Ok(size) = cr.text_extents(&rendered) {
-        cr.move_to(x - size.width() / 2.0 - size.x_bearing(), y);
-    }
-    let _ = cr.show_text(&rendered);
+    let layout = pangocairo::functions::create_layout(cr);
+    layout.set_font_description(Some(&pango::FontDescription::from_string("Sans 10")));
+    layout.set_text(&rendered);
+    let (width, height) = layout.pixel_size();
+    cr.move_to(x - f64::from(width) / 2.0, y - f64::from(height) * 0.78);
+    pangocairo::functions::show_layout(cr, &layout);
 }
 
 fn arrow(cr: &Context, (ax, ay): (f64, f64), (bx, by): (f64, f64)) {

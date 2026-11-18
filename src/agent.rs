@@ -58,12 +58,14 @@ impl Agent {
         let toolbar = row(10);
         toolbar.style_context().add_class("agent-toolbar");
         let title = agent_render::text(&format!("Codex  /  {host}"));
+        title.set_selectable(false);
         title.style_context().add_class("agent-title");
         toolbar.pack_start(&title, true, true, 0);
         let copy_id = button("复制会话 ID", false);
         copy_id.set_no_show_all(true);
         toolbar.pack_end(&copy_id, false, false, 0);
         let status = agent_render::text("等待打开会话");
+        status.set_selectable(false);
         status.set_ellipsize(pango::EllipsizeMode::End);
         status.style_context().add_class("agent-status");
         toolbar.pack_end(&status, false, false, 0);
@@ -546,7 +548,8 @@ impl Agent {
             }
             Some("imageGeneration") => {
                 if let Some(path) = item["savedPath"].as_str() {
-                    let image = agent_render::image(path, "生成的图片", &self.context.borrow());
+                    let image =
+                        agent_render::image(path, "生成的图片", &self.context.borrow(), true);
                     self.append(&image);
                 }
             }
@@ -654,7 +657,7 @@ impl Agent {
         let running = self.active.get();
         let ready = self.thread.borrow().is_some();
         self.connect.set_sensitive(self.rpc.borrow().is_none());
-        self.input.set_sensitive(ready && !running);
+        self.input.set_sensitive(ready);
         self.send.set_sensitive(ready && !running);
         self.stop
             .set_sensitive(running && self.turn.borrow().is_some());

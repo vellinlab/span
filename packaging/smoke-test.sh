@@ -29,7 +29,9 @@ PROFILE
 if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
     export PATH="$HOME/bin:$PATH"
-    convert -size 260x95 xc:'#304c78' "$HOME/test-output.png"
+    convert -size 340x98 xc:'#233045' -fill '#86b4ff' \
+        -draw 'roundrectangle 24,58 85,76 3,3 roundrectangle 102,47 163,76 3,3 roundrectangle 180,34 241,76 3,3 roundrectangle 258,20 319,76 3,3' \
+        "$HOME/test-output.png"
 fi
 
 wait_until() {

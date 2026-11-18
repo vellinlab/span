@@ -2,9 +2,11 @@ use crate::mermaid::Diagram;
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd, html};
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 const MAX_IMAGE: usize = 8 * 1024 * 1024;
 
@@ -18,6 +20,7 @@ pub fn response(markdown: &str, context: &Context) -> gtk::Box {
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let mut pending = String::new();
     let mut list_depth: u32 = 0;
+    let mut automatic_images = 0;
     let mut events = parser(markdown);
     while let Some(event) = events.next() {
         match event {
@@ -55,7 +58,15 @@ pub fn response(markdown: &str, context: &Context) -> gtk::Box {
                         _ => {}
                     }
                 }
-                blocks.add(&image(&dest_url, &alt, context));
+                let relative = Path::new(dest_url.as_ref()).components().all(|part| {
+                    matches!(
+                        part,
+                        std::path::Component::Normal(_) | std::path::Component::CurDir
+                    )
+                });
+                let automatic = relative && automatic_images < 3;
+                automatic_images += usize::from(automatic);
+                blocks.add(&image(&dest_url, &alt, context, automatic));
             }
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph | TagEnd::Heading(_)) => {
@@ -126,7 +137,7 @@ fn flush_text(blocks: &gtk::Box, pending: &mut String) {
 }
 
 fn table(events: &mut Parser<'_>) -> gtk::ScrolledWindow {
-    let grid = gtk::Grid::builder().column_homogeneous(false).build();
+    let grid = gtk::Grid::builder().column_homogeneous(true).build();
     grid.style_context().add_class("agent-table");
 
     let mut row = 0;
@@ -143,6 +154,7 @@ fn table(events: &mut Parser<'_>) -> gtk::ScrolledWindow {
                 in_cell = false;
                 if row < 100 && col < 20 {
                     let label = text(&cell);
+                    label.set_hexpand(true);
                     label.set_width_chars(9);
                     label.set_max_width_chars(48);
                     if row == 0 {
@@ -223,7 +235,7 @@ fn diagram_widget(diagram: Diagram, code: String) -> gtk::Box {
     block
 }
 
-pub fn image(path: &str, alt: &str, context: &Context) -> gtk::Box {
+pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::Box {
     let block = gtk::Box::new(gtk::Orientation::Vertical, 5);
     block.style_context().add_class("agent-card");
     let status = text(if alt.is_empty() { path } else { alt });
@@ -250,6 +262,8 @@ pub fn image(path: &str, alt: &str, context: &Context) -> gtk::Box {
     block.add(&actions);
 
     let socket = context.socket.clone();
+    let decoded = Rc::new(RefCell::new(None));
+    let copy_source = decoded.clone();
     load.connect_clicked(glib::clone!(
         #[weak]
         preview,
@@ -265,6 +279,7 @@ pub fn image(path: &str, alt: &str, context: &Context) -> gtk::Box {
             let preview = preview.downgrade();
             let status = status.downgrade();
             let copy = copy.downgrade();
+            let decoded = decoded.clone();
             glib::MainContext::default().spawn_local(async move {
                 let result = gio::spawn_blocking(move || load_image(&target, socket.as_deref()))
                     .await
@@ -281,8 +296,18 @@ pub fn image(path: &str, alt: &str, context: &Context) -> gtk::Box {
                 match result {
                     Ok(image) => {
                         copy.set_sensitive(true);
-                        preview.set_from_pixbuf(Some(&image));
+                        let width = preview.allocated_width().clamp(180, 620);
+                        let scale = (f64::from(width) / f64::from(image.width()))
+                            .min(340.0 / f64::from(image.height()))
+                            .min(1.0);
+                        let thumbnail = image.scale_simple(
+                            (f64::from(image.width()) * scale).max(1.0) as i32,
+                            (f64::from(image.height()) * scale).max(1.0) as i32,
+                            gdk_pixbuf::InterpType::Bilinear,
+                        );
+                        preview.set_from_pixbuf(thumbnail.as_ref().or(Some(&image)));
                         status.set_text(&format!("{} × {}", image.width(), image.height()));
+                        decoded.replace(Some(image));
                     }
                     Err(error) => {
                         status.set_text(&error);
@@ -292,21 +317,28 @@ pub fn image(path: &str, alt: &str, context: &Context) -> gtk::Box {
             });
         }
     ));
-    copy.connect_clicked(glib::clone!(
-        #[weak]
-        preview,
-        move |_| {
-            if let Some(image) = preview.pixbuf() {
-                clipboard().set_image(&image);
-            }
+    copy.connect_clicked(move |_| {
+        if let Some(image) = copy_source.borrow().as_ref() {
+            clipboard().set_image(image);
         }
-    ));
+    });
+    if automatic {
+        let load = load.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(load) = load.upgrade().filter(|load| load.is_sensitive()) {
+                load.emit_clicked();
+            }
+        });
+    }
     block
 }
 
 fn load_image(path: &Path, socket: Option<&Path>) -> Result<Vec<u8>, String> {
     if let Some(socket) = socket {
         return crate::sftp::read_image(socket, path, MAX_IMAGE);
+    }
+    if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return Err("图片路径必须指向普通文件。".into());
     }
     let file = File::open(path).map_err(|e| format!("无法打开图片：{e}"))?;
     if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {

@@ -6,6 +6,7 @@ description = "A Linux desktop terminal for local shells and OpenSSH sessions"
 
 [dependencies]
 gtk = "0.19"
+pangocairo = "0.22"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde_json = "1"
 
