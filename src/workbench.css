@@ -163,6 +163,33 @@ menu menuitem:hover {
     border-right: 1px solid @line;
 }
 
+.sidebar-tabs {
+    padding: 9px 10px 3px;
+}
+
+.workbench .sidebar-tabs button {
+    min-height: 27px;
+    margin: 0 2px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: @muted;
+    font-size: 12px;
+}
+
+.workbench .sidebar-tabs button:hover {
+    background: @hover;
+    color: @foreground;
+}
+
+.workbench .sidebar-tabs button:checked {
+    background: @surface;
+    border-color: @line;
+    color: @foreground;
+    font-weight: bold;
+}
+
 .sidebar-heading {
     padding: 10px 12px 7px;
 }
@@ -434,12 +461,13 @@ menu menuitem:hover {
 }
 
 .agent-catalog-list {
-    background: @canvas;
+    background: transparent;
     color: @foreground;
 }
 
 .agent-catalog-list row {
-    padding: 5px 8px;
+    padding: 6px 8px;
+    border-radius: 7px;
 }
 
 .agent-catalog-list row:selected,
@@ -449,14 +477,8 @@ menu menuitem:hover {
 }
 
 .agent-catalog-project {
-    color: @accent;
+    color: @muted;
     font-size: 11px;
-}
-
-.agent-diff,
-.agent-diff text {
-    background: @canvas;
-    color: @foreground;
 }
 
 .agent-drawer-header {
@@ -490,7 +512,6 @@ menu menuitem:hover {
 }
 
 .agent-card,
-.agent-code,
 .agent-command,
 .agent-approval {
     background: @sidebar;
@@ -503,8 +524,70 @@ menu menuitem:hover {
     border-color: #82643c;
 }
 
-.agent-monospace {
+.agent-activity {
+    color: @muted;
+}
+
+.agent-activity-heading {
+    font-weight: bold;
+}
+
+.agent-activity-heading,
+.agent-activity-row {
+    font-size: 12px;
+}
+
+.agent-activity-rows {
+    margin: 6px 0 3px 7px;
+    padding: 4px 0 4px 11px;
+    border-left: 1px solid @line;
+}
+
+.agent-activity-row {
+    padding: 3px 0;
+}
+
+.agent-activity-detail {
+    color: @foreground;
+    padding: 6px 9px;
+    font-size: 13px;
+}
+
+.agent-code {
+    color: @foreground;
+    background: @terminal;
+    border: 1px solid @line;
+    border-radius: 9px;
+    margin: 3px 0;
+}
+
+.agent-code-header {
+    min-height: 31px;
+    padding: 1px 8px 1px 11px;
+    background: @sidebar;
+    border-bottom: 1px solid @line;
+    border-radius: 8px 8px 0 0;
+    color: @muted;
+    font-size: 12px;
+}
+
+.agent-code-view,
+.agent-code-view text {
+    color: @foreground;
+    background: @terminal;
+    font-size: 12px;
+}
+
+.agent-code-status {
+    padding: 4px 11px 6px;
+    border-top: 1px solid @line;
+    color: @muted;
+    font-size: 11px;
+}
+
+.agent-diff-stats {
     font-family: monospace;
+    font-size: 11px;
 }
 
 .agent-response .quiet-button {
@@ -535,7 +618,7 @@ menu menuitem:hover {
 .agent-compose-card {
     background: @chrome;
     border: 1px solid #354252;
-    border-radius: 12px;
+    border-radius: 16px;
     padding: 5px 8px 7px;
 }
 
@@ -561,8 +644,9 @@ menu menuitem:hover {
 
 .workbench .agent-compose-card button.agent-send {
     min-height: 24px;
-    padding: 2px 10px;
+    padding: 2px 12px;
     margin-left: 4px;
+    border-radius: 14px;
 }
 
 .agent-attachment {

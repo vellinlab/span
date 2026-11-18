@@ -1,4 +1,5 @@
 use crate::agent_render;
+use crate::icons::{self, Icon};
 use gtk::prelude::*;
 use gtk::{glib, pango};
 use serde_json::Value;
@@ -54,7 +55,7 @@ impl Entry {
 }
 
 pub struct Catalog {
-    pub popover: gtk::Popover,
+    pub panel: gtk::Box,
     pub search: gtk::SearchEntry,
     pub archived: gtk::CheckButton,
     pub more: gtk::Button,
@@ -67,28 +68,29 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    pub fn new(anchor: &gtk::Button, host: &str) -> Self {
-        let popover = gtk::Popover::new(Some(anchor));
-        popover.set_position(gtk::PositionType::Bottom);
+    pub fn new(host: &str) -> Self {
         let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
         column.style_context().add_class("agent-catalog");
-        column.set_width_request(370);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let title = agent_render::text(&format!("{} · Codex 会话", host));
+        let title = agent_render::text(host);
         title.set_selectable(false);
+        title.set_ellipsize(pango::EllipsizeMode::End);
         title.style_context().add_class("agent-title");
         header.pack_start(&title, true, true, 0);
         let new_thread = gtk::Button::with_label("新建");
+        new_thread.style_context().add_class("quiet-button");
         header.pack_end(&new_thread, false, false, 0);
         column.add(&header);
 
         let search = gtk::SearchEntry::builder()
             .placeholder_text("搜索会话标题")
+            .width_chars(12)
             .build();
         column.add(&search);
         let filters = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let archived = gtk::CheckButton::with_label("已归档");
         let refresh = gtk::Button::with_label("刷新");
+        refresh.style_context().add_class("quiet-button");
         filters.pack_start(&archived, true, true, 0);
         filters.pack_end(&refresh, false, false, 0);
         column.add(&filters);
@@ -98,23 +100,21 @@ impl Catalog {
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .height_request(290)
             .build();
         scroll.add(&list);
-        column.add(&scroll);
+        column.pack_start(&scroll, true, true, 0);
         let status = gtk::Label::new(Some("正在读取会话…"));
         status.set_xalign(0.0);
         status.set_ellipsize(pango::EllipsizeMode::End);
         let more = gtk::Button::with_label("加载更多");
+        more.style_context().add_class("quiet-button");
         more.set_sensitive(false);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         footer.pack_start(&status, true, true, 0);
         footer.pack_end(&more, false, false, 0);
         column.add(&footer);
-        popover.add(&column);
-        column.show_all();
         Self {
-            popover,
+            panel: column,
             search,
             archived,
             more,
@@ -208,12 +208,20 @@ impl Catalog {
             let heading = gtk::ListBoxRow::new();
             heading.set_activatable(false);
             heading.set_selectable(false);
-            let label = gtk::Label::new(Some(project));
+            let name = std::path::Path::new(project)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(project);
+            let label = gtk::Label::new(Some(name));
             label.set_xalign(0.0);
             label.set_ellipsize(pango::EllipsizeMode::Start);
             label.set_tooltip_text(Some(project));
             label.style_context().add_class("agent-catalog-project");
-            heading.add(&label);
+            let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            line.style_context().add_class("agent-catalog-project");
+            line.pack_start(&icons::widget(Icon::Folder, 14), false, false, 0);
+            line.pack_start(&label, true, true, 0);
+            heading.add(&line);
             self.list.add(&heading);
             for index in items {
                 let entry = &entries[index];

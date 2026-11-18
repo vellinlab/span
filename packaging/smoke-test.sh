@@ -166,6 +166,17 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers ctrl+Return
     wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
     grep -qx 'Show the deployment check' "$HOME/agent-prompt"
+    xdotool mousemove --window "$window" 310 390 click --repeat 16 4
+    widget mouse '进行中 · 修改文件 · checks.txt…'
+    widget contains 'Checking the build before publishing.'
+    widget not-contains 'fixture raw reasoning sentinel'
+    widget mouse '读取文件 · checks.txt'
+    widget expanded-contains '读取文件 · checks.txt' 'integration test passed'
+    widget mouse '修改文件 · checks.txt…'
+    widget expanded-contains '修改文件 · checks.txt…' '+passed'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-activity.png"
+    widget mouse '进行中 · 修改文件 · checks.txt…'
+    xdotool mousemove --window "$window" 310 390 click --repeat 16 5
     widget contains 'Which deployment environment?'
     xdotool mousemove --window "$window" 900 710 click --repeat 8 5
     sleep 0.25
@@ -192,6 +203,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     grep -q '<td>12 passed</td>' "$HOME/table.html"
     widget click '复制 Markdown'
     xclip -out -selection clipboard | grep -qF '| Integration | 12 passed |'
+    widget click '复制代码'
+    xclip -out -selection clipboard | grep -qx 'target=staging'
     widget click '保存 PNG'
     wait_until "the Save PNG dialog" dialog_open '保存文件'
     save_dialog="$(xdotool search --onlyvisible --name '^保存文件$' | head -n1)"
@@ -199,6 +212,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers Escape
     xdotool windowfocus --sync "$window"
 
+    xdotool key --clearmodifiers ctrl+shift+h
+    wait_until "the host-scoped session sidebar" test -f "$HOME/agent-catalog"
+    widget contains 'Deployment rollout'
     xdotool windowsize --sync "$window" 1580 950
     xdotool key --clearmodifiers ctrl+shift+f
     sleep 0.35
@@ -235,6 +251,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget click '加载更早的对话'
     wait_until "loading an older page" test -f "$HOME/agent-older-page"
     widget contains 'Earlier deployment notes'
+    widget mouse '已完成 · 2 项活动'
+    widget contains 'Checked the saved deployment plan.'
+    widget not-contains 'fixture raw reasoning sentinel'
     xdotool key --clearmodifiers ctrl+shift+a
     printf '%s\n' 'The Codex session tested formatted table data, structured questions, diff, drawer, search and paginated history.'
 

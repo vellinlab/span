@@ -22,6 +22,11 @@ The app renders structured output using native GTK widgets.
 | Build | Passed |
 | Integration | 12 passed |
 
+```bash
+target=staging
+deploy --target "$target" --check-only
+```
+
 ```mermaid
 flowchart LR
 A[Inspect] --> B[Test] --> C[Publish]
@@ -48,6 +53,8 @@ def entry(identifier, name, project, state="idle"):
 def stored_turn(identifier, text):
     return {"id": identifier, "status": "completed", "items": [
         {"id": identifier + "-message", "type": "agentMessage", "text": text},
+        {"id": identifier + "-reasoning", "type": "reasoning", "summary": ["Checked the saved deployment plan."],
+         "content": ["fixture raw reasoning sentinel"]},
         {"id": identifier + "-change", "type": "fileChange", "changes": [
             {"path": "checks.txt", "diff": diff}]}]}
 
@@ -115,6 +122,7 @@ for line in sys.stdin:
                                           "nextCursor": None}})
         (home / "agent-older-page").touch()
     elif method == "turn/start":
+        assert params["summary"] == "auto"
         (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")
         if params["threadId"] == saved_thread:
             message = params["input"][0]["text"]
@@ -136,6 +144,22 @@ for line in sys.stdin:
         assert params["input"][1] == {"type": "localImage", "path": str(home / "test-output.png")}
         (home / "agent-prompt").write_text(params["input"][0]["text"])
         send({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress"}}})
+        event = {"threadId": thread, "turnId": turn}
+        send({"method": "item/reasoning/summaryTextDelta", "params": {
+            **event, "itemId": "reasoning", "summaryIndex": 0, "delta": "Checking the build "}})
+        send({"method": "item/reasoning/summaryTextDelta", "params": {
+            **event, "itemId": "reasoning", "summaryIndex": 0, "delta": "before publishing."}})
+        send({"method": "item/reasoning/textDelta", "params": {
+            **event, "itemId": "reasoning", "contentIndex": 0, "delta": "fixture raw reasoning sentinel"}})
+        command = {"id": "read-checks", "type": "commandExecution", "command": "cat checks.txt",
+                   "commandActions": [{"type": "read", "name": "checks.txt", "path": "checks.txt"}]}
+        send({"method": "item/started", "params": {**event, "item": {**command, "status": "inProgress"}}})
+        send({"method": "item/completed", "params": {**event, "item": {
+            **command, "status": "completed", "exitCode": 0, "aggregatedOutput": "integration test passed"}}})
+        send({"method": "item/completed", "params": {**event, "item": {
+            "id": "web", "type": "webSearch", "query": "deployment checklist documentation"}}})
+        send({"method": "item/fileChange/patchUpdated", "params": {
+            **event, "itemId": "checks-edit", "changes": [{"path": "checks.txt", "diff": diff}]}})
         send({"method": "item/agentMessage/delta", "params": {
             "threadId": thread, "turnId": turn, "itemId": item, "delta": "Deployment checklist"}})
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
@@ -152,6 +176,9 @@ for line in sys.stdin:
                  "isOther": False, "isSecret": False, "options": None}]}})
     elif request_id == "preview-question":
         assert request["result"] == {"answers": {"environment": {"answers": ["Staging"]}}}
+        send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
+              "item": {"id": "reasoning", "type": "reasoning", "summary": ["Checked the build before publishing."],
+                       "content": ["fixture raw reasoning sentinel"]}}})
         (home / "agent-answered").touch()
         send({"method": "turn/completed", "params": {"threadId": thread,
               "turn": {"id": turn, "status": "completed", "error": None}}})

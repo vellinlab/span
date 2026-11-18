@@ -15,6 +15,8 @@ struct Workbench {
     tabs: gtk::Notebook,
     views: gtk::Stack,
     sidebar: gtk::Box,
+    sidebar_pages: gtk::Stack,
+    sidebar_catalog: gtk::Box,
     workspace: gtk::Paned,
     browser: Rc<Browser>,
     search: gtk::SearchEntry,
@@ -40,7 +42,20 @@ pub fn open(app: &gtk::Application) {
 
     let root = column(0);
     let layout = row(0);
-    let (sidebar, search, host_list) = host_sidebar();
+    let (hosts_view, search, host_list) = host_sidebar();
+    let sidebar = column(0);
+    sidebar.set_width_request(232);
+    sidebar.style_context().add_class("host-sidebar");
+    let sidebar_pages = gtk::Stack::new();
+    let sidebar_catalog = column(0);
+    sidebar_pages.add_titled(&hosts_view, "hosts", "主机");
+    sidebar_pages.add_titled(&sidebar_catalog, "sessions", "会话");
+    let sidebar_tabs = gtk::StackSwitcher::new();
+    sidebar_tabs.style_context().add_class("sidebar-tabs");
+    sidebar_tabs.set_homogeneous(true);
+    sidebar_tabs.set_stack(Some(&sidebar_pages));
+    sidebar.pack_start(&sidebar_tabs, false, false, 0);
+    sidebar.pack_start(&sidebar_pages, true, true, 0);
     let tabs = gtk::Notebook::builder()
         .scrollable(true)
         .enable_popup(true)
@@ -99,6 +114,8 @@ pub fn open(app: &gtk::Application) {
         tabs,
         views,
         sidebar,
+        sidebar_pages,
+        sidebar_catalog,
         workspace,
         browser,
         search,
@@ -173,11 +190,20 @@ pub fn open(app: &gtk::Application) {
         }
     });
     let weak = Rc::downgrade(&workbench);
+    workbench
+        .sidebar_pages
+        .connect_visible_child_name_notify(move |_| {
+            if let Some(workbench) = weak.upgrade() {
+                workbench.sync_catalog(workbench.current_session().as_ref(), false);
+            }
+        });
+    let weak = Rc::downgrade(&workbench);
     workbench.tabs.connect_switch_page(move |_, page, _| {
         if let Some(workbench) = weak.upgrade() {
             let active = workbench.session_for(page);
             workbench.update_status(active.as_deref());
             workbench.browser.select(active.as_ref());
+            workbench.sync_catalog(active.as_ref(), false);
             if let Some(active) = active {
                 active.focus_terminal();
             }
@@ -276,6 +302,7 @@ impl Workbench {
         if self.sessions.borrow().is_empty() {
             self.views.set_visible_child_name("empty");
             self.browser.select(None);
+            self.sync_catalog(None, false);
         }
         self.refresh_status();
     }
@@ -369,8 +396,36 @@ impl Workbench {
     }
 
     fn agent_catalog(self: &Rc<Self>) {
-        if let Some(session) = self.current_session() {
-            session.show_agent_catalog();
+        self.sidebar.show();
+        self.sidebar_pages.set_visible_child_name("sessions");
+        self.sync_catalog(self.current_session().as_ref(), true);
+    }
+
+    fn sync_catalog(&self, session: Option<&Rc<Session>>, focus: bool) {
+        if self.sidebar_pages.visible_child_name().as_deref() != Some("sessions") {
+            return;
+        }
+        let children = self.sidebar_catalog.children();
+        if let Some(agent) = session.map(Session::agent) {
+            let panel = agent.catalog_panel();
+            let current = children.first() == Some(panel.upcast_ref::<gtk::Widget>());
+            if !current {
+                for child in children {
+                    self.sidebar_catalog.remove(&child);
+                }
+                self.sidebar_catalog.pack_start(panel, true, true, 0);
+                panel.show_all();
+            }
+            if !current || focus {
+                agent.show_catalog(focus);
+            }
+        } else {
+            for child in children {
+                self.sidebar_catalog.remove(&child);
+            }
+            let hint = text_label("打开终端标签以查看会话", "host-empty");
+            self.sidebar_catalog.add(&hint);
+            hint.show();
         }
     }
 
@@ -598,7 +653,7 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
         (
             "视图",
             &[
-                ("显示／隐藏主机栏", "sidebar"),
+                ("显示／隐藏侧栏", "sidebar"),
                 ("文件目录", "files"),
                 ("Codex 会话／终端", "agent"),
                 ("Codex 会话列表", "agent-catalog"),
@@ -634,7 +689,7 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
     let rail = column(4);
     rail.style_context().add_class("tool-rail");
     let hosts = gtk::ToggleButton::builder()
-        .tooltip_text("显示／隐藏主机栏 (Ctrl+Shift+B)")
+        .tooltip_text("显示／隐藏侧栏 (Ctrl+Shift+B)")
         .build();
     hosts.style_context().add_class("quiet-button");
     hosts.add(&icon(Icon::Server, 17));
@@ -657,8 +712,6 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
 
 fn host_sidebar() -> (gtk::Box, gtk::SearchEntry, gtk::Box) {
     let sidebar = column(0);
-    sidebar.set_width_request(232);
-    sidebar.style_context().add_class("host-sidebar");
 
     let heading = row(8);
     heading.style_context().add_class("sidebar-heading");

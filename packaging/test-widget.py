@@ -41,8 +41,8 @@ for _ in range(50):
             bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
             if bounds.width > 0 and bounds.height > 0:
                 combos.append((bounds.x + bounds.width // 2, bounds.y + bounds.height // 2))
-        if operation == "contains" and contains(node, name):
-            sys.exit(0)
+        if operation in ("contains", "not-contains") and contains(node, name):
+            sys.exit(0 if operation == "contains" else f"Unexpected text {name!r}")
         if node.name != name:
             continue
         if operation == "click" and "Action" in node.get_interfaces():
@@ -65,6 +65,8 @@ for _ in range(50):
                 if visible(field) and "EditableText" in field.get_interfaces():
                     field.queryEditableText().setTextContents(values[0])
                     sys.exit(0)
+    if operation == "not-contains":
+        sys.exit(0)
     if operation == "combo-next" and len(combos) == 2:
         x, y = sorted(combos)[int(name)]
         subprocess.run(["xdotool", "mousemove", str(x), str(y), "click", "1"], check=True)

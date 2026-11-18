@@ -1,6 +1,8 @@
 mod agent;
+mod agent_activity;
 mod agent_attachments;
 mod agent_catalog;
+mod agent_diff;
 mod agent_options;
 mod agent_question;
 mod agent_render;

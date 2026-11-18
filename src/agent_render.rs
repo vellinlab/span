@@ -38,15 +38,19 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk:
                         _ => {}
                     }
                 }
-                if let CodeBlockKind::Fenced(language) = kind {
-                    if language.trim() == "mermaid" {
-                        if let Some(diagram) = Diagram::parse(&code) {
-                            blocks.add(&diagram_widget(diagram, code));
-                            continue;
-                        }
+                let language = match &kind {
+                    CodeBlockKind::Fenced(info) => {
+                        info.split_whitespace().next().unwrap_or("纯文本")
+                    }
+                    CodeBlockKind::Indented => "纯文本",
+                };
+                if language == "mermaid" {
+                    if let Some(diagram) = Diagram::parse(&code) {
+                        blocks.add(&diagram_widget(diagram, code));
+                        continue;
                     }
                 }
-                blocks.add(&code_block(&code));
+                blocks.add(&code_card(language, &code, None));
             }
             Event::Start(Tag::Image { dest_url, .. }) => {
                 flush_text(&blocks, &mut pending);
@@ -242,13 +246,80 @@ pub fn text(value: &str) -> gtk::Label {
     label
 }
 
-fn code_block(code: &str) -> gtk::Box {
-    let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    block.style_context().add_class("agent-code");
-    let label = text(code);
-    label.style_context().add_class("agent-monospace");
-    block.add(&label);
-    block
+pub struct CodeCard {
+    pub panel: gtk::Box,
+    pub header: gtk::Box,
+    pub copy: gtk::Button,
+    pub buffer: gtk::TextBuffer,
+    pub scroll: gtk::ScrolledWindow,
+}
+
+impl CodeCard {
+    pub fn new(title: &str, copy_label: &str) -> Self {
+        let block = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        block.style_context().add_class("agent-code");
+
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        header.style_context().add_class("agent-code-header");
+        let language = gtk::Label::new(Some(&crate::agent::limited(title, 240)));
+        language.set_ellipsize(pango::EllipsizeMode::Start);
+        language.set_tooltip_text(Some(&crate::agent::limited(title, 1024)));
+        header.pack_start(&language, false, false, 0);
+        let copy = gtk::Button::with_label(copy_label);
+        copy.style_context().add_class("quiet-button");
+        header.pack_end(&copy, false, false, 0);
+        block.add(&header);
+
+        let view = gtk::TextView::builder()
+            .editable(false)
+            .cursor_visible(false)
+            .accepts_tab(false)
+            .monospace(true)
+            .left_margin(10)
+            .right_margin(10)
+            .top_margin(8)
+            .bottom_margin(8)
+            .build();
+        view.style_context().add_class("agent-code-view");
+        let buffer = view.buffer().expect("code view buffer");
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .build();
+        scroll.add(&view);
+        block.add(&scroll);
+        Self {
+            panel: block,
+            header,
+            copy,
+            buffer,
+            scroll,
+        }
+    }
+
+    pub fn size_to(&self, text: &str) {
+        let lines = text.lines().take(15).count().max(1) as i32;
+        self.scroll.set_height_request(18 * lines + 20);
+    }
+}
+
+pub fn code_card(language: &str, code: &str, status: Option<&str>) -> gtk::Box {
+    let card = CodeCard::new(language, "复制代码");
+    card.buffer.set_text(&code.replace('\0', "�"));
+    card.size_to(code);
+    let buffer = card.buffer.clone();
+    card.copy.connect_clicked(move |_| {
+        if let Some(text) = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true) {
+            clipboard().set_text(&text);
+        }
+    });
+    if let Some(status) = status {
+        let footer = gtk::Label::new(Some(status));
+        footer.set_xalign(1.0);
+        footer.style_context().add_class("agent-code-status");
+        card.panel.add(&footer);
+    }
+    card.panel
 }
 
 fn diagram_widget(diagram: Diagram, code: String) -> gtk::Box {

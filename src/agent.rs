@@ -1,5 +1,7 @@
+use crate::agent_activity::{self, Activity, Record};
 use crate::agent_attachments::{Attachments, Prepared};
 use crate::agent_catalog::{self, Catalog};
+use crate::agent_diff::DiffCard;
 use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
@@ -31,9 +33,16 @@ struct LiveMessage {
     label: gtk::Label,
 }
 
+struct TurnDiff {
+    id: String,
+    expander: gtk::Expander,
+    card: DiffCard,
+}
+
 pub struct Agent {
     pub panel: gtk::Box,
     connection: Box<dyn Fn() -> Result<Option<PathBuf>, String>>,
+    reveal: Box<dyn Fn()>,
     rpc: RefCell<Option<Rc<Rpc>>>,
     pending: RefCell<HashMap<u64, Request>>,
     thread: RefCell<Option<String>>,
@@ -43,6 +52,7 @@ pub struct Agent {
     context: RefCell<Context>,
     approvals: RefCell<HashMap<Value, gtk::Box>>,
     live: RefCell<Option<LiveMessage>>,
+    activity: RefCell<Option<(String, Activity)>>,
     history: gtk::Box,
     older: gtk::Button,
     history_cursor: RefCell<Option<String>>,
@@ -51,10 +61,9 @@ pub struct Agent {
     opening: Cell<bool>,
     initialized: Cell<bool>,
     list_serial: Cell<u64>,
-    catalog_button: gtk::Button,
     catalog: Catalog,
     questions: RefCell<HashMap<Value, gtk::Box>>,
-    diff: RefCell<Option<(String, String)>>,
+    diff: RefCell<Option<TurnDiff>>,
     scroll: gtk::ScrolledWindow,
     scroll_scheduled: Rc<Cell<bool>>,
     status: gtk::Label,
@@ -81,6 +90,7 @@ impl Agent {
         initial_directory: Option<&std::path::Path>,
         connection: impl Fn() -> Result<Option<PathBuf>, String> + 'static,
         toggle_terminal: impl Fn() + 'static,
+        reveal: impl Fn() + 'static,
     ) -> Rc<Self> {
         let panel = column(0);
         panel.style_context().add_class("agent-panel");
@@ -96,8 +106,9 @@ impl Agent {
         terminal.connect_clicked(move |_| toggle_terminal());
         toolbar.pack_end(&terminal, false, false, 0);
         let catalog_button = button("会话", false);
+        catalog_button.set_action_name(Some("win.agent-catalog"));
         toolbar.pack_end(&catalog_button, false, false, 0);
-        let catalog = Catalog::new(&catalog_button, host);
+        let catalog = Catalog::new(host);
         let copy_id = button("复制会话 ID", false);
         copy_id.set_no_show_all(true);
         toolbar.pack_end(&copy_id, false, false, 0);
@@ -198,6 +209,7 @@ impl Agent {
         let agent = Rc::new(Self {
             panel,
             connection: Box::new(connection),
+            reveal: Box::new(reveal),
             rpc: RefCell::new(None),
             pending: RefCell::new(HashMap::new()),
             thread: RefCell::new(None),
@@ -210,6 +222,7 @@ impl Agent {
             }),
             approvals: RefCell::new(HashMap::new()),
             live: RefCell::new(None),
+            activity: RefCell::new(None),
             history,
             older,
             history_cursor: RefCell::new(None),
@@ -218,7 +231,6 @@ impl Agent {
             opening: Cell::new(false),
             initialized: Cell::new(false),
             list_serial: Cell::new(0),
-            catalog_button,
             catalog,
             questions: RefCell::new(HashMap::new()),
             diff: RefCell::new(None),
@@ -358,12 +370,6 @@ impl Agent {
 
     fn bind_catalog(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
-        self.catalog_button.connect_clicked(move |_| {
-            if let Some(agent) = weak.upgrade() {
-                agent.show_catalog();
-            }
-        });
-        let weak = Rc::downgrade(self);
         self.catalog.search.connect_search_changed(move |_| {
             if let Some(agent) = weak.upgrade() {
                 agent.load_catalog(None);
@@ -378,7 +384,7 @@ impl Agent {
         let weak = Rc::downgrade(self);
         self.catalog.refresh.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
-                agent.show_catalog();
+                agent.show_catalog(false);
             }
         });
         let weak = Rc::downgrade(self);
@@ -401,7 +407,7 @@ impl Agent {
                         agent.catalog.show_status("请先结束当前任务或回答提问");
                         return;
                     }
-                    agent.catalog.popover.popdown();
+                    (agent.reveal)();
                     if agent.thread.borrow().as_deref() != Some(entry.id.as_str()) {
                         agent.resume.set_text(&entry.id);
                         agent.open();
@@ -423,7 +429,7 @@ impl Agent {
                     agent.catalog.show_status("请先结束当前任务或回答提问");
                     return;
                 }
-                agent.catalog.popover.popdown();
+                (agent.reveal)();
                 agent.resume.set_text("");
                 agent.settings.show();
                 agent.cwd.grab_focus();
@@ -431,9 +437,18 @@ impl Agent {
         });
     }
 
-    pub fn show_catalog(self: &Rc<Self>) {
-        self.catalog.popover.popup();
+    pub fn catalog_panel(&self) -> &gtk::Box {
+        &self.catalog.panel
+    }
+
+    pub fn focus_catalog(&self) {
         self.catalog.search.grab_focus();
+    }
+
+    pub fn show_catalog(self: &Rc<Self>, focus: bool) {
+        if focus {
+            self.focus_catalog();
+        }
         if self.initialized.get() {
             self.load_catalog(None);
         } else {
@@ -443,7 +458,7 @@ impl Agent {
     }
 
     fn load_catalog(&self, cursor: Option<String>) {
-        if !self.initialized.get() || !self.catalog.popover.is_visible() {
+        if !self.initialized.get() || !self.catalog.panel.is_mapped() {
             return;
         }
         let serial = self.list_serial.get() + 1;
@@ -583,15 +598,29 @@ impl Agent {
         };
         for turn in turns {
             let mut changes = String::new();
+            let mut activity = None;
             for item in array(&turn["items"]) {
-                self.completed_item(item, true);
+                if let Some(record) = Record::from_item(item) {
+                    activity
+                        .get_or_insert_with(|| self.new_activity())
+                        .record(record);
+                } else {
+                    self.completed_item(item, true);
+                }
                 append_file_changes(item, &mut changes);
             }
             if !changes.is_empty() {
                 self.add_diff(&changes);
             }
-            if turn["status"] == "inProgress" {
+            let status = turn["status"].as_str();
+            if !prepend && status == Some("inProgress") {
                 running = turn["id"].as_str().map(str::to_owned);
+                if let (Some(id), Some(activity)) = (&running, activity.take()) {
+                    self.activity.replace(Some((id.clone(), activity)));
+                }
+            }
+            if let Some(activity) = activity {
+                activity.finish(status);
             }
         }
         self.prepend_at.set(None);
@@ -693,6 +722,7 @@ impl Agent {
                     Request::Send => {
                         self.active.set(false);
                         self.turn.take();
+                        self.finish_activity(Some("failed"));
                         self.remove_pending_user();
                         self.show_status(error);
                         self.update_controls();
@@ -882,7 +912,11 @@ impl Agent {
     }
 
     fn begin_turn(&self, thread: String, text: &str, selection: &Selection, files: Prepared) {
-        let mut params = json!({"threadId":thread, "input": files.input(text, selection.images)});
+        let mut params = json!({
+            "threadId": thread,
+            "input": files.input(text, selection.images),
+            "summary": "auto",
+        });
         selection.apply(&mut params);
         let label = self.add_user(&files.summary(text));
         self.pending_user.replace(Some(label));
@@ -915,6 +949,7 @@ impl Agent {
         self.history_generation
             .set(self.history_generation.get() + 1);
         self.live.take();
+        self.activity.take();
         self.diff.take();
         self.approvals.borrow_mut().clear();
         self.questions.borrow_mut().clear();
@@ -942,6 +977,8 @@ impl Agent {
         self.thread.take();
         self.turn.take();
         self.active.set(false);
+        self.finish_activity(Some("disconnected"));
+        self.diff.take();
         self.remove_live();
         for (_, approval) in self.approvals.borrow_mut().drain() {
             self.history.remove(&approval);
@@ -971,7 +1008,32 @@ impl Agent {
                     self.delta(id, delta);
                 }
             }
-            "item/completed" => self.completed_item(&params["item"], false),
+            "item/started" | "item/completed" => {
+                let item = &params["item"];
+                if let Some(record) = Record::from_item(item) {
+                    if let Some(turn) = params["turnId"].as_str() {
+                        self.update_activity(turn, |activity| activity.record(record));
+                    }
+                } else if method == "item/completed" {
+                    self.completed_item(item, false);
+                }
+            }
+            "item/reasoning/summaryTextDelta" => {
+                if let (Some(turn), Some((id, index, delta))) = (
+                    params["turnId"].as_str(),
+                    agent_activity::summary_delta(params),
+                ) {
+                    self.update_activity(turn, |activity| activity.summary(id, index, delta));
+                }
+            }
+            "item/fileChange/patchUpdated" => {
+                if let (Some(turn), Some(id)) =
+                    (params["turnId"].as_str(), params["itemId"].as_str())
+                {
+                    let record = Record::patch(id, &params["changes"], Some("inProgress"));
+                    self.update_activity(turn, |activity| activity.record(record));
+                }
+            }
             "turn/started" => {
                 self.active.set(true);
                 self.turn
@@ -982,25 +1044,38 @@ impl Agent {
                 if let (Some(turn), Some(diff)) =
                     (params["turnId"].as_str(), params["diff"].as_str())
                 {
-                    self.diff
-                        .replace(Some((turn.to_owned(), limited(diff, 256 * 1024))));
+                    if self.is_active_turn(turn) {
+                        let mut live = self.diff.borrow_mut();
+                        if live.as_ref().is_none_or(|entry| entry.id != turn) {
+                            let (expander, card) = self.add_diff(diff);
+                            live.replace(TurnDiff {
+                                id: turn.into(),
+                                expander,
+                                card,
+                            });
+                        } else if let Some(live) = live.as_ref() {
+                            live.card.update(diff);
+                            live.expander.set_visible(!diff.is_empty());
+                        }
+                    }
                 }
             }
             "turn/completed" => {
+                let turn = &params["turn"];
+                if let Some(id) = turn["id"].as_str() {
+                    for record in array(&turn["items"]).filter_map(Record::from_item) {
+                        self.update_activity(id, |activity| activity.record(record));
+                    }
+                }
+                self.finish_activity(turn["status"].as_str());
                 self.remove_live();
                 self.active.set(false);
                 self.turn.take();
                 for (_, approval) in self.approvals.borrow_mut().drain() {
                     self.history.remove(&approval);
                 }
-                let turn = &params["turn"];
-                let diff = self
-                    .diff
-                    .take()
-                    .filter(|(id, _)| turn["id"].as_str() == Some(id.as_str()));
-                if let Some((_, diff)) = diff.filter(|(_, diff)| !diff.is_empty()) {
-                    self.add_diff(&diff);
-                } else {
+                let diff = self.diff.take();
+                if !diff.is_some_and(|entry| turn["id"].as_str() == Some(entry.id.as_str())) {
                     let mut changes = String::new();
                     for item in array(&turn["items"]) {
                         append_file_changes(item, &mut changes);
@@ -1034,6 +1109,36 @@ impl Agent {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn new_activity(&self) -> Activity {
+        let activity = Activity::new();
+        self.append(&activity.widget);
+        activity
+    }
+
+    fn update_activity(&self, turn: &str, update: impl FnOnce(&mut Activity)) {
+        if !self.is_active_turn(turn) {
+            return;
+        }
+        let mut activity = self.activity.borrow_mut();
+        if activity.as_ref().is_some_and(|(id, _)| id != turn) {
+            if let Some((_, older)) = activity.take() {
+                older.finish(None);
+            }
+        }
+        let (_, activity) = activity.get_or_insert_with(|| (turn.to_owned(), self.new_activity()));
+        update(activity);
+    }
+
+    fn is_active_turn(&self, turn: &str) -> bool {
+        self.active.get() && self.turn.borrow().as_deref().is_none_or(|id| id == turn)
+    }
+
+    fn finish_activity(&self, status: Option<&str>) {
+        if let Some((_, activity)) = self.activity.take() {
+            activity.finish(status);
         }
     }
 
@@ -1093,26 +1198,6 @@ impl Agent {
                 self.remove_live();
                 if let Some(text) = item["text"].as_str() {
                     self.add_agent(text, loading_history);
-                }
-            }
-            Some("commandExecution") => {
-                let command = item["command"].as_str().unwrap_or("");
-                let output = item["aggregatedOutput"].as_str().unwrap_or("");
-                let expander =
-                    gtk::Expander::new(Some(&format!("命令 · {}", limited(command, 240))));
-                expander.add(&agent_render::text(&limited(output, 24 * 1024)));
-                expander.style_context().add_class("agent-command");
-                self.append(&expander);
-            }
-            Some("fileChange") => {
-                let paths: Vec<_> = array(&item["changes"])
-                    .filter_map(|value| value["path"].as_str())
-                    .collect();
-                if !paths.is_empty() {
-                    let card = gtk::Expander::new(Some(&format!("文件变更 · {} 项", paths.len())));
-                    card.add(&agent_render::text(&paths.join("\n")));
-                    card.style_context().add_class("agent-command");
-                    self.append(&card);
                 }
             }
             Some("imageGeneration") => {
@@ -1201,52 +1286,12 @@ impl Agent {
         self.append(&card);
     }
 
-    fn add_diff(&self, diff: &str) {
+    fn add_diff(&self, diff: &str) -> (gtk::Expander, DiffCard) {
         let expander = gtk::Expander::new(Some("本轮变更 · 查看 diff"));
         expander.style_context().add_class("agent-command");
-        let scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Automatic)
-            .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .height_request(250)
-            .build();
-        let view = gtk::TextView::builder()
-            .editable(false)
-            .monospace(true)
-            .build();
-        view.set_left_margin(7);
-        view.style_context().add_class("agent-diff");
-        if let Some(buffer) = view.buffer() {
-            let added = gtk::TextTag::builder().foreground("#83cb9b").build();
-            let removed = gtk::TextTag::builder().foreground("#f0838c").build();
-            let context = gtk::TextTag::builder().foreground("#82aaff").build();
-            let table = buffer.tag_table().expect("diff tag table");
-            for tag in [&added, &removed, &context] {
-                table.add(tag);
-            }
-            let diff = limited(diff, 256 * 1024);
-            for line in diff.split_inclusive('\n') {
-                let tag = if ["+++", "---", "@@", "diff --git"]
-                    .into_iter()
-                    .any(|prefix| line.starts_with(prefix))
-                {
-                    Some(&context)
-                } else if line.starts_with('+') {
-                    Some(&added)
-                } else if line.starts_with('-') {
-                    Some(&removed)
-                } else {
-                    None
-                };
-                let mut end = buffer.end_iter();
-                let start = end.offset();
-                buffer.insert(&mut end, line);
-                if let Some(tag) = tag {
-                    buffer.apply_tag(tag, &buffer.iter_at_offset(start), &end);
-                }
-            }
-        }
-        scroll.add(&view);
-        expander.add(&scroll);
+        let card = DiffCard::new("本轮改动");
+        card.update(diff);
+        expander.add(card.widget());
         let history = self.history.downgrade();
         let timeline = self.scroll.downgrade();
         expander.connect_notify_local(Some("expanded"), move |expander, _| {
@@ -1270,6 +1315,8 @@ impl Agent {
             });
         });
         self.append(&expander);
+        expander.set_visible(!diff.is_empty());
+        (expander, card)
     }
 
     fn add_user(&self, text: &str) -> gtk::Label {
@@ -1363,15 +1410,21 @@ impl Agent {
 }
 
 fn append_file_changes(item: &Value, out: &mut String) {
-    if item["type"] != "fileChange" {
-        return;
+    if item["type"] == "fileChange" {
+        append_changes(&item["changes"], out);
     }
-    for change in array(&item["changes"]) {
+}
+
+pub(crate) fn append_changes(changes: &Value, out: &mut String) {
+    for change in array(changes) {
         if out.len() >= 256 * 1024 {
             break;
         }
         if let Some(diff) = change["diff"].as_str().filter(|diff| !diff.is_empty()) {
-            if let Some(path) = change["path"].as_str() {
+            if let Some(path) = change["path"]
+                .as_str()
+                .filter(|_| !diff.starts_with("diff --git "))
+            {
                 out.push_str(&format!("diff --git {path}\n"));
             }
             out.push_str(&limited(
@@ -1387,7 +1440,7 @@ fn array(value: &Value) -> impl Iterator<Item = &Value> {
     value.as_array().into_iter().flatten()
 }
 
-fn limited(text: &str, max: usize) -> String {
+pub(crate) fn limited(text: &str, max: usize) -> String {
     let cleaned = text.replace('\0', "�");
     if cleaned.len() <= max {
         return cleaned;

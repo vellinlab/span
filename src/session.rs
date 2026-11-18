@@ -141,9 +141,20 @@ impl Session {
             self.terminal.grab_focus();
             return;
         }
+        self.show_agent();
+    }
+
+    fn show_agent(self: &Rc<Self>) {
+        let agent = self.agent();
+        self.page.set_visible_child_name("agent");
+        agent.focus();
+    }
+
+    pub fn agent(self: &Rc<Self>) -> Rc<Agent> {
         if self.agent.borrow().is_none() {
             let weak = Rc::downgrade(self);
             let drawer_session = weak.clone();
+            let reveal_session = weak.clone();
             let agent = Agent::new(
                 self.launch.label(),
                 self.directory.borrow().as_deref(),
@@ -160,6 +171,11 @@ impl Session {
                 move || {
                     if let Some(session) = drawer_session.upgrade() {
                         session.toggle_drawer();
+                    }
+                },
+                move || {
+                    if let Some(session) = reveal_session.upgrade() {
+                        session.show_agent();
                     }
                 },
             );
@@ -199,19 +215,11 @@ impl Session {
             self.agent_view.replace(Some(AgentView { split, drawer }));
             self.agent.replace(Some(agent));
         }
-        self.page.set_visible_child_name("agent");
-        if let Some(agent) = self.agent.borrow().as_ref() {
-            agent.focus();
-        }
-    }
-
-    pub fn show_agent_catalog(self: &Rc<Self>) {
-        if self.page.visible_child_name().as_deref() != Some("agent") {
-            self.toggle_agent();
-        }
-        if let Some(agent) = self.agent.borrow().as_ref() {
-            agent.show_catalog();
-        }
+        self.agent
+            .borrow()
+            .as_ref()
+            .expect("agent initialized")
+            .clone()
     }
 
     pub fn toggle_drawer(&self) {
