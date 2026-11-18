@@ -7,7 +7,7 @@ Version:        %{workbench_version}
 Release:        1%{?dist}
 Summary:        Span SSH terminal and Codex workspace
 License:        Unspecified and LGPL-3.0-or-later
-URL:            https://github.com/zyw02/ssh-workbench
+URL:            https://github.com/zyw02/span
 Requires:       bash
 Requires:       coreutils
 Requires:       openssh-clients
