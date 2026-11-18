@@ -49,6 +49,7 @@ pub fn open(app: &gtk::Application) {
     let views = gtk::Stack::new();
     views.add_named(&tabs, "terminal");
     views.add_named(&empty_workspace(), "empty");
+    layout.pack_start(&tool_rail(&sidebar), false, false, 0);
     layout.pack_start(&sidebar, false, false, 0);
     layout.pack_start(&views, true, true, 0);
     root.pack_start(&layout, true, true, 0);
@@ -324,8 +325,8 @@ impl Workbench {
     }
 
     fn edit_host(self: &Rc<Self>, index: Option<usize>) {
-        if self.load_error.is_some() {
-            self.report_error("主机列表无法编辑", self.load_error.as_deref().unwrap());
+        if let Some(error) = &self.load_error {
+            self.report_error("主机列表无法编辑", error);
             return;
         }
         let mut next = self.hosts.borrow().clone();
@@ -428,10 +429,13 @@ impl Workbench {
         let labels = column(2);
         let name = text_label(&host.name, "host-name");
         let target = text_label(&host.target, "host-target");
-        for label in [&name, &target] {
-            label.set_ellipsize(pango::EllipsizeMode::End);
-            labels.pack_start(label, false, false, 0);
+        name.set_ellipsize(pango::EllipsizeMode::End);
+        labels.pack_start(&name, false, false, 0);
+        if host.name != host.target {
+            target.set_ellipsize(pango::EllipsizeMode::End);
+            labels.pack_start(&target, false, false, 0);
         }
+        labels.set_valign(gtk::Align::Center);
         contents.pack_start(&badge, false, false, 0);
         contents.pack_start(&labels, true, true, 0);
         if host.trusted_x11 {
@@ -485,6 +489,7 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
 
     let brand = row(8);
     let mark = text_label(">_", "app-mark");
+    mark.set_xalign(0.5);
     brand.pack_start(&mark, false, false, 0);
     brand.pack_start(&text_label("SSH Workbench", "app-title"), false, false, 0);
     header.pack_start(&brand);
@@ -534,9 +539,42 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
     header
 }
 
+fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
+    let rail = column(4);
+    rail.style_context().add_class("tool-rail");
+    let hosts = gtk::ToggleButton::builder()
+        .tooltip_text("显示／隐藏主机栏 (Ctrl+Shift+B)")
+        .build();
+    hosts.style_context().add_class("quiet-button");
+    hosts.add(&icon("network-server-symbolic", 17));
+    sidebar
+        .bind_property("visible", &hosts, "active")
+        .bidirectional()
+        .sync_create()
+        .build();
+    rail.pack_start(&hosts, false, false, 0);
+    for (symbol, tooltip, action) in [
+        (
+            "utilities-terminal-symbolic",
+            "新建本地终端 (Ctrl+Shift+T)",
+            "win.local",
+        ),
+        (
+            "network-transmit-receive-symbolic",
+            "快速连接 (Ctrl+Shift+O)",
+            "win.quick",
+        ),
+    ] {
+        let button = icon_button(symbol, tooltip);
+        button.set_action_name(Some(action));
+        rail.pack_start(&button, false, false, 0);
+    }
+    rail
+}
+
 fn host_sidebar() -> (gtk::Box, gtk::SearchEntry, gtk::Box) {
     let sidebar = column(0);
-    sidebar.set_width_request(252);
+    sidebar.set_width_request(232);
     sidebar.style_context().add_class("host-sidebar");
 
     let heading = row(8);
@@ -563,22 +601,6 @@ fn host_sidebar() -> (gtk::Box, gtk::SearchEntry, gtk::Box) {
         .build();
     scroll.add(&list);
     sidebar.pack_start(&scroll, true, true, 0);
-
-    let quick = gtk::Button::new();
-    quick.style_context().add_class("quick-connect");
-    quick.set_action_name(Some("win.quick"));
-    quick.set_tooltip_text(Some("快速连接 (Ctrl+Shift+O)"));
-    let content = row(8);
-    content.pack_start(
-        &icon("network-transmit-receive-symbolic", 16),
-        false,
-        false,
-        0,
-    );
-    content.pack_start(&text_label("快速连接", ""), true, true, 0);
-    content.pack_end(&text_label("Ctrl+Shift+O", "shortcut"), false, false, 0);
-    quick.add(&content);
-    sidebar.pack_end(&quick, false, false, 0);
 
     (sidebar, search, list)
 }

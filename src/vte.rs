@@ -85,8 +85,8 @@ impl Terminal {
     pub fn apply_theme(&self) {
         let color = |hex| gdk::RGBA::parse(hex).expect("valid theme color");
         let foreground = color("#d8e1ed");
-        let background = color("#10141b");
-        let cursor = color("#91b9ff");
+        let background = color("#161719");
+        let cursor = color("#68aff5");
         let selection = color("#304c78");
         let palette = [
             "#1b2330", "#f0838c", "#83cb9b", "#e8be79", "#82aaff", "#c6a0f6", "#78cbd7", "#c3cddb",

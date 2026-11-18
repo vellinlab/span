@@ -2,7 +2,7 @@
 Version=1.0
 Type=Application
 Name=SSH Workbench
-Comment=Local Bash and SSH in one window
+Comment=Tabbed terminal and SSH host manager
 Exec=ssh-workbench
 Icon=utilities-terminal
 Terminal=false

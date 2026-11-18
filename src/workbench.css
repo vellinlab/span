@@ -1,12 +1,12 @@
-@define-color canvas #10141b;
-@define-color sidebar #171d27;
-@define-color chrome #1c2431;
-@define-color line #2c3646;
-@define-color surface #222d3e;
-@define-color hover #2a3850;
-@define-color foreground #e2eaf5;
-@define-color muted #a0aec4;
-@define-color accent #91b9ff;
+@define-color canvas #161719;
+@define-color sidebar #1c1d20;
+@define-color chrome #232427;
+@define-color line #33353a;
+@define-color surface #282b30;
+@define-color hover #303640;
+@define-color foreground #e3e7ee;
+@define-color muted #a5afbd;
+@define-color accent #68aff5;
 
 window.workbench,
 window.workbench-dialog,
@@ -18,7 +18,7 @@ window.workbench-dialog,
 
 .workbench-header,
 .workbench-dialog headerbar {
-    min-height: 38px;
+    min-height: 34px;
     padding: 0 9px;
     background: @chrome;
     border: 0;
@@ -31,7 +31,7 @@ window.workbench-dialog,
     min-width: 27px;
     min-height: 25px;
     border-radius: 6px;
-    background-color: #2d4772;
+    background-color: #283b52;
     color: #c2d8ff;
     font-family: monospace;
     font-size: 13px;
@@ -137,13 +137,24 @@ menu menuitem:hover {
     border-color: @accent;
 }
 
+.tool-rail {
+    padding: 6px 4px;
+    background: @chrome;
+    border-right: 1px solid @line;
+}
+
+.workbench .tool-rail button:checked {
+    background: #2a3a50;
+    color: @accent;
+}
+
 .host-sidebar {
     background-color: @sidebar;
     border-right: 1px solid @line;
 }
 
 .sidebar-heading {
-    padding: 12px 12px 8px;
+    padding: 8px 10px 5px;
 }
 
 .section-title {
@@ -157,7 +168,7 @@ menu menuitem:hover {
     min-height: 30px;
     padding: 0 9px;
     background: @canvas;
-    border: 1px solid #384559;
+    border: 1px solid #3a4049;
     border-radius: 5px;
     box-shadow: none;
     color: @foreground;
@@ -189,7 +200,7 @@ menu menuitem:hover {
 .workbench button.host-connect {
     background: transparent;
     border-color: transparent;
-    padding: 8px 7px;
+    padding: 5px 6px;
 }
 
 .workbench button.host-connect:hover {
@@ -205,10 +216,10 @@ menu menuitem:hover {
 }
 
 .host-icon {
-    padding: 7px;
+    padding: 5px;
     border-radius: 6px;
     color: @accent;
-    background: #293c59;
+    background: #282f3c;
 }
 
 .host-name {
@@ -230,17 +241,6 @@ menu menuitem:hover {
     background: #314764;
     color: #c2d8ff;
     font-size: 10px;
-}
-
-.workbench button.quick-connect {
-    margin: 10px 12px;
-    padding: 6px 8px;
-}
-
-.shortcut {
-    color: @muted;
-    font-size: 10px;
-    font-family: monospace;
 }
 
 .workbench notebook.terminal-tabs {
@@ -306,7 +306,7 @@ menu menuitem:hover {
 }
 
 .statusbar {
-    min-height: 27px;
+    min-height: 22px;
     padding: 0 10px;
     background: @chrome;
     border-top: 1px solid @line;
