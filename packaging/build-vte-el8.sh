@@ -19,7 +19,10 @@ src="$build_dir/vte-$version"
 meson setup "$build_dir/build" "$src" \
     --prefix=/usr --libdir=lib64 --buildtype=release \
     -Dgtk4=false -Dgir=false -Dvapi=false -Ddocs=false -Dglade=false -Dicu=false -D_systemd=false
-ninja -C "$build_dir/build" -j 2 src/libvte-2.91.so.0.6400.2
+# VTE's code generators use dataclasses via /usr/bin/env python3.
+mkdir "$build_dir/tools"
+ln -s "$(command -v python3.9)" "$build_dir/tools/python3"
+PATH="$build_dir/tools:$PATH" ninja -C "$build_dir/build" -j 2 src/libvte-2.91.so.0.6400.2
 install -m 0755 "$build_dir/build/src/libvte-2.91.so.0.6400.2" "$staging_dir/libvte-2.91.so.0"
 install -m 0644 "$src"/COPYING.* "$staging_dir"
 printf 'VTE %s is bundled unmodified. Upstream source: %s\n' "$version" "$source_url" > "$staging_dir/SOURCE"
