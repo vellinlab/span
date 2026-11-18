@@ -11,7 +11,7 @@
 在 GitHub Actions 的 **Build Linux** 成功运行页面下载 `ssh-workbench-el8-x86_64`，解压后安装 RPM。
 
 ```sh
-sudo dnf install ./ssh-workbench-0.6.2-1.el8.x86_64.rpm
+sudo dnf install ./ssh-workbench-0.6.3-1.el8.x86_64.rpm
 ssh-workbench
 ```
 
@@ -22,7 +22,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 下载同一构建页面的 `ssh-workbench-linux-amd64` 并解压。
 
 ```sh
-sudo apt install ./ssh-workbench_0.6.2_amd64.deb
+sudo apt install ./ssh-workbench_0.6.3_amd64.deb
 ssh-workbench
 ```
 
@@ -49,6 +49,8 @@ Span 使用 `ssh-workbench` 包名和启动命令，可直接升级此前的 SSH
 - 「会话」（`Ctrl+Shift+H`）按工作目录展示当前主机保存的会话，支持搜索、查看归档和新建。打开旧会话后，可以按需加载更早的对话，也可以直接填会话 ID。SSH 断开后，在同一标签重新连接会恢复上次打开的已保存会话。
 - 「终端」（`Ctrl+Shift+J`）在会话页下方展开当前标签的真实终端。「加入选区」把终端中选中的文字放进输入框，供编辑后发送。
 - Codex 的问题和审批显示为可操作卡片。文件变更可按轮次展开查看只读 diff。
+- 输入区可以选择当前主机提供的模型和思考强度。点击「用量」可查看会话累计 token、上下文占用和账号返回的额度。
+- 点击「附件」选择本机文件，发送前可移除，每条消息最多 6 个、合计 16 MiB。SSH 会话通过当前连接的 SFTP 将附件放入远端私有临时目录。支持视觉输入的模型会直接收到 PNG、JPEG、GIF 和 WebP 图片，其余附件按文件路径交给 Agent 读取。
 
 运行 Agent 的主机需要安装支持 App Server 的 Codex CLI，并完成其正常登录。如果使用 SSH，先在终端完成登录。会话通过同一条已认证的 SSH 连接启动 App Server，并使用所选工作目录。
 

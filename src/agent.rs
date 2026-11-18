@@ -1,8 +1,11 @@
+use crate::agent_attachments::{Attachments, Prepared};
 use crate::agent_catalog::{self, Catalog};
+use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
+use crate::agent_usage::Usage;
 use gtk::prelude::*;
-use gtk::{glib, pango};
+use gtk::{gio, glib, pango};
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -14,6 +17,8 @@ enum Request {
     Initialize { browse: bool },
     Open { resume: bool },
     Catalog(u64),
+    Models(u64),
+    Quota,
     Turns { prepend: bool, generation: u64 },
     Unsubscribe,
     Send,
@@ -59,6 +64,13 @@ pub struct Agent {
     connect: gtk::Button,
     copy_id: gtk::Button,
     input: gtk::TextView,
+    options: Options,
+    model_provider: RefCell<Option<String>>,
+    usage: Usage,
+    quota_started: Cell<bool>,
+    attachments: Rc<Attachments>,
+    uploading: Cell<bool>,
+    pending_user: RefCell<Option<gtk::Label>>,
     send: gtk::Button,
     stop: gtk::Button,
 }
@@ -130,6 +142,8 @@ impl Agent {
 
         let composer = column(5);
         composer.style_context().add_class("agent-composer");
+        let card = column(5);
+        card.style_context().add_class("agent-compose-card");
         let input = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
             .accepts_tab(false)
@@ -140,14 +154,41 @@ impl Agent {
             .height_request(77)
             .build();
         input_scroll.add(&input);
-        let inputs = row(8);
+        let editor = gtk::Overlay::new();
+        editor.add(&input_scroll);
+        let placeholder = gtk::Label::new(Some("输入消息，或添加附件"));
+        placeholder
+            .style_context()
+            .add_class("agent-compose-placeholder");
+        placeholder.set_halign(gtk::Align::Start);
+        placeholder.set_valign(gtk::Align::Start);
+        placeholder.set_no_show_all(true);
+        editor.add_overlay(&placeholder);
+        editor.set_overlay_pass_through(&placeholder, true);
+        placeholder.show();
+        if let Some(buffer) = input.buffer() {
+            let placeholder = placeholder.downgrade();
+            buffer.connect_changed(move |buffer| {
+                if let Some(placeholder) = placeholder.upgrade() {
+                    placeholder.set_visible(buffer.char_count() == 0);
+                }
+            });
+        }
+        let inputs = row(5);
+        let attachments = Attachments::new();
+        inputs.pack_start(&attachments.button, false, false, 0);
+        let options = Options::new(&inputs);
+        let usage = Usage::new();
         let send = button("发送", true);
         send.set_tooltip_text(Some("发送（Ctrl+Enter）"));
         let stop = button("停止", false);
         inputs.pack_end(&send, false, false, 0);
         inputs.pack_end(&stop, false, false, 0);
-        composer.pack_start(&input_scroll, false, false, 0);
-        composer.pack_end(&inputs, false, false, 0);
+        inputs.pack_end(&usage.button, false, false, 0);
+        card.pack_start(&editor, false, false, 0);
+        card.pack_start(&attachments.chips, false, false, 0);
+        card.pack_end(&inputs, false, false, 0);
+        composer.add(&card);
         panel.pack_end(&composer, false, false, 0);
 
         let agent = Rc::new(Self {
@@ -186,6 +227,13 @@ impl Agent {
             connect,
             copy_id,
             input,
+            options,
+            model_provider: RefCell::new(None),
+            usage,
+            quota_started: Cell::new(false),
+            attachments,
+            uploading: Cell::new(false),
+            pending_user: RefCell::new(None),
             send,
             stop,
         });
@@ -196,6 +244,7 @@ impl Agent {
 
     fn bind(self: &Rc<Self>) {
         self.bind_catalog();
+        self.bind_composer();
         let weak = Rc::downgrade(self);
         self.older.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -255,6 +304,46 @@ impl Agent {
         });
     }
 
+    fn bind_composer(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.options.model.connect_changed(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                agent.options.model_changed();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.usage.button.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                agent.usage.popover.popup();
+                if !agent.quota_started.get() {
+                    agent.read_quota();
+                }
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.usage.refresh.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                agent.read_quota();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.attachments.button.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                let weak = Rc::downgrade(&agent);
+                agent.attachments.choose(move |paths| {
+                    if let Some(agent) = weak
+                        .upgrade()
+                        .filter(|agent| agent.attachments.button.is_sensitive())
+                    {
+                        if let Err(error) = agent.attachments.add(paths) {
+                            agent.show_status(error);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
     pub fn focus(&self) {
         if self.thread.borrow().is_some() {
             self.input.grab_focus();
@@ -301,6 +390,7 @@ impl Agent {
             if let Some(agent) = weak.upgrade() {
                 if let Some(entry) = agent.catalog.entry(index) {
                     if agent.active.get()
+                        || agent.uploading.get()
                         || agent.opening.get()
                         || !agent.questions.borrow().is_empty()
                     {
@@ -321,7 +411,10 @@ impl Agent {
         let weak = Rc::downgrade(self);
         self.catalog.new_thread.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
-                if agent.active.get() || agent.opening.get() || !agent.questions.borrow().is_empty()
+                if agent.active.get()
+                    || agent.uploading.get()
+                    || agent.opening.get()
+                    || !agent.questions.borrow().is_empty()
                 {
                     agent.catalog.show_status("请先结束当前任务或回答提问");
                     return;
@@ -364,7 +457,11 @@ impl Agent {
     }
 
     fn open(self: &Rc<Self>) {
-        if self.active.get() || self.opening.get() || !self.questions.borrow().is_empty() {
+        if self.active.get()
+            || self.uploading.get()
+            || self.opening.get()
+            || !self.questions.borrow().is_empty()
+        {
             return;
         }
         if self.initialized.get() {
@@ -449,6 +546,26 @@ impl Agent {
         }
     }
 
+    fn load_models(&self, cursor: Option<String>) {
+        let mut params = json!({"limit":50,"cursor":cursor});
+        if let Some(provider) = self.model_provider.borrow().as_deref() {
+            params["modelProvider"] = json!(provider);
+        }
+        self.request(
+            Request::Models(self.history_generation.get()),
+            "model/list",
+            params,
+        );
+    }
+
+    fn read_quota(&self) {
+        if self.initialized.get() && self.usage.refresh.is_sensitive() {
+            self.quota_started.set(true);
+            self.usage.loading();
+            self.request(Request::Quota, "account/rateLimits/read", Value::Null);
+        }
+    }
+
     fn load_turns(&self, data: &Value, newest_first: bool, prepend: bool) {
         let Some(turns) = data.as_array() else { return };
         if prepend {
@@ -501,6 +618,10 @@ impl Agent {
     }
 
     pub fn add_terminal_context(&self, selected: &str) {
+        if self.uploading.get() || self.pending_user.borrow().is_some() {
+            self.show_status("请等当前消息发送完成");
+            return;
+        }
         if let Some(buffer) = self.input.buffer() {
             let selected = limited(selected, 64 * 1024);
             buffer.insert_at_cursor(&format!("\n\n[终端选区]\n{selected}\n[/终端选区]\n"));
@@ -550,6 +671,14 @@ impl Agent {
                     Request::Catalog(serial) if serial == self.list_serial.get() => {
                         self.catalog.show_status(error);
                     }
+                    Request::Models(generation) if generation == self.history_generation.get() => {
+                        self.options
+                            .model
+                            .set_tooltip_text(Some(&error.replace('\0', "�")));
+                        self.options.render_models();
+                        self.update_controls();
+                    }
+                    Request::Quota => self.usage.unavailable(error),
                     Request::Turns {
                         prepend,
                         generation,
@@ -559,6 +688,8 @@ impl Agent {
                     }
                     Request::Send => {
                         self.active.set(false);
+                        self.turn.take();
+                        self.remove_pending_user();
                         self.show_status(error);
                         self.update_controls();
                     }
@@ -612,6 +743,14 @@ impl Agent {
                     self.cwd.set_text(&cwd.replace('\0', "�"));
                 }
                 self.clear_history();
+                self.options.open(result);
+                self.options
+                    .model
+                    .set_tooltip_text(Some("选择下一条消息使用的模型"));
+                self.usage.clear_tokens();
+                self.model_provider
+                    .replace(result["modelProvider"].as_str().map(str::to_owned));
+                self.load_models(None);
                 self.active.set(false);
                 self.turn.take();
                 if let Some(page) = result
@@ -639,6 +778,16 @@ impl Agent {
                     self.catalog.update(result);
                 }
             }
+            Request::Models(generation) => {
+                if generation == self.history_generation.get() {
+                    if let Some(cursor) = self.options.add_page(result) {
+                        self.load_models(Some(cursor));
+                    } else {
+                        self.update_controls();
+                    }
+                }
+            }
+            Request::Quota => self.usage.quota(result, true),
             Request::Turns {
                 prepend,
                 generation,
@@ -651,6 +800,13 @@ impl Agent {
             }
             Request::Unsubscribe => {}
             Request::Send => {
+                if self.pending_user.take().is_some() {
+                    self.options.remember();
+                    if let Some(buffer) = self.input.buffer() {
+                        buffer.set_text("");
+                    }
+                    self.attachments.clear();
+                }
                 if self.active.get() {
                     self.turn
                         .replace(result["turn"]["id"].as_str().map(str::to_owned));
@@ -661,8 +817,12 @@ impl Agent {
         }
     }
 
-    fn send(&self) {
-        if self.active.get() || self.opening.get() {
+    fn send(self: &Rc<Self>) {
+        if self.active.get()
+            || self.opening.get()
+            || self.uploading.get()
+            || self.pending_user.borrow().is_some()
+        {
             return;
         }
         let Some(thread) = self.thread.borrow().clone() else {
@@ -674,26 +834,64 @@ impl Agent {
         let Some(text) = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false) else {
             return;
         };
-        let text = text.trim();
-        if text.is_empty() {
+        let text = text.trim().to_owned();
+        let paths = self.attachments.paths();
+        if text.is_empty() && paths.is_empty() {
             return;
         }
         if text.len() > 256 * 1024 {
             self.show_status("输入超过 256 KiB。");
             return;
         }
-        self.add_user(text);
-        buffer.set_text("");
+        let selection = self.options.selection();
+        if paths.is_empty() {
+            self.begin_turn(thread, &text, &selection, Prepared::empty());
+            return;
+        }
+        let socket = self.context.borrow().socket.clone();
+        let generation = self.history_generation.get();
+        let weak = Rc::downgrade(self);
+        self.uploading.set(true);
+        self.show_status(if socket.is_some() {
+            "正在上传附件…"
+        } else {
+            "正在读取附件…"
+        });
+        self.update_controls();
+        glib::MainContext::default().spawn_local(async move {
+            let result = gio::spawn_blocking(move || Prepared::read(paths, socket.as_deref()))
+                .await
+                .unwrap_or_else(|_| Err("附件准备中断。".into()));
+            if let Some(agent) = weak.upgrade() {
+                if agent.history_generation.get() != generation || !agent.uploading.replace(false) {
+                    return;
+                }
+                match result {
+                    Ok(attachments) => agent.begin_turn(thread, &text, &selection, attachments),
+                    Err(error) => {
+                        agent.show_status(&error);
+                        agent.update_controls();
+                    }
+                }
+            }
+        });
+    }
+
+    fn begin_turn(&self, thread: String, text: &str, selection: &Selection, files: Prepared) {
+        let mut params = json!({"threadId":thread, "input": files.input(text, selection.images)});
+        selection.apply(&mut params);
+        let label = self.add_user(&files.summary(text));
+        self.pending_user.replace(Some(label));
         self.active.set(true);
         self.show_status("Codex 正在处理…");
         self.update_controls();
-        self.request(
-            Request::Send,
-            "turn/start",
-            json!({
-                "threadId":thread,"input":[{"type":"text","text":text,"text_elements":[]}]
-            }),
-        );
+        self.request(Request::Send, "turn/start", params);
+    }
+
+    fn remove_pending_user(&self) {
+        if let Some(label) = self.pending_user.take() {
+            self.history.remove(&label);
+        }
     }
 
     fn stop(&self) {
@@ -730,6 +928,11 @@ impl Agent {
         self.pending.borrow_mut().clear();
         self.opening.set(false);
         self.initialized.set(false);
+        self.uploading.set(false);
+        self.remove_pending_user();
+        self.options.open(&Value::Null);
+        self.usage.disconnect();
+        self.quota_started.set(false);
         self.older.hide();
         self.history_cursor.take();
         self.thread.take();
@@ -755,6 +958,8 @@ impl Agent {
             }
         }
         match method {
+            "thread/tokenUsage/updated" => self.usage.tokens(&params["tokenUsage"]),
+            "account/rateLimits/updated" => self.usage.quota(params, false),
             "item/agentMessage/delta" => {
                 if let (Some(id), Some(delta)) =
                     (params["itemId"].as_str(), params["delta"].as_str())
@@ -863,7 +1068,17 @@ impl Agent {
         match item["type"].as_str() {
             Some("userMessage") if loading_history => {
                 let items: Vec<_> = array(&item["content"])
-                    .filter_map(|value| value["text"].as_str())
+                    .filter_map(|value| match value["type"].as_str() {
+                        Some("text") => value["text"].as_str().map(str::to_owned),
+                        Some("localImage") => value["path"].as_str().map(|path| {
+                            format!(
+                                "附件 · {}",
+                                crate::agent_attachments::filename(std::path::Path::new(path))
+                            )
+                        }),
+                        Some("image") => Some("附件 · 图片".into()),
+                        _ => None,
+                    })
                     .collect();
                 if !items.is_empty() {
                     self.add_user(&items.join("\n"));
@@ -1052,10 +1267,11 @@ impl Agent {
         self.append(&expander);
     }
 
-    fn add_user(&self, text: &str) {
+    fn add_user(&self, text: &str) -> gtk::Label {
         let label = agent_render::text(&limited(text, 256 * 1024));
         label.style_context().add_class("agent-user");
         self.append(&label);
+        label
     }
 
     fn add_agent(&self, text: &str, loading_history: bool) {
@@ -1118,9 +1334,20 @@ impl Agent {
         let ready = self.thread.borrow().is_some();
         let opening =
             self.opening.get() || (self.rpc.borrow().is_some() && !self.initialized.get());
-        self.connect.set_sensitive(!opening && !running);
+        let waiting = self.uploading.get() || self.pending_user.borrow().is_some();
+        self.connect.set_sensitive(!opening && !running && !waiting);
         self.input.set_sensitive(ready);
-        self.send.set_sensitive(ready && !running && !opening);
+        self.input.set_editable(!waiting);
+        self.attachments
+            .button
+            .set_sensitive(ready && !opening && !waiting);
+        self.attachments
+            .chips
+            .set_sensitive(ready && !opening && !waiting);
+        self.options.update(ready && !opening && !waiting);
+        self.usage.button.set_sensitive(ready);
+        self.send
+            .set_sensitive(ready && !running && !opening && !waiting);
         self.stop
             .set_sensitive(running && self.turn.borrow().is_some());
     }

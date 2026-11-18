@@ -1,5 +1,5 @@
-use gtk::glib;
 use gtk::prelude::*;
+use gtk::{cairo, gdk, gdk_pixbuf, glib};
 
 #[derive(Clone, Copy)]
 pub enum Icon {
@@ -10,6 +10,9 @@ pub enum Icon {
     Close,
     More,
     Folder,
+    File,
+    Link,
+    Attachment,
     Up,
     Refresh,
 }
@@ -22,89 +25,128 @@ pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
     area.connect_draw(move |area, cr| {
         let style = area.style_context();
         let color = style.color(area.state_flags());
-        let scale = f64::from(size) / 24.0;
-        let _ = cr.save();
-        cr.scale(scale, scale);
-        cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
-        cr.set_line_width(1.8);
-        cr.set_line_cap(gtk::cairo::LineCap::Round);
-        cr.set_line_join(gtk::cairo::LineJoin::Round);
-
-        match icon {
-            Icon::Terminal => {
-                cr.rectangle(3.0, 5.0, 18.0, 14.0);
-                cr.move_to(7.0, 9.0);
-                cr.line_to(10.0, 12.0);
-                cr.line_to(7.0, 15.0);
-                cr.move_to(13.0, 15.0);
-                cr.line_to(17.0, 15.0);
-            }
-            Icon::Server => {
-                for y in [4.5, 13.5] {
-                    cr.rectangle(3.0, y, 18.0, 6.0);
-                    cr.move_to(6.5, y + 3.0);
-                    cr.line_to(7.5, y + 3.0);
-                    cr.move_to(13.5, y + 3.0);
-                    cr.line_to(17.5, y + 3.0);
-                }
-            }
-            Icon::Connect => {
-                cr.move_to(4.0, 8.0);
-                cr.line_to(20.0, 8.0);
-                cr.move_to(16.0, 4.0);
-                cr.line_to(20.0, 8.0);
-                cr.line_to(16.0, 12.0);
-                cr.move_to(20.0, 16.0);
-                cr.line_to(4.0, 16.0);
-                cr.move_to(8.0, 12.0);
-                cr.line_to(4.0, 16.0);
-                cr.line_to(8.0, 20.0);
-            }
-            Icon::Plus => {
-                cr.move_to(12.0, 4.5);
-                cr.line_to(12.0, 19.5);
-                cr.move_to(4.5, 12.0);
-                cr.line_to(19.5, 12.0);
-            }
-            Icon::Close => {
-                cr.move_to(6.0, 6.0);
-                cr.line_to(18.0, 18.0);
-                cr.move_to(18.0, 6.0);
-                cr.line_to(6.0, 18.0);
-            }
-            Icon::More => {
-                for x in [5.5, 12.0, 18.5] {
-                    cr.new_sub_path();
-                    cr.arc(x, 12.0, 1.3, 0.0, std::f64::consts::TAU);
-                }
-                let _ = cr.fill();
-            }
-            Icon::Folder => {
-                cr.move_to(3.0, 19.0);
-                cr.line_to(3.0, 6.0);
-                cr.line_to(10.0, 6.0);
-                cr.line_to(12.5, 8.5);
-                cr.line_to(21.0, 8.5);
-                cr.line_to(21.0, 19.0);
-                cr.close_path();
-            }
-            Icon::Up => {
-                cr.move_to(12.0, 19.5);
-                cr.line_to(12.0, 4.5);
-                cr.move_to(6.0, 10.5);
-                cr.line_to(12.0, 4.5);
-                cr.line_to(18.0, 10.5);
-            }
-            Icon::Refresh => {
-                cr.arc(12.0, 12.0, 7.2, 0.0, 5.5);
-                cr.move_to(17.1, 2.8);
-                cr.line_to(17.1, 6.9);
-                cr.line_to(13.0, 6.9);
-            }
-        }
-        let _ = cr.stroke();
-        let _ = cr.restore();
+        draw(cr, icon, size, &color);
         glib::Propagation::Proceed
     });
     area
+}
+
+pub fn pixbuf(icon: Icon, size: i32, color: &gdk::RGBA) -> Option<gdk_pixbuf::Pixbuf> {
+    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, size, size).ok()?;
+    {
+        let cr = cairo::Context::new(&surface).ok()?;
+        draw(&cr, icon, size, color);
+    }
+    gdk::pixbuf_get_from_surface(&surface, 0, 0, size, size)
+}
+
+fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
+    let scale = f64::from(size) / 24.0;
+    let _ = cr.save();
+    cr.scale(scale, scale);
+    cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
+    cr.set_line_width(1.8);
+    cr.set_line_cap(gtk::cairo::LineCap::Round);
+    cr.set_line_join(gtk::cairo::LineJoin::Round);
+
+    match icon {
+        Icon::Terminal => {
+            cr.rectangle(3.0, 5.0, 18.0, 14.0);
+            cr.move_to(7.0, 9.0);
+            cr.line_to(10.0, 12.0);
+            cr.line_to(7.0, 15.0);
+            cr.move_to(13.0, 15.0);
+            cr.line_to(17.0, 15.0);
+        }
+        Icon::Server => {
+            for y in [4.5, 13.5] {
+                cr.rectangle(3.0, y, 18.0, 6.0);
+                cr.move_to(6.5, y + 3.0);
+                cr.line_to(7.5, y + 3.0);
+                cr.move_to(13.5, y + 3.0);
+                cr.line_to(17.5, y + 3.0);
+            }
+        }
+        Icon::Connect => {
+            cr.move_to(4.0, 8.0);
+            cr.line_to(20.0, 8.0);
+            cr.move_to(16.0, 4.0);
+            cr.line_to(20.0, 8.0);
+            cr.line_to(16.0, 12.0);
+            cr.move_to(20.0, 16.0);
+            cr.line_to(4.0, 16.0);
+            cr.move_to(8.0, 12.0);
+            cr.line_to(4.0, 16.0);
+            cr.line_to(8.0, 20.0);
+        }
+        Icon::Plus => {
+            cr.move_to(12.0, 4.5);
+            cr.line_to(12.0, 19.5);
+            cr.move_to(4.5, 12.0);
+            cr.line_to(19.5, 12.0);
+        }
+        Icon::Close => {
+            cr.move_to(6.0, 6.0);
+            cr.line_to(18.0, 18.0);
+            cr.move_to(18.0, 6.0);
+            cr.line_to(6.0, 18.0);
+        }
+        Icon::More => {
+            for x in [5.5, 12.0, 18.5] {
+                cr.new_sub_path();
+                cr.arc(x, 12.0, 1.3, 0.0, std::f64::consts::TAU);
+            }
+            let _ = cr.fill();
+        }
+        Icon::Folder => {
+            cr.move_to(3.0, 19.0);
+            cr.line_to(3.0, 6.0);
+            cr.line_to(10.0, 6.0);
+            cr.line_to(12.5, 8.5);
+            cr.line_to(21.0, 8.5);
+            cr.line_to(21.0, 19.0);
+            cr.close_path();
+        }
+        Icon::File => {
+            cr.move_to(6.0, 3.5);
+            cr.line_to(14.0, 3.5);
+            cr.line_to(19.0, 8.5);
+            cr.line_to(19.0, 20.5);
+            cr.line_to(6.0, 20.5);
+            cr.close_path();
+            cr.move_to(14.0, 3.5);
+            cr.line_to(14.0, 8.5);
+            cr.line_to(19.0, 8.5);
+        }
+        Icon::Link => {
+            cr.move_to(6.0, 18.0);
+            cr.line_to(18.0, 6.0);
+            cr.move_to(9.0, 6.0);
+            cr.line_to(18.0, 6.0);
+            cr.line_to(18.0, 15.0);
+        }
+        Icon::Attachment => {
+            cr.move_to(9.0, 13.5);
+            cr.line_to(15.0, 7.5);
+            cr.curve_to(17.2, 5.3, 20.5, 8.6, 18.3, 10.8);
+            cr.line_to(10.5, 18.6);
+            cr.curve_to(6.9, 22.2, 1.8, 17.1, 5.4, 13.5);
+            cr.line_to(14.5, 4.4);
+        }
+        Icon::Up => {
+            cr.move_to(12.0, 19.5);
+            cr.line_to(12.0, 4.5);
+            cr.move_to(6.0, 10.5);
+            cr.line_to(12.0, 4.5);
+            cr.line_to(18.0, 10.5);
+        }
+        Icon::Refresh => {
+            cr.arc(12.0, 12.0, 7.2, 0.0, 5.5);
+            cr.move_to(17.1, 2.8);
+            cr.line_to(17.1, 6.9);
+            cr.line_to(13.0, 6.9);
+        }
+    }
+    let _ = cr.stroke();
+    let _ = cr.restore();
 }

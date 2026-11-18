@@ -12,8 +12,12 @@ const VERSION: u8 = 2;
 const OPEN: u8 = 3;
 const CLOSE: u8 = 4;
 const READ: u8 = 5;
+const WRITE: u8 = 6;
 const OPENDIR: u8 = 11;
 const READDIR: u8 = 12;
+const REMOVE: u8 = 13;
+const MKDIR: u8 = 14;
+const RMDIR: u8 = 15;
 const REALPATH: u8 = 16;
 const STATUS: u8 = 101;
 const HANDLE: u8 = 102;
@@ -22,15 +26,44 @@ const NAME: u8 = 104;
 const MAX_PACKET: usize = 256 * 1024;
 
 pub fn list(socket: &Path, path: Option<&Path>) -> Result<Directory, String> {
-    through_socket(socket, |sftp| sftp.directory(path))
+    through_socket(socket, "15s", |sftp| sftp.directory(path))
 }
 
 pub fn read_image(socket: &Path, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
-    through_socket(socket, |sftp| sftp.read_file(path, limit))
+    through_socket(socket, "15s", |sftp| sftp.read_file(path, limit))
+}
+
+pub fn upload_attachments(
+    socket: &Path,
+    files: &[(String, Vec<u8>)],
+) -> Result<Vec<PathBuf>, String> {
+    let directory = Path::new("/tmp").join(format!("span-{}", gtk::glib::uuid_string_random()));
+    through_socket(socket, "60s", |sftp| {
+        let mut payload = string_payload(directory.as_os_str().as_bytes())?;
+        payload.extend_from_slice(&4u32.to_be_bytes()); // SSH_FILEXFER_ATTR_PERMISSIONS
+        payload.extend_from_slice(&0o700u32.to_be_bytes());
+        let result = sftp.request_payload(MKDIR, &payload)?;
+        success(result, "无法创建远端附件目录")?;
+        let mut uploaded = Vec::new();
+        for (index, (name, data)) in files.iter().enumerate() {
+            let path = directory.join(format!("{:02}-{name}", index + 1));
+            let result = sftp.write_file(&path, data);
+            uploaded.push(path);
+            if let Err(error) = result {
+                for path in &uploaded {
+                    let _ = sftp.request(REMOVE, path.as_os_str().as_bytes());
+                }
+                let _ = sftp.request(RMDIR, directory.as_os_str().as_bytes());
+                return Err(error);
+            }
+        }
+        Ok(uploaded)
+    })
 }
 
 fn through_socket<T>(
     socket: &Path,
+    timeout: &str,
     action: impl FnOnce(
         &mut Sftp<std::process::ChildStdout, std::process::ChildStdin>,
     ) -> Result<T, String>,
@@ -44,7 +77,7 @@ fn through_socket<T>(
     let mut child = Command::new("/usr/bin/timeout")
         .args([
             "--kill-after=1s",
-            "15s",
+            timeout,
             "/usr/bin/ssh",
             "-F",
             "/dev/null",
@@ -204,6 +237,34 @@ impl<R: Read, W: Write> Sftp<R, W> {
         Ok(image)
     }
 
+    fn write_file(&mut self, path: &Path, bytes: &[u8]) -> Result<(), String> {
+        let mut payload = string_payload(path.as_os_str().as_bytes())?;
+        payload.extend_from_slice(&42u32.to_be_bytes()); // SSH_FXF_WRITE | CREAT | EXCL
+        payload.extend_from_slice(&4u32.to_be_bytes()); // SSH_FILEXFER_ATTR_PERMISSIONS
+        payload.extend_from_slice(&0o600u32.to_be_bytes());
+        let (kind, mut packet) = self.request_payload(OPEN, &payload)?;
+        if kind != HANDLE {
+            return Err(unexpected(kind, packet, "无法创建远端附件"));
+        }
+        let handle = packet.string()?.to_vec();
+        let result = self.write_chunks(&handle, bytes);
+        let close = self.request(CLOSE, &handle);
+        result.and_then(|_| success(close?, "无法完成远端附件写入"))
+    }
+
+    fn write_chunks(&mut self, handle: &[u8], bytes: &[u8]) -> Result<(), String> {
+        let handle = string_payload(handle)?;
+        const CHUNK: usize = 96 * 1024;
+        for (index, data) in bytes.chunks(CHUNK).enumerate() {
+            let mut payload = handle.clone();
+            payload.extend_from_slice(&((index * CHUNK) as u64).to_be_bytes());
+            payload.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            payload.extend_from_slice(data);
+            success(self.request_payload(WRITE, &payload)?, "无法写入远端附件")?;
+        }
+        Ok(())
+    }
+
     fn request(&mut self, kind: u8, value: &[u8]) -> Result<(u8, Packet), String> {
         self.request_payload(kind, &string_payload(value)?)
     }
@@ -333,8 +394,16 @@ fn unexpected(kind: u8, packet: Packet, context: &str) -> String {
     format!("{context}：{detail}。")
 }
 
+fn success((kind, packet): (u8, Packet), context: &str) -> Result<(), String> {
+    if kind == STATUS && packet.status_code()? == 0 {
+        Ok(())
+    } else {
+        Err(unexpected(kind, packet, context))
+    }
+}
+
 fn transport(err: io::Error) -> String {
-    format!("读取 SFTP 目录失败：{err}")
+    format!("SFTP 通信失败：{err}")
 }
 
 #[cfg(test)]
@@ -388,5 +457,33 @@ mod tests {
             offset: 0,
         };
         assert!(broken.string().is_err());
+    }
+
+    #[test]
+    fn uploads_files_privately_through_an_existing_ssh_session() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(socket) = std::env::var_os("WORKBENCH_TEST_SFTP_SOCKET") else {
+            return;
+        };
+        let contents = vec![0xAB; 210 * 1024];
+        let files = vec![
+            ("report.pdf".into(), contents),
+            ("空.txt".into(), Vec::new()),
+        ];
+        let uploaded = upload_attachments(Path::new(&socket), &files).unwrap();
+        let folder = uploaded[0].parent().unwrap();
+        assert_eq!(
+            fs::metadata(folder).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        for (path, (_, expected)) in uploaded.iter().zip(files) {
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(fs::read(path).unwrap(), expected);
+            fs::remove_file(path).unwrap();
+        }
+        fs::remove_dir(folder).unwrap();
     }
 }

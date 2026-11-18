@@ -2,7 +2,7 @@ use crate::files::{self, Directory, Kind, Source};
 use crate::icons::{self, Icon};
 use crate::session::Session;
 use gtk::prelude::*;
-use gtk::{gio, glib, pango};
+use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
@@ -15,6 +15,7 @@ pub struct Browser {
     refresh: gtk::Button,
     hidden: gtk::ToggleButton,
     list: gtk::ListStore,
+    entry_icons: [Option<gdk_pixbuf::Pixbuf>; 3],
     rows: gtk::TreeView,
     session: RefCell<Weak<Session>>,
     directory: RefCell<Option<Directory>>,
@@ -71,6 +72,7 @@ impl Browser {
             String::static_type(),
             String::static_type(),
             u32::static_type(),
+            gdk_pixbuf::Pixbuf::static_type(),
         ]);
         let rows = gtk::TreeView::with_model(&list);
         rows.style_context().add_class("files-table");
@@ -91,6 +93,12 @@ impl Browser {
             column.set_expand(index == 0);
             column.set_sizing(gtk::TreeViewColumnSizing::Fixed);
             column.set_fixed_width(width);
+            if index == 0 {
+                let image = gtk::CellRendererPixbuf::new();
+                image.set_padding(5, 0);
+                TreeViewColumnExt::pack_start(&column, &image, false);
+                TreeViewColumnExt::add_attribute(&column, &image, "pixbuf", 5);
+            }
             TreeViewColumnExt::pack_start(&column, &renderer, true);
             TreeViewColumnExt::add_attribute(&column, &renderer, "text", index as i32);
             rows.append_column(&column);
@@ -122,6 +130,11 @@ impl Browser {
             refresh,
             hidden,
             list,
+            entry_icons: [
+                icons::pixbuf(Icon::Folder, 16, &gdk::RGBA::new(0.60, 0.76, 0.97, 1.0)),
+                icons::pixbuf(Icon::File, 16, &gdk::RGBA::new(0.63, 0.68, 0.74, 1.0)),
+                icons::pixbuf(Icon::Link, 16, &gdk::RGBA::new(0.63, 0.68, 0.74, 1.0)),
+            ],
             rows,
             session: RefCell::new(Weak::new()),
             directory: RefCell::new(None),
@@ -351,12 +364,12 @@ impl Browser {
                     continue;
                 }
                 shown += 1;
-                let prefix = match entry.kind {
-                    Kind::Directory => "▸  ",
-                    Kind::Symlink => "↗  ",
-                    _ => "    ",
+                let icon = match entry.kind {
+                    Kind::Directory => &self.entry_icons[0],
+                    Kind::Symlink => &self.entry_icons[2],
+                    _ => &self.entry_icons[1],
                 };
-                let name = format!("{prefix}{}", files::display(&entry.name));
+                let name = files::display(&entry.name);
                 let size = match (entry.kind, entry.size) {
                     (Kind::File, Some(size)) => glib::format_size(size).to_string(),
                     _ => "—".into(),
@@ -377,6 +390,7 @@ impl Browser {
                         (2, &modified),
                         (3, &mode),
                         (4, &(index as u32)),
+                        (5, icon),
                     ],
                 );
             }
