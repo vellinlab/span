@@ -21,6 +21,8 @@ cleanup() {
 trap 'cleanup "$?"' EXIT
 
 export HOME="$test_home" XDG_CONFIG_HOME="$test_home/.config" GDK_BACKEND=x11 NO_AT_BRIDGE=1
+export TMPDIR="$test_home/tmp"
+mkdir "$TMPDIR"
 cat > "$HOME/.bash_profile" <<'PROFILE'
 printf '%s\n' "$BASHPID" >> "$HOME/bash-ready"
 PS1='\[\e[38;5;79m\]\u@local\[\e[0m\]:\w\$ '
@@ -224,10 +226,9 @@ PY
         xdotool key --clearmodifiers Return
         wait_until "resuming the remote session" grep -qsx stored-deployment "$WORKBENCH_SSH_FIXTURE/agent-resumed"
         widget contains 'Latest deployment notes'
-        xdotool key --clearmodifiers ctrl+shift+j
-        sleep 0.25
-        xdotool type --clearmodifiers exit
-        xdotool key --clearmodifiers Return
+        ssh_socket="$(find "$TMPDIR" -type s -path '*/swb-*/ssh' -print -quit)"
+        test -S "$ssh_socket"
+        ssh -F /dev/null -S "$ssh_socket" -O exit localhost
         widget click '重新连接'
         resumed_twice() { [[ $(wc -l < "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 2 ]]; }
         wait_until "automatic restoration on SSH reconnect" resumed_twice
