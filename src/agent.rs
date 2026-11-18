@@ -1027,6 +1027,28 @@ impl Agent {
         }
         scroll.add(&view);
         expander.add(&scroll);
+        let history = self.history.downgrade();
+        let timeline = self.scroll.downgrade();
+        expander.connect_notify_local(Some("expanded"), move |expander, _| {
+            if !expander.property::<bool>("expanded") {
+                return;
+            }
+            let expander = expander.downgrade();
+            let history = history.clone();
+            let timeline = timeline.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(32), move || {
+                if let (Some(expander), Some(history), Some(timeline)) =
+                    (expander.upgrade(), history.upgrade(), timeline.upgrade())
+                {
+                    if let Some((_, top)) = expander.translate_coordinates(&history, 0, 0) {
+                        timeline.vadjustment().clamp_page(
+                            f64::from(top),
+                            f64::from(top + expander.allocated_height()),
+                        );
+                    }
+                }
+            });
+        });
         self.append(&expander);
     }
 

@@ -9,6 +9,9 @@ cleanup() {
     if [[ $1 != 0 && -f "$test_home/app.log" ]]; then
         cat "$test_home/app.log" >&2
         xwininfo -root -tree >&2 || true
+        if [[ -n ${window:-} && -n ${WORKBENCH_PREVIEW:-} ]]; then
+            import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/test-failure.png" || true
+        fi
     fi
     for pid in "$probe_pid" "$app_pid" "$xvfb_pid"; do
         if [[ -n "$pid" ]]; then
@@ -132,10 +135,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget fill-card 'Which deployment environment?' Staging
     widget click '提交答案'
     wait_until "the structured answer" test -f "$HOME/agent-answered"
-    widget click '本轮变更 · 查看 diff'
-    xdotool mousemove --window "$window" 1150 660 click --repeat 6 5
+    widget mouse '本轮变更 · 查看 diff'
+    sleep 0.25
+    xdotool mousemove --window "$window" 285 660 click --repeat 6 5
     widget contains '+passed'
-    widget click '本轮变更 · 查看 diff'
+    widget mouse '本轮变更 · 查看 diff'
 
     xdotool mousemove --window "$window" 900 360 click --repeat 8 4
     sleep 0.25
