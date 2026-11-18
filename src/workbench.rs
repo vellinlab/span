@@ -110,8 +110,8 @@ pub fn open(app: &gtk::Application) {
             &["<Primary><Shift>b"][..],
             Workbench::toggle_sidebar,
         ),
-        ("copy", &["<Primary><Shift>c"][..], Workbench::copy),
-        ("paste", &["<Primary><Shift>v"][..], Workbench::paste),
+        ("copy", &[][..], Workbench::copy),
+        ("paste", &[][..], Workbench::paste),
         (
             "previous",
             &["<Primary>Page_Up"][..],
@@ -482,6 +482,7 @@ impl Workbench {
 
 fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
     let header = gtk::HeaderBar::builder()
+        .title("SSH Workbench")
         .show_close_button(true)
         .has_subtitle(false)
         .build();

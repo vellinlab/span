@@ -7,6 +7,7 @@ xvfb_pid=
 cleanup() {
     if [[ $1 != 0 && -f "$test_home/app.log" ]]; then
         cat "$test_home/app.log" >&2
+        xwininfo -root -tree >&2 || true
     fi
     for pid in "$app_pid" "$xvfb_pid"; do
         if [[ -n "$pid" ]]; then
@@ -37,7 +38,7 @@ wait_until() {
     exit 1
 }
 
-Xvfb -displayfd 3 -screen 0 1280x800x24 -nolisten tcp 3>"$HOME/display" &
+Xvfb -displayfd 3 -screen 0 1280x800x24 -nolisten tcp -noreset 3>"$HOME/display" &
 xvfb_pid=$!
 wait_until "the Xvfb display" test -s "$HOME/display"
 export DISPLAY=":$(cat "$HOME/display")"
@@ -45,7 +46,7 @@ export DISPLAY=":$(cat "$HOME/display")"
 "$1" >"$HOME/app.log" 2>&1 &
 app_pid=$!
 window_exists() {
-    kill -0 "$app_pid" &&
+    kill -0 "$app_pid" 2>/dev/null &&
         xwininfo -root -tree | grep -F '"SSH Workbench"' >/dev/null
 }
 wait_until "the GTK3 window" window_exists

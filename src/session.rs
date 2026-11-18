@@ -1,7 +1,7 @@
 use crate::hosts::Host;
 use crate::vte::Terminal;
 use gtk::prelude::*;
-use gtk::{gio, glib};
+use gtk::{gdk, gio, glib};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -61,6 +61,19 @@ impl Session {
         let terminal = Terminal::new();
         terminal.set_scrollback_lines(10_000);
         terminal.apply_theme();
+        terminal.connect_key_press_event(|terminal, event| {
+            let shortcut = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
+            let modifiers = event.state();
+            if !modifiers.contains(shortcut) || modifiers.contains(gdk::ModifierType::MOD1_MASK) {
+                return glib::Propagation::Proceed;
+            }
+            match event.keyval().to_lower() {
+                gdk::keys::constants::c => terminal.copy_text(),
+                gdk::keys::constants::v => terminal.paste_text(),
+                _ => return glib::Propagation::Proceed,
+            }
+            glib::Propagation::Stop
+        });
         terminal.show();
 
         let page = gtk::ScrolledWindow::builder()
