@@ -35,7 +35,7 @@ Architecture: $arch
 Section: utils
 Priority: optional
 Maintainer: Span maintainers <zyw02@users.noreply.github.com>
-Depends: bash, coreutils, openssh-client, $libraries
+Depends: bash, coreutils, openssh-client, librsvg2-common, $libraries
 Recommends: xauth
 Description: Span SSH terminal and Codex workspace
  Manage SSH hosts and switch between local and remote terminal tabs.

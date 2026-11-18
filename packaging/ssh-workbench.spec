@@ -12,6 +12,7 @@ Requires:       bash
 Requires:       coreutils
 Requires:       openssh-clients
 Requires:       gtk3 >= 3.22.30
+Requires:       librsvg2
 Recommends:     xorg-x11-xauth
 
 %description
@@ -35,4 +36,4 @@ install -pm 0644 %{_sourcedir}/target/bundled-vte/COPYING.* %{buildroot}%{_licen
 %license %{_licensedir}/ssh-workbench/COPYING.*
 %{_bindir}/ssh-workbench
 %{_datadir}/applications/io.github.zyw02.SshWorkbench.desktop
-%{_datadir}/icons/hicolor/*/apps/io.github.zyw02.SshWorkbench.png
+%{_datadir}/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg

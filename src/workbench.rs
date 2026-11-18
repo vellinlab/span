@@ -573,7 +573,7 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
 
     let brand = row(8);
     let logo = gtk::gdk_pixbuf::Pixbuf::from_read(std::io::Cursor::new(include_bytes!(
-        "../packaging/icons/hicolor/24x24/apps/io.github.zyw02.SshWorkbench.png"
+        "../packaging/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg"
     )))
     .ok();
     let mark = gtk::Image::from_pixbuf(logo.as_ref());
