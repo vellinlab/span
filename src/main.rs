@@ -1,5 +1,8 @@
-use gtk::{gdk, gio, glib};
-use vte4::prelude::*;
+mod vte;
+
+use gtk::prelude::*;
+use gtk::{gdk, glib};
+use vte::Terminal;
 
 fn main() -> glib::ExitCode {
     let app = gtk::Application::builder()
@@ -17,37 +20,32 @@ fn build_window(app: &gtk::Application) {
 
     let (local, local_terminal) = local_pane();
     let remote = remote_pane();
-    let split = gtk::Paned::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .wide_handle(true)
-        .position(540)
-        .build();
-    split.set_start_child(Some(&local));
-    split.set_end_child(Some(&remote));
-    split.set_shrink_start_child(false);
-    split.set_shrink_end_child(false);
-    split.set_resize_start_child(true);
-    split.set_resize_end_child(true);
+    let split = gtk::Paned::new(gtk::Orientation::Horizontal);
+    split.set_wide_handle(true);
+    split.set_position(540);
+    split.pack1(&local, true, false);
+    split.pack2(&remote, true, false);
 
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title("SSH Workbench")
         .default_width(1080)
         .default_height(640)
-        .child(&split)
         .build();
-    window.present();
+    window.add(&split);
+    window.show_all();
     local_terminal.grab_focus();
 }
 
-fn local_pane() -> (gtk::Box, vte4::Terminal) {
+fn local_pane() -> (gtk::Box, Terminal) {
     let heading = gtk::Label::new(Some("本地 Bash"));
     let status = gtk::Label::new(None);
     let restart = gtk::Button::with_label("启动 Bash");
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    header.append(&heading);
-    header.append(&status);
-    header.append(&restart);
+    header.pack_start(&heading, false, false, 0);
+    header.pack_start(&status, false, false, 0);
+    restart.set_no_show_all(true);
+    header.pack_start(&restart, false, false, 0);
 
     let (pane, terminal) = terminal_pane(&header);
     terminal.connect_child_exited(glib::clone!(
@@ -72,14 +70,13 @@ fn local_pane() -> (gtk::Box, vte4::Terminal) {
     (pane, terminal)
 }
 
-fn start_bash(terminal: &vte4::Terminal, status: &gtk::Label, restart: &gtk::Button) {
+fn start_bash(terminal: &Terminal, status: &gtk::Label, restart: &gtk::Button) {
     restart.set_visible(false);
     terminal.reset(true, false);
     terminal.set_input_enabled(true);
     status.set_label("");
     let home = glib::home_dir();
-    spawn(
-        terminal,
+    terminal.spawn(
         home.to_str(),
         &["/bin/bash", "-l"],
         glib::clone!(
@@ -89,7 +86,7 @@ fn start_bash(terminal: &vte4::Terminal, status: &gtk::Label, restart: &gtk::But
             status,
             #[weak]
             restart,
-            move |result: Result<glib::Pid, glib::Error>| {
+            move |result: Result<(), glib::Error>| {
                 if let Err(error) = result {
                     show_error(&terminal, &status, "Bash 启动失败", &error);
                     restart.set_visible(true);
@@ -115,16 +112,16 @@ fn remote_pane() -> gtk::Box {
     let connect = gtk::Button::with_label("连接");
     let status = gtk::Label::new(Some("等待连接"));
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    header.append(&heading);
-    header.append(&target);
-    header.append(&x11);
-    header.append(&connect);
+    header.pack_start(&heading, false, false, 0);
+    header.pack_start(&target, true, true, 0);
+    header.pack_start(&x11, false, false, 0);
+    header.pack_start(&connect, false, false, 0);
 
     let (pane, terminal) = terminal_pane(&header);
     status.set_xalign(0.0);
     status.set_margin_start(10);
     status.set_margin_bottom(6);
-    pane.append(&status);
+    pane.pack_start(&status, false, false, 0);
     terminal.set_input_enabled(false);
 
     connect.connect_clicked(glib::clone!(
@@ -156,8 +153,7 @@ fn remote_pane() -> gtk::Box {
             terminal.reset(true, false);
             terminal.set_input_enabled(true);
             terminal.grab_focus();
-            spawn(
-                &terminal,
+            terminal.spawn(
                 None,
                 &argv,
                 glib::clone!(
@@ -171,7 +167,7 @@ fn remote_pane() -> gtk::Box {
                     status,
                     #[weak]
                     button,
-                    move |result: Result<glib::Pid, glib::Error>| {
+                    move |result: Result<(), glib::Error>| {
                         if let Err(error) = result {
                             show_error(&terminal, &status, "SSH 启动失败", &error);
                             set_connecting(&target, &x11, &button, false);
@@ -219,69 +215,42 @@ fn set_connecting(
     connect.set_sensitive(!active);
 }
 
-fn terminal_pane(header: &gtk::Box) -> (gtk::Box, vte4::Terminal) {
+fn terminal_pane(header: &gtk::Box) -> (gtk::Box, Terminal) {
     header.set_margin_top(8);
     header.set_margin_bottom(8);
     header.set_margin_start(10);
     header.set_margin_end(10);
-    let terminal = vte4::Terminal::new();
+    let terminal = Terminal::new();
     terminal.set_scrollback_lines(10_000);
 
-    let keys = gtk::EventControllerKey::new();
-    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-    keys.connect_key_pressed(glib::clone!(
-        #[weak]
-        terminal,
-        #[upgrade_or]
-        glib::Propagation::Proceed,
-        move |_, key, _, modifiers| {
-            let shortcut = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
-            if !modifiers.contains(shortcut) || modifiers.contains(gdk::ModifierType::ALT_MASK) {
-                return glib::Propagation::Proceed;
-            }
-            match key.to_lower() {
-                gdk::Key::c => terminal.copy_clipboard_format(vte4::Format::Text),
-                gdk::Key::v => terminal.paste_clipboard(),
-                _ => return glib::Propagation::Proceed,
-            }
-            glib::Propagation::Stop
+    terminal.connect_key_press_event(|terminal, event| {
+        let shortcut = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
+        let modifiers = event.state();
+        if !modifiers.contains(shortcut) || modifiers.contains(gdk::ModifierType::MOD1_MASK) {
+            return glib::Propagation::Proceed;
         }
-    ));
-    terminal.add_controller(keys);
+        match event.keyval().to_lower() {
+            gdk::keys::constants::c => terminal.copy_text(),
+            gdk::keys::constants::v => terminal.paste_text(),
+            _ => return glib::Propagation::Proceed,
+        }
+        glib::Propagation::Stop
+    });
 
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
         .hexpand(true)
         .vexpand(true)
-        .child(&terminal)
         .build();
+    scroll.add(&terminal);
     let pane = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    pane.append(header);
-    pane.append(&scroll);
+    pane.pack_start(header, false, false, 0);
+    pane.pack_start(&scroll, true, true, 0);
     (pane, terminal)
 }
 
-fn spawn(
-    terminal: &vte4::Terminal,
-    directory: Option<&str>,
-    argv: &[&str],
-    on_spawn: impl FnOnce(Result<glib::Pid, glib::Error>) + 'static,
-) {
-    terminal.spawn_async(
-        vte4::PtyFlags::DEFAULT,
-        directory,
-        argv,
-        &[],
-        glib::SpawnFlags::DEFAULT,
-        || {},
-        10_000,
-        None::<&gio::Cancellable>,
-        on_spawn,
-    );
-}
-
-fn show_error(terminal: &vte4::Terminal, status: &gtk::Label, label: &str, error: &glib::Error) {
+fn show_error(terminal: &Terminal, status: &gtk::Label, label: &str, error: &glib::Error) {
     terminal.set_input_enabled(false);
     terminal.feed(format!("\r\n{label}: {error}\r\n").as_bytes());
     status.set_label(label);

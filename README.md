@@ -1,31 +1,31 @@
 # SSH Workbench
 
-用于 Linux 桌面的轻量双窗格终端。使用 Rust、GTK4/VTE 和系统 OpenSSH。
+一个 Linux 双窗格终端。左侧运行本地 Bash，右侧通过系统 OpenSSH 连接远端。应用使用 Rust 和 GTK3/VTE，支持 X11 桌面。
 
 ## 安装
 
-在 GitHub Actions 的 **Build Linux** 成功运行页面下载 `ssh-workbench-linux-amd64`，解压后在 Ubuntu 24.04 x86-64 上安装其中的 Debian 软件包。
+### NewStartOS／EL8 x86_64
+
+在 GitHub Actions 的 **Build Linux** 成功运行页面下载 `ssh-workbench-el8-x86_64`，解压后安装 RPM。
 
 ```sh
-sudo apt install ./ssh-workbench_0.1.0_amd64.deb
+sudo dnf install ./ssh-workbench-0.2.0-1.el8.x86_64.rpm
 ssh-workbench
 ```
 
-在 NDE 的 X11 会话里，可以用 Cairo 软件渲染启动：
+CI 使用 AlmaLinux 8，验证 glibc 2.28、GTK 3.22.30 和 VTE 0.52.4，并在虚拟 X11 下启动已安装的 RPM。
+
+### Ubuntu 24.04 amd64
+
+下载同一构建页面的 `ssh-workbench-linux-amd64` 并解压。
 
 ```sh
-GDK_BACKEND=x11 GSK_RENDERER=cairo ssh-workbench
+sudo apt install ./ssh-workbench_0.2.0_amd64.deb
+ssh-workbench
 ```
 
 ## 使用
 
-左侧是本地 Bash。右侧默认填了 `tokyo`，可以改成你在 OpenSSH 中使用的主机别名或 `user@host`。按「连接」后，系统 SSH 会照常处理你的配置、代理和认证。
+右侧默认填入 `tokyo`。可以改成 OpenSSH 配置中的主机别名或 `user@host`。按「连接」后，系统 SSH 会使用现有配置、代理和认证。
 
-远程 Codex 需要通过 X11 读取本机截图时，先勾选「信任 X11」再连接。此选项使用 `ssh -Y -S none`，允许远端程序访问本机 X11 会话，请只对信任的主机使用。连接后，和在普通终端里一样，用 `Ctrl+V` 将截图附到 Codex。文字复制和粘贴用 `Ctrl+Shift+C` 和 `Ctrl+Shift+V`。
-
-## 本地构建
-
-```sh
-sudo apt-get install build-essential pkg-config libgtk-4-dev libvte-2.91-gtk4-dev
-cargo build --locked --release
-```
+如果远端 Codex 需要通过 X11 读取本机截图，先勾选「信任 X11」再连接。此选项使用 `ssh -Y -S none`，允许远端程序访问本机 X11 会话，请只对信任的主机使用。连接后在 Codex 中按 `Ctrl+V` 附上截图。文字复制和粘贴分别使用 `Ctrl+Shift+C` 和 `Ctrl+Shift+V`。

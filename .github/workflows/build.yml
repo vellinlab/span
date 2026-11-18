@@ -27,16 +27,17 @@ jobs:
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
-            build-essential pkg-config dpkg-dev libgtk-4-dev libvte-2.91-gtk4-dev \
-            dbus-daemon desktop-file-utils xvfb xauth xdotool
+            build-essential pkg-config dpkg-dev libgtk-3-dev libvte-2.91-dev \
+            dbus-daemon desktop-file-utils xvfb x11-utils
 
       - name: Check formatting and build
         run: |
           rustup toolchain install 1.98.1 --profile minimal --component rustfmt
+          if [[ ! -f Cargo.lock ]]; then cargo +1.98.1 generate-lockfile; fi
           cargo +1.98.1 fmt --all -- --check
           cargo +1.98.1 build --locked --release
 
-      - name: Package and test on X11 with Cairo
+      - name: Package and test on X11
         run: |
           desktop-file-validate packaging/io.github.zyw02.SshWorkbench.desktop
           bash packaging/package-deb.sh
@@ -44,7 +45,7 @@ jobs:
           extracted="$(mktemp -d)"
           dpkg-deb --info "${package[0]}"
           dpkg-deb --extract "${package[0]}" "$extracted"
-          xvfb-run -a dbus-run-session -- bash packaging/smoke-test.sh "$extracted/usr/bin/ssh-workbench"
+          dbus-run-session -- bash packaging/smoke-test.sh "$extracted/usr/bin/ssh-workbench"
 
       - name: Upload Debian package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -53,3 +54,34 @@ jobs:
           path: dist/*.deb
           if-no-files-found: error
           retention-days: 30
+
+  el8-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test RPM in AlmaLinux 8
+        run: |
+          docker run --rm --volume "$PWD:/work" --workdir /work \
+            almalinux:8 bash packaging/build-el8.sh
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ssh-workbench-el8-x86_64
+          path: dist/*.rpm
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Return the initial lockfile
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gtk3-cargo-lock
+          path: Cargo.lock
+          if-no-files-found: ignore
+          retention-days: 1

@@ -1,12 +1,11 @@
 [package]
 name = "ssh-workbench"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A Linux desktop terminal for local shells and OpenSSH sessions"
 
 [dependencies]
-gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
-vte4 = "0.10"
+gtk = "0.19"
 
 [profile.release]
 strip = "debuginfo"
