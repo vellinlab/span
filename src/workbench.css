@@ -529,9 +529,14 @@ menu menuitem:hover {
     padding: 0 3px 0 6px;
 }
 
-.agent-usage {
+.agent-usage-popover {
     background: @sidebar;
     color: @foreground;
+    border: 1px solid @line;
+    border-radius: 8px;
+}
+
+.agent-usage {
     padding: 12px;
 }
 

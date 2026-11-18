@@ -63,6 +63,7 @@ impl Usage {
         button.style_context().add_class("quiet-button");
         button.set_tooltip_text(Some("查看上下文、会话 token 和账号额度"));
         let popover = gtk::Popover::new(Some(&button));
+        popover.style_context().add_class("agent-usage-popover");
         popover.set_position(gtk::PositionType::Top);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.style_context().add_class("agent-usage");

@@ -70,7 +70,7 @@ impl Selection {
 impl Options {
     pub fn new(actions: &gtk::Box) -> Self {
         let model = picker("模型", 19);
-        let effort = picker("思考强度", 10);
+        let effort = picker("思考强度", 15);
         actions.pack_start(&model, false, false, 0);
         actions.pack_start(&effort, false, false, 0);
         let options = Self {

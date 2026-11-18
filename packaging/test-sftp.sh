@@ -6,6 +6,9 @@ cleanup() {
     local result="$1"
     if [[ $result -ne 0 && -f "$fixture/sshd.log" ]]; then
         cat "$fixture/sshd.log" >&2
+        if [[ -f "$fixture/unexpected-command" ]]; then
+            cat "$fixture/unexpected-command" >&2
+        fi
     fi
     ssh -F /dev/null -S "$fixture/control" -O exit localhost 2>/dev/null || true
     if [[ -f "$fixture/sshd.pid" ]]; then
@@ -52,10 +55,13 @@ case \${SSH_ORIGINAL_COMMAND:-} in
     "bash -lc 'exec codex app-server'")
         exec /usr/bin/python3 '$PWD/packaging/test-agent.py' app-server
         ;;
-    '/usr/lib/openssh/sftp-server')
+    '/usr/lib/openssh/sftp-server'|'/usr/lib/openssh/sftp-server ')
         exec /usr/lib/openssh/sftp-server
         ;;
-    *) exit 1 ;;
+    *)
+        printf 'Unexpected remote command: %q\n' "\$SSH_ORIGINAL_COMMAND" >> '$fixture/unexpected-command'
+        exit 1
+        ;;
 esac
 SCRIPT
     chmod 700 "$fixture/remote-command"
