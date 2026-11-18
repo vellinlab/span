@@ -33,7 +33,6 @@ jobs:
       - name: Check formatting and build
         run: |
           rustup toolchain install 1.98.1 --profile minimal --component rustfmt
-          if [[ ! -f Cargo.lock ]]; then cargo +1.98.1 generate-lockfile; fi
           cargo +1.98.1 fmt --all -- --check
           cargo +1.98.1 build --locked --release
 
@@ -76,12 +75,3 @@ jobs:
           path: dist/*.rpm
           if-no-files-found: error
           retention-days: 30
-
-      - name: Return the initial lockfile
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: gtk3-cargo-lock
-          path: Cargo.lock
-          if-no-files-found: ignore
-          retention-days: 1

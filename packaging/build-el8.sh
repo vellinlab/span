@@ -9,9 +9,6 @@ curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/ssh-workbench-rustup.sh
 bash /tmp/ssh-workbench-rustup.sh -y --profile minimal --default-toolchain 1.98.1 --component rustfmt
 export PATH="$HOME/.cargo/bin:$PATH"
 
-if [[ ! -f Cargo.lock ]]; then
-    cargo generate-lockfile
-fi
 cargo fmt --all -- --check
 cargo build --locked --release
 
