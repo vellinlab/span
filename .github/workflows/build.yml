@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-linux-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux-amd64:
     runs-on: ubuntu-24.04
@@ -20,8 +24,9 @@ jobs:
 
       - name: Install GTK, VTE and X11 test tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             build-essential pkg-config dpkg-dev libgtk-4-dev libvte-2.91-gtk4-dev \
             dbus-daemon desktop-file-utils xvfb xauth xdotool
 

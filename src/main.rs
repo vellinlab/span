@@ -205,7 +205,7 @@ fn remote_pane() -> gtk::Box {
             set_connecting(&target, &x11, &connect, false);
         }
     ));
-    (pane, terminal)
+    pane
 }
 
 fn set_connecting(
