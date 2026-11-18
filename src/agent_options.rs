@@ -188,7 +188,7 @@ impl Options {
             self.effort
                 .append(Some(id), &format!("思考 · {}{default}", effort_name(id)));
         }
-        if !self.effort.set_active_id(select) {
+        if select.is_none_or(|id| !self.effort.set_active_id(Some(id))) {
             self.effort.set_active(Some(0));
         }
         self.effort

@@ -769,7 +769,7 @@ impl Agent {
                 }
                 self.settings.hide();
                 self.copy_id.show();
-                self.show_status(result["model"].as_str().unwrap_or("就绪"));
+                self.show_status("就绪");
                 self.update_controls();
                 self.input.grab_focus();
             }

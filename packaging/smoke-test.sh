@@ -8,9 +8,12 @@ probe_pid=
 cleanup() {
     if [[ $1 != 0 && -f "$test_home/app.log" ]]; then
         cat "$test_home/app.log" >&2
+        if [[ -f "$test_home/agent-request" ]]; then
+            cat "$test_home/agent-request" >&2
+        fi
         xwininfo -root -tree >&2 || true
         if [[ -n ${window:-} && -n ${WORKBENCH_PREVIEW:-} ]]; then
-            import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/test-failure.png" || true
+            import -window root "$(dirname "$WORKBENCH_PREVIEW")/test-failure.png" || true
         fi
     fi
     for pid in "$probe_pid" "$app_pid" "$xvfb_pid"; do
@@ -94,15 +97,20 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
         xdotool search --onlyvisible --name "^$1$" >/dev/null
     }
     widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    attachment_chooser_closed() {
+        ! dialog_open '添加附件'
+    }
     add_attachment() {
         local file="$1" chooser
         widget click '附件'
         wait_until "the attachment chooser" dialog_open '添加附件'
         chooser="$(xdotool search --onlyvisible --name '^添加附件$' | head -n1)"
         xdotool windowfocus --sync "$chooser"
+        sleep 0.35
         xdotool key --clearmodifiers ctrl+l
         xdotool type --clearmodifiers "$file"
-        xdotool key --clearmodifiers Return
+        widget click '添加'
+        wait_until "confirming the selected file" attachment_chooser_closed
         widget contains "${file##*/}"
         xdotool windowfocus --sync "$window"
         widget mouse '输入消息，或添加附件'

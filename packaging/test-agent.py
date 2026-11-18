@@ -115,6 +115,7 @@ for line in sys.stdin:
                                           "nextCursor": None}})
         (home / "agent-older-page").touch()
     elif method == "turn/start":
+        (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")
         if params["threadId"] == saved_thread:
             message = params["input"][0]["text"]
             assert message.startswith("Read the remote attachment")
