@@ -133,6 +133,16 @@ pub fn open(app: &gtk::Application) {
         ),
         ("files", &["<Primary><Shift>f"][..], Workbench::toggle_files),
         ("agent", &["<Primary><Shift>a"][..], Workbench::toggle_agent),
+        (
+            "agent-catalog",
+            &["<Primary><Shift>h"][..],
+            Workbench::agent_catalog,
+        ),
+        (
+            "agent-drawer",
+            &["<Primary><Shift>j"][..],
+            Workbench::agent_drawer,
+        ),
         ("copy", &[][..], Workbench::copy),
         ("paste", &[][..], Workbench::paste),
         (
@@ -356,6 +366,18 @@ impl Workbench {
         }
     }
 
+    fn agent_catalog(self: &Rc<Self>) {
+        if let Some(session) = self.current_session() {
+            session.show_agent_catalog();
+        }
+    }
+
+    fn agent_drawer(self: &Rc<Self>) {
+        if let Some(session) = self.current_session() {
+            session.toggle_drawer();
+        }
+    }
+
     fn copy(self: &Rc<Self>) {
         if let Some(session) = self.current_session() {
             session.terminal.copy_text();
@@ -574,6 +596,8 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
                 ("显示／隐藏主机栏", "sidebar"),
                 ("文件目录", "files"),
                 ("Codex 会话／终端", "agent"),
+                ("Codex 会话列表", "agent-catalog"),
+                ("会话页终端面板", "agent-drawer"),
                 ("上一个标签", "previous"),
                 ("下一个标签", "next"),
             ][..],

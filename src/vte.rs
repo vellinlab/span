@@ -44,6 +44,8 @@ unsafe extern "C" {
     );
     fn vte_terminal_feed(terminal: *mut VteTerminal, data: *const c_char, len: isize);
     fn vte_terminal_copy_clipboard_format(terminal: *mut VteTerminal, format: c_uint);
+    fn vte_terminal_get_has_selection(terminal: *mut VteTerminal) -> gffi::gboolean;
+    fn vte_terminal_copy_primary(terminal: *mut VteTerminal);
     fn vte_terminal_paste_clipboard(terminal: *mut VteTerminal);
     fn vte_terminal_spawn_async(
         terminal: *mut VteTerminal,
@@ -149,6 +151,17 @@ impl Terminal {
 
     pub fn paste_text(&self) {
         unsafe { vte_terminal_paste_clipboard(self.to_glib_none().0) }
+    }
+
+    pub fn request_selection(&self, callback: impl FnOnce(Option<&str>) + 'static) -> bool {
+        let terminal = self.to_glib_none().0;
+        // VTE 0.52 uses the X11 primary selection for retrieving the selected text.
+        if unsafe { vte_terminal_get_has_selection(terminal) } == 0 {
+            return false;
+        }
+        unsafe { vte_terminal_copy_primary(terminal) };
+        gtk::Clipboard::get(&gdk::SELECTION_PRIMARY).request_text(move |_, text| callback(text));
+        true
     }
 
     pub fn connect_child_exited(&self, on_exit: impl Fn(&Self, i32) + 'static) {

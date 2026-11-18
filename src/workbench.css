@@ -418,6 +418,46 @@ menu menuitem:hover {
     font-size: 11px;
 }
 
+.agent-catalog {
+    background: @sidebar;
+    color: @foreground;
+    padding: 10px;
+}
+
+.agent-catalog-list {
+    background: @canvas;
+    color: @foreground;
+}
+
+.agent-catalog-list row {
+    padding: 5px 8px;
+}
+
+.agent-catalog-list row:selected,
+.agent-catalog-list row:hover {
+    background: #263349;
+    color: @foreground;
+}
+
+.agent-catalog-project {
+    color: @accent;
+    font-size: 11px;
+}
+
+.agent-diff,
+.agent-diff text {
+    background: @canvas;
+    color: @foreground;
+}
+
+.agent-drawer-header {
+    background: @chrome;
+    color: @foreground;
+    border-top: 1px solid @line;
+    border-bottom: 1px solid @line;
+    padding: 2px 10px;
+}
+
 .agent-settings {
     background: @sidebar;
     padding: 10px 18px;

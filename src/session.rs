@@ -61,6 +61,14 @@ pub struct Session {
     cancellable: gio::Cancellable,
     control: RefCell<Option<ControlSocket>>,
     agent: RefCell<Option<Rc<Agent>>>,
+    shell: gtk::ScrolledWindow,
+    agent_view: RefCell<Option<AgentView>>,
+    reconnect: RefCell<Option<gio::FileMonitor>>,
+}
+
+struct AgentView {
+    split: gtk::Paned,
+    drawer: gtk::Box,
 }
 
 impl Session {
@@ -113,17 +121,29 @@ impl Session {
             cancellable: gio::Cancellable::new(),
             control: RefCell::new(control),
             agent: RefCell::new(None),
+            shell: scroll,
+            agent_view: RefCell::new(None),
+            reconnect: RefCell::new(None),
         })
     }
 
     pub fn toggle_agent(self: &Rc<Self>) {
         if self.page.visible_child_name().as_deref() == Some("agent") {
+            if self
+                .agent_view
+                .borrow()
+                .as_ref()
+                .is_some_and(|view| view.drawer.is_visible())
+            {
+                self.toggle_drawer();
+            }
             self.page.set_visible_child_name("terminal");
             self.terminal.grab_focus();
             return;
         }
         if self.agent.borrow().is_none() {
             let weak = Rc::downgrade(self);
+            let drawer_session = weak.clone();
             let agent = Agent::new(
                 self.launch.label(),
                 self.directory.borrow().as_deref(),
@@ -137,14 +157,87 @@ impl Session {
                         _ => Err("请先在终端完成 SSH 登录，再打开 Codex 会话。".into()),
                     }
                 },
+                move || {
+                    if let Some(session) = drawer_session.upgrade() {
+                        session.toggle_drawer();
+                    }
+                },
             );
-            self.page.add_named(&agent.panel, "agent");
-            agent.panel.show_all();
+            let split = gtk::Paned::new(gtk::Orientation::Vertical);
+            let drawer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let tools = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            tools.style_context().add_class("agent-drawer-header");
+            tools.pack_start(&gtk::Label::new(Some("终端")), false, false, 0);
+            let add = gtk::Button::with_label("加入选区");
+            add.style_context().add_class("quiet-button");
+            tools.pack_end(&add, false, false, 0);
+            drawer.pack_start(&tools, false, false, 0);
+            let terminal = self.terminal.downgrade();
+            let target = Rc::downgrade(&agent);
+            add.connect_clicked(move |_| {
+                if let (Some(terminal), Some(agent)) = (terminal.upgrade(), target.upgrade()) {
+                    let target = Rc::downgrade(&agent);
+                    if !terminal.request_selection(move |text| {
+                        if let Some(agent) = target.upgrade() {
+                            if let Some(text) = text.filter(|text| !text.is_empty()) {
+                                agent.add_terminal_context(text);
+                            } else {
+                                agent.show_status("终端选区为空");
+                            }
+                        }
+                    }) {
+                        agent.show_status("请先在终端中选中文字");
+                    }
+                }
+            });
+            tools.show_all();
+            drawer.set_no_show_all(true);
+            split.pack1(&agent.panel, true, false);
+            split.pack2(&drawer, false, true);
+            self.page.add_named(&split, "agent");
+            split.show_all();
+            self.agent_view.replace(Some(AgentView { split, drawer }));
             self.agent.replace(Some(agent));
         }
         self.page.set_visible_child_name("agent");
         if let Some(agent) = self.agent.borrow().as_ref() {
             agent.focus();
+        }
+    }
+
+    pub fn show_agent_catalog(self: &Rc<Self>) {
+        if self.page.visible_child_name().as_deref() != Some("agent") {
+            self.toggle_agent();
+        }
+        if let Some(agent) = self.agent.borrow().as_ref() {
+            agent.show_catalog();
+        }
+    }
+
+    pub fn toggle_drawer(&self) {
+        if self.page.visible_child_name().as_deref() != Some("agent") {
+            return;
+        }
+        let agent_view = self.agent_view.borrow();
+        let Some(view) = agent_view.as_ref() else {
+            return;
+        };
+        if view.drawer.is_visible() {
+            view.drawer.hide();
+            view.drawer.remove(&self.shell);
+            self.page.add_named(&self.shell, "terminal");
+            if let Some(agent) = self.agent.borrow().as_ref() {
+                agent.focus();
+            }
+        } else {
+            self.page.remove(&self.shell);
+            view.drawer.pack_start(&self.shell, true, true, 0);
+            self.shell.show();
+            view.drawer.show();
+            let height = view.split.allocated_height();
+            view.split
+                .set_position(height.saturating_sub((height / 3).clamp(155, 260)));
+            self.terminal.grab_focus();
         }
     }
 
@@ -194,6 +287,9 @@ impl Session {
             }
         };
 
+        if let Some(socket) = socket_path.clone() {
+            self.watch_reconnect(socket);
+        }
         self.set_state(State::Starting);
         self.terminal.reset(true, false);
         self.terminal.set_input_enabled(true);
@@ -208,6 +304,7 @@ impl Session {
                     match result {
                         Ok(()) => session.set_state(State::Running),
                         Err(error) => {
+                            session.stop_watching();
                             session.control.replace(None);
                             session.set_state(State::Failed);
                             session
@@ -221,6 +318,7 @@ impl Session {
     }
 
     pub fn child_exited(&self, status: i32) {
+        self.stop_watching();
         self.control.replace(None);
         if matches!(self.launch, Launch::Ssh(_)) {
             if let Some(agent) = self.agent.borrow().as_ref() {
@@ -232,7 +330,46 @@ impl Session {
 
     pub fn cancel(&self) {
         self.cancellable.cancel();
+        self.stop_watching();
         self.agent.take();
+    }
+
+    fn watch_reconnect(self: &Rc<Self>, socket: PathBuf) {
+        let Some(agent) = self
+            .agent
+            .borrow()
+            .clone()
+            .filter(|agent| agent.has_resume())
+        else {
+            return;
+        };
+        let Some(parent) = socket.parent() else {
+            return;
+        };
+        let Ok(monitor) = gio::File::for_path(parent)
+            .monitor_directory(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)
+        else {
+            return;
+        };
+        let weak = Rc::downgrade(self);
+        let check = move || {
+            if let Some(session) = weak.upgrade() {
+                if crate::sftp::socket_ready(&socket) {
+                    session.stop_watching();
+                    agent.reconnect();
+                }
+            }
+        };
+        let initial = check.clone();
+        monitor.connect_changed(move |_, _, _, _| check());
+        self.reconnect.replace(Some(monitor));
+        initial();
+    }
+
+    fn stop_watching(&self) {
+        if let Some(monitor) = self.reconnect.take() {
+            monitor.cancel();
+        }
     }
 
     fn set_state(&self, state: State) {

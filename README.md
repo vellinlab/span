@@ -9,7 +9,7 @@
 在 GitHub Actions 的 **Build Linux** 成功运行页面下载 `ssh-workbench-el8-x86_64`，解压后安装 RPM。
 
 ```sh
-sudo dnf install ./ssh-workbench-0.5.0-1.el8.x86_64.rpm
+sudo dnf install ./ssh-workbench-0.6.0-1.el8.x86_64.rpm
 ssh-workbench
 ```
 
@@ -20,7 +20,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 下载同一构建页面的 `ssh-workbench-linux-amd64` 并解压。
 
 ```sh
-sudo apt install ./ssh-workbench_0.5.0_amd64.deb
+sudo apt install ./ssh-workbench_0.6.0_amd64.deb
 ssh-workbench
 ```
 
@@ -40,8 +40,12 @@ ssh-workbench
 
 ## Codex 会话
 
-点击当前终端标签右侧的「Codex」，或按 `Ctrl+Shift+A`，在同一标签内切换终端与 Agent 界面。打开会话后可以发送消息、停止生成、查看命令和文件变更，以及处理命令和文件的审批请求。填写已有会话 ID 可以接着使用 Codex 保存在该主机上的会话。
+点击当前终端标签右侧的「Codex」，或按 `Ctrl+Shift+A`，在同一标签内切换终端与 Agent 界面。
+
+- 「会话」（`Ctrl+Shift+H`）按工作目录展示当前主机保存的会话，支持搜索、查看归档和新建。打开旧会话后，可以按需加载更早的对话，也可以直接填会话 ID。SSH 断开后，在同一标签重新连接会恢复上次打开的已保存会话。
+- 「终端」（`Ctrl+Shift+J`）在会话页下方展开当前标签的真实终端。「加入选区」把终端中选中的文字放进输入框，供编辑后发送。
+- Codex 的问题和审批显示为可操作卡片。文件变更可按轮次展开查看只读 diff。
 
 运行 Agent 的主机需要安装支持 App Server 的 Codex CLI，并完成其正常登录。如果使用 SSH，先在终端完成登录。会话通过同一条已认证的 SSH 连接启动 App Server，并使用所选工作目录。
 
-Agent 回复支持 GitHub 风格 Markdown 表格、Mermaid 基础流程图和时序图，以及本机或远端文件中的 PNG/JPEG 图片预览。可以复制 Markdown、带表格的 HTML 富文本、Mermaid 源码和图像。复杂 Mermaid 语法保留为源码，图片文件预览上限为 8 MiB。
+Agent 回复支持 GitHub 风格 Markdown 表格、Mermaid 基础流程图和时序图，以及本机或远端文件中的 PNG/JPEG 图片。表格可以单独复制为 HTML 富文本、CSV 或 Markdown。图片和 Mermaid 图可以放大、复制和保存，Mermaid 图同时提供源码。复杂 Mermaid 语法以源码显示，图片文件预览上限为 8 MiB。

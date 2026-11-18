@@ -1,4 +1,6 @@
 mod agent;
+mod agent_catalog;
+mod agent_question;
 mod agent_render;
 mod agent_rpc;
 mod browser;

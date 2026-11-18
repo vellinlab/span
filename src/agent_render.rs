@@ -1,7 +1,7 @@
 use crate::mermaid::Diagram;
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd, html};
+use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::Read;
@@ -21,17 +21,17 @@ pub fn response(markdown: &str, context: &Context) -> gtk::Box {
     let mut pending = String::new();
     let mut list_depth: u32 = 0;
     let mut automatic_images = 0;
-    let mut events = parser(markdown);
-    while let Some(event) = events.next() {
+    let mut events = parser(markdown).into_offset_iter();
+    while let Some((event, range)) = events.next() {
         match event {
             Event::Start(Tag::Table(_)) => {
                 flush_text(&blocks, &mut pending);
-                blocks.add(&table(&mut events));
+                blocks.add(&table(&mut events, markdown, range.start));
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 flush_text(&blocks, &mut pending);
                 let mut code = String::new();
-                for event in events.by_ref() {
+                for (event, _) in events.by_ref() {
                     match event {
                         Event::End(TagEnd::CodeBlock) => break,
                         Event::Text(text) => code.push_str(&text),
@@ -51,7 +51,7 @@ pub fn response(markdown: &str, context: &Context) -> gtk::Box {
             Event::Start(Tag::Image { dest_url, .. }) => {
                 flush_text(&blocks, &mut pending);
                 let mut alt = String::new();
-                for event in events.by_ref() {
+                for (event, _) in events.by_ref() {
                     match event {
                         Event::End(TagEnd::Image) => break,
                         Event::Text(text) | Event::Code(text) => alt.push_str(&text),
@@ -136,15 +136,18 @@ fn flush_text(blocks: &gtk::Box, pending: &mut String) {
     pending.clear();
 }
 
-fn table(events: &mut Parser<'_>) -> gtk::ScrolledWindow {
+fn table(events: &mut OffsetIter<'_>, markdown: &str, start: usize) -> gtk::Box {
     let grid = gtk::Grid::builder().column_homogeneous(true).build();
     grid.style_context().add_class("agent-table");
 
     let mut row = 0;
     let mut col = 0;
     let mut cell = String::new();
+    let mut cells = Vec::new();
+    let mut rows = Vec::new();
+    let mut end = start;
     let mut in_cell = false;
-    for event in events.by_ref() {
+    for (event, range) in events.by_ref() {
         match event {
             Event::Start(Tag::TableCell) => {
                 cell.clear();
@@ -162,14 +165,20 @@ fn table(events: &mut Parser<'_>) -> gtk::ScrolledWindow {
                     }
                     grid.attach(&label, col, row, 1, 1);
                 }
+                cells.push(std::mem::take(&mut cell));
                 col += 1;
             }
             Event::End(TagEnd::TableRow | TagEnd::TableHead) => {
+                rows.push(std::mem::take(&mut cells));
                 row += 1;
                 col = 0;
             }
             Event::Text(value) | Event::Code(value) if in_cell => cell.push_str(&value),
-            Event::End(TagEnd::Table) => break,
+            Event::HardBreak | Event::SoftBreak if in_cell => cell.push('\n'),
+            Event::End(TagEnd::Table) => {
+                end = range.end;
+                break;
+            }
             _ => {}
         }
     }
@@ -182,7 +191,43 @@ fn table(events: &mut Parser<'_>) -> gtk::ScrolledWindow {
         .propagate_natural_height(true)
         .build();
     scroll.add(&grid);
-    scroll
+    let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let source: Rc<str> = Rc::from(markdown.get(start..end).unwrap_or_default().trim_end());
+    let markdown_source = source.clone();
+    let md = gtk::Button::with_label("复制 Markdown");
+    md.connect_clicked(move |_| clipboard().set_text(&markdown_source));
+    let rich = gtk::Button::with_label("复制 HTML");
+    rich.set_tooltip_text(Some("复制表格格式，可粘贴到支持富文本的应用"));
+    rich.connect_clicked(move |_| copy_rich(source.to_string()));
+    let csv = gtk::Button::with_label("复制 CSV");
+    csv.connect_clicked(move |_| clipboard().set_text(&table_csv(&rows)));
+    actions.pack_end(&md, false, false, 0);
+    actions.pack_end(&csv, false, false, 0);
+    actions.pack_end(&rich, false, false, 0);
+    block.add(&scroll);
+    block.add(&actions);
+    block
+}
+
+fn table_csv(rows: &[Vec<String>]) -> String {
+    let mut csv = String::new();
+    for row in rows {
+        for (index, cell) in row.iter().enumerate() {
+            if index != 0 {
+                csv.push(',');
+            }
+            if cell.contains([',', '\n', '\r', '"']) {
+                csv.push('"');
+                csv.push_str(&cell.replace('"', "\"\""));
+                csv.push('"');
+            } else {
+                csv.push_str(cell);
+            }
+        }
+        csv.push_str("\r\n");
+    }
+    csv
 }
 
 pub fn text(value: &str) -> gtk::Label {
@@ -211,8 +256,11 @@ fn diagram_widget(diagram: Diagram, code: String) -> gtk::Box {
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let copy = gtk::Button::with_label("复制图像");
     let source = gtk::Button::with_label("复制 Mermaid");
-    actions.pack_end(&source, false, false, 0);
-    actions.pack_end(&copy, false, false, 0);
+    let expand = gtk::Button::with_label("放大");
+    let save = gtk::Button::with_label("保存 PNG");
+    for button in [&save, &copy, &source, &expand] {
+        actions.pack_end(button, false, false, 0);
+    }
     let drawing = gtk::DrawingArea::new();
     let (width, height) = diagram.dimensions();
     drawing.set_height_request(height.min(540));
@@ -224,10 +272,27 @@ fn diagram_widget(diagram: Diagram, code: String) -> gtk::Box {
         drawing_diagram.draw(cairo, area.allocated_width(), area.allocated_height());
         glib::Propagation::Stop
     });
+    let copy_diagram = diagram.clone();
     copy.connect_clicked(move |_| {
-        if let Some(image) = diagram.image() {
+        if let Some(image) = copy_diagram.image() {
             clipboard().set_image(&image);
         }
+    });
+    let expanded = diagram.clone();
+    expand.connect_clicked(move |button| {
+        if let Some(image) = expanded.image() {
+            asset_preview(button, &image, "Mermaid");
+        }
+    });
+    save.connect_clicked(move |button| {
+        let Some(image) = diagram.image() else {
+            return;
+        };
+        save_asset(button, "diagram.png", move |path| {
+            image
+                .savev(path, "png", &[])
+                .map_err(|error| error.to_string())
+        });
     });
     source.connect_clicked(move |_| clipboard().set_text(&code));
     block.add(&drawing);
@@ -251,18 +316,26 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
         return block;
     }
     let target = context.cwd.join(target);
+    let filename = target
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned());
     let preview = gtk::Image::new();
     block.add(&preview);
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let load = gtk::Button::with_label("加载预览");
     let copy = gtk::Button::with_label("复制图片");
-    copy.set_sensitive(false);
-    actions.pack_end(&copy, false, false, 0);
-    actions.pack_end(&load, false, false, 0);
+    let expand = gtk::Button::with_label("放大");
+    let save = gtk::Button::with_label("保存原图");
+    for button in [&save, &copy, &expand] {
+        button.set_sensitive(false);
+    }
+    for button in [&save, &copy, &expand, &load] {
+        actions.pack_end(button, false, false, 0);
+    }
     block.add(&actions);
 
     let socket = context.socket.clone();
-    let decoded = Rc::new(RefCell::new(None));
+    let decoded = Rc::new(RefCell::new(None::<(gdk_pixbuf::Pixbuf, Rc<Vec<u8>>)>));
     let copy_source = decoded.clone();
     load.connect_clicked(glib::clone!(
         #[weak]
@@ -271,6 +344,10 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
         status,
         #[weak]
         copy,
+        #[weak]
+        expand,
+        #[weak]
+        save,
         move |load| {
             load.set_sensitive(false);
             let target = target.clone();
@@ -279,23 +356,28 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
             let preview = preview.downgrade();
             let status = status.downgrade();
             let copy = copy.downgrade();
+            let expand = expand.downgrade();
+            let save = save.downgrade();
             let decoded = decoded.clone();
             glib::MainContext::default().spawn_local(async move {
                 let result = gio::spawn_blocking(move || load_image(&target, socket.as_deref()))
                     .await
                     .unwrap_or_else(|_| Err("图片预览被中断。".into()))
-                    .and_then(|bytes| decode_image(&bytes));
-                let (Some(load), Some(preview), Some(status), Some(copy)) = (
+                    .and_then(|bytes| decode_image(&bytes).map(|image| (image, bytes)));
+                let (Some(load), Some(preview), Some(status), Some(copy), Some(expand), Some(save)) = (
                     load.upgrade(),
                     preview.upgrade(),
                     status.upgrade(),
                     copy.upgrade(),
+                    expand.upgrade(),
+                    save.upgrade(),
                 ) else {
                     return;
                 };
                 match result {
-                    Ok(image) => {
-                        copy.set_sensitive(true);
+                    Ok((image, bytes)) => {
+                        for button in [&copy, &expand, &save] { button.set_sensitive(true); }
+                        load.hide();
                         let width = preview.allocated_width().clamp(180, 620);
                         let scale = (f64::from(width) / f64::from(image.width()))
                             .min(340.0 / f64::from(image.height()))
@@ -307,7 +389,7 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
                         );
                         preview.set_from_pixbuf(thumbnail.as_ref().or(Some(&image)));
                         status.set_text(&format!("{} × {}", image.width(), image.height()));
-                        decoded.replace(Some(image));
+                        decoded.replace(Some((image, Rc::new(bytes))));
                     }
                     Err(error) => {
                         status.set_text(&error);
@@ -318,9 +400,30 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
         }
     ));
     copy.connect_clicked(move |_| {
-        if let Some(image) = copy_source.borrow().as_ref() {
+        if let Some((image, _)) = copy_source.borrow().as_ref() {
             clipboard().set_image(image);
         }
+    });
+    let expanded = decoded.clone();
+    expand.connect_clicked(move |button| {
+        if let Some((image, _)) = expanded.borrow().as_ref() {
+            asset_preview(button, image, "图片预览");
+        }
+    });
+    save.connect_clicked(move |button| {
+        let Some((_, bytes)) = decoded.borrow().as_ref().cloned() else {
+            return;
+        };
+        let name = filename.as_deref().unwrap_or_else(|| {
+            if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                "image.png"
+            } else {
+                "image.jpg"
+            }
+        });
+        save_asset(button, name, move |path| {
+            std::fs::write(path, &*bytes).map_err(|error| error.to_string())
+        });
     });
     if automatic {
         let load = load.downgrade();
@@ -331,6 +434,70 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
         });
     }
     block
+}
+
+fn asset_preview(button: &gtk::Button, image: &gdk_pixbuf::Pixbuf, title: &str) {
+    let parent = button.toplevel().and_downcast::<gtk::Window>();
+    let dialog = gtk::Dialog::with_buttons(
+        Some(title),
+        parent.as_ref(),
+        gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
+        &[("关闭", gtk::ResponseType::Close)],
+    );
+    dialog.set_default_size(
+        (image.width() + 30).clamp(335, 1000),
+        (image.height() + 66).clamp(180, 720),
+    );
+    let scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .build();
+    scroll.add(&gtk::Image::from_pixbuf(Some(image)));
+    dialog.content_area().pack_start(&scroll, true, true, 0);
+    dialog.connect_response(|dialog, _| dialog.close());
+    dialog.show_all();
+}
+
+fn save_asset(
+    button: &gtk::Button,
+    name: &str,
+    save: impl Fn(&Path) -> Result<(), String> + 'static,
+) {
+    let parent = button.toplevel().and_downcast::<gtk::Window>();
+    let dialog = gtk::FileChooserDialog::new(
+        Some("保存文件"),
+        parent.as_ref(),
+        gtk::FileChooserAction::Save,
+        &[
+            ("取消", gtk::ResponseType::Cancel),
+            ("保存", gtk::ResponseType::Accept),
+        ],
+    );
+    dialog.set_modal(true);
+    dialog.set_destroy_with_parent(true);
+    dialog.set_do_overwrite_confirmation(true);
+    dialog.set_current_name(name);
+    dialog.set_default_response(gtk::ResponseType::Accept);
+    dialog.connect_response(move |dialog, response| {
+        if response == gtk::ResponseType::Accept {
+            if let Some(path) = dialog.filename() {
+                if let Err(error) = save(&path) {
+                    let message = gtk::MessageDialog::new(
+                        Some(dialog),
+                        gtk::DialogFlags::MODAL,
+                        gtk::MessageType::Error,
+                        gtk::ButtonsType::Close,
+                        &error,
+                    );
+                    message.connect_response(|message, _| message.close());
+                    message.show();
+                    return;
+                }
+            }
+        }
+        dialog.close();
+    });
+    dialog.show();
 }
 
 fn load_image(path: &Path, socket: Option<&Path>) -> Result<Vec<u8>, String> {
@@ -421,5 +588,11 @@ mod tests {
         assert!(html.contains("<table>"));
         assert!(html.contains("<td>2</td>"));
         assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn csv_preserves_commas_quotes_and_line_breaks() {
+        let rows = vec![vec!["plain".into(), "a,\"b\"\nc".into()]];
+        assert_eq!(table_csv(&rows), "plain,\"a,\"\"b\"\"\nc\"\r\n");
     }
 }
