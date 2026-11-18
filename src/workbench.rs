@@ -50,6 +50,11 @@ pub fn open(app: &gtk::Application) {
     let files = icon_button(Icon::Folder, "文件目录 (Ctrl+Shift+F)");
     files.set_action_name(Some("win.files"));
     let tools = row(2);
+    let agent = gtk::Button::with_label("Codex");
+    agent.style_context().add_class("quiet-button");
+    agent.set_tooltip_text(Some("切换 Codex 会话／终端 (Ctrl+Shift+A)"));
+    agent.set_action_name(Some("win.agent"));
+    tools.add(&agent);
     tools.add(&files);
     tools.add(&plus);
     tools.show_all();
@@ -127,6 +132,7 @@ pub fn open(app: &gtk::Application) {
             Workbench::toggle_sidebar,
         ),
         ("files", &["<Primary><Shift>f"][..], Workbench::toggle_files),
+        ("agent", &["<Primary><Shift>a"][..], Workbench::toggle_agent),
         ("copy", &[][..], Workbench::copy),
         ("paste", &[][..], Workbench::paste),
         (
@@ -161,7 +167,7 @@ pub fn open(app: &gtk::Application) {
             workbench.update_status(active.as_deref());
             workbench.browser.select(active.as_ref());
             if let Some(active) = active {
-                active.terminal.grab_focus();
+                active.focus_terminal();
             }
         }
     });
@@ -341,6 +347,12 @@ impl Workbench {
             self.workspace
                 .set_position((self.workspace.allocated_width() - 414).max(0));
             self.browser.select(self.current_session().as_ref());
+        }
+    }
+
+    fn toggle_agent(self: &Rc<Self>) {
+        if let Some(session) = self.current_session() {
+            session.toggle_agent();
         }
     }
 
@@ -561,6 +573,7 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
             &[
                 ("显示／隐藏主机栏", "sidebar"),
                 ("文件目录", "files"),
+                ("Codex 会话／终端", "agent"),
                 ("上一个标签", "previous"),
                 ("下一个标签", "next"),
             ][..],

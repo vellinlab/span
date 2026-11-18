@@ -9,16 +9,32 @@ use std::process::{Command, Stdio};
 
 const INIT: u8 = 1;
 const VERSION: u8 = 2;
+const OPEN: u8 = 3;
 const CLOSE: u8 = 4;
+const READ: u8 = 5;
 const OPENDIR: u8 = 11;
 const READDIR: u8 = 12;
 const REALPATH: u8 = 16;
 const STATUS: u8 = 101;
 const HANDLE: u8 = 102;
+const DATA: u8 = 103;
 const NAME: u8 = 104;
 const MAX_PACKET: usize = 256 * 1024;
 
 pub fn list(socket: &Path, path: Option<&Path>) -> Result<Directory, String> {
+    through_socket(socket, |sftp| sftp.directory(path))
+}
+
+pub fn read_image(socket: &Path, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+    through_socket(socket, |sftp| sftp.read_file(path, limit))
+}
+
+fn through_socket<T>(
+    socket: &Path,
+    action: impl FnOnce(
+        &mut Sftp<std::process::ChildStdout, std::process::ChildStdin>,
+    ) -> Result<T, String>,
+) -> Result<T, String> {
     if !socket_ready(socket) {
         return Err("请在终端完成 SSH 登录，然后刷新目录。".into());
     }
@@ -52,7 +68,7 @@ pub fn list(socket: &Path, path: Option<&Path>) -> Result<Directory, String> {
         child.stdin.take().expect("piped SFTP stdin"),
     )
     .map_err(|_| "无法打开 SFTP 通道。请确认 SSH 仍在线，且服务器允许 SFTP。".to_owned())
-    .and_then(|mut connection| connection.directory(path));
+    .and_then(|mut connection| action(&mut connection));
     let _ = child.wait();
     result
 }
@@ -157,15 +173,46 @@ impl<R: Read, W: Write> Sftp<R, W> {
         Ok(Packet { bytes, offset: 0 })
     }
 
-    fn request(&mut self, kind: u8, value: &[u8]) -> Result<(u8, Packet), String> {
-        if value.len() > MAX_PACKET - 9 {
-            return Err("SFTP 路径过长。".into());
+    fn read_file(&mut self, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+        let mut payload = string_payload(path.as_os_str().as_bytes())?;
+        payload.extend_from_slice(&1u32.to_be_bytes()); // SSH_FXF_READ
+        payload.extend_from_slice(&0u32.to_be_bytes()); // no attributes
+        let (kind, mut packet) = self.request_payload(OPEN, &payload)?;
+        if kind != HANDLE {
+            return Err(unexpected(kind, packet, "无法打开图片"));
         }
+        let handle = packet.string()?.to_vec();
+        let mut image = Vec::new();
+        loop {
+            let mut payload = string_payload(&handle)?;
+            payload.extend_from_slice(&(image.len() as u64).to_be_bytes());
+            payload.extend_from_slice(&65536u32.to_be_bytes());
+            let (kind, mut packet) = self.request_payload(READ, &payload)?;
+            if kind == STATUS && packet.status_code()? == 1 {
+                break;
+            }
+            if kind != DATA {
+                return Err(unexpected(kind, packet, "无法读取图片"));
+            }
+            let chunk = packet.string()?;
+            if chunk.is_empty() || image.len() + chunk.len() > limit {
+                return Err("图片大小超出预览上限，或服务器返回了空数据。".into());
+            }
+            image.extend_from_slice(chunk);
+        }
+        let _ = self.request(CLOSE, &handle);
+        Ok(image)
+    }
+
+    fn request(&mut self, kind: u8, value: &[u8]) -> Result<(u8, Packet), String> {
+        self.request_payload(kind, &string_payload(value)?)
+    }
+
+    fn request_payload(&mut self, kind: u8, payload: &[u8]) -> Result<(u8, Packet), String> {
         self.id += 1;
         let mut bytes = vec![kind];
         bytes.extend_from_slice(&self.id.to_be_bytes());
-        bytes.extend_from_slice(&(value.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(value);
+        bytes.extend_from_slice(payload);
         self.send(&bytes)?;
         let mut reply = self.receive()?;
         let kind = reply.byte()?;
@@ -174,6 +221,16 @@ impl<R: Read, W: Write> Sftp<R, W> {
         }
         Ok((kind, reply))
     }
+}
+
+fn string_payload(value: &[u8]) -> Result<Vec<u8>, String> {
+    if value.len() > MAX_PACKET - 32 {
+        return Err("SFTP 路径或句柄过长。".into());
+    }
+    let mut payload = Vec::with_capacity(4 + value.len());
+    payload.extend_from_slice(&(value.len() as u32).to_be_bytes());
+    payload.extend_from_slice(value);
+    Ok(payload)
 }
 
 struct Packet {

@@ -1,8 +1,12 @@
+mod agent;
+mod agent_render;
+mod agent_rpc;
 mod browser;
 mod files;
 mod host_dialog;
 mod hosts;
 mod icons;
+mod mermaid;
 mod session;
 mod sftp;
 mod vte;

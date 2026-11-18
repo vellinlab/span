@@ -396,3 +396,95 @@ menu menuitem:hover {
     font-size: 11px;
     border-top: 1px solid @line;
 }
+
+.agent-panel {
+    background: @canvas;
+    color: @foreground;
+}
+
+.agent-toolbar {
+    min-height: 39px;
+    padding: 0 18px;
+    background: @chrome;
+    border-bottom: 1px solid @line;
+}
+
+.agent-title {
+    font-weight: bold;
+}
+
+.agent-status {
+    color: @muted;
+    font-size: 11px;
+}
+
+.agent-settings {
+    background: @sidebar;
+    padding: 10px 18px;
+    border-bottom: 1px solid @line;
+}
+
+.agent-history {
+    padding: 18px 24px 14px;
+}
+
+.agent-user {
+    background: #253144;
+    border-left: 2px solid @accent;
+    border-radius: 5px;
+    padding: 9px 11px;
+}
+
+.agent-card,
+.agent-code,
+.agent-command,
+.agent-approval {
+    background: @sidebar;
+    border: 1px solid @line;
+    border-radius: 5px;
+    padding: 8px;
+}
+
+.agent-approval {
+    border-color: #82643c;
+}
+
+.agent-monospace {
+    font-family: monospace;
+}
+
+.agent-table {
+    background: @line;
+    border: 1px solid @line;
+}
+
+.agent-table label {
+    background: @canvas;
+    padding: 6px 10px;
+    border-bottom: 1px solid @line;
+    border-right: 1px solid @line;
+}
+
+.agent-table label.agent-table-head {
+    background: @chrome;
+    font-weight: bold;
+}
+
+.agent-composer {
+    background: @sidebar;
+    border-top: 1px solid @line;
+    padding: 9px 18px;
+}
+
+.agent-composer textview,
+.agent-composer textview text {
+    background: @canvas;
+    color: @foreground;
+    caret-color: @accent;
+}
+
+.agent-composer textview {
+    border: 1px solid @line;
+    border-radius: 4px;
+    padding: 5px;
+}
