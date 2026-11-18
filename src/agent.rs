@@ -157,6 +157,14 @@ impl Agent {
                 agent.open();
             }
         });
+        for entry in [&self.cwd, &self.resume] {
+            let weak = Rc::downgrade(self);
+            entry.connect_activate(move |_| {
+                if let Some(agent) = weak.upgrade() {
+                    agent.open();
+                }
+            });
+        }
         let weak = Rc::downgrade(self);
         self.send.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -191,6 +199,14 @@ impl Agent {
                 glib::Propagation::Proceed
             }
         });
+    }
+
+    pub fn focus(&self) {
+        if self.thread.borrow().is_some() {
+            self.input.grab_focus();
+        } else {
+            self.cwd.grab_focus();
+        }
     }
 
     fn open(self: &Rc<Self>) {
@@ -621,11 +637,10 @@ impl Agent {
         let scroll = self.scroll.downgrade();
         glib::idle_add_local_once(move || {
             if let Some(scroll) = scroll.upgrade() {
-                if let Some(adjustment) = scroll.vadjustment() {
-                    adjustment.set_value(
-                        (adjustment.upper() - adjustment.page_size()).max(adjustment.lower()),
-                    );
-                }
+                let adjustment = scroll.vadjustment();
+                adjustment.set_value(
+                    (adjustment.upper() - adjustment.page_size()).max(adjustment.lower()),
+                );
             }
         });
     }

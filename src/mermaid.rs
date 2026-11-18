@@ -304,18 +304,20 @@ mod tests {
 
     #[test]
     fn renders_common_flowcharts_and_sequences() {
-        assert!(
-            Diagram::parse("flowchart TD\nA[Start] -->|ok| B[End]")
-                .unwrap()
-                .image()
-                .is_some()
-        );
-        assert!(
-            Diagram::parse("sequenceDiagram\nparticipant C as Client\nC->>S: Ping")
-                .unwrap()
-                .image()
-                .is_some()
-        );
+        for source in [
+            "flowchart TD\nA[Start] -->|ok| B[End]",
+            "sequenceDiagram\nparticipant C as Client\nC->>S: Ping",
+        ] {
+            let diagram = Diagram::parse(source).unwrap();
+            let (width, height) = diagram.dimensions();
+            let mut surface =
+                cairo::ImageSurface::create(cairo::Format::ARgb32, width, height).unwrap();
+            let cr = Context::new(&surface).unwrap();
+            diagram.draw(&cr, width, height);
+            drop(cr);
+            let pixels = surface.data().unwrap();
+            assert!(pixels.chunks_exact(4).any(|pixel| pixel != &pixels[..4]));
+        }
         assert!(Diagram::parse("pie\n\"A\": 12").is_none());
     }
 }

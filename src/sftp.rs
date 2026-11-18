@@ -355,6 +355,11 @@ mod tests {
             .find(|entry| entry.name == "a sample.txt")
             .unwrap();
         assert!(file.kind == Kind::File);
+        assert_eq!(
+            read_image(Path::new(&socket), &directory.join("a sample.txt"), 3).unwrap(),
+            b"abc"
+        );
+        assert!(read_image(Path::new(&socket), &directory.join("a sample.txt"), 2).is_err());
         assert_eq!(file.size, Some(3));
         assert_eq!(file.mode.unwrap() & 0o777, 0o640);
         assert!(file.modified.is_some());

@@ -65,11 +65,11 @@ impl Rpc {
         let weak = Rc::downgrade(&rpc);
         glib::MainContext::default().spawn_local(async move {
             loop {
-                let read = stdout.read_line_future(glib::Priority::DEFAULT).await;
+                let read = stdout.read_line_utf8_future(glib::Priority::DEFAULT).await;
                 let Some(rpc) = weak.upgrade() else { break };
                 match read {
                     Ok(Some(bytes)) if bytes.len() <= 16 * 1024 * 1024 => {
-                        if let Ok(message) = serde_json::from_slice(&bytes) {
+                        if let Ok(message) = serde_json::from_str(bytes.as_str()) {
                             (rpc.receive)(Ok(message));
                         }
                     }

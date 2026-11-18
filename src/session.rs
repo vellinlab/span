@@ -97,6 +97,7 @@ impl Session {
         scroll.style_context().add_class("terminal-page");
         scroll.add(&terminal);
         let page = gtk::Stack::new();
+        page.set_homogeneous(false);
         page.add_named(&scroll, "terminal");
 
         let indicator = gtk::Label::new(Some("●"));
@@ -142,6 +143,9 @@ impl Session {
             self.agent.replace(Some(agent));
         }
         self.page.set_visible_child_name("agent");
+        if let Some(agent) = self.agent.borrow().as_ref() {
+            agent.focus();
+        }
     }
 
     pub fn focus_terminal(&self) {

@@ -26,6 +26,12 @@ printf '%s\n' "$BASHPID" >> "$HOME/bash-ready"
 PS1='\[\e[38;5;79m\]\u@local\[\e[0m\]:\w\$ '
 PROFILE
 
+if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
+    install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
+    export PATH="$HOME/bin:$PATH"
+    convert -size 260x95 xc:'#304c78' "$HOME/test-output.png"
+fi
+
 wait_until() {
     local description="$1"
     shift
@@ -102,6 +108,20 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool type --clearmodifiers 'printf "%s\\n" "$BASHPID" > "$HOME/current-bash"'
     xdotool key --clearmodifiers Return
     wait_until "returning to the first Bash tab" grep -qsx "$first_bash" "$HOME/current-bash"
+
+    xdotool key --clearmodifiers ctrl+shift+a
+    sleep 0.2
+    xdotool key --clearmodifiers Return
+    wait_until "the Codex App Server handshake" test -f "$HOME/agent-ready"
+    sleep 0.25
+    xdotool type --clearmodifiers 'Show the deployment check'
+    xdotool key --clearmodifiers ctrl+Return
+    wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
+    grep -qx 'Show the deployment check' "$HOME/agent-prompt"
+    sleep 0.35
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent.png"
+    xdotool key --clearmodifiers ctrl+shift+a
+    printf '%s\n' 'Codex session opened, sent a prompt, and received a structured reply.'
 
     # Check the real OpenSSH client version banner against an isolated loopback listener.
     python3 - "$HOME" <<'PY' &
