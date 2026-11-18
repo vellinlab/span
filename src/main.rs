@@ -12,6 +12,7 @@ mod host_dialog;
 mod hosts;
 mod icons;
 mod mermaid;
+mod reading_column;
 mod session;
 mod sftp;
 mod vte;

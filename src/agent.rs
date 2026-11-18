@@ -127,7 +127,7 @@ impl Agent {
         settings.pack_end(&connect, false, false, 0);
         panel.pack_start(&settings, false, false, 0);
 
-        let history = column(14);
+        let history = crate::reading_column::new(18);
         history.style_context().add_class("agent-history");
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -140,18 +140,20 @@ impl Agent {
         scroll.add(&history);
         panel.pack_start(&scroll, true, true, 0);
 
-        let composer = column(5);
+        let composer = crate::reading_column::new(0);
         composer.style_context().add_class("agent-composer");
         let card = column(5);
         card.style_context().add_class("agent-compose-card");
         let input = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
+            .pixels_above_lines(2)
+            .pixels_below_lines(2)
             .accepts_tab(false)
             .build();
         let input_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .height_request(77)
+            .height_request(62)
             .build();
         input_scroll.add(&input);
         let editor = gtk::Overlay::new();
@@ -174,14 +176,16 @@ impl Agent {
                 }
             });
         }
-        let inputs = row(5);
+        let inputs = row(4);
         let attachments = Attachments::new();
         inputs.pack_start(&attachments.button, false, false, 0);
         let options = Options::new(&inputs);
         let usage = Usage::new();
         let send = button("发送", true);
+        send.style_context().add_class("agent-send");
         send.set_tooltip_text(Some("发送（Ctrl+Enter）"));
         let stop = button("停止", false);
+        stop.set_no_show_all(true);
         inputs.pack_end(&send, false, false, 0);
         inputs.pack_end(&stop, false, false, 0);
         inputs.pack_end(&usage.button, false, false, 0);
@@ -1042,6 +1046,7 @@ impl Agent {
         if !same {
             self.remove_live();
             let label = agent_render::text("");
+            label.style_context().add_class("agent-prose");
             self.append(&label);
             self.live.replace(Some(LiveMessage {
                 id: id.into(),
@@ -1269,6 +1274,8 @@ impl Agent {
 
     fn add_user(&self, text: &str) -> gtk::Label {
         let label = agent_render::text(&limited(text, 256 * 1024));
+        label.set_halign(gtk::Align::End);
+        label.set_max_width_chars(52);
         label.style_context().add_class("agent-user");
         self.append(&label);
         label
@@ -1277,6 +1284,7 @@ impl Agent {
     fn add_agent(&self, text: &str, loading_history: bool) {
         let text = limited(text, 256 * 1024);
         let message = column(6);
+        message.style_context().add_class("agent-response");
         let actions = row(6);
         let markdown = button("复制 Markdown", false);
         let rich = button("复制富文本", false);
@@ -1348,6 +1356,7 @@ impl Agent {
         self.usage.button.set_sensitive(ready);
         self.send
             .set_sensitive(ready && !running && !opening && !waiting);
+        self.stop.set_visible(running);
         self.stop
             .set_sensitive(running && self.turn.borrow().is_some());
     }

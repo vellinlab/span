@@ -48,9 +48,12 @@ for _ in range(50):
         if operation == "click" and "Action" in node.get_interfaces():
             if node.queryAction().doAction(0):
                 sys.exit(0)
-        if operation == "mouse" and "Component" in node.get_interfaces():
+        if operation in ("bounds", "mouse") and "Component" in node.get_interfaces():
             bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
             if bounds.width > 0 and bounds.height > 0:
+                if operation == "bounds":
+                    print(bounds.x, bounds.y, bounds.width, bounds.height)
+                    sys.exit(0)
                 subprocess.run(["xdotool", "mousemove", str(bounds.x + min(14, bounds.width // 2)),
                                 str(bounds.y + min(12, bounds.height // 2)), "click", "1"], check=True)
                 sys.exit(0)

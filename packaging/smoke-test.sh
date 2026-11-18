@@ -67,7 +67,7 @@ wait_until() {
     exit 1
 }
 
-Xvfb -displayfd 3 -screen 0 1360x980x24 -nolisten tcp -noreset 3>"$HOME/display" &
+Xvfb -displayfd 3 -screen 0 1600x980x24 -nolisten tcp -noreset 3>"$HOME/display" &
 xvfb_pid=$!
 wait_until "the Xvfb display" test -s "$HOME/display"
 export DISPLAY=":$(cat "$HOME/display")"
@@ -198,6 +198,22 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowfocus --sync "$save_dialog"
     xdotool key --clearmodifiers Escape
     xdotool windowfocus --sync "$window"
+
+    xdotool windowsize --sync "$window" 1580 950
+    xdotool key --clearmodifiers ctrl+shift+f
+    sleep 0.35
+    xdotool mousemove --window "$window" 690 330 click --repeat 8 4
+    sleep 0.2
+    widget contains 'Deployment checklist'
+    read -r wide_x _ < <(widget bounds '输入消息，或添加附件')
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-workspace.png"
+    xdotool windowsize --sync "$window" 1170 940
+    sleep 0.2
+    read -r narrow_x _ < <(widget bounds '输入消息，或添加附件')
+    ((wide_x > narrow_x + 32))
+    xdotool key --clearmodifiers ctrl+shift+f
+    xdotool windowsize --sync "$window" 1250 940
+    printf '%s\n' 'The centered composer adapts to both wide and narrow split layouts.'
 
     xdotool key --clearmodifiers ctrl+shift+j
     sleep 0.25

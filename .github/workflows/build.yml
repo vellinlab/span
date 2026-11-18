@@ -69,6 +69,7 @@ jobs:
             dist/agent-question.png
             dist/agent-compose.png
             dist/agent-usage.png
+            dist/agent-workspace.png
             dist/test-failure.png
           if-no-files-found: ignore
           retention-days: 30

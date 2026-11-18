@@ -126,6 +126,7 @@ fn parser(markdown: &str) -> Parser<'_> {
 fn flush_text(blocks: &gtk::Box, pending: &mut String) {
     if !pending.trim().is_empty() {
         let label = text("");
+        label.style_context().add_class("agent-prose");
         if pango::parse_markup(pending.trim(), '\0').is_ok() {
             label.set_markup(pending.trim());
         } else {

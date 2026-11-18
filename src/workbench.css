@@ -1,18 +1,24 @@
-@define-color canvas #161719;
-@define-color sidebar #1c1d20;
-@define-color chrome #232427;
-@define-color line #33353a;
-@define-color surface #282b30;
-@define-color hover #303640;
-@define-color foreground #e3e7ee;
-@define-color muted #a5afbd;
-@define-color accent #68aff5;
+@define-color canvas #161b23;
+@define-color terminal #131820;
+@define-color sidebar #1a2029;
+@define-color chrome #202733;
+@define-color line #2b3440;
+@define-color surface #242d39;
+@define-color hover #2c3848;
+@define-color selection #2a3d56;
+@define-color foreground #e7ecf3;
+@define-color muted #a6b1c2;
+@define-color accent #8cbafa;
 
 window.workbench,
 window.workbench-dialog,
-.workbench stack,
-.workbench .terminal-page {
+.workbench stack {
     background-color: @canvas;
+    color: @foreground;
+}
+
+.workbench .terminal-page {
+    background-color: @terminal;
     color: @foreground;
 }
 
@@ -25,9 +31,9 @@ window.workbench-dialog,
 
 .workbench-header,
 .workbench-dialog headerbar {
-    min-height: 34px;
-    padding: 0 9px;
-    background: @chrome;
+    min-height: 38px;
+    padding: 0 12px;
+    background: @sidebar;
     border: 0;
     border-bottom: 1px solid @line;
     box-shadow: none;
@@ -79,7 +85,7 @@ menu menuitem:hover {
 .workbench-dialog button {
     background: @surface;
     border: 1px solid @line;
-    border-radius: 5px;
+    border-radius: 7px;
     box-shadow: none;
     color: @foreground;
     text-shadow: none;
@@ -98,13 +104,21 @@ menu menuitem:hover {
 
 .workbench button.primary,
 .workbench-dialog button.primary {
-    background: #3769b5;
+    background: #3266b6;
+    border-color: #487ecb;
     color: white;
 }
 
 .workbench button.primary:hover,
 .workbench-dialog button.primary:hover {
-    background: #447bcc;
+    background: #3c74c5;
+}
+
+.workbench button.primary:disabled,
+.workbench-dialog button.primary:disabled {
+    background: @surface;
+    border-color: @line;
+    color: @muted;
 }
 
 .workbench-dialog button.destructive {
@@ -134,13 +148,13 @@ menu menuitem:hover {
 }
 
 .tool-rail {
-    padding: 6px 4px;
+    padding: 8px 5px;
     background: @chrome;
     border-right: 1px solid @line;
 }
 
 .workbench .tool-rail button:checked {
-    background: #2a3a50;
+    background: @selection;
     color: @accent;
 }
 
@@ -150,7 +164,7 @@ menu menuitem:hover {
 }
 
 .sidebar-heading {
-    padding: 8px 10px 5px;
+    padding: 10px 12px 7px;
 }
 
 .section-title {
@@ -163,9 +177,9 @@ menu menuitem:hover {
 .workbench-dialog entry {
     min-height: 30px;
     padding: 0 9px;
-    background: @canvas;
-    border: 1px solid #3a4049;
-    border-radius: 5px;
+    background: @terminal;
+    border: 1px solid @line;
+    border-radius: 7px;
     box-shadow: none;
     color: @foreground;
     caret-color: @accent;
@@ -185,18 +199,22 @@ menu menuitem:hover {
 }
 
 .host-list {
-    padding: 0 8px;
+    padding: 0 10px;
 }
 
 .host-row {
-    border-radius: 6px;
+    border-radius: 8px;
+    background: transparent;
+}
+
+.host-row:hover {
     background: @chrome;
 }
 
 .workbench button.host-connect {
     background: transparent;
     border-color: transparent;
-    padding: 5px 6px;
+    padding: 6px;
 }
 
 .workbench button.host-connect:hover {
@@ -213,9 +231,9 @@ menu menuitem:hover {
 
 .host-icon {
     padding: 5px;
-    border-radius: 6px;
+    border-radius: 8px;
     color: @accent;
-    background: #282f3c;
+    background: @surface;
 }
 
 .host-name {
@@ -245,20 +263,20 @@ menu menuitem:hover {
 }
 
 .terminal-tabs > header {
-    min-height: 35px;
+    min-height: 39px;
     background: @sidebar;
     border-bottom: 1px solid @line;
     box-shadow: none;
-    padding: 0 6px 0 0;
+    padding: 3px 7px 3px 5px;
 }
 
 .terminal-tabs > header > tabs > tab {
-    margin: 0;
+    margin: 0 2px;
     padding: 0 8px;
-    min-height: 34px;
-    background: @sidebar;
-    border: 0;
-    border-right: 1px solid @line;
+    min-height: 32px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
     box-shadow: none;
     color: @muted;
 }
@@ -269,8 +287,8 @@ menu menuitem:hover {
 }
 
 .terminal-tabs > header > tabs > tab:checked {
-    background: @canvas;
-    box-shadow: inset 0 2px @accent;
+    background: @surface;
+    border-color: @line;
     color: @foreground;
 }
 
@@ -300,7 +318,7 @@ menu menuitem:hover {
 .statusbar {
     min-height: 22px;
     padding: 0 10px;
-    background: @chrome;
+    background: @sidebar;
     border-top: 1px solid @line;
     color: @muted;
 }
@@ -324,7 +342,7 @@ menu menuitem:hover {
 }
 
 .files-split > separator {
-    min-width: 4px;
+    min-width: 3px;
     background: @line;
 }
 
@@ -338,9 +356,9 @@ menu menuitem:hover {
 }
 
 .files-header {
-    min-height: 35px;
-    padding: 0 8px;
-    background: @chrome;
+    min-height: 39px;
+    padding: 0 10px;
+    background: @sidebar;
     border-bottom: 1px solid @line;
 }
 
@@ -350,32 +368,33 @@ menu menuitem:hover {
 }
 
 .workbench .files-header button:checked {
-    background: #2a3a50;
+    background: @selection;
     color: @accent;
 }
 
 .files-location {
-    padding: 8px;
+    padding: 9px;
 }
 
 .files-table {
     background: @canvas;
     color: @foreground;
-    font-size: 11px;
-    -GtkTreeView-vertical-separator: 5;
+    font-size: 12px;
+    -GtkTreeView-vertical-separator: 6;
 }
 
 .files-table.view:selected {
-    background: #2a3a50;
+    background: @selection;
     color: @foreground;
 }
 
 .workbench .files-table header button {
-    background: @chrome;
-    border-color: @line;
+    background: @sidebar;
+    border: 0;
+    border-bottom: 1px solid @line;
     border-radius: 0;
     color: @muted;
-    padding: 5px 5px;
+    padding: 6px 7px;
 }
 
 .files-status {
@@ -392,13 +411,14 @@ menu menuitem:hover {
 }
 
 .agent-toolbar {
-    min-height: 39px;
-    padding: 0 18px;
-    background: @chrome;
+    min-height: 42px;
+    padding: 0 16px;
+    background: @canvas;
     border-bottom: 1px solid @line;
 }
 
 .agent-title {
+    font-size: 13px;
     font-weight: bold;
 }
 
@@ -424,7 +444,7 @@ menu menuitem:hover {
 
 .agent-catalog-list row:selected,
 .agent-catalog-list row:hover {
-    background: #263349;
+    background: @selection;
     color: @foreground;
 }
 
@@ -440,7 +460,7 @@ menu menuitem:hover {
 }
 
 .agent-drawer-header {
-    background: @chrome;
+    background: @sidebar;
     color: @foreground;
     border-top: 1px solid @line;
     border-bottom: 1px solid @line;
@@ -454,14 +474,19 @@ menu menuitem:hover {
 }
 
 .agent-history {
-    padding: 18px 24px 14px;
+    padding: 24px 18px 12px;
+}
+
+.agent-prose {
+    font-size: 14px;
 }
 
 .agent-user {
-    background: #253144;
-    border-left: 2px solid @accent;
-    border-radius: 5px;
-    padding: 9px 11px;
+    background: #233954;
+    border: 1px solid #2e4866;
+    border-radius: 12px 12px 4px 12px;
+    padding: 9px 13px;
+    font-size: 14px;
 }
 
 .agent-card,
@@ -470,8 +495,8 @@ menu menuitem:hover {
 .agent-approval {
     background: @sidebar;
     border: 1px solid @line;
-    border-radius: 5px;
-    padding: 8px;
+    border-radius: 8px;
+    padding: 10px;
 }
 
 .agent-approval {
@@ -480,6 +505,10 @@ menu menuitem:hover {
 
 .agent-monospace {
     font-family: monospace;
+}
+
+.agent-response .quiet-button {
+    font-size: 12px;
 }
 
 .agent-table {
@@ -495,42 +524,56 @@ menu menuitem:hover {
 }
 
 .agent-table label.agent-table-head {
-    background: @chrome;
+    background: @sidebar;
     font-weight: bold;
 }
 
 .agent-composer {
-    background: @sidebar;
-    border-top: 1px solid @line;
-    padding: 9px 18px;
+    padding: 6px 18px 14px;
 }
 
 .agent-compose-card {
-    background: @canvas;
-    border: 1px solid @line;
-    border-radius: 8px;
-    padding: 4px 6px 5px;
+    background: @chrome;
+    border: 1px solid #354252;
+    border-radius: 12px;
+    padding: 5px 8px 7px;
 }
 
 .agent-compose-placeholder {
     color: @muted;
-    padding: 8px 9px;
+    padding: 8px 8px;
 }
 
-.agent-picker button {
+.workbench .agent-picker button {
     min-height: 22px;
     padding: 2px 6px;
+    background: transparent;
+    border-color: transparent;
+}
+
+.workbench .agent-picker button:hover {
+    background: @hover;
+}
+
+.workbench .agent-picker button:focus {
+    border-color: @accent;
+}
+
+.workbench .agent-compose-card button.agent-send {
+    min-height: 24px;
+    padding: 2px 10px;
+    margin-left: 4px;
 }
 
 .agent-attachment {
-    background: @chrome;
+    background: @surface;
     border: 1px solid @line;
     border-radius: 5px;
     padding: 0 3px 0 6px;
 }
 
 .agent-usage-popover {
-    background: @sidebar;
+    background: @chrome;
     color: @foreground;
     border: 1px solid @line;
     border-radius: 8px;
@@ -542,12 +585,12 @@ menu menuitem:hover {
 
 .agent-composer textview,
 .agent-composer textview text {
-    background: @canvas;
+    background: @chrome;
     color: @foreground;
     caret-color: @accent;
 }
 
 .agent-composer textview {
-    border-radius: 5px;
-    padding: 6px 8px;
+    padding: 4px 7px;
+    font-size: 14px;
 }
