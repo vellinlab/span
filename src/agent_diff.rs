@@ -94,11 +94,8 @@ impl DiffCard {
             let start = cursor.offset();
             let old = old.map_or_else(String::new, |value| value.to_string());
             let new = new.map_or_else(String::new, |value| value.to_string());
-            buffer.insert_with_tags(
-                &mut cursor,
-                &format!("{old:>5} {new:>5}  "),
-                &[&self.number],
-            );
+            buffer.insert(&mut cursor, &format!("{old:>5} {new:>5}  "));
+            buffer.apply_tag(&self.number, &buffer.iter_at_offset(start), &cursor);
             buffer.insert(&mut cursor, line);
             if let Some(tag) = tag {
                 buffer.apply_tag(tag, &buffer.iter_at_offset(start), &cursor);
