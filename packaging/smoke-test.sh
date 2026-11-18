@@ -92,7 +92,12 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
     xdotool windowfocus --sync "$window"
     xdotool mousemove 1250 770
+    mkdir "$HOME/Documents" "$HOME/Projects"
+    printf 'Workspace notes\n' > "$HOME/notes.txt"
+    xdotool key --clearmodifiers ctrl+shift+f
+    sleep 0.5
     import -window "$window" "$WORKBENCH_PREVIEW"
+    xdotool key --clearmodifiers ctrl+shift+f
     xdotool key --clearmodifiers ctrl+shift+w
     xdotool type --clearmodifiers 'printf "%s\\n" "$BASHPID" > "$HOME/current-bash"'
     xdotool key --clearmodifiers Return

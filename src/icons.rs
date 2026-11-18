@@ -9,6 +9,9 @@ pub enum Icon {
     Plus,
     Close,
     More,
+    Folder,
+    Up,
+    Refresh,
 }
 
 pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
@@ -75,6 +78,28 @@ pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
                     cr.arc(x, 12.0, 1.3, 0.0, std::f64::consts::TAU);
                 }
                 let _ = cr.fill();
+            }
+            Icon::Folder => {
+                cr.move_to(3.0, 19.0);
+                cr.line_to(3.0, 6.0);
+                cr.line_to(10.0, 6.0);
+                cr.line_to(12.5, 8.5);
+                cr.line_to(21.0, 8.5);
+                cr.line_to(21.0, 19.0);
+                cr.close_path();
+            }
+            Icon::Up => {
+                cr.move_to(12.0, 19.5);
+                cr.line_to(12.0, 4.5);
+                cr.move_to(6.0, 10.5);
+                cr.line_to(12.0, 4.5);
+                cr.line_to(18.0, 10.5);
+            }
+            Icon::Refresh => {
+                cr.arc(12.0, 12.0, 7.2, 0.0, 5.5);
+                cr.move_to(17.1, 2.8);
+                cr.line_to(17.1, 6.9);
+                cr.line_to(13.0, 6.9);
             }
         }
         let _ = cr.stroke();

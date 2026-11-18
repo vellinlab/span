@@ -333,3 +333,66 @@ menu menuitem:hover {
     padding: 16px 20px;
     color: @foreground;
 }
+
+.files-split > separator {
+    min-width: 4px;
+    background: @line;
+}
+
+.files-split > separator:hover {
+    background: @accent;
+}
+
+.files-panel {
+    background: @sidebar;
+    color: @foreground;
+}
+
+.files-header {
+    min-height: 35px;
+    padding: 0 8px;
+    background: @chrome;
+    border-bottom: 1px solid @line;
+}
+
+.workbench .files-header button {
+    font-size: 11px;
+    padding: 1px 7px;
+}
+
+.workbench .files-header button:checked {
+    background: #2a3a50;
+    color: @accent;
+}
+
+.files-location {
+    padding: 8px;
+}
+
+.files-table {
+    background: @canvas;
+    color: @foreground;
+    font-size: 11px;
+    -GtkTreeView-vertical-separator: 5;
+}
+
+.files-table.view:selected {
+    background: #2a3a50;
+    color: @foreground;
+}
+
+.workbench .files-table header button {
+    background: @chrome;
+    border-color: @line;
+    border-radius: 0;
+    color: @muted;
+    padding: 5px 5px;
+}
+
+.files-status {
+    min-height: 25px;
+    padding: 0 8px;
+    color: @muted;
+    font-size: 11px;
+    border-top: 1px solid @line;
+}

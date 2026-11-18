@@ -1,7 +1,10 @@
+mod browser;
+mod files;
 mod host_dialog;
 mod hosts;
 mod icons;
 mod session;
+mod sftp;
 mod vte;
 mod workbench;
 

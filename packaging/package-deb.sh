@@ -34,7 +34,7 @@ Architecture: $arch
 Section: utils
 Priority: optional
 Maintainer: SSH Workbench maintainers <zyw02@users.noreply.github.com>
-Depends: bash, openssh-client, $libraries
+Depends: bash, coreutils, openssh-client, $libraries
 Recommends: xauth
 Description: A desktop terminal for local shells and OpenSSH sessions
  Manage SSH hosts and switch between local and remote terminal tabs.

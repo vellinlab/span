@@ -1,9 +1,11 @@
+use crate::files::{ControlSocket, Source};
 use crate::hosts::Host;
 use crate::icons::Icon;
 use crate::vte::Terminal;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 pub enum Launch {
@@ -54,7 +56,9 @@ pub struct Session {
     pub terminal: Terminal,
     pub indicator: gtk::Label,
     pub state: Cell<State>,
+    pub directory: RefCell<Option<PathBuf>>,
     cancellable: gio::Cancellable,
+    control: RefCell<Option<ControlSocket>>,
 }
 
 impl Session {
@@ -99,18 +103,44 @@ impl Session {
             terminal,
             indicator,
             state: Cell::new(State::Starting),
+            directory: RefCell::new(None),
             cancellable: gio::Cancellable::new(),
+            control: RefCell::new(None),
         })
+    }
+
+    pub fn file_source(&self) -> Source {
+        match self.launch {
+            Launch::Local => Source::Local,
+            Launch::Ssh(_) => Source::Sftp {
+                socket: self
+                    .control
+                    .borrow()
+                    .as_ref()
+                    .map(|value| value.path().to_owned()),
+            },
+        }
     }
 
     pub fn start(self: &Rc<Self>, changed: impl Fn() + 'static) {
         let home = glib::home_dir();
+        let mut socket_path = None;
+        if matches!(self.launch, Launch::Ssh(_)) {
+            let socket = ControlSocket::new();
+            socket_path = socket.as_ref().map(|value| value.path().to_owned());
+            self.control.replace(socket);
+        }
         let (cwd, argv) = match &self.launch {
             Launch::Local => (home.to_str(), vec!["/bin/bash", "-l"]),
             Launch::Ssh(host) => {
                 let mut argv = vec!["/usr/bin/ssh"];
                 if host.trusted_x11 {
-                    argv.extend(["-Y", "-S", "none"]);
+                    argv.push("-Y");
+                }
+                if let Some(path) = socket_path.as_deref().and_then(|path| path.to_str()) {
+                    argv.extend(["-M", "-o", "ControlPersist=no", "-S", path]);
+                } else if host.trusted_x11 {
+                    argv.extend(["-S", "none"]);
                 }
                 argv.extend(["--", host.target.as_str()]);
                 (None, argv)
@@ -143,6 +173,7 @@ impl Session {
     }
 
     pub fn child_exited(&self, status: i32) {
+        self.control.replace(None);
         self.set_state(State::Exited(status));
     }
 

@@ -9,6 +9,7 @@ Summary:        A desktop terminal for local shells and OpenSSH sessions
 License:        Unspecified and LGPL-3.0-or-later
 URL:            https://github.com/zyw02/ssh-workbench
 Requires:       bash
+Requires:       coreutils
 Requires:       openssh-clients
 Requires:       gtk3 >= 3.22.30
 Recommends:     xorg-x11-xauth

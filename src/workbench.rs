@@ -1,3 +1,4 @@
+use crate::browser::Browser;
 use crate::host_dialog;
 use crate::hosts::{self, Host};
 use crate::icons::{Icon, widget as icon};
@@ -13,6 +14,8 @@ struct Workbench {
     tabs: gtk::Notebook,
     views: gtk::Stack,
     sidebar: gtk::Box,
+    workspace: gtk::Paned,
+    browser: Rc<Browser>,
     search: gtk::SearchEntry,
     host_list: gtk::Box,
     status: gtk::Label,
@@ -44,15 +47,25 @@ pub fn open(app: &gtk::Application) {
     tabs.style_context().add_class("terminal-tabs");
     let plus = icon_button(Icon::Plus, "新建本地终端 (Ctrl+Shift+T)");
     plus.set_action_name(Some("win.local"));
-    plus.show_all();
-    tabs.set_action_widget(&plus, gtk::PackType::End);
+    let files = icon_button(Icon::Folder, "文件目录 (Ctrl+Shift+F)");
+    files.set_action_name(Some("win.files"));
+    let tools = row(2);
+    tools.add(&files);
+    tools.add(&plus);
+    tools.show_all();
+    tabs.set_action_widget(&tools, gtk::PackType::End);
 
     let views = gtk::Stack::new();
     views.add_named(&tabs, "terminal");
     views.add_named(&empty_workspace(), "empty");
     layout.pack_start(&tool_rail(&sidebar), false, false, 0);
     layout.pack_start(&sidebar, false, false, 0);
-    layout.pack_start(&views, true, true, 0);
+    let browser = Browser::new();
+    let workspace = gtk::Paned::new(gtk::Orientation::Horizontal);
+    workspace.style_context().add_class("files-split");
+    workspace.pack1(&views, true, true);
+    workspace.pack2(&browser.panel, false, false);
+    layout.pack_start(&workspace, true, true, 0);
     root.pack_start(&layout, true, true, 0);
 
     let footer = row(9);
@@ -79,6 +92,8 @@ pub fn open(app: &gtk::Application) {
         tabs,
         views,
         sidebar,
+        workspace,
+        browser,
         search,
         host_list,
         status,
@@ -111,6 +126,7 @@ pub fn open(app: &gtk::Application) {
             &["<Primary><Shift>b"][..],
             Workbench::toggle_sidebar,
         ),
+        ("files", &["<Primary><Shift>f"][..], Workbench::toggle_files),
         ("copy", &[][..], Workbench::copy),
         ("paste", &[][..], Workbench::paste),
         (
@@ -143,6 +159,7 @@ pub fn open(app: &gtk::Application) {
         if let Some(workbench) = weak.upgrade() {
             let active = workbench.session_for(page);
             workbench.update_status(active.as_deref());
+            workbench.browser.select(active.as_ref());
             if let Some(active) = active {
                 active.terminal.grab_focus();
             }
@@ -233,6 +250,7 @@ impl Workbench {
         }
         if self.sessions.borrow().is_empty() {
             self.views.set_visible_child_name("empty");
+            self.browser.select(None);
         }
         self.refresh_status();
     }
@@ -304,6 +322,18 @@ impl Workbench {
 
     fn toggle_sidebar(self: &Rc<Self>) {
         self.sidebar.set_visible(!self.sidebar.is_visible());
+    }
+
+    fn toggle_files(self: &Rc<Self>) {
+        if self.browser.panel.is_visible() {
+            self.browser.panel.hide();
+            self.browser.reset();
+        } else {
+            self.browser.panel.show();
+            self.workspace
+                .set_position((self.workspace.allocated_width() - 414).max(0));
+            self.browser.select(self.current_session().as_ref());
+        }
     }
 
     fn copy(self: &Rc<Self>) {
@@ -522,6 +552,7 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
             "视图",
             &[
                 ("显示／隐藏主机栏", "sidebar"),
+                ("文件目录", "files"),
                 ("上一个标签", "previous"),
                 ("下一个标签", "next"),
             ][..],
