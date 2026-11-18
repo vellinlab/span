@@ -590,8 +590,22 @@ menu menuitem:hover {
     font-size: 11px;
 }
 
-.agent-response .quiet-button {
+.workbench .agent-response button {
+    min-height: 24px;
+    padding: 2px 8px;
+    background: transparent;
+    border-color: transparent;
+    color: @muted;
     font-size: 12px;
+}
+
+.workbench .agent-response button:hover {
+    background: @hover;
+    color: @foreground;
+}
+
+.workbench .agent-response button:focus {
+    border-color: @accent;
 }
 
 .agent-table {

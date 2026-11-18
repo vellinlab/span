@@ -166,7 +166,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers ctrl+Return
     wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
     grep -qx 'Show the deployment check' "$HOME/agent-prompt"
-    xdotool mousemove --window "$window" 310 390 click --repeat 16 4
+    widget contains 'Which deployment environment?'
+    sleep 0.15
+    xdotool mousemove --window "$window" 355 390 click --repeat 16 4
     widget mouse '进行中 · 修改文件 · checks.txt…'
     widget contains 'Checking the build before publishing.'
     widget not-contains 'fixture raw reasoning sentinel'
@@ -176,7 +178,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget expanded-contains '修改文件 · checks.txt…' '+passed'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-activity.png"
     widget mouse '进行中 · 修改文件 · checks.txt…'
-    xdotool mousemove --window "$window" 310 390 click --repeat 16 5
+    xdotool mousemove --window "$window" 355 390 click --repeat 16 5
     widget contains 'Which deployment environment?'
     xdotool mousemove --window "$window" 900 710 click --repeat 8 5
     sleep 0.25
