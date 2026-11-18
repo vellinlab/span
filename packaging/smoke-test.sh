@@ -137,9 +137,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget click '提交答案'
     wait_until "the structured answer" test -f "$HOME/agent-answered"
     widget mouse '本轮变更 · 查看 diff'
-    sleep 0.25
-    xdotool mousemove --window "$window" 285 660 click --repeat 6 5
-    widget contains '+passed'
+    widget expanded-contains '本轮变更 · 查看 diff' '+passed'
     widget mouse '本轮变更 · 查看 diff'
 
     xdotool mousemove --window "$window" 900 360 click --repeat 8 4

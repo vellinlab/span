@@ -19,6 +19,13 @@ def visible(node):
     return states.contains(pyatspi.STATE_VISIBLE) and states.contains(pyatspi.STATE_SHOWING)
 
 
+def contains(node, expected):
+    if "Text" not in node.get_interfaces():
+        return False
+    content = node.queryText().getText(0, -1)
+    return bool(content and expected in content)
+
+
 operation, name, *values = sys.argv[1:]
 desktop = pyatspi.Registry.getDesktop(0)
 seen = []
@@ -29,10 +36,8 @@ for _ in range(50):
             continue
         if node.name:
             seen.append(node.name)
-        if operation == "contains" and "Text" in node.get_interfaces():
-            content = node.queryText().getText(0, -1)
-            if content and name in content:
-                sys.exit(0)
+        if operation == "contains" and contains(node, name):
+            sys.exit(0)
         if node.name != name:
             continue
         if operation == "click" and "Action" in node.get_interfaces():
@@ -43,6 +48,9 @@ for _ in range(50):
             if bounds.width > 0 and bounds.height > 0:
                 subprocess.run(["xdotool", "mousemove", str(bounds.x + min(14, bounds.width // 2)),
                                 str(bounds.y + min(12, bounds.height // 2)), "click", "1"], check=True)
+                sys.exit(0)
+        if operation == "expanded-contains" and node.getState().contains(pyatspi.STATE_EXPANDED):
+            if any(contains(child, values[0]) for child in descendants(node)):
                 sys.exit(0)
         if operation == "fill-card":
             for field in descendants(node.parent):
