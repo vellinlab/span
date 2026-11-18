@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SSH Workbench
+Comment=Local Bash and SSH in one window
+Exec=ssh-workbench
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;

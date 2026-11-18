@@ -1,0 +1,11 @@
+[package]
+name = "ssh-workbench"
+version = "0.1.0"
+edition = "2024"
+description = "A Linux desktop terminal for local shells and OpenSSH sessions"
+
+[dependencies]
+vte4 = "0.10"
+
+[profile.release]
+strip = "debuginfo"
