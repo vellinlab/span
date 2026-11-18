@@ -5,6 +5,7 @@ edition = "2024"
 description = "A Linux desktop terminal for local shells and OpenSSH sessions"
 
 [dependencies]
+gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
 vte4 = "0.10"
 
 [profile.release]

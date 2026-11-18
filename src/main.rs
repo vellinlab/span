@@ -1,4 +1,4 @@
-use vte4::gtk::{self, gdk, gio, glib};
+use gtk::{gdk, gio, glib};
 use vte4::prelude::*;
 
 fn main() -> glib::ExitCode {
