@@ -124,20 +124,27 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     grep -qx 'Show the deployment check' "$HOME/agent-prompt"
     widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
     widget contains 'Which deployment environment?'
+    xdotool mousemove --window "$window" 900 710 click --repeat 8 5
+    sleep 0.25
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-question.png"
     widget fill-card 'Which deployment environment?' Staging
     widget click '提交答案'
     wait_until "the structured answer" test -f "$HOME/agent-answered"
     widget click '本轮变更 · 查看 diff'
+    xdotool mousemove --window "$window" 1150 660 click --repeat 6 5
     widget contains '+passed'
     widget click '本轮变更 · 查看 diff'
 
+    xdotool mousemove --window "$window" 900 360 click --repeat 8 4
+    sleep 0.25
     widget click '复制 CSV'
     xclip -out -selection clipboard | tr -d '\r' > "$HOME/table.csv"
     grep -qx 'Integration,12 passed' "$HOME/table.csv"
     widget click '复制 HTML'
     xclip -out -selection clipboard -target text/html > "$HOME/table.html"
     grep -q '<td>12 passed</td>' "$HOME/table.html"
+    widget click '复制 Markdown'
+    xclip -out -selection clipboard | grep -qF '| Integration | 12 passed |'
     widget click '保存 PNG'
     wait_until "the Save PNG dialog" dialog_open '保存文件'
     save_dialog="$(xdotool search --onlyvisible --name '^保存文件$' | head -n1)"
@@ -196,4 +203,35 @@ PY
     xdotool key --clearmodifiers Return
     wait_until "the system OpenSSH banner" grep -qs '^SSH-2.0-OpenSSH_' "$HOME/ssh-banner"
     printf '%s\n' 'Tab creation/closing, host creation/persistence and system OpenSSH all passed.'
+
+    if [[ -n ${WORKBENCH_SSH_FIXTURE:-} ]]; then
+        xdotool key --clearmodifiers ctrl+shift+o
+        wait_until "the remote fixture Quick Connect dialog" dialog_open '快速连接'
+        dialog="$(xdotool search --onlyvisible --name '^快速连接$' | head -n1)"
+        xdotool windowfocus --sync "$dialog"
+        xdotool type --clearmodifiers "ssh://$WORKBENCH_SSH_USER@127.0.0.1:$WORKBENCH_SSH_PORT"
+        xdotool key --clearmodifiers Return
+        xdotool windowfocus --sync "$window"
+        widget contains 'Are you sure you want to continue connecting'
+        xdotool type --clearmodifiers yes
+        xdotool key --clearmodifiers Return
+        wait_until "the authenticated SSH shell" test -s "$WORKBENCH_SSH_FIXTURE/remote-shells"
+        xdotool key --clearmodifiers ctrl+shift+h
+        wait_until "the remote session list" test -f "$WORKBENCH_SSH_FIXTURE/agent-catalog"
+        xdotool type --clearmodifiers 'Deployment'
+        wait_until "search on the remote host" test -f "$WORKBENCH_SSH_FIXTURE/agent-searched"
+        sleep 0.25
+        xdotool key --clearmodifiers Return
+        wait_until "resuming the remote session" grep -qsx stored-deployment "$WORKBENCH_SSH_FIXTURE/agent-resumed"
+        widget contains 'Latest deployment notes'
+        xdotool key --clearmodifiers ctrl+shift+j
+        sleep 0.25
+        xdotool type --clearmodifiers exit
+        xdotool key --clearmodifiers Return
+        widget click '重新连接'
+        resumed_twice() { [[ $(wc -l < "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 2 ]]; }
+        wait_until "automatic restoration on SSH reconnect" resumed_twice
+        widget contains 'Latest deployment notes'
+        printf '%s\n' 'A saved remote Codex session was restored after disconnecting and restarting its authenticated SSH tab.'
+    fi
 fi

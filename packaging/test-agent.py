@@ -79,7 +79,8 @@ for line in sys.stdin:
         send({"id": request_id, "result": {"thread": entry(saved_thread, "Deployment rollout", "Projects/Operations"),
               "model": "Codex", "initialTurnsPage": {"data": [stored_turn("saved-turn", "Latest deployment notes")],
                                                        "nextCursor": "older-cursor"}}})
-        (home / "agent-resumed").touch()
+        with (home / "agent-resumed").open("a") as resumes:
+            print(saved_thread, file=resumes)
     elif method == "thread/unsubscribe":
         assert params["threadId"] == thread
         send({"id": request_id, "result": {"status": "unsubscribed"}})

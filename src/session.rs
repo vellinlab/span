@@ -247,6 +247,18 @@ impl Session {
         }
     }
 
+    pub fn focus_reconnecting_terminal(&self) {
+        let drawer_hidden = self
+            .agent_view
+            .borrow()
+            .as_ref()
+            .is_some_and(|view| !view.drawer.is_visible());
+        if matches!(self.launch, Launch::Ssh(_)) && drawer_hidden {
+            self.toggle_drawer();
+        }
+        self.terminal.grab_focus();
+    }
+
     pub fn file_source(&self) -> Source {
         match self.launch {
             Launch::Local => Source::Local,

@@ -46,8 +46,9 @@ jobs:
           extracted="$(mktemp -d)"
           dpkg-deb --info "${package[0]}"
           dpkg-deb --extract "${package[0]}" "$extracted"
-          WORKBENCH_PREVIEW="$PWD/dist/workbench.png" \
-            dbus-run-session -- bash packaging/smoke-test.sh "$extracted/usr/bin/ssh-workbench"
+          WORKBENCH_PREVIEW="$PWD/dist/workbench.png" WORKBENCH_TEST_AGENT_SSH=1 \
+            bash packaging/test-sftp.sh dbus-run-session -- \
+            bash packaging/smoke-test.sh "$extracted/usr/bin/ssh-workbench"
 
       - name: Upload Debian package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -58,6 +59,7 @@ jobs:
           retention-days: 30
 
       - name: Upload desktop preview
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: workbench-preview
@@ -66,7 +68,7 @@ jobs:
             dist/agent.png
             dist/agent-catalog.png
             dist/agent-question.png
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 30
 
   el8-x86_64:

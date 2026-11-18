@@ -332,7 +332,7 @@ impl Workbench {
         {
             self.start(&session);
             self.browser.reload();
-            session.terminal.grab_focus();
+            session.focus_reconnecting_terminal();
         }
     }
 

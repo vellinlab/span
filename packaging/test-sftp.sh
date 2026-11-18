@@ -40,9 +40,33 @@ UsePAM yes
 Subsystem sftp internal-sftp
 CONFIG
 
+if [[ ${WORKBENCH_TEST_AGENT_SSH:-} == 1 ]]; then
+    cat > "$fixture/remote-command" <<SCRIPT
+#!/usr/bin/env bash
+export HOME='$fixture'
+case \${SSH_ORIGINAL_COMMAND:-} in
+    '')
+        printf '%s\n' "\$\$" >> '$fixture/remote-shells'
+        exec /bin/bash --noprofile --norc -i
+        ;;
+    "bash -lc 'exec codex app-server'")
+        exec /usr/bin/python3 '$PWD/packaging/test-agent.py' app-server
+        ;;
+    *) exit 1 ;;
+esac
+SCRIPT
+    chmod 700 "$fixture/remote-command"
+    printf 'ForceCommand %s/remote-command\n' "$fixture" >> "$fixture/sshd_config"
+fi
+
 sudo install -d -m 0755 /run/sshd
 touch "$fixture/sshd.log"
 sudo /usr/sbin/sshd -f "$fixture/sshd_config" -E "$fixture/sshd.log"
+if [[ ${WORKBENCH_TEST_AGENT_SSH:-} == 1 ]]; then
+    WORKBENCH_SSH_FIXTURE="$fixture" WORKBENCH_SSH_PORT="$port" WORKBENCH_SSH_USER="$(id -un)" \
+        ssh-agent bash -c 'ssh-add "$WORKBENCH_SSH_FIXTURE/client" && exec "$@"' bash "$@"
+    exit
+fi
 ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 \
     -i "$fixture/client" -M -S "$fixture/control" -fN -p "$port" "$(id -un)@127.0.0.1"

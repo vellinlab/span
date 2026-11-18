@@ -51,6 +51,7 @@ pub struct Agent {
     questions: RefCell<HashMap<Value, gtk::Box>>,
     diff: RefCell<Option<(String, String)>>,
     scroll: gtk::ScrolledWindow,
+    scroll_scheduled: Rc<Cell<bool>>,
     status: gtk::Label,
     settings: gtk::Box,
     cwd: gtk::Entry,
@@ -177,6 +178,7 @@ impl Agent {
             questions: RefCell::new(HashMap::new()),
             diff: RefCell::new(None),
             scroll,
+            scroll_scheduled: Rc::new(Cell::new(false)),
             status,
             settings,
             cwd,
@@ -241,7 +243,7 @@ impl Agent {
         self.input.connect_key_press_event(move |_, event| {
             use gtk::gdk::keys::constants::{KP_Enter, Return};
             if event.state().contains(gtk::gdk::ModifierType::CONTROL_MASK)
-                && matches!(event.keyval(), Return | KP_Enter)
+                && [Return, KP_Enter].contains(&event.keyval())
             {
                 if let Some(agent) = weak.upgrade() {
                     agent.send();
@@ -1067,8 +1069,14 @@ impl Agent {
     }
 
     fn scroll_to_end(&self) {
+        if self.scroll_scheduled.replace(true) {
+            return;
+        }
         let scroll = self.scroll.downgrade();
-        glib::idle_add_local_once(move || {
+        let scheduled = self.scroll_scheduled.clone();
+        // Give GTK a frame to allocate the cards before reading the scroll range.
+        glib::timeout_add_local_once(std::time::Duration::from_millis(32), move || {
+            scheduled.set(false);
             if let Some(scroll) = scroll.upgrade() {
                 let adjustment = scroll.vadjustment();
                 adjustment.set_value(
