@@ -5,7 +5,7 @@
 Name:           ssh-workbench
 Version:        %{workbench_version}
 Release:        1%{?dist}
-Summary:        Hopstride SSH terminal and Codex workspace
+Summary:        Span SSH terminal and Codex workspace
 License:        Unspecified and LGPL-3.0-or-later
 URL:            https://github.com/zyw02/ssh-workbench
 Requires:       bash

@@ -18,7 +18,7 @@ use gtk::prelude::*;
 use gtk::{gdk, glib};
 
 const APP_ID: &str = "io.github.zyw02.SshWorkbench";
-const APP_NAME: &str = "Hopstride";
+const APP_NAME: &str = "Span";
 
 fn main() -> glib::ExitCode {
     glib::set_application_name(APP_NAME);

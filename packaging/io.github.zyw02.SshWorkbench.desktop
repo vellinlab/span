@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Hopstride
+Name=Span
 Comment=SSH terminal and Codex workspace
 Comment[zh_CN]=SSH 终端和 Codex 工作台
 Exec=ssh-workbench

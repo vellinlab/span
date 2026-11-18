@@ -19,11 +19,11 @@ cat > debian/control <<'CONTROL'
 Source: ssh-workbench
 Section: utils
 Priority: optional
-Maintainer: Hopstride maintainers <zyw02@users.noreply.github.com>
+Maintainer: Span maintainers <zyw02@users.noreply.github.com>
 
 Package: ssh-workbench
 Architecture: any
-Description: Hopstride SSH terminal and Codex workspace
+Description: Span SSH terminal and Codex workspace
 CONTROL
 
 libraries="$(dpkg-shlibdeps -O -e"$package/usr/bin/ssh-workbench" | sed -n 's/^shlibs:Depends=//p')"
@@ -34,10 +34,10 @@ Version: $version
 Architecture: $arch
 Section: utils
 Priority: optional
-Maintainer: Hopstride maintainers <zyw02@users.noreply.github.com>
+Maintainer: Span maintainers <zyw02@users.noreply.github.com>
 Depends: bash, coreutils, openssh-client, $libraries
 Recommends: xauth
-Description: Hopstride SSH terminal and Codex workspace
+Description: Span SSH terminal and Codex workspace
  Manage SSH hosts and switch between local and remote terminal tabs.
 CONTROL
 

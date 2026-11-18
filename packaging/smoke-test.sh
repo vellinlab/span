@@ -62,11 +62,11 @@ export DISPLAY=":$(cat "$HOME/display")"
 app_pid=$!
 window_exists() {
     kill -0 "$app_pid" 2>/dev/null &&
-        xwininfo -root -tree | grep -F '"Hopstride"' >/dev/null
+        xwininfo -root -tree | grep -F '"Span"' >/dev/null
 }
 wait_until "the GTK3 window" window_exists
 wait_until "the local Bash PTY" test -s "$HOME/bash-ready"
-window="$(xwininfo -root -tree | awk '/"Hopstride"/ && !found { print $1; found=1 }')"
+window="$(xwininfo -root -tree | awk '/"Span"/ && !found { print $1; found=1 }')"
 xprop -id "$window" _NET_WM_ICON | grep -F '_NET_WM_ICON(CARDINAL) =' >/dev/null
 if grep -q 'Failed to load Workbench theme' "$HOME/app.log"; then
     exit 1
