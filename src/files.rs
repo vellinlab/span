@@ -45,7 +45,9 @@ impl ControlSocket {
         };
         let path = directory?.join("ssh");
         // OpenSSH briefly appends a suffix while binding the socket.
-        if path.to_str().is_none() || path.as_os_str().as_bytes().len() > 85 {
+        if path.to_str().is_none_or(|path| path.contains(['%', '$']))
+            || path.as_os_str().as_bytes().len() > 85
+        {
             let _ = fs::remove_dir(path.parent()?);
             return None;
         }
@@ -134,15 +136,14 @@ fn list_local(path: Option<&Path>) -> io::Result<Directory> {
 }
 
 pub fn display(value: &std::ffi::OsStr) -> String {
-    value
-        .to_string_lossy()
-        .chars()
-        .flat_map(|c| {
-            if c.is_control() {
-                c.escape_default().collect::<Vec<_>>()
-            } else {
-                vec![c]
-            }
-        })
-        .collect()
+    let value = value.to_string_lossy();
+    let mut text = String::with_capacity(value.len());
+    for c in value.chars() {
+        if c.is_control() {
+            text.extend(c.escape_default());
+        } else {
+            text.push(c);
+        }
+    }
+    text
 }

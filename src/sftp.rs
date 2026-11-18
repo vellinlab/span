@@ -19,7 +19,7 @@ const NAME: u8 = 104;
 const MAX_PACKET: usize = 256 * 1024;
 
 pub fn list(socket: &Path, path: Option<&Path>) -> Result<Directory, String> {
-    if !fs::symlink_metadata(socket).is_ok_and(|meta| meta.file_type().is_socket()) {
+    if !socket_ready(socket) {
         return Err("请在终端完成 SSH 登录，然后刷新目录。".into());
     }
 
@@ -57,6 +57,10 @@ pub fn list(socket: &Path, path: Option<&Path>) -> Result<Directory, String> {
     result
 }
 
+pub fn socket_ready(socket: &Path) -> bool {
+    fs::symlink_metadata(socket).is_ok_and(|meta| meta.file_type().is_socket())
+}
+
 struct Sftp<R, W> {
     input: R,
     output: W,
@@ -87,7 +91,11 @@ impl<R: Read, W: Write> Sftp<R, W> {
         if packet.u32()? != 1 {
             return Err("SFTP 返回了无效的目录路径。".into());
         }
-        let path = PathBuf::from(OsString::from_vec(packet.string()?.to_vec()));
+        let bytes = packet.string()?;
+        if !bytes.starts_with(b"/") || bytes.contains(&0) {
+            return Err("SFTP 返回了无效的目录路径。".into());
+        }
+        let path = PathBuf::from(OsString::from_vec(bytes.to_vec()));
 
         let (kind, mut packet) = self.request(OPENDIR, path.as_os_str().as_bytes())?;
         if kind != HANDLE {
@@ -236,6 +244,7 @@ impl Packet {
             }
         }
         if name.is_empty()
+            || name.len() > 4096
             || name == b"."
             || name == b".."
             || name.contains(&b'/')
@@ -288,7 +297,7 @@ mod tests {
             .iter()
             .find(|entry| entry.name == "a sample.txt")
             .unwrap();
-        assert_eq!(file.kind == Kind::File, true);
+        assert!(file.kind == Kind::File);
         assert_eq!(file.size, Some(3));
         assert_eq!(file.mode.unwrap() & 0o777, 0o640);
         assert!(file.modified.is_some());

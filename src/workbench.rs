@@ -216,6 +216,13 @@ impl Workbench {
             if let (Some(workbench), Some(session)) = (weak.upgrade(), active.upgrade()) {
                 session.child_exited(status);
                 workbench.refresh_status();
+                if matches!(session.launch, Launch::Ssh(_))
+                    && workbench
+                        .current_session()
+                        .is_some_and(|current| Rc::ptr_eq(&current, &session))
+                {
+                    workbench.browser.reload();
+                }
             }
         });
 
@@ -308,6 +315,7 @@ impl Workbench {
             .filter(|s| s.state.get().can_restart())
         {
             self.start(&session);
+            self.browser.reload();
             session.terminal.grab_focus();
         }
     }

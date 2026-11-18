@@ -97,6 +97,7 @@ impl Session {
 
         let indicator = gtk::Label::new(Some("●"));
         indicator.style_context().add_class("session-dot");
+        let control = new_control_socket(&launch);
         Rc::new(Self {
             launch,
             page,
@@ -105,7 +106,7 @@ impl Session {
             state: Cell::new(State::Starting),
             directory: RefCell::new(None),
             cancellable: gio::Cancellable::new(),
-            control: RefCell::new(None),
+            control: RefCell::new(control),
         })
     }
 
@@ -124,12 +125,14 @@ impl Session {
 
     pub fn start(self: &Rc<Self>, changed: impl Fn() + 'static) {
         let home = glib::home_dir();
-        let mut socket_path = None;
-        if matches!(self.launch, Launch::Ssh(_)) {
-            let socket = ControlSocket::new();
-            socket_path = socket.as_ref().map(|value| value.path().to_owned());
-            self.control.replace(socket);
+        if self.control.borrow().is_none() {
+            self.control.replace(new_control_socket(&self.launch));
         }
+        let socket_path = self
+            .control
+            .borrow()
+            .as_ref()
+            .map(|socket| socket.path().to_owned());
         let (cwd, argv) = match &self.launch {
             Launch::Local => (home.to_str(), vec!["/bin/bash", "-l"]),
             Launch::Ssh(host) => {
@@ -161,6 +164,7 @@ impl Session {
                     match result {
                         Ok(()) => session.set_state(State::Running),
                         Err(error) => {
+                            session.control.replace(None);
                             session.set_state(State::Failed);
                             session
                                 .terminal
@@ -195,5 +199,12 @@ impl Session {
         if state.can_restart() {
             self.terminal.set_input_enabled(false);
         }
+    }
+}
+
+fn new_control_socket(launch: &Launch) -> Option<ControlSocket> {
+    match launch {
+        Launch::Local => None,
+        Launch::Ssh(_) => ControlSocket::new(),
     }
 }

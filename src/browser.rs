@@ -22,6 +22,7 @@ pub struct Browser {
     pending: RefCell<Option<Request>>,
     in_flight: Cell<bool>,
     loading: Cell<bool>,
+    monitor: RefCell<Option<gio::FileMonitor>>,
 }
 
 struct Request {
@@ -77,9 +78,10 @@ impl Browser {
         rows.set_enable_search(true);
         rows.set_search_column(0);
         rows.set_tooltip_column(0);
-        for (index, title, width) in [("名称", 144), ("大小", 61), ("修改时间", 111), ("权限", 76)]
-            .into_iter()
-            .enumerate()
+        for (index, (title, width)) in
+            [("名称", 144), ("大小", 61), ("修改时间", 111), ("权限", 76)]
+                .into_iter()
+                .enumerate()
         {
             let renderer = gtk::CellRendererText::new();
             renderer.set_ellipsize(pango::EllipsizeMode::End);
@@ -89,8 +91,8 @@ impl Browser {
             column.set_expand(index == 0);
             column.set_sizing(gtk::TreeViewColumnSizing::Fixed);
             column.set_fixed_width(width);
-            column.pack_start(&renderer, true);
-            column.add_attribute(&renderer, "text", index as i32);
+            TreeViewColumnExt::pack_start(&column, &renderer, true);
+            TreeViewColumnExt::add_attribute(&column, &renderer, "text", index as i32);
             rows.append_column(&column);
         }
 
@@ -102,6 +104,7 @@ impl Browser {
         panel.pack_start(&scroll, true, true, 0);
 
         let status = gtk::Label::builder()
+            .label("打开终端标签以浏览文件")
             .xalign(0.0)
             .ellipsize(pango::EllipsizeMode::End)
             .build();
@@ -126,8 +129,10 @@ impl Browser {
             pending: RefCell::new(None),
             in_flight: Cell::new(false),
             loading: Cell::new(false),
+            monitor: RefCell::new(None),
         });
         browser.connect();
+        browser.update_controls();
         browser
     }
 
@@ -154,12 +159,18 @@ impl Browser {
         self.session.replace(Weak::new());
         self.directory.replace(None);
         self.list.clear();
+        self.path.set_text("");
+        self.status.set_text("打开终端标签以浏览文件");
+        self.update_controls();
     }
 
     fn invalidate(&self) {
         self.request.set(self.request.get() + 1);
         self.pending.take();
         self.loading.set(false);
+        if let Some(monitor) = self.monitor.take() {
+            monitor.cancel();
+        }
     }
 
     fn connect(self: &Rc<Self>) {
@@ -234,17 +245,57 @@ impl Browser {
         let Some(session) = self.session.borrow().upgrade() else {
             return;
         };
-        let id = self.request.get() + 1;
-        self.request.set(id);
+        self.invalidate();
+        let id = self.request.get();
+        let source = session.file_source();
+        self.status.set_tooltip_text(None);
+        if let Source::Sftp {
+            socket: Some(socket),
+        } = &source
+        {
+            if !crate::sftp::socket_ready(socket) && self.watch_socket(id, socket, path.clone()) {
+                self.status.set_text("等待 SSH 登录…");
+                self.update_controls();
+                return;
+            }
+        }
         self.loading.set(true);
         self.status.set_text("正在读取目录…");
         self.update_controls();
-        self.pending.replace(Some(Request {
-            id,
-            source: session.file_source(),
-            path,
-        }));
+        self.pending.replace(Some(Request { id, source, path }));
         self.start_pending();
+    }
+
+    pub fn reload(self: &Rc<Self>) {
+        if self.panel.is_visible() {
+            self.load(self.current_path());
+        }
+    }
+
+    fn watch_socket(self: &Rc<Self>, id: u64, socket: &Path, path: Option<PathBuf>) -> bool {
+        let Some(directory) = socket.parent() else {
+            return false;
+        };
+        let Ok(monitor) = gio::File::for_path(directory)
+            .monitor_directory(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)
+        else {
+            return false;
+        };
+        if crate::sftp::socket_ready(socket) {
+            monitor.cancel();
+            return false;
+        }
+        let weak = Rc::downgrade(self);
+        let socket = socket.to_path_buf();
+        monitor.connect_changed(move |_, _, _, _| {
+            if let Some(browser) = weak.upgrade() {
+                if browser.request.get() == id && crate::sftp::socket_ready(&socket) {
+                    browser.load(path.clone());
+                }
+            }
+        });
+        self.monitor.replace(Some(monitor));
+        true
     }
 
     fn start_pending(self: &Rc<Self>) {
