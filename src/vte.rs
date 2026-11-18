@@ -1,5 +1,9 @@
-use gtk::glib::{self, ffi as gffi, translate::*};
 use gtk::prelude::*;
+use gtk::{
+    gdk, gio,
+    glib::{self, ffi as gffi, translate::*},
+    pango,
+};
 use std::ffi::{c_char, c_int, c_long, c_uint, c_void};
 use std::ptr::{NonNull, null_mut};
 
@@ -15,6 +19,22 @@ type SpawnCallback =
 unsafe extern "C" {
     fn vte_terminal_get_type() -> gffi::GType;
     fn vte_terminal_new() -> *mut gtk::ffi::GtkWidget;
+    fn vte_terminal_set_colors(
+        terminal: *mut VteTerminal,
+        foreground: *const gdk::ffi::GdkRGBA,
+        background: *const gdk::ffi::GdkRGBA,
+        palette: *const gdk::ffi::GdkRGBA,
+        palette_size: usize,
+    );
+    fn vte_terminal_set_color_cursor(terminal: *mut VteTerminal, color: *const gdk::ffi::GdkRGBA);
+    fn vte_terminal_set_color_highlight(
+        terminal: *mut VteTerminal,
+        color: *const gdk::ffi::GdkRGBA,
+    );
+    fn vte_terminal_set_font(
+        terminal: *mut VteTerminal,
+        font_desc: *const pango::ffi::PangoFontDescription,
+    );
     fn vte_terminal_set_scrollback_lines(terminal: *mut VteTerminal, lines: c_long);
     fn vte_terminal_set_input_enabled(terminal: *mut VteTerminal, enabled: gffi::gboolean);
     fn vte_terminal_reset(
@@ -62,6 +82,42 @@ impl Terminal {
         unsafe { vte_terminal_set_scrollback_lines(self.to_glib_none().0, lines) }
     }
 
+    pub fn apply_theme(&self) {
+        let color = |hex| gdk::RGBA::parse(hex).expect("valid theme color");
+        let foreground = color("#d8e1ed");
+        let background = color("#10141b");
+        let cursor = color("#91b9ff");
+        let selection = color("#304c78");
+        let palette = [
+            "#1b2330", "#f0838c", "#83cb9b", "#e8be79", "#82aaff", "#c6a0f6", "#78cbd7", "#c3cddb",
+            "#64748b", "#ff9ca3", "#a0e4b6", "#f9d493", "#a3c1ff", "#ddbcff", "#9fe3e9", "#f0f4fb",
+        ]
+        .map(|hex| {
+            // GdkRGBA is a plain C struct. Copy it into a contiguous VTE palette.
+            let rgba = color(hex);
+            gdk::ffi::GdkRGBA {
+                red: rgba.red(),
+                green: rgba.green(),
+                blue: rgba.blue(),
+                alpha: rgba.alpha(),
+            }
+        });
+        let font = pango::FontDescription::from_string("Monospace 11");
+        unsafe {
+            let terminal = self.to_glib_none().0;
+            vte_terminal_set_colors(
+                terminal,
+                foreground.to_glib_none().0,
+                background.to_glib_none().0,
+                palette.as_ptr(),
+                palette.len(),
+            );
+            vte_terminal_set_color_cursor(terminal, cursor.to_glib_none().0);
+            vte_terminal_set_color_highlight(terminal, selection.to_glib_none().0);
+            vte_terminal_set_font(terminal, font.to_glib_none().0);
+        }
+    }
+
     pub fn set_input_enabled(&self, enabled: bool) {
         unsafe { vte_terminal_set_input_enabled(self.to_glib_none().0, enabled.into_glib()) }
     }
@@ -104,8 +160,13 @@ impl Terminal {
         });
     }
 
-    pub fn spawn<F>(&self, cwd: Option<&str>, argv: &[&str], on_spawn: F)
-    where
+    pub fn spawn<F>(
+        &self,
+        cwd: Option<&str>,
+        argv: &[&str],
+        cancellable: &gio::Cancellable,
+        on_spawn: F,
+    ) where
         F: FnOnce(Result<(), glib::Error>) + 'static,
     {
         assert!(!argv.is_empty());
@@ -139,7 +200,7 @@ impl Terminal {
                 null_mut(),
                 None,
                 10_000,
-                null_mut(),
+                cancellable.to_glib_none().0,
                 Some(finished::<F>),
                 Box::into_raw(Box::new(on_spawn)).cast(),
             )

@@ -1,0 +1,332 @@
+@define-color canvas #10141b;
+@define-color sidebar #171d27;
+@define-color chrome #1c2431;
+@define-color line #2c3646;
+@define-color surface #222d3e;
+@define-color hover #2a3850;
+@define-color foreground #e2eaf5;
+@define-color muted #a0aec4;
+@define-color accent #91b9ff;
+
+window.workbench,
+window.workbench-dialog,
+.workbench stack,
+.workbench .terminal-page {
+    background-color: @canvas;
+    color: @foreground;
+}
+
+.workbench-header,
+.workbench-dialog headerbar {
+    min-height: 38px;
+    padding: 0 9px;
+    background: @chrome;
+    border: 0;
+    border-bottom: 1px solid @line;
+    box-shadow: none;
+    color: @foreground;
+}
+
+.app-mark {
+    min-width: 27px;
+    min-height: 25px;
+    border-radius: 6px;
+    background-color: #2d4772;
+    color: #c2d8ff;
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.app-title {
+    color: @foreground;
+    font-size: 13px;
+    font-weight: bold;
+    margin-right: 14px;
+}
+
+.workbench menubar {
+    background: transparent;
+    color: @muted;
+    padding: 0;
+}
+
+.workbench menubar > menuitem {
+    border-radius: 5px;
+    padding: 6px 9px;
+}
+
+.workbench menubar > menuitem:hover,
+.workbench menubar > menuitem:selected {
+    background-color: @hover;
+    color: @foreground;
+}
+
+menu {
+    padding: 4px;
+    background-color: @surface;
+    border: 1px solid @line;
+    color: @foreground;
+}
+
+menu menuitem {
+    padding: 7px 12px;
+    border-radius: 4px;
+}
+
+menu menuitem:hover {
+    background-color: @hover;
+    color: @foreground;
+}
+
+.workbench button,
+.workbench-dialog button {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 5px;
+    box-shadow: none;
+    color: @foreground;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+}
+
+.workbench button:hover,
+.workbench-dialog button:hover {
+    background: @hover;
+}
+
+.workbench button:focus,
+.workbench-dialog button:focus {
+    border-color: @accent;
+}
+
+.workbench button.primary,
+.workbench-dialog button.primary {
+    background: #3769b5;
+    color: white;
+}
+
+.workbench button.primary:hover,
+.workbench-dialog button.primary:hover {
+    background: #447bcc;
+}
+
+.workbench-dialog button.destructive {
+    background: #72323d;
+    color: #fff0f1;
+}
+
+.workbench button.quiet-button,
+.workbench headerbar button.titlebutton {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 2px;
+    background: transparent;
+    border-color: transparent;
+    color: @muted;
+}
+
+.workbench button.quiet-button:hover,
+.workbench headerbar button.titlebutton:hover {
+    background: @hover;
+    color: @foreground;
+}
+
+.workbench button.quiet-button:focus,
+.workbench headerbar button.titlebutton:focus {
+    border-color: @accent;
+}
+
+.host-sidebar {
+    background-color: @sidebar;
+    border-right: 1px solid @line;
+}
+
+.sidebar-heading {
+    padding: 12px 12px 8px;
+}
+
+.section-title {
+    color: @foreground;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.workbench entry,
+.workbench-dialog entry {
+    min-height: 30px;
+    padding: 0 9px;
+    background: @canvas;
+    border: 1px solid #384559;
+    border-radius: 5px;
+    box-shadow: none;
+    color: @foreground;
+    caret-color: @accent;
+}
+
+.workbench entry:focus,
+.workbench-dialog entry:focus {
+    border-color: @accent;
+}
+
+.workbench entry image {
+    color: @muted;
+}
+
+.host-search {
+    margin: 0 12px 10px;
+}
+
+.host-list {
+    padding: 0 8px;
+}
+
+.host-row {
+    border-radius: 6px;
+    background: @chrome;
+}
+
+.workbench button.host-connect {
+    background: transparent;
+    border-color: transparent;
+    padding: 8px 7px;
+}
+
+.workbench button.host-connect:hover {
+    background: @hover;
+}
+
+.workbench button.host-connect:focus {
+    border-color: @accent;
+}
+
+.host-row > .quiet-button {
+    margin: 5px 3px 5px 0;
+}
+
+.host-icon {
+    padding: 7px;
+    border-radius: 6px;
+    color: @accent;
+    background: #293c59;
+}
+
+.host-name {
+    font-weight: bold;
+}
+
+.host-target, .host-empty {
+    font-size: 11px;
+    color: @muted;
+}
+
+.host-empty {
+    padding: 8px;
+}
+
+.host-tag {
+    padding: 2px 4px;
+    border-radius: 4px;
+    background: #314764;
+    color: #c2d8ff;
+    font-size: 10px;
+}
+
+.workbench button.quick-connect {
+    margin: 10px 12px;
+    padding: 6px 8px;
+}
+
+.shortcut {
+    color: @muted;
+    font-size: 10px;
+    font-family: monospace;
+}
+
+.workbench notebook.terminal-tabs {
+    background-color: @canvas;
+    border: 0;
+}
+
+.terminal-tabs > header {
+    min-height: 35px;
+    background: @sidebar;
+    border-bottom: 1px solid @line;
+    box-shadow: none;
+    padding: 0 6px 0 0;
+}
+
+.terminal-tabs > header > tabs > tab {
+    margin: 0;
+    padding: 0 8px;
+    min-height: 34px;
+    background: @sidebar;
+    border: 0;
+    border-right: 1px solid @line;
+    box-shadow: none;
+    color: @muted;
+}
+
+.terminal-tabs > header > tabs > tab:hover {
+    background: @chrome;
+    color: @foreground;
+}
+
+.terminal-tabs > header > tabs > tab:checked {
+    background: @canvas;
+    box-shadow: inset 0 2px @accent;
+    color: @foreground;
+}
+
+.tab-title {
+    font-size: 12px;
+}
+
+.session-dot {
+    font-size: 8px;
+    color: #7f8da3;
+}
+
+.session-running {
+    color: #83cb9b;
+}
+
+.session-failed, .form-error {
+    color: #ff9ca3;
+}
+
+.workbench button.tab-close {
+    min-width: 16px;
+    min-height: 18px;
+    margin: 3px 0;
+}
+
+.terminal-page vte-terminal {
+    padding: 11px 12px;
+}
+
+.statusbar {
+    min-height: 27px;
+    padding: 0 10px;
+    background: @chrome;
+    border-top: 1px solid @line;
+    color: @muted;
+}
+
+.session-status {
+    font-size: 11px;
+}
+
+.empty-icon {
+    color: @accent;
+}
+
+.empty-title {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.dialog-body {
+    padding: 16px 20px;
+    color: @foreground;
+}

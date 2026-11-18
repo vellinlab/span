@@ -14,7 +14,7 @@ Requires:       gtk3 >= 3.22.30
 Recommends:     xorg-x11-xauth
 
 %description
-Open a local Bash shell and a remote OpenSSH session in a split GTK window.
+Open local shells and OpenSSH sessions in a tabbed GTK workspace.
 
 %install
 install -Dpm 0755 %{_sourcedir}/target/release/ssh-workbench %{buildroot}%{_bindir}/ssh-workbench

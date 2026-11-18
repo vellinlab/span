@@ -37,7 +37,7 @@ Maintainer: SSH Workbench maintainers <zyw02@users.noreply.github.com>
 Depends: bash, openssh-client, $libraries
 Recommends: xauth
 Description: A desktop terminal for local shells and OpenSSH sessions
- Control both terminals from a split GTK window.
+ Manage SSH hosts and switch between local and remote terminal tabs.
 CONTROL
 
 mkdir -p "$root/dist"
