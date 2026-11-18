@@ -37,7 +37,7 @@ StrictModes no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 UsePAM yes
-Subsystem sftp internal-sftp
+Subsystem sftp /usr/lib/openssh/sftp-server
 CONFIG
 
 if [[ ${WORKBENCH_TEST_AGENT_SSH:-} == 1 ]]; then
@@ -51,6 +51,9 @@ case \${SSH_ORIGINAL_COMMAND:-} in
         ;;
     "bash -lc 'exec codex app-server'")
         exec /usr/bin/python3 '$PWD/packaging/test-agent.py' app-server
+        ;;
+    '/usr/lib/openssh/sftp-server')
+        exec /usr/lib/openssh/sftp-server
         ;;
     *) exit 1 ;;
 esac

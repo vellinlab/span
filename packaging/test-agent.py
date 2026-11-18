@@ -3,6 +3,7 @@
 
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -28,6 +29,11 @@ A[Inspect] --> B[Test] --> C[Publish]
 
 ![Preview image](test-output.png)
 """
+
+def model(slug, name, default, efforts):
+    return {"model": slug, "id": slug, "displayName": name, "inputModalities": ["text", "image"],
+            "defaultReasoningEffort": default, "supportedReasoningEfforts": [
+                {"reasoningEffort": effort} for effort in efforts]}
 
 
 def send(value):
@@ -63,8 +69,24 @@ for line in sys.stdin:
         assert params["sandbox"] == "workspace-write"
         assert params["approvalPolicy"] == "on-request"
         send({"id": request_id, "result": {"thread": {"id": thread, "turns": []},
-                                          "cwd": str(home), "model": "Codex"}})
+                                          "cwd": str(home), "model": "gpt-base-fixture",
+                                          "modelProvider": "fixture", "reasoningEffort": "low"}})
         (home / "agent-ready").touch()
+    elif method == "model/list":
+        assert params["modelProvider"] == "fixture" and params["limit"] == 50
+        if params.get("cursor") is None:
+            data = [model("gpt-base-fixture", "GPT Base", "low", ["low"])]
+            next_cursor = "fixture-vision"
+        else:
+            assert params["cursor"] == "fixture-vision"
+            data = [model("gpt-vision-fixture", "GPT Vision", "medium", ["medium", "high"])]
+            next_cursor = None
+            (home / "agent-models").touch()
+        send({"id": request_id, "result": {"data": data, "nextCursor": next_cursor}})
+    elif method == "account/rateLimits/read":
+        send({"id": request_id, "result": {"rateLimits": {"limitId": "codex",
+            "primary": {"usedPercent": 17, "windowDurationMins": 300},
+            "secondary": {"usedPercent": 31, "windowDurationMins": 10080}}}})
     elif method == "thread/list":
         assert params["limit"] == 30 and params["sortKey"] == "updated_at"
         results = [entry(saved_thread, "Deployment rollout", "Projects/Operations"),
@@ -78,8 +100,9 @@ for line in sys.stdin:
         assert params["threadId"] == saved_thread and params["excludeTurns"]
         assert params["initialTurnsPage"] == {"limit": 12, "sortDirection": "desc", "itemsView": "full"}
         send({"id": request_id, "result": {"thread": entry(saved_thread, "Deployment rollout", "Projects/Operations"),
-              "model": "Codex", "initialTurnsPage": {"data": [stored_turn("saved-turn", "Latest deployment notes")],
-                                                       "nextCursor": "older-cursor"}}})
+              "model": "gpt-base-fixture", "modelProvider": "fixture", "reasoningEffort": "low",
+              "initialTurnsPage": {"data": [stored_turn("saved-turn", "Latest deployment notes")],
+                                   "nextCursor": "older-cursor"}}})
         with (home / "agent-resumed").open("a") as resumes:
             print(saved_thread, file=resumes)
     elif method == "thread/unsubscribe":
@@ -92,13 +115,34 @@ for line in sys.stdin:
                                           "nextCursor": None}})
         (home / "agent-older-page").touch()
     elif method == "turn/start":
+        if params["threadId"] == saved_thread:
+            message = params["input"][0]["text"]
+            assert message.startswith("Read the remote attachment")
+            uploaded = Path(json.loads(message.splitlines()[-1].removeprefix("- ")))
+            assert uploaded.parent.parent == Path("/tmp") and uploaded.parent.name.startswith("span-")
+            assert uploaded.read_text() == "Workspace notes\n"
+            assert stat.S_IMODE(uploaded.stat().st_mode) == 0o600
+            assert stat.S_IMODE(uploaded.parent.stat().st_mode) == 0o700
+            uploaded.unlink()
+            uploaded.parent.rmdir()
+            send({"id": request_id, "result": {"turn": {"id": "uploaded-turn", "status": "completed"}}})
+            send({"method": "turn/completed", "params": {"threadId": saved_thread,
+                  "turn": {"id": "uploaded-turn", "status": "completed", "error": None}}})
+            (home / "agent-uploaded").touch()
+            continue
         assert params["threadId"] == thread
+        assert params["model"] == "gpt-vision-fixture" and params["effort"] == "high"
+        assert params["input"][1] == {"type": "localImage", "path": str(home / "test-output.png")}
         (home / "agent-prompt").write_text(params["input"][0]["text"])
         send({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress"}}})
         send({"method": "item/agentMessage/delta", "params": {
             "threadId": thread, "turnId": turn, "itemId": item, "delta": "Deployment checklist"}})
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
               "item": {"id": item, "type": "agentMessage", "text": reply}}})
+        send({"method": "thread/tokenUsage/updated", "params": {"threadId": thread, "turnId": turn,
+              "tokenUsage": {"total": {"totalTokens": 12800},
+                             "last": {"totalTokens": 667, "inputTokens": 540, "outputTokens": 127},
+                             "modelContextWindow": 5000}}})
         send({"method": "turn/diff/updated", "params": {"threadId": thread, "turnId": turn, "diff": diff}})
         (home / "agent-replied").touch()
         send({"id": "preview-question", "method": "item/tool/requestUserInput", "params": {

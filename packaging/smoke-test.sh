@@ -93,6 +93,20 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     dialog_open() {
         xdotool search --onlyvisible --name "^$1$" >/dev/null
     }
+    widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    add_attachment() {
+        local file="$1" chooser
+        widget click '附件'
+        wait_until "the attachment chooser" dialog_open '添加附件'
+        chooser="$(xdotool search --onlyvisible --name '^添加附件$' | head -n1)"
+        xdotool windowfocus --sync "$chooser"
+        xdotool key --clearmodifiers ctrl+l
+        xdotool type --clearmodifiers "$file"
+        xdotool key --clearmodifiers Return
+        widget contains "${file##*/}"
+        xdotool windowfocus --sync "$window"
+        widget mouse '输入消息，或添加附件'
+    }
     wait_until "the Add Host dialog" dialog_open '添加主机'
     dialog="$(xdotool search --onlyvisible --name '^添加主机$' | head -n1)"
     xdotool windowfocus --sync "$dialog"
@@ -123,12 +137,16 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     sleep 0.2
     xdotool key --clearmodifiers Return
     wait_until "the Codex App Server handshake" test -f "$HOME/agent-ready"
+    wait_until "the second model catalog page" test -f "$HOME/agent-models"
     sleep 0.25
+    widget combo-next 0
+    widget combo-next 1
+    add_attachment "$HOME/test-output.png"
     xdotool type --clearmodifiers 'Show the deployment check'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-compose.png"
     xdotool key --clearmodifiers ctrl+Return
     wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
     grep -qx 'Show the deployment check' "$HOME/agent-prompt"
-    widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
     widget contains 'Which deployment environment?'
     xdotool mousemove --window "$window" 900 710 click --repeat 8 5
     sleep 0.25
@@ -136,6 +154,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget fill-card 'Which deployment environment?' Staging
     widget click '提交答案'
     wait_until "the structured answer" test -f "$HOME/agent-answered"
+    widget click '用量 · 13%'
+    widget contains '会话累计 · 12,800 tokens'
+    widget contains '5 小时 · 已用 17%'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-usage.png"
+    xdotool key --clearmodifiers Escape
     widget mouse '本轮变更 · 查看 diff'
     widget expanded-contains '本轮变更 · 查看 diff' '+passed'
     widget mouse '本轮变更 · 查看 diff'
@@ -236,6 +259,11 @@ PY
         resumed_twice() { [[ $(wc -l < "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 2 ]]; }
         wait_until "automatic restoration on SSH reconnect" resumed_twice
         widget contains 'Latest deployment notes'
+        add_attachment "$HOME/notes.txt"
+        xdotool type --clearmodifiers 'Read the remote attachment'
+        xdotool key --clearmodifiers ctrl+Return
+        wait_until "remote file attachment bytes, permissions, and path" test -f "$WORKBENCH_SSH_FIXTURE/agent-uploaded"
         printf '%s\n' 'A saved remote Codex session was restored after disconnecting and restarting its authenticated SSH tab.'
+        printf '%s\n' 'Picker files, model and effort overrides, token and account usage, and remote attachment uploads passed.'
     fi
 fi

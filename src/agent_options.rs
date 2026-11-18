@@ -117,7 +117,7 @@ impl Options {
         let next = result["nextCursor"]
             .as_str()
             .filter(|cursor| !cursor.is_empty())
-            .filter(|cursor| catalog.len() < 200 && self.cursors.borrow().len() < 10)
+            .filter(|_| catalog.len() < 200 && self.cursors.borrow().len() < 10)
             .map(str::to_owned);
         drop(catalog);
         if let Some(next) = next.filter(|cursor| self.cursors.borrow_mut().insert(cursor.clone())) {

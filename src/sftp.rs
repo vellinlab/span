@@ -37,6 +37,12 @@ pub fn upload_attachments(
     socket: &Path,
     files: &[(String, Vec<u8>)],
 ) -> Result<Vec<PathBuf>, String> {
+    if files
+        .iter()
+        .any(|(name, _)| name.is_empty() || name.contains(['/', '\0']))
+    {
+        return Err("附件名称无效。".into());
+    }
     let directory = Path::new("/tmp").join(format!("span-{}", gtk::glib::uuid_string_random()));
     through_socket(socket, "60s", |sftp| {
         let mut payload = string_payload(directory.as_os_str().as_bytes())?;
