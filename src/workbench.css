@@ -16,6 +16,13 @@ window.workbench-dialog,
     color: @foreground;
 }
 
+.workbench decoration,
+.workbench-dialog decoration {
+    background-color: @canvas;
+    border: 1px solid @line;
+    box-shadow: none;
+}
+
 .workbench-header,
 .workbench-dialog headerbar {
     min-height: 34px;
@@ -299,10 +306,6 @@ menu menuitem:hover {
     min-width: 16px;
     min-height: 18px;
     margin: 3px 0;
-}
-
-.terminal-page vte-terminal {
-    padding: 11px 12px;
 }
 
 .statusbar {

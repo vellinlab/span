@@ -1,5 +1,6 @@
 mod host_dialog;
 mod hosts;
+mod icons;
 mod session;
 mod vte;
 mod workbench;

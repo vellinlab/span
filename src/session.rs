@@ -1,4 +1,5 @@
 use crate::hosts::Host;
+use crate::icons::Icon;
 use crate::vte::Terminal;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -18,10 +19,10 @@ impl Launch {
         }
     }
 
-    pub fn icon(&self) -> &str {
+    pub fn icon(&self) -> Icon {
         match self {
-            Self::Local => "utilities-terminal-symbolic",
-            Self::Ssh(_) => "network-server-symbolic",
+            Self::Local => Icon::Terminal,
+            Self::Ssh(_) => Icon::Server,
         }
     }
 
@@ -61,6 +62,10 @@ impl Session {
         let terminal = Terminal::new();
         terminal.set_scrollback_lines(10_000);
         terminal.apply_theme();
+        terminal.set_margin_start(9);
+        terminal.set_margin_end(8);
+        terminal.set_margin_top(6);
+        terminal.set_margin_bottom(4);
         terminal.connect_key_press_event(|terminal, event| {
             let shortcut = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
             let modifiers = event.state();

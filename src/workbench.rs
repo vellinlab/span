@@ -1,5 +1,6 @@
 use crate::host_dialog;
 use crate::hosts::{self, Host};
+use crate::icons::{Icon, widget as icon};
 use crate::session::{Launch, Session, State};
 use gtk::prelude::*;
 use gtk::{gio, glib, pango};
@@ -41,7 +42,7 @@ pub fn open(app: &gtk::Application) {
         .group_name("workbench")
         .build();
     tabs.style_context().add_class("terminal-tabs");
-    let plus = icon_button("list-add-symbolic", "新建本地终端 (Ctrl+Shift+T)");
+    let plus = icon_button(Icon::Plus, "新建本地终端 (Ctrl+Shift+T)");
     plus.set_action_name(Some("win.local"));
     plus.show_all();
     tabs.set_action_widget(&plus, gtk::PackType::End);
@@ -56,7 +57,7 @@ pub fn open(app: &gtk::Application) {
 
     let footer = row(9);
     footer.style_context().add_class("statusbar");
-    footer.pack_start(&icon("utilities-terminal-symbolic", 14), false, false, 0);
+    footer.pack_start(&icon(Icon::Terminal, 14), false, false, 0);
     let status = text_label("", "session-status");
     status.set_ellipsize(pango::EllipsizeMode::End);
     footer.pack_start(&status, true, true, 0);
@@ -170,12 +171,16 @@ impl Workbench {
         tab.style_context().add_class("tab-label");
         let label = text_label(session.launch.label(), "tab-title");
         label.set_ellipsize(pango::EllipsizeMode::End);
-        label.set_max_width_chars(20);
+        let title_width = label
+            .create_pango_layout(Some(session.launch.label()))
+            .pixel_size()
+            .0;
+        label.set_width_request(title_width.clamp(64, 160));
         tab.set_tooltip_text(Some(&session.launch.description()));
         tab.pack_start(&icon(session.launch.icon(), 14), false, false, 0);
         tab.pack_start(&label, true, true, 0);
         tab.pack_start(&session.indicator, false, false, 0);
-        let close = icon_button("window-close-symbolic", "关闭标签");
+        let close = icon_button(Icon::Close, "关闭标签");
         close.style_context().add_class("tab-close");
         tab.pack_end(&close, false, false, 0);
         tab.show_all();
@@ -424,8 +429,9 @@ impl Workbench {
         action.style_context().add_class("host-connect");
         action.set_tooltip_text(Some(&format!("连接 {}", host.target)));
         let contents = row(10);
-        let badge = icon("network-server-symbolic", 16);
+        let badge = row(0);
         badge.style_context().add_class("host-icon");
+        badge.add(&icon(Icon::Server, 16));
         let labels = column(2);
         let name = text_label(&host.name, "host-name");
         let target = text_label(&host.target, "host-target");
@@ -473,7 +479,10 @@ impl Workbench {
         });
         let more = gtk::MenuButton::builder().tooltip_text("主机操作").build();
         more.style_context().add_class("quiet-button");
-        more.set_image(Some(&icon("view-more-symbolic", 16)));
+        if let Some(arrow) = more.child() {
+            more.remove(&arrow);
+        }
+        more.add(&icon(Icon::More, 16));
         more.set_popup(Some(&menu));
         item.pack_end(&more, false, false, 0);
         item
@@ -547,7 +556,7 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
         .tooltip_text("显示／隐藏主机栏 (Ctrl+Shift+B)")
         .build();
     hosts.style_context().add_class("quiet-button");
-    hosts.add(&icon("network-server-symbolic", 17));
+    hosts.add(&icon(Icon::Server, 17));
     sidebar
         .bind_property("visible", &hosts, "active")
         .bidirectional()
@@ -555,16 +564,8 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
         .build();
     rail.pack_start(&hosts, false, false, 0);
     for (symbol, tooltip, action) in [
-        (
-            "utilities-terminal-symbolic",
-            "新建本地终端 (Ctrl+Shift+T)",
-            "win.local",
-        ),
-        (
-            "network-transmit-receive-symbolic",
-            "快速连接 (Ctrl+Shift+O)",
-            "win.quick",
-        ),
+        (Icon::Terminal, "新建本地终端 (Ctrl+Shift+T)", "win.local"),
+        (Icon::Connect, "快速连接 (Ctrl+Shift+O)", "win.quick"),
     ] {
         let button = icon_button(symbol, tooltip);
         button.set_action_name(Some(action));
@@ -581,7 +582,7 @@ fn host_sidebar() -> (gtk::Box, gtk::SearchEntry, gtk::Box) {
     let heading = row(8);
     heading.style_context().add_class("sidebar-heading");
     heading.pack_start(&text_label("SSH 主机", "section-title"), true, true, 0);
-    let add = icon_button("list-add-symbolic", "添加主机 (Ctrl+Shift+N)");
+    let add = icon_button(Icon::Plus, "添加主机 (Ctrl+Shift+N)");
     add.set_action_name(Some("win.add-host"));
     heading.pack_end(&add, false, false, 0);
     sidebar.pack_start(&heading, false, false, 0);
@@ -610,7 +611,7 @@ fn empty_workspace() -> gtk::Box {
     let stage = column(12);
     stage.set_halign(gtk::Align::Center);
     stage.set_valign(gtk::Align::Center);
-    let terminal = icon("utilities-terminal-symbolic", 38);
+    let terminal = icon(Icon::Terminal, 38);
     terminal.style_context().add_class("empty-icon");
     stage.pack_start(&terminal, false, false, 0);
     let title = text_label("打开终端", "empty-title");
@@ -644,15 +645,9 @@ fn text_label(text: &str, class: &str) -> gtk::Label {
     label
 }
 
-fn icon(name: &str, size: i32) -> gtk::Image {
-    let image = gtk::Image::from_icon_name(Some(name), gtk::IconSize::Menu);
-    image.set_pixel_size(size);
-    image
-}
-
-fn icon_button(name: &str, tooltip: &str) -> gtk::Button {
+fn icon_button(symbol: Icon, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::builder().tooltip_text(tooltip).build();
     button.style_context().add_class("quiet-button");
-    button.add(&icon(name, 16));
+    button.add(&icon(symbol, 16));
     button
 }
