@@ -4,12 +4,13 @@ set -euo pipefail
 test_home="$(mktemp -d)"
 app_pid=
 xvfb_pid=
+probe_pid=
 cleanup() {
     if [[ $1 != 0 && -f "$test_home/app.log" ]]; then
         cat "$test_home/app.log" >&2
         xwininfo -root -tree >&2 || true
     fi
-    for pid in "$app_pid" "$xvfb_pid"; do
+    for pid in "$probe_pid" "$app_pid" "$xvfb_pid"; do
         if [[ -n "$pid" ]]; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -55,6 +56,8 @@ if grep -q 'Failed to load Workbench theme' "$HOME/app.log"; then
     exit 1
 fi
 printf '%s\n' 'GTK3 window opened on virtual X11 and the local Bash PTY started.'
+awk '/^VmRSS:/ { print "Application RSS with one Bash tab (Xvfb): " $2 " KiB" }' "/proc/$app_pid/status"
+awk '/^Pss:/ { print "Application PSS with one Bash tab (Xvfb): " $2 " KiB" }' "/proc/$app_pid/smaps_rollup"
 
 if [[ $# -eq 2 ]]; then
     LD_LIBRARY_PATH=/usr/lib64/ssh-workbench "$2"
@@ -64,7 +67,6 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     window="$(xdotool search --onlyvisible --name '^SSH Workbench$' | head -n 1)"
     xdotool windowfocus --sync "$window"
     first_bash="$(head -n1 "$HOME/bash-ready")"
-    awk '/^VmRSS:/ { print "Idle application RSS with one Bash tab (Xvfb): " $2 " KiB" }' "/proc/$app_pid/status"
 
     xdotool key --clearmodifiers ctrl+shift+t
     second_bash_started() {
@@ -96,33 +98,32 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers Return
     wait_until "returning to the first Bash tab" grep -qsx "$first_bash" "$HOME/current-bash"
 
-    # OpenSSH reads the temporary config for the CI runner's real user via passwd.
-    ssh_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
-    ssh_config="$ssh_home/.ssh/config"
-    mkdir -p "$ssh_home/.ssh"
-    backup="$(mktemp)"
-    if [[ -f "$ssh_config" ]]; then
-        cp -p "$ssh_config" "$backup"
-    fi
-    printf 'Host ci-host\n    ProxyCommand echo launched > %s/ssh-ready; exit 1\n\n' "$HOME" > "$backup.new"
-    cat "$backup" >> "$backup.new"
-    install -m 0600 "$backup.new" "$ssh_config"
-    restore_ssh() {
-        if [[ -s "$backup" ]]; then
-            install -m 0600 "$backup" "$ssh_config"
-        else
-            rm -f "$ssh_config"
-        fi
-        rm -f "$backup" "$backup.new"
-    }
-    trap 'result=$?; restore_ssh; cleanup "$result"' EXIT
+    # Check the real OpenSSH client version banner against an isolated loopback listener.
+    python3 - "$HOME" <<'PY' &
+import socket
+import sys
+from pathlib import Path
+
+home = Path(sys.argv[1])
+with socket.socket() as listener:
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    (home / "ssh-port").write_text(str(listener.getsockname()[1]))
+    listener.settimeout(15)
+    conn, _ = listener.accept()
+    with conn:
+        conn.settimeout(5)
+        (home / "ssh-banner").write_bytes(conn.makefile("rb").readline())
+PY
+    probe_pid=$!
+    wait_until "the local SSH probe" test -s "$HOME/ssh-port"
 
     xdotool key --clearmodifiers ctrl+shift+o
     wait_until "the Quick Connect dialog" dialog_open '快速连接'
     dialog="$(xdotool search --onlyvisible --name '^快速连接$' | head -n1)"
     xdotool windowfocus --sync "$dialog"
-    xdotool type --clearmodifiers 'ci-host'
+    xdotool type --clearmodifiers "ssh://127.0.0.1:$(cat "$HOME/ssh-port")"
     xdotool key --clearmodifiers Return
-    wait_until "OpenSSH using the configured alias" test -s "$HOME/ssh-ready"
+    wait_until "the system OpenSSH banner" grep -qs '^SSH-2.0-OpenSSH_' "$HOME/ssh-banner"
     printf '%s\n' 'Tab creation/closing, host creation/persistence and system OpenSSH all passed.'
 fi
