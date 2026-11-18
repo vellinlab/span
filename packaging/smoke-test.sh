@@ -37,6 +37,9 @@ for _ in {1..100}; do
     kill -0 "$app_pid"
     if [[ -s "$HOME/bash-ready" ]] && xwininfo -root -tree | grep -F '"SSH Workbench"' >/dev/null; then
         printf '%s\n' 'GTK3 window opened on virtual X11 and the local Bash PTY started.'
+        if [[ $# -eq 2 ]]; then
+            LD_LIBRARY_PATH=/usr/lib64/ssh-workbench "$2"
+        fi
         exit 0
     fi
     sleep 0.1

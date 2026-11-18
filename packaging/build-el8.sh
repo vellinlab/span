@@ -3,14 +3,17 @@ set -euo pipefail
 
 dnf --enablerepo=powertools --setopt=install_weak_deps=False -y install \
     gcc binutils ca-certificates curl pkgconf-pkg-config rpm-build desktop-file-utils \
-    gtk3-devel vte291-devel openssh-clients dbus-daemon xorg-x11-server-Xvfb xorg-x11-utils
+    gtk3-devel vte291-devel openssh-clients dbus-daemon xorg-x11-server-Xvfb xorg-x11-utils \
+    gcc-c++ gettext meson ninja-build fribidi-devel gnutls-devel pcre2-devel zlib-devel xz
 
 curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/ssh-workbench-rustup.sh
 bash /tmp/ssh-workbench-rustup.sh -y --profile minimal --default-toolchain 1.98.1 --component rustfmt
 export PATH="$HOME/.cargo/bin:$PATH"
 
 cargo fmt --all -- --check
-cargo build --locked --release
+RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib64/ssh-workbench' cargo build --locked --release
+bash packaging/build-vte-el8.sh
+gcc -o target/verify-osc packaging/verify-osc.c $(pkg-config --cflags --libs gtk+-3.0 vte-2.91)
 
 printf '%s\n' "$(getconf GNU_LIBC_VERSION)" \
     "GTK $(pkg-config --modversion gtk+-3.0)" "VTE $(pkg-config --modversion vte-2.91)"
@@ -19,7 +22,7 @@ pkg-config --exact-version=3.22.30 gtk+-3.0
 pkg-config --exact-version=0.52.4 vte-2.91
 
 binary=target/release/ssh-workbench
-required_glibc="$(readelf --version-info "$binary" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -n 1)"
+required_glibc="$(readelf --version-info "$binary" target/bundled-vte/libvte-2.91.so.0 | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -n 1)"
 printf 'Highest glibc symbol required: %s\n' "$required_glibc"
 test "$(printf '%s\n' "$required_glibc" GLIBC_2.28 | sort -V | tail -n 1)" = GLIBC_2.28
 dependencies="$(readelf --dynamic "$binary")"
@@ -40,4 +43,6 @@ cp "$topdir"/RPMS/x86_64/*.rpm dist/
 package=(dist/*.rpm)
 rpm -qp --requires "${package[0]}"
 rpm -Uvh "${package[0]}"
-dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/ssh-workbench
+linked_vte="$(ldd /usr/bin/ssh-workbench | awk '$1 == "libvte-2.91.so.0" { print $3 }')"
+test "$(realpath "$linked_vte")" = /usr/lib64/ssh-workbench/libvte-2.91.so.0
+dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/ssh-workbench target/verify-osc

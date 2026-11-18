@@ -9,18 +9,18 @@
 在 GitHub Actions 的 **Build Linux** 成功运行页面下载 `ssh-workbench-el8-x86_64`，解压后安装 RPM。
 
 ```sh
-sudo dnf install ./ssh-workbench-0.2.0-1.el8.x86_64.rpm
+sudo dnf install ./ssh-workbench-0.2.1-1.el8.x86_64.rpm
 ssh-workbench
 ```
 
-CI 使用 AlmaLinux 8，验证 glibc 2.28、GTK 3.22.30 和 VTE 0.52.4，并在虚拟 X11 下启动已安装的 RPM。
+CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下启动已安装的 RPM。RPM 带有仅由 Workbench 加载的 VTE 0.64.2。该版本能忽略 Codex 的 OSC 状态序列。对应的 VTE 源码可从同一次构建的 `vte-0.64.2-source` 取得。
 
 ### Ubuntu 24.04 amd64
 
 下载同一构建页面的 `ssh-workbench-linux-amd64` 并解压。
 
 ```sh
-sudo apt install ./ssh-workbench_0.2.0_amd64.deb
+sudo apt install ./ssh-workbench_0.2.1_amd64.deb
 ssh-workbench
 ```
 
