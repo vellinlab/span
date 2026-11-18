@@ -47,6 +47,8 @@ impl Attachments {
         chooser.set_modal(true);
         chooser.set_destroy_with_parent(true);
         chooser.set_select_multiple(true);
+        chooser.set_default_size(720, 540);
+        chooser.set_current_folder(gtk::glib::home_dir());
         chooser.add_buttons(&[
             ("取消", gtk::ResponseType::Cancel),
             ("添加", gtk::ResponseType::Accept),

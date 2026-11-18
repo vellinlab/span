@@ -106,10 +106,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
         wait_until "the attachment chooser" dialog_open '添加附件'
         chooser="$(xdotool search --onlyvisible --name '^添加附件$' | head -n1)"
         xdotool windowfocus --sync "$chooser"
-        sleep 0.35
-        xdotool key --clearmodifiers ctrl+l
-        xdotool type --clearmodifiers "$file"
-        widget click '添加'
+        widget mouse "${file##*/}"
+        widget mouse '添加'
         wait_until "confirming the selected file" attachment_chooser_closed
         widget contains "${file##*/}"
         xdotool windowfocus --sync "$window"
