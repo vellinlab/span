@@ -24,7 +24,7 @@ impl Part {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Position {
     part: usize,
     byte: usize,
@@ -86,13 +86,11 @@ impl TextSelection {
             }
         });
         view.connect_focus_out_event(|view, _| {
-            if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
-                eprintln!(
-                    "Selection lost focus with anchor {:?}",
-                    view.imp().drag.get()
-                );
+            if view.imp().drag.take().is_some()
+                && let Some(grab) = gtk::grab_get_current().filter(|grab| grab.is_ancestor(view))
+            {
+                grab.grab_remove();
             }
-            view.imp().drag.set(None);
             glib::Propagation::Proceed
         });
         view
@@ -108,11 +106,7 @@ impl TextSelection {
             if event.button() != 1 {
                 return glib::Propagation::Proceed;
             }
-            let anchor = view.hit(event.root(), false);
-            if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
-                eprintln!("Selection press {:?} at {:?}", anchor, event.root());
-            }
-            let Some(anchor) = anchor else {
+            let Some(anchor) = view.hit(event.root(), false) else {
                 return glib::Propagation::Proceed;
             };
             // GTK's viewport scrolls to reveal the focused widget. The pointer
@@ -150,13 +144,6 @@ impl TextSelection {
                 return glib::Propagation::Proceed;
             }
             view.extend_to(event.root());
-            if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
-                eprintln!(
-                    "Selection release {:?} at {:?}",
-                    view.imp().range.get(),
-                    event.root()
-                );
-            }
             let drag = view.imp().drag.take();
             if widget.has_grab() {
                 widget.grab_remove();
@@ -244,9 +231,12 @@ impl TextSelection {
         let (part, x, y) = closest?;
         let label = &self.parts()[part].label;
         let (left, top) = label.layout_offsets();
+        // Labels have no GDK window. GTK reports layout offsets in the
+        // containing window, while x and y above are relative to the label.
+        let allocation = label.allocation();
         let (_, index, trailing) = label.layout()?.xy_to_index(
-            (x - left).saturating_mul(pango::SCALE),
-            (y - top).saturating_mul(pango::SCALE),
+            (x + allocation.x() - left).saturating_mul(pango::SCALE),
+            (y + allocation.y() - top).saturating_mul(pango::SCALE),
         );
         let text = label.text();
         let index = (index as usize).min(text.len());
@@ -306,9 +296,6 @@ impl TextSelection {
     }
 
     pub fn copy(&self) -> bool {
-        if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
-            eprintln!("Selection copy {:?}", self.imp().range.get());
-        }
         let Some(text) = self.selected_text() else {
             return false;
         };
