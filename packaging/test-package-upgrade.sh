@@ -54,3 +54,7 @@ esac
 test -x /usr/bin/span
 test "$(readlink /usr/bin/ssh-workbench)" = span
 printf '%s\n' 'Span replaced the legacy SSH Workbench package and retained the old launcher alias.'
+
+selawik_font="$(fc-match --format '%{file}' 'Selawik:style=Regular')"
+[[ "$selawik_font" == /usr/share/fonts/*/selawk.ttf && "$selawik_font" == */span-selawik/selawk.ttf ]]
+printf 'Fontconfig found the bundled Selawik font at %s.\n' "$selawik_font"

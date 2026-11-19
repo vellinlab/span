@@ -19,7 +19,7 @@ window.workbench,
 .workbench,
 .workbench-dialog,
 popover.agent-picker-menu {
-    font-family: "Segoe UI", "Liberation Sans", "Arial", "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "DejaVu Sans", sans-serif;
+    font-family: "Segoe UI", "Selawik", "Liberation Sans", "Arial", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", "WenQuanYi Micro Hei", "DejaVu Sans", sans-serif;
     font-size: 14px;
     font-weight: 400;
 }

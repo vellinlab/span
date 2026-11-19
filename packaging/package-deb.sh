@@ -13,6 +13,9 @@ ln -s span "$package/usr/bin/ssh-workbench"
 install -D -m 0644 "$root/packaging/io.github.zyw02.SshWorkbench.desktop" \
     "$package/usr/share/applications/io.github.zyw02.SshWorkbench.desktop"
 cp -a "$root/packaging/icons" "$package/usr/share/"
+install -dm 0755 "$package/usr/share/fonts/truetype/span-selawik"
+install -m 0644 "$root"/packaging/fonts/selawik/*.ttf "$package/usr/share/fonts/truetype/span-selawik/"
+install -D -m 0644 "$root/packaging/fonts/selawik/LICENSE.txt" "$package/usr/share/doc/span/Selawik-LICENSE.txt"
 
 cd "$workspace"
 mkdir -p debian "$package/DEBIAN"
@@ -37,7 +40,7 @@ Section: utils
 Priority: optional
 Maintainer: Span maintainers <zyw02@users.noreply.github.com>
 Depends: bash, coreutils, openssh-client, librsvg2-common, $libraries
-Recommends: xauth, fonts-liberation
+Recommends: xauth
 Provides: ssh-workbench
 Conflicts: ssh-workbench
 Replaces: ssh-workbench

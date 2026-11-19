@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/zyw02/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.9-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-rc.13-1.el8.x86_64.rpm
 span
 ```
 
@@ -22,13 +22,15 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./span_0.1.0-rc.9_amd64.deb
+sudo apt install ./span_0.1.0-rc.13_amd64.deb
 span
 ```
 
 安装包与启动命令均使用 `span`。安装时会替换旧的 `ssh-workbench` 软件包，继续读取已有的主机配置。`ssh-workbench` 启动命令仍可作为兼容别名使用。
 
 带 `-alpha.N`、`-beta.N` 或 `-rc.N` 后缀的版本会标记为预发布，供测试使用。
+
+界面英文字体优先使用本机的 Segoe UI，简体中文优先使用微软雅黑 UI 或微软雅黑。安装包附带微软的 [Selawik 1.01](https://github.com/microsoft/Selawik/releases/tag/1.01)，供缺少 Segoe UI 的系统使用。缺少微软雅黑时，优先使用系统已有的思源黑体或 Noto Sans CJK SC。
 
 ## 使用
 
