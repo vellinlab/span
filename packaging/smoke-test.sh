@@ -199,8 +199,15 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
     xdotool windowfocus --sync "$window"
     xdotool mousemove 1250 770
+    files_open="$(widget count '文件目录')"
+    if ((files_open)); then
+        xdotool key --clearmodifiers ctrl+shift+f
+    fi
     widget contains 'CI Host'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/host-workbench.png"
+    if ((files_open)); then
+        xdotool key --clearmodifiers ctrl+shift+f
+    fi
     mkdir "$HOME/Documents" "$HOME/Projects"
     printf 'Workspace notes\n' > "$HOME/notes.txt"
     printf 'Split workspace preview\n' > "$HOME/000-layout.txt"
