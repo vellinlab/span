@@ -3,7 +3,7 @@ set -euo pipefail
 
 dnf --enablerepo=powertools --setopt=install_weak_deps=False -y install \
     gcc binutils ca-certificates curl pkgconf-pkg-config rpm-build desktop-file-utils \
-    gtk3-devel vte291-devel librsvg2 openssh-clients dbus-daemon xorg-x11-server-Xvfb xorg-x11-utils \
+    gtk3-devel vte291-devel librsvg2-devel openssh-clients dbus-daemon xorg-x11-server-Xvfb xorg-x11-utils \
     gcc-c++ gettext meson ninja-build python39 fribidi-devel gnutls-devel pcre2-devel zlib-devel xz
 
 curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/span-rustup.sh
@@ -11,7 +11,9 @@ bash /tmp/span-rustup.sh -y --profile minimal --default-toolchain 1.98.1 --compo
 export PATH="$HOME/.cargo/bin:$PATH"
 
 cargo fmt --all -- --check
-RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib64/span' cargo build --locked --release
+export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib64/span'
+cargo build --locked --release
+cargo test --locked --release svg::tests
 bash packaging/build-vte-el8.sh
 gcc -o target/verify-osc packaging/verify-osc.c $(pkg-config --cflags --libs gtk+-3.0 vte-2.91)
 
@@ -28,6 +30,7 @@ test "$(printf '%s\n' "$required_glibc" GLIBC_2.28 | sort -V | tail -n 1)" = GLI
 dependencies="$(readelf --dynamic "$binary")"
 grep -Fq '[libgtk-3.so.0]' <<< "$dependencies"
 grep -Fq '[libvte-2.91.so.0]' <<< "$dependencies"
+grep -Fq '[librsvg-2.so.2]' <<< "$dependencies"
 
 desktop-file-validate packaging/io.github.zyw02.SshWorkbench.desktop
 version="$(bash packaging/package-version.sh)"

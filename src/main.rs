@@ -22,6 +22,7 @@ mod reading_column;
 mod session;
 mod sftp;
 mod source_preview;
+mod svg;
 mod vte;
 mod workbench;
 

@@ -4,9 +4,10 @@ use crate::files::{self, Source};
 use crate::icons::{self, Icon};
 use crate::session::Session;
 use crate::source_preview::{self, SourceText};
+use crate::svg::Svg;
 use gtk::gdk::prelude::GdkContextExt;
 use gtk::prelude::*;
-use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
+use gtk::{cairo, gdk, gio, glib, pango};
 use std::cell::{Cell, RefCell};
 use std::path::{Component, Path, PathBuf};
 use std::rc::{Rc, Weak};
@@ -454,27 +455,45 @@ impl Panel {
                 scroll.add(&view);
             }
             Content::Image(data, kind) => match agent_render::decode_pixbuf(&data, kind) {
-                Ok(image) => self.add_image(&scroll, &image),
+                Ok(image) => self.add_image(&scroll, (image.width(), image.height()), move |cr| {
+                    cr.set_source_pixbuf(&image, 0.0, 0.0);
+                    let _ = cr.paint();
+                }),
                 Err(error) => {
                     self.notice(&error);
                     return;
                 }
             },
-            Content::Mermaid(text) => {
-                match crate::mermaid::Diagram::parse(&text).and_then(|diagram| diagram.image()) {
-                    Some(image) => self.add_image(&scroll, &image),
-                    None => {
-                        self.notice("该 Mermaid 图可从会话中查看源码。");
-                        return;
-                    }
+            Content::Svg(data) => match Svg::new(&data) {
+                Ok(svg) => self.add_image(&scroll, svg.dimensions(), move |cr| {
+                    svg.draw(cr);
+                }),
+                Err(error) => {
+                    self.notice(&error);
+                    return;
                 }
-            }
+            },
+            Content::Mermaid(text) => match crate::mermaid::Diagram::parse(&text) {
+                Some(diagram) => {
+                    let size = diagram.dimensions();
+                    self.add_image(&scroll, size, move |cr| diagram.draw(cr, size.0, size.1));
+                }
+                None => {
+                    self.notice("该 Mermaid 图可从会话中查看源码。");
+                    return;
+                }
+            },
         }
         self.body.pack_start(&scroll, true, true, 0);
         scroll.show_all();
     }
 
-    fn add_image(&self, scroll: &gtk::ScrolledWindow, image: &gdk_pixbuf::Pixbuf) {
+    fn add_image(
+        &self,
+        scroll: &gtk::ScrolledWindow,
+        size: (i32, i32),
+        draw: impl Fn(&cairo::Context) + 'static,
+    ) {
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 2);
         toolbar.style_context().add_class("preview-zoom");
         let zoom_out = tool("−", "缩小图片");
@@ -490,6 +509,9 @@ impl Panel {
         toolbar.show_all();
 
         let canvas = gtk::DrawingArea::new();
+        if let Some(accessible) = canvas.accessible() {
+            accessible.set_name("图片画布");
+        }
         canvas.set_halign(gtk::Align::Center);
         canvas.set_valign(gtk::Align::Start);
         canvas.set_margin_top(10);
@@ -497,15 +519,15 @@ impl Panel {
         canvas.set_margin_start(8);
         canvas.set_margin_end(8);
         let scale = Rc::new(Cell::new(0.0));
-        let image = image.clone();
         let paint_scale = scale.clone();
-        let (width, height) = (f64::from(image.width()), f64::from(image.height()));
+        let (width, height) = (f64::from(size.0), f64::from(size.1));
         canvas.connect_draw(move |_, cr| {
             let _ = cr.save();
             let factor = paint_scale.get();
             cr.scale(factor, factor);
-            cr.set_source_pixbuf(&image, 0.0, 0.0);
-            let _ = cr.paint();
+            cr.rectangle(0.0, 0.0, width, height);
+            cr.clip();
+            draw(cr);
             let _ = cr.restore();
             glib::Propagation::Stop
         });
@@ -515,9 +537,11 @@ impl Panel {
         let canvas = canvas.downgrade();
         let level = level.downgrade();
         let applied = scale.clone();
+        // Bound the logical canvas as well as the magnification for large SVGs.
+        let max_factor = (32_000.0 / width.max(height)).min(4.0);
         let update = Rc::new(move |factor: f64| {
-            let factor = factor.clamp(0.02, 4.0);
-            if (applied.replace(factor) - factor).abs() > 0.0001 {
+            let factor = factor.clamp(0.02_f64.min(max_factor), max_factor);
+            if applied.replace(factor) != factor {
                 if let Some(canvas) = canvas.upgrade() {
                     canvas.set_size_request(
                         (width * factor).ceil() as i32,
@@ -646,6 +670,7 @@ enum Content {
     Markdown(String),
     Markup(String),
     Image(Vec<u8>, &'static str),
+    Svg(Vec<u8>),
     Mermaid(String),
 }
 
@@ -664,7 +689,7 @@ fn read_file(source: &Source, path: &Path) -> Result<Content, String> {
         return Ok(Content::Image(bytes, "jpeg"));
     }
     if ext == "svg" {
-        return Ok(Content::Image(bytes, "svg"));
+        return Ok(Content::Svg(bytes));
     }
     let text = String::from_utf8(bytes)
         .ok()

@@ -31,7 +31,7 @@ jobs:
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
-            build-essential pkg-config dpkg-dev libgtk-3-dev libvte-2.91-dev librsvg2-common \
+            build-essential pkg-config dpkg-dev libgtk-3-dev libvte-2.91-dev librsvg2-dev librsvg2-common \
             dbus-daemon desktop-file-utils xvfb x11-utils xdotool imagemagick fonts-wqy-microhei openssh-server \
             at-spi2-core python3-pyatspi python3-websockets xclip
 
@@ -80,6 +80,7 @@ jobs:
             dist/agent-workspace-compact.png
             dist/agent-quote-preview.png
             dist/agent-source-preview.png
+            dist/svg-preview-400.png
             dist/agent-activity.png
             dist/agent-paused.png
             dist/agent-task-status.png

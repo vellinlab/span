@@ -184,6 +184,14 @@ import os
 def load_settings():
     return os.getenv("SPAN_TEST_MODE", "standard")  # preserve spacing
 PYTHON
+    cat > "$HOME/000-vector.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="58" viewBox="0 0 64 58">
+  <rect width="64" height="58" fill="#162234"/>
+  <rect fill="white" x="16.25" y="2" width="0.5" height="54"/>
+  <circle fill="none" stroke="#8aabf4" stroke-width=".5" cx="43" cy="28" r="15"/>
+  <path fill="none" stroke="#a4d8c9" stroke-width=".65" d="M33 33 L39 24 L44 30 L53 21"/>
+</svg>
+SVG
     xdotool key --clearmodifiers ctrl+shift+f
     sleep 0.5
     read -r sidebar_x sidebar_y sidebar_width sidebar_height < <(widget bounds '工作区侧栏')
@@ -412,6 +420,22 @@ PYTHON
     widget bounds '行号' >/dev/null
     widget contains '    return os.getenv("SPAN_TEST_MODE", "standard")'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-source-preview.png"
+    widget mouse '000-vector.svg'
+    widget click '预览'
+    widget bounds '图片画布' >/dev/null
+    widget click '原始大小'
+    read -r canvas_x canvas_y canvas_width _ <<< "$(widget bounds '图片画布')"
+    xdotool mousemove "$((canvas_x + canvas_width / 2))" "$((canvas_y + 20))" keydown ctrl click --repeat 7 4 keyup ctrl
+    widget contains '400%'
+    read -r canvas_x canvas_y canvas_width _ <<< "$(widget bounds '图片画布')"
+    [[ "$canvas_width" == 256 ]]
+    xdotool mousemove 12 16
+    sleep 0.2
+    svg_preview="$(dirname "$WORKBENCH_PREVIEW")/svg-preview-400.png"
+    import -window root "$svg_preview"
+    [[ $(convert "$svg_preview" -crop "4x1+$((canvas_x + 64))+$((canvas_y + 30))" +repage \
+        -format '%[fx:u.p{0,0}.r<0.2&&u.p{1,0}.r>0.95&&u.p{2,0}.r>0.95&&u.p{3,0}.r<0.2]' info:) == 1 ]]
+    printf '%s\n' 'SVG zoom resolves a half-pixel source stroke into a sharp two-pixel line at 400%.'
     widget mouse '000-layout.txt'
     widget click '预览'
     widget contains 'Split workspace preview'
