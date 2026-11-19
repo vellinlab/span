@@ -6,7 +6,7 @@ use crate::session::{Launch, Session, State};
 use crate::{APP_ID, APP_NAME};
 use gtk::prelude::*;
 use gtk::{gio, glib, pango};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -17,6 +17,7 @@ struct Workbench {
     sidebar: gtk::Box,
     sidebar_pages: gtk::Stack,
     sidebar_catalog: gtk::Box,
+    panels_pending: Cell<bool>,
     workspace: gtk::Paned,
     browser: Rc<Browser>,
     search: gtk::SearchEntry,
@@ -116,6 +117,7 @@ pub fn open(app: &gtk::Application) {
         sidebar,
         sidebar_pages,
         sidebar_catalog,
+        panels_pending: Cell::new(false),
         workspace,
         browser,
         search,
@@ -202,8 +204,7 @@ pub fn open(app: &gtk::Application) {
         if let Some(workbench) = weak.upgrade() {
             let active = workbench.session_for(page);
             workbench.update_status(active.as_deref());
-            workbench.browser.select(active.as_ref());
-            workbench.sync_catalog(active.as_ref(), false);
+            workbench.schedule_panels();
             if let Some(active) = active {
                 active.focus_terminal();
             }
@@ -222,6 +223,21 @@ pub fn open(app: &gtk::Application) {
 }
 
 impl Workbench {
+    fn schedule_panels(self: &Rc<Self>) {
+        if self.panels_pending.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(workbench) = weak.upgrade() {
+                workbench.panels_pending.set(false);
+                let session = workbench.current_session();
+                workbench.browser.select(session.as_ref());
+                workbench.sync_catalog(session.as_ref(), false);
+            }
+        });
+    }
+
     fn open_local(self: &Rc<Self>) {
         self.open_session(Launch::Local);
     }

@@ -377,9 +377,42 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget click '加载更早的对话'
     wait_until "loading an older page" test -f "$HOME/agent-older-page"
     widget contains 'Earlier deployment notes'
-    widget mouse '已完成 · 2 项活动'
+    widget mouse '已完成 · 3 项活动'
     widget contains 'Checked the saved deployment plan.'
     widget not-contains 'fixture raw reasoning sentinel'
+    widget mouse '运行命令 · printf archived'
+    widget expanded-contains '运行命令 · printf archived' 'Historical command output'
+    widget mouse '运行命令 · printf archived'
+    widget mouse '修改文件 · checks.txt'
+    widget expanded-contains '修改文件 · checks.txt' '+passed'
+    widget mouse '修改文件 · checks.txt'
+    widget mouse '本轮变更 · 查看 diff'
+    widget expanded-contains '本轮变更 · 查看 diff' '+passed'
+
+    widget click '刷新'
+    widget contains '点击会话继续'
+    xdotool key --clearmodifiers ctrl+shift+f
+    widget contains 'agent-older-page'
+    touch "$HOME/000-switch-fixture.txt"
+    xdotool key --clearmodifiers ctrl+shift+t
+    widget contains 'Release checklist'
+    widget contains '000-switch-fixture.txt'
+    catalog_requests="$(wc -l < "$HOME/agent-catalog-requests")"
+    xdotool key --clearmodifiers ctrl+Page_Up
+    widget contains 'Deployment rollout'
+    widget contains 'agent-older-page'
+    widget not-contains 'Release checklist'
+    widget not-contains '000-switch-fixture.txt'
+    xdotool key --clearmodifiers ctrl+Page_Down
+    widget contains 'Release checklist'
+    widget contains '000-switch-fixture.txt'
+    [[ $(wc -l < "$HOME/agent-catalog-requests") -eq $catalog_requests ]]
+    xdotool key --clearmodifiers ctrl+shift+w
+    widget not-contains 'Release checklist'
+    widget click '刷新目录'
+    widget contains '000-switch-fixture.txt'
+    xdotool key --clearmodifiers ctrl+shift+f
+    printf '%s\n' 'Warm tab switches reused their catalogs and directory models. Explicit refresh read the new file.'
     xdotool key --clearmodifiers ctrl+shift+a
     printf '%s\n' 'The Codex session tested formatted table data, structured questions, diff, drawer, search and paginated history.'
 

@@ -15,12 +15,17 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+const INITIAL_TURNS: usize = 4;
+const OLDER_TURNS: usize = 12;
+const CATALOG_FRESHNESS: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Copy)]
 enum Request {
     Initialize { browse: bool },
     Open { resume: bool },
-    Catalog(u64),
+    Catalog { serial: u64, replace: bool },
     Models(u64),
     Quota,
     Turns { prepend: bool, generation: u64 },
@@ -40,6 +45,12 @@ struct TurnDiff {
     id: String,
     expander: gtk::Expander,
     card: DiffCard,
+}
+
+struct CatalogFetch {
+    search: String,
+    archived: bool,
+    fetched_at: Option<Instant>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -89,6 +100,7 @@ pub struct Agent {
     opening: Cell<bool>,
     initialized: Cell<bool>,
     list_serial: Cell<u64>,
+    catalog_fetch: RefCell<Option<CatalogFetch>>,
     catalog: Catalog,
     questions: RefCell<HashMap<Value, gtk::Box>>,
     diff: RefCell<Option<TurnDiff>>,
@@ -300,6 +312,7 @@ impl Agent {
             opening: Cell::new(false),
             initialized: Cell::new(false),
             list_serial: Cell::new(0),
+            catalog_fetch: RefCell::new(None),
             catalog,
             questions: RefCell::new(HashMap::new()),
             diff: RefCell::new(None),
@@ -503,7 +516,11 @@ impl Agent {
         let weak = Rc::downgrade(self);
         self.catalog.refresh.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
-                agent.show_catalog(false);
+                if agent.initialized.get() {
+                    agent.load_catalog(None);
+                } else {
+                    agent.show_catalog(false);
+                }
             }
         });
         let weak = Rc::downgrade(self);
@@ -569,7 +586,18 @@ impl Agent {
             self.focus_catalog();
         }
         if self.initialized.get() {
-            self.load_catalog(None);
+            let search = self.catalog.search.text();
+            let archived = self.catalog.archived.is_active();
+            let has_recent = self.catalog_fetch.borrow().as_ref().is_some_and(|fetch| {
+                fetch.search == search.trim()
+                    && fetch.archived == archived
+                    && fetch
+                        .fetched_at
+                        .is_none_or(|at| at.elapsed() < CATALOG_FRESHNESS)
+            });
+            if !has_recent {
+                self.load_catalog(None);
+            }
         } else {
             self.catalog.loading(true);
             self.start_rpc(true);
@@ -582,15 +610,24 @@ impl Agent {
         }
         let serial = self.list_serial.get() + 1;
         self.list_serial.set(serial);
-        self.catalog.loading(cursor.is_none());
+        let search = self.catalog.search.text();
+        let archived = self.catalog.archived.is_active();
+        let replace = cursor.is_none();
+        let query_changed = self
+            .catalog_fetch
+            .borrow()
+            .as_ref()
+            .is_none_or(|fetch| fetch.search != search.trim() || fetch.archived != archived);
+        self.catalog_fetch.replace(Some(CatalogFetch {
+            search: search.trim().to_owned(),
+            archived,
+            fetched_at: None,
+        }));
+        self.catalog.loading(replace && query_changed);
         self.request(
-            Request::Catalog(serial),
+            Request::Catalog { serial, replace },
             "thread/list",
-            agent_catalog::wire_params(
-                &self.catalog.search.text(),
-                self.catalog.archived.is_active(),
-                cursor,
-            ),
+            agent_catalog::wire_params(&search, archived, cursor),
         );
     }
 
@@ -652,7 +689,7 @@ impl Agent {
             params["threadId"] = json!(resume.trim());
             params["excludeTurns"] = json!(true);
             params["initialTurnsPage"] =
-                json!({"limit": 12, "sortDirection": "desc", "itemsView":"full"});
+                json!({"limit": INITIAL_TURNS, "sortDirection": "desc", "itemsView":"full"});
             "thread/resume"
         } else {
             let cwd = self.cwd.text();
@@ -678,8 +715,9 @@ impl Agent {
     fn turn_page(&self, cursor: Option<String>, prepend: bool) {
         if let Some(thread) = self.thread.borrow().as_deref() {
             let generation = self.history_generation.get();
+            let limit = if prepend { OLDER_TURNS } else { INITIAL_TURNS };
             self.request(Request::Turns { prepend, generation }, "thread/turns/list", json!({
-                "threadId":thread,"limit":12,"cursor":cursor,"sortDirection":"desc","itemsView":"full"
+                "threadId":thread,"limit":limit,"cursor":cursor,"sortDirection":"desc","itemsView":"full"
             }));
         }
     }
@@ -719,20 +757,23 @@ impl Agent {
         for turn in turns {
             let mut changes = String::new();
             let mut activity = None;
+            let status = turn["status"].as_str();
             for item in array(&turn["items"]) {
                 if let Some(record) = Record::from_item(item) {
-                    activity
-                        .get_or_insert_with(|| self.new_activity())
-                        .record(record);
+                    let activity = activity.get_or_insert_with(|| self.new_activity());
+                    if status == Some("inProgress") {
+                        activity.record(record);
+                    } else {
+                        activity.record_history(record);
+                    }
                 } else {
                     self.completed_item(item, true);
                 }
                 append_file_changes(item, &mut changes);
             }
             if !changes.is_empty() {
-                self.add_diff(&changes);
+                self.add_history_diff(changes);
             }
-            let status = turn["status"].as_str();
             latest_status = status;
             if !prepend && status == Some("inProgress") {
                 running = turn["id"].as_str().map(str::to_owned);
@@ -827,7 +868,8 @@ impl Agent {
                         self.show_status(error);
                         self.update_controls();
                     }
-                    Request::Catalog(serial) if serial == self.list_serial.get() => {
+                    Request::Catalog { serial, .. } if serial == self.list_serial.get() => {
+                        self.catalog_fetch.take();
                         self.catalog.show_status(error);
                     }
                     Request::Models(generation) if generation == self.history_generation.get() => {
@@ -880,7 +922,9 @@ impl Agent {
                 self.initialized.set(true);
                 self.update_controls();
                 if browse {
-                    self.load_catalog(None);
+                    if self.catalog.panel.is_mapped() {
+                        self.load_catalog(None);
+                    }
                     self.show_status("选择会话或新建");
                 } else {
                     self.open_thread();
@@ -939,11 +983,16 @@ impl Agent {
                     "就绪"
                 });
                 self.update_controls();
-                self.input.grab_focus();
+                if self.panel.is_mapped() {
+                    self.input.grab_focus();
+                }
             }
-            Request::Catalog(serial) => {
+            Request::Catalog { serial, replace } => {
                 if serial == self.list_serial.get() {
-                    self.catalog.update(result);
+                    if let Some(fetch) = self.catalog_fetch.borrow_mut().as_mut() {
+                        fetch.fetched_at = Some(Instant::now());
+                    }
+                    self.catalog.update(result, replace);
                 }
             }
             Request::Models(generation) => {
@@ -1225,6 +1274,7 @@ impl Agent {
         self.pending.borrow_mut().clear();
         self.opening.set(false);
         self.initialized.set(false);
+        self.catalog_fetch.take();
         self.uploading.set(false);
         self.pasting.set(false);
         self.remove_pending_user();
@@ -1575,11 +1625,32 @@ impl Agent {
     }
 
     fn add_diff(&self, diff: &str) -> (gtk::Expander, DiffCard) {
-        let expander = gtk::Expander::new(Some("本轮变更 · 查看 diff"));
-        expander.style_context().add_class("agent-command");
+        let expander = self.diff_expander();
         let card = DiffCard::new("本轮改动");
         card.update(diff);
         expander.add(card.widget());
+        self.append(&expander);
+        expander.set_visible(!diff.is_empty());
+        (expander, card)
+    }
+
+    fn add_history_diff(&self, diff: String) {
+        let expander = self.diff_expander();
+        let weak = expander.downgrade();
+        agent_activity::render_detail(&expander, true, move || {
+            if let Some(expander) = weak.upgrade() {
+                let card = DiffCard::new("本轮改动");
+                card.update(&diff);
+                expander.add(card.widget());
+                card.widget().show_all();
+            }
+        });
+        self.append(&expander);
+    }
+
+    fn diff_expander(&self) -> gtk::Expander {
+        let expander = gtk::Expander::new(Some("本轮变更 · 查看 diff"));
+        expander.style_context().add_class("agent-command");
         let history = self.history.downgrade();
         let timeline = self.scroll.downgrade();
         expander.connect_notify_local(Some("expanded"), move |expander, _| {
@@ -1602,9 +1673,7 @@ impl Agent {
                 }
             });
         });
-        self.append(&expander);
-        expander.set_visible(!diff.is_empty());
-        (expander, card)
+        expander
     }
 
     fn add_user(&self, text: &str) -> gtk::Label {

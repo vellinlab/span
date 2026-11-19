@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Entry {
     pub id: String,
     pub project: String,
@@ -178,11 +178,12 @@ impl Catalog {
             .set_sensitive(self.cursor.borrow().is_some() && status != "正在读取会话…");
     }
 
-    pub fn update(&self, result: &Value) {
+    pub fn update(&self, result: &Value, replace: bool) {
         let mut entries = self.entries.borrow_mut();
-        let mut seen: HashSet<_> = entries.iter().map(|entry| entry.id.clone()).collect();
+        let mut next = if replace { Vec::new() } else { entries.clone() };
+        let mut seen: HashSet<_> = next.iter().map(|entry| entry.id.clone()).collect();
         if let Some(data) = result["data"].as_array() {
-            entries.extend(
+            next.extend(
                 data.iter()
                     .filter_map(Entry::parse)
                     .filter(|entry| seen.insert(entry.id.clone())),
@@ -190,6 +191,15 @@ impl Catalog {
         }
         self.cursor
             .replace(result["nextCursor"].as_str().map(str::to_owned));
+        self.show_status(if next.is_empty() {
+            "没有匹配的会话"
+        } else {
+            "点击会话继续"
+        });
+        if *entries == next {
+            return;
+        }
+        *entries = next;
         for child in self.list.children() {
             self.list.remove(&child);
         }
@@ -243,11 +253,6 @@ impl Catalog {
             }
         }
         self.list.show_all();
-        self.show_status(if entries.is_empty() {
-            "没有匹配的会话"
-        } else {
-            "点击会话继续"
-        });
     }
 }
 

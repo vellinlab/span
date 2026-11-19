@@ -66,6 +66,8 @@ def stored_turn(identifier, text):
         {"id": identifier + "-message", "type": "agentMessage", "text": text},
         {"id": identifier + "-reasoning", "type": "reasoning", "summary": ["Checked the saved deployment plan."],
          "content": ["fixture raw reasoning sentinel"]},
+        {"id": identifier + "-command", "type": "commandExecution", "command": "printf archived",
+         "status": "completed", "exitCode": 0, "aggregatedOutput": "Historical command output\n" * 200},
         {"id": identifier + "-change", "type": "fileChange", "changes": [
             {"path": "checks.txt", "diff": diff}]}]}
 
@@ -164,6 +166,8 @@ for line in sys.stdin:
             "secondary": {"usedPercent": 31, "windowDurationMins": 10080}}}})
     elif method == "thread/list":
         assert params["limit"] == 30 and params["sortKey"] == "updated_at"
+        with (home / "agent-catalog-requests").open("a") as requests:
+            print(os.getpid(), file=requests)
         results = [entry(saved_thread, "Deployment rollout", "Projects/Operations"),
                    entry(thread, "Release checklist", "Projects/Operations"),
                    entry("archive-notes", "Build notes", "Projects/Platform")]
@@ -173,7 +177,7 @@ for line in sys.stdin:
         (home / ("agent-searched" if search else "agent-catalog")).touch()
     elif method == "thread/resume":
         assert params["threadId"] == saved_thread and params["excludeTurns"]
-        assert params["initialTurnsPage"] == {"limit": 12, "sortDirection": "desc", "itemsView": "full"}
+        assert params["initialTurnsPage"] == {"limit": 4, "sortDirection": "desc", "itemsView": "full"}
         send({"id": request_id, "result": {"thread": entry(saved_thread, "Deployment rollout", "Projects/Operations"),
               "model": "gpt-base-fixture", "modelProvider": "fixture", "reasoningEffort": "low",
               "initialTurnsPage": {"data": [stored_turn("saved-turn", "Latest deployment notes")],

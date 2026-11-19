@@ -4,7 +4,7 @@ use crate::agent_render;
 use gtk::pango;
 use gtk::prelude::*;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 const SUMMARY_LIMIT: usize = 8 * 1024;
 const SUMMARY_PARTS: usize = 24;
@@ -18,6 +18,7 @@ pub struct Activity {
 }
 
 struct Entry {
+    row: gtk::Expander,
     title: gtk::Label,
     view: View,
     summary: Vec<String>,
@@ -26,7 +27,10 @@ struct Entry {
 enum View {
     Text(gtk::Label),
     Command(gtk::Box),
-    Patch { files: gtk::Label, diff: DiffCard },
+    Patch {
+        files: gtk::Label,
+        diff: Rc<DiffCard>,
+    },
 }
 
 pub struct Record<'a> {
@@ -146,6 +150,14 @@ impl Activity {
     }
 
     pub fn record(&mut self, record: Record<'_>) {
+        self.render_record(record, false);
+    }
+
+    pub fn record_history(&mut self, record: Record<'_>) {
+        self.render_record(record, true);
+    }
+
+    fn render_record(&mut self, record: Record<'_>, historical: bool) {
         let entry = self.entry(record.id, record.kind);
         entry.title.set_text(&record.title);
         entry.title.set_tooltip_text(Some(&record.title));
@@ -162,20 +174,28 @@ impl Activity {
                     Some("inProgress") => "运行中",
                     _ => "",
                 };
-                for child in body.children() {
-                    body.remove(&child);
-                }
-                let card = agent_render::code_card("Shell", &record.detail, nonempty(Some(status)));
-                body.add(&card);
-                card.show_all();
+                let body = body.clone();
+                let detail = record.detail;
+                render_detail(&entry.row, historical, move || {
+                    for child in body.children() {
+                        body.remove(&child);
+                    }
+                    let card = agent_render::code_card("Shell", &detail, nonempty(Some(status)));
+                    body.add(&card);
+                    card.show_all();
+                });
             }
             View::Patch { files, diff } => {
                 files.set_text(&record.detail);
-                if let Some(patch) = &record.patch {
-                    diff.update(patch);
-                    diff.widget().show();
+                if let Some(patch) = record.patch {
+                    let diff = diff.clone();
+                    let files = files.clone();
+                    render_detail(&entry.row, historical, move || {
+                        diff.update(&patch);
+                        diff.widget().show();
+                        files.hide();
+                    });
                 }
-                files.set_visible(!diff.widget().is_visible());
             }
         }
         self.set_heading(&format!("进行中 · {}", record.title));
@@ -242,7 +262,7 @@ impl Activity {
                 let files = agent_render::text("");
                 files.style_context().add_class("agent-activity-detail");
                 body.add(&files);
-                let diff = DiffCard::new("文件补丁");
+                let diff = Rc::new(DiffCard::new("文件补丁"));
                 body.add(diff.widget());
                 diff.widget().show_all();
                 diff.widget().set_no_show_all(true);
@@ -263,12 +283,28 @@ impl Activity {
             self.rows.add(&item);
             item.show_all();
             Entry {
+                row: item,
                 title,
                 view,
                 summary: Vec::new(),
             }
         })
     }
+}
+
+pub fn render_detail(row: &gtk::Expander, deferred: bool, render: impl FnOnce() + 'static) {
+    if !deferred || row.is_expanded() {
+        render();
+        return;
+    }
+    let render = RefCell::new(Some(render));
+    row.connect_expanded_notify(move |row| {
+        if row.is_expanded()
+            && let Some(render) = render.take()
+        {
+            render();
+        }
+    });
 }
 
 pub fn summary_delta(params: &Value) -> Option<(&str, usize, &str)> {

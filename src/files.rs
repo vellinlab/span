@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub const MAX_ENTRIES: usize = 10_000;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Source {
     Local,
     Sftp { socket: Option<PathBuf> },

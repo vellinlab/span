@@ -4,8 +4,13 @@ use crate::session::Session;
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
+use std::time::{Duration, Instant};
+
+const DIRECTORY_FRESHNESS: Duration = Duration::from_secs(15);
+const CACHED_DIRECTORIES: usize = 3;
 
 pub struct Browser {
     pub panel: gtk::Box,
@@ -14,16 +19,25 @@ pub struct Browser {
     parent: gtk::Button,
     refresh: gtk::Button,
     hidden: gtk::ToggleButton,
-    list: gtk::ListStore,
     entry_icons: [Option<gdk_pixbuf::Pixbuf>; 3],
     rows: gtk::TreeView,
     session: RefCell<Weak<Session>>,
-    directory: RefCell<Option<Directory>>,
+    directory: RefCell<Option<Rc<Directory>>>,
+    cached: RefCell<VecDeque<DirectoryView>>,
     request: Cell<u64>,
     pending: RefCell<Option<Request>>,
     in_flight: Cell<bool>,
     loading: Cell<bool>,
     monitor: RefCell<Option<gio::FileMonitor>>,
+}
+
+struct DirectoryView {
+    session: Weak<Session>,
+    source: Source,
+    directory: Rc<Directory>,
+    model: gtk::ListStore,
+    fetched_at: Instant,
+    show_hidden: bool,
 }
 
 struct Request {
@@ -66,15 +80,7 @@ impl Browser {
         location.pack_start(&refresh, false, false, 0);
         panel.pack_start(&location, false, false, 0);
 
-        let list = gtk::ListStore::new(&[
-            String::static_type(),
-            String::static_type(),
-            String::static_type(),
-            String::static_type(),
-            u32::static_type(),
-            gdk_pixbuf::Pixbuf::static_type(),
-        ]);
-        let rows = gtk::TreeView::with_model(&list);
+        let rows = gtk::TreeView::new();
         rows.style_context().add_class("files-table");
         rows.set_headers_visible(true);
         rows.set_enable_search(true);
@@ -129,7 +135,6 @@ impl Browser {
             parent,
             refresh,
             hidden,
-            list,
             entry_icons: [
                 icons::pixbuf(Icon::Folder, 16, &gdk::RGBA::new(0.60, 0.76, 0.97, 1.0)),
                 icons::pixbuf(Icon::File, 16, &gdk::RGBA::new(0.63, 0.68, 0.74, 1.0)),
@@ -138,6 +143,7 @@ impl Browser {
             rows,
             session: RefCell::new(Weak::new()),
             directory: RefCell::new(None),
+            cached: RefCell::new(VecDeque::new()),
             request: Cell::new(0),
             pending: RefCell::new(None),
             in_flight: Cell::new(false),
@@ -154,11 +160,27 @@ impl Browser {
         if !self.panel.is_visible() || self.session.borrow().ptr_eq(&next) {
             return;
         }
-        self.session.replace(next);
+        self.session.replace(next.clone());
         self.invalidate();
-        self.directory.replace(None);
-        self.list.clear();
-        self.path.set_text("");
+        let current = session.and_then(|session| self.take_cached(&next, &session.file_source()));
+        if let Some(view) = current {
+            let fresh = view.fetched_at.elapsed() < DIRECTORY_FRESHNESS;
+            self.directory.replace(Some(view.directory.clone()));
+            self.path
+                .set_text(&files::display(view.directory.path.as_os_str()));
+            if view.show_hidden == self.hidden.is_active() {
+                self.show_model(&view.model, &view.directory);
+            } else {
+                self.render();
+            }
+            self.cache_view(view);
+            if fresh {
+                self.update_controls();
+                return;
+            }
+        } else {
+            self.clear_view();
+        }
         if let Some(session) = session {
             self.load(session.directory.borrow().clone());
         } else {
@@ -170,11 +192,36 @@ impl Browser {
     pub fn reset(&self) {
         self.invalidate();
         self.session.replace(Weak::new());
-        self.directory.replace(None);
-        self.list.clear();
-        self.path.set_text("");
+        self.clear_view();
         self.status.set_text("打开终端标签以浏览文件");
         self.update_controls();
+    }
+
+    fn clear_view(&self) {
+        self.directory.take();
+        self.rows.set_model(gtk::TreeModel::NONE);
+        self.path.set_text("");
+    }
+
+    fn take_cached(&self, session: &Weak<Session>, source: &Source) -> Option<DirectoryView> {
+        let mut cached = self.cached.borrow_mut();
+        cached.retain(|view| view.session.strong_count() > 0);
+        if let Source::Sftp { socket } = source
+            && !socket.as_deref().is_some_and(crate::sftp::socket_ready)
+        {
+            return None;
+        }
+        let index = cached
+            .iter()
+            .position(|view| view.session.ptr_eq(session) && view.source == *source)?;
+        cached.remove(index)
+    }
+
+    fn cache_view(&self, view: DirectoryView) {
+        let mut cached = self.cached.borrow_mut();
+        cached.retain(|item| !item.session.ptr_eq(&view.session));
+        cached.push_front(view);
+        cached.truncate(CACHED_DIRECTORIES);
     }
 
     fn invalidate(&self) {
@@ -245,8 +292,9 @@ impl Browser {
     }
 
     fn activated_directory(&self, row: &gtk::TreePath) -> Option<PathBuf> {
-        let iter = self.list.iter(row)?;
-        let index = self.list.value(&iter, 4).get::<u32>().ok()? as usize;
+        let model = self.rows.model()?;
+        let iter = model.iter(row)?;
+        let index = model.value(&iter, 4).get::<u32>().ok()? as usize;
         let directory = self.directory.borrow();
         let directory = directory.as_ref()?;
         let entry = directory.entries.get(index)?;
@@ -281,6 +329,10 @@ impl Browser {
 
     pub fn reload(self: &Rc<Self>) {
         if self.panel.is_visible() {
+            let session = self.session.borrow();
+            self.cached
+                .borrow_mut()
+                .retain(|view| !view.session.ptr_eq(&session));
             self.load(self.current_path());
         }
     }
@@ -321,21 +373,22 @@ impl Browser {
         self.in_flight.set(true);
         let weak = Rc::downgrade(self);
         glib::MainContext::default().spawn_local(async move {
-            let result = gio::spawn_blocking(move || source.list(path.as_deref()))
+            let reader = source.clone();
+            let result = gio::spawn_blocking(move || reader.list(path.as_deref()))
                 .await
                 .unwrap_or_else(|_| Err("目录读取意外中断。".into()));
             if let Some(browser) = weak.upgrade() {
                 browser.in_flight.set(false);
                 if browser.request.get() == id {
                     browser.loading.set(false);
-                    browser.finish(result);
+                    browser.finish(source, result);
                 }
                 browser.start_pending();
             }
         });
     }
 
-    fn finish(&self, result: Result<Directory, String>) {
+    fn finish(&self, source: Source, result: Result<Directory, String>) {
         match result {
             Ok(directory) => {
                 if let Some(session) = self.session.borrow().upgrade() {
@@ -343,8 +396,19 @@ impl Browser {
                 }
                 self.path
                     .set_text(&files::display(directory.path.as_os_str()));
-                self.directory.replace(Some(directory));
-                self.render();
+                let directory = Rc::new(directory);
+                self.directory.replace(Some(directory.clone()));
+                let show_hidden = self.hidden.is_active();
+                let model = self.build_model(&directory, show_hidden);
+                self.show_model(&model, &directory);
+                self.cache_view(DirectoryView {
+                    session: self.session.borrow().clone(),
+                    source,
+                    directory,
+                    model,
+                    fetched_at: Instant::now(),
+                    show_hidden,
+                });
             }
             Err(error) => {
                 self.status.set_text(&error);
@@ -355,54 +419,69 @@ impl Browser {
     }
 
     fn render(&self) {
-        self.list.clear();
         if let Some(directory) = self.directory.borrow().as_ref() {
-            let show_hidden = self.hidden.is_active();
-            let mut shown = 0;
-            for (index, entry) in directory.entries.iter().enumerate() {
-                if !show_hidden && entry.hidden() {
-                    continue;
-                }
-                shown += 1;
-                let icon = match entry.kind {
-                    Kind::Directory => &self.entry_icons[0],
-                    Kind::Symlink => &self.entry_icons[2],
-                    _ => &self.entry_icons[1],
-                };
-                let name = files::display(&entry.name);
-                let size = match (entry.kind, entry.size) {
-                    (Kind::File, Some(size)) => glib::format_size(size).to_string(),
-                    _ => "—".into(),
-                };
-                let modified = entry
-                    .modified
-                    .and_then(|timestamp| glib::DateTime::from_unix_local(timestamp).ok())
-                    .and_then(|date| date.format("%Y-%m-%d %H:%M").ok())
-                    .map_or_else(|| "—".into(), |s| s.to_string());
-                let mode = entry
-                    .mode
-                    .map_or_else(|| "—".into(), |mode| format!("{:04o}", mode & 0o7777));
-                self.list.insert_with_values(
-                    None,
-                    &[
-                        (0, &name),
-                        (1, &size),
-                        (2, &modified),
-                        (3, &mode),
-                        (4, &(index as u32)),
-                        (5, icon),
-                    ],
-                );
+            let model = self.build_model(directory, self.hidden.is_active());
+            self.show_model(&model, directory);
+        }
+    }
+
+    fn build_model(&self, directory: &Directory, show_hidden: bool) -> gtk::ListStore {
+        let list = gtk::ListStore::new(&[
+            String::static_type(),
+            String::static_type(),
+            String::static_type(),
+            String::static_type(),
+            u32::static_type(),
+            gdk_pixbuf::Pixbuf::static_type(),
+        ]);
+        for (index, entry) in directory.entries.iter().enumerate() {
+            if !show_hidden && entry.hidden() {
+                continue;
             }
-            if !self.loading.get() {
-                self.status.set_tooltip_text(None);
-                let suffix = if directory.truncated {
-                    " · 到达显示上限"
-                } else {
-                    ""
-                };
-                self.status.set_text(&format!("{shown} 项{suffix}"));
-            }
+            let icon = match entry.kind {
+                Kind::Directory => &self.entry_icons[0],
+                Kind::Symlink => &self.entry_icons[2],
+                _ => &self.entry_icons[1],
+            };
+            let name = files::display(&entry.name);
+            let size = match (entry.kind, entry.size) {
+                (Kind::File, Some(size)) => glib::format_size(size).to_string(),
+                _ => "—".into(),
+            };
+            let modified = entry
+                .modified
+                .and_then(|timestamp| glib::DateTime::from_unix_local(timestamp).ok())
+                .and_then(|date| date.format("%Y-%m-%d %H:%M").ok())
+                .map_or_else(|| "—".into(), |s| s.to_string());
+            let mode = entry
+                .mode
+                .map_or_else(|| "—".into(), |mode| format!("{:04o}", mode & 0o7777));
+            list.insert_with_values(
+                None,
+                &[
+                    (0, &name),
+                    (1, &size),
+                    (2, &modified),
+                    (3, &mode),
+                    (4, &(index as u32)),
+                    (5, icon),
+                ],
+            );
+        }
+        list
+    }
+
+    fn show_model(&self, model: &gtk::ListStore, directory: &Directory) {
+        self.rows.set_model(Some(model));
+        if !self.loading.get() {
+            self.status.set_tooltip_text(None);
+            let suffix = if directory.truncated {
+                " · 到达显示上限"
+            } else {
+                ""
+            };
+            self.status
+                .set_text(&format!("{} 项{suffix}", model.iter_n_children(None)));
         }
     }
 
