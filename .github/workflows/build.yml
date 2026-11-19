@@ -124,9 +124,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  windows:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/windows.yml
+
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [linux-amd64, el8-x86_64]
+    needs: [linux-amd64, el8-x86_64, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -155,6 +159,14 @@ jobs:
           name: vte-0.64.2-source
           path: release
 
+      - name: Download Windows portable package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: span-*-windows-x86_64.zip
+          path: release
+          merge-multiple: true
+          skip-decompress: true
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -175,6 +187,7 @@ jobs:
           assets=(
             "$rpm_asset"
             "$deb_asset"
+            "release/span-$version-windows-x86_64.zip"
             "release/vte-0.64.2.tar.xz"
           )
           for asset in "${assets[@]}"; do

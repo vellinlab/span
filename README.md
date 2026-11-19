@@ -30,7 +30,7 @@ span
 
 ### Windows x86_64
 
-从通过的 [Build Windows](https://github.com/zyw02/span/actions/workflows/windows.yml) 下载 `span-windows-x86_64` 构建产物。解压后打开 `Span.exe`，使用 Windows 自带的 ConPTY 运行 PowerShell。GTK3 运行库随便携包提供。
+下载 `span-*-windows-x86_64.zip`。版本包随 GitHub Release 发布，测试包可在通过的 [Build Windows](https://github.com/zyw02/span/actions/workflows/windows.yml) 中下载。解压后打开 `Span.exe`，使用 Windows 自带的 ConPTY 运行 PowerShell。GTK3 运行库随便携包提供。
 
 远程终端使用系统 OpenSSH 客户端，密码和验证码在终端中输入。Windows 的 SFTP 和远程 Codex 会为同一主机建立后台 SSH 连接，需要可直接使用的密钥或 SSH Agent。先在终端确认主机公钥，后台连接会验证已保存的主机身份。使用本地 Codex 会话需要将已登录的 `codex.exe` 放在 `PATH` 中。本地 Windows Codex 目前使用独立的 App Server。
 
@@ -52,7 +52,7 @@ span
 
 可拖动左栏右边的分隔线调整宽度。快速连接先填写 SSH 目标，由 OpenSSH 请求认证。支持 AskPass 的 OpenSSH 在需要时弹出掩码输入框，较早的客户端在终端中提示。密码与验证码不会保存。
 
-双击文件可在右侧预览 UTF-8 文本、代码、Markdown、HTML、Mermaid 和 PNG/JPEG/SVG 图片。图片可缩放、适合宽度或恢复原始大小，也可用 `Ctrl`＋滚轮缩放。SVG 和 Mermaid 按当前倍率重绘。Markdown 预览保留代码块与表格，HTML 以静态方式展示。上方按钮可上传本机文件到当前目录，或下载选中的文件。上传遇到同名文件时会提示，下载覆盖前会确认。远端文件操作复用已登录的 OpenSSH 连接打开 SFTP 通道。
+双击文件可在右侧预览 UTF-8 文本、代码、Markdown、HTML、Mermaid 和 PNG/JPEG/SVG 图片。图片可缩放、适合宽度或恢复原始大小，也可用 `Ctrl`＋滚轮缩放。SVG 和 Mermaid 按当前倍率重绘。Markdown 预览保留代码块与表格，HTML 以静态方式展示。上方按钮可上传本机文件到当前目录，或下载选中的文件。上传遇到同名文件时会提示，下载覆盖前会确认。Linux 的远端文件操作复用已登录的 OpenSSH 连接，Windows 按上述要求建立后台 SFTP 连接。
 
 Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会自动进入同一个右侧预览区。用预览标题栏的箭头切换产物，点击会话里的文件链接或预览按钮可再次打开。HTML 预览中的 HTTP／HTTPS 链接由系统默认浏览器打开。手动选中的预览会保留，新的产物可用箭头切换查看。
 

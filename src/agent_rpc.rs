@@ -2,7 +2,7 @@ use async_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use futures_channel::mpsc;
 use futures_util::{
     StreamExt, TryStreamExt, future,
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
 };
 use gtk::gio::{self, prelude::*};
 use gtk::glib;
@@ -21,6 +21,10 @@ fi
 printf "span-codex-stdio\n"
 exec codex app-server
 "#;
+
+#[cfg(windows)]
+#[path = "windows_pipe.rs"]
+mod windows_pipe;
 
 pub struct Rpc {
     process: gio::Subprocess,
@@ -88,7 +92,12 @@ impl Rpc {
             .map_err(|e| format!("无法启动 Codex：{e}"))?;
         let stdin = process.stdin_pipe().expect("Codex stdin pipe");
         let stdout = process.stdout_pipe().expect("Codex stdout pipe");
-        let stream = gio::SimpleIOStream::new(&stdout, &stdin);
+        #[cfg(unix)]
+        let stream = gio::SimpleIOStream::new(&stdout, &stdin)
+            .into_async_read_write()
+            .map_err(|_| "无法打开 Codex 的输入输出流。")?;
+        #[cfg(windows)]
+        let stream = windows_pipe::Pipe::new(stdout, stdin);
         let (outgoing, requests) = mpsc::unbounded();
         let rpc = Rc::new(Self {
             process,
@@ -143,16 +152,12 @@ impl Rpc {
 }
 
 async fn exchange(
-    stream: gio::SimpleIOStream,
+    stream: impl AsyncRead + AsyncWrite + Unpin,
     mut requests: mpsc::UnboundedReceiver<String>,
     route_startup: bool,
     receive: impl Fn(&[u8]),
 ) -> Result<(), String> {
-    let mut stream = BufReader::new(
-        stream
-            .into_async_read_write()
-            .map_err(|_| "无法打开 Codex 的输入输出流。")?,
-    );
+    let mut stream = BufReader::new(stream);
     let mut line = Vec::new();
     let shared = if route_startup {
         let route = async {
