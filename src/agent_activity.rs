@@ -65,7 +65,7 @@ impl<'a> Record<'a> {
                         Some(
                             earlier
                                 .get(index)
-                                .and_then(|prefix| part.strip_prefix(prefix))
+                                .and_then(|prefix| part.strip_prefix(prefix.as_str()))
                                 .unwrap_or(part),
                         )
                     })

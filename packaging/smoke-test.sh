@@ -342,7 +342,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers Escape
     read -r pause_x pause_y _ < <(widget bounds '继续推理')
     ((stop_x == pause_x && stop_y == pause_y))
-    widget contains '已中断'
+    widget contains '已停止 · 1 项活动'
     widget contains 'Preparing the comparison table.'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-paused.png"
     widget mouse '输入消息，或添加附件'

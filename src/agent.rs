@@ -811,10 +811,15 @@ impl Agent {
         };
         for turn in turns {
             let mut changes = String::new();
-            let mut activity = None;
+            let mut activity: Option<Activity> = None;
             let mut assistant_text = Vec::new();
             let status = turn["status"].as_str();
             for item in array(&turn["items"]) {
+                if item["type"] == "userMessage"
+                    && let Some(previous) = activity.take()
+                {
+                    previous.finish(Some("steered"));
+                }
                 if let Some(record) = Record::from_item(item) {
                     let activity = activity.get_or_insert_with(|| self.new_activity());
                     if status == Some("inProgress") {
