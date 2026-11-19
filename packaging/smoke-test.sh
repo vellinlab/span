@@ -267,14 +267,6 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget click '复制 HTML'
     xclip -out -selection clipboard -target text/html > "$HOME/table.html"
     grep -q '<td>12 passed</td>' "$HOME/table.html"
-    widget click '复制本轮 Markdown'
-    copied_turn="$(xclip -out -selection clipboard)"
-    [[ $copied_turn == *'| Integration | 12 passed |'* && $copied_turn == *'Environment confirmed.'* ]]
-    [[ $(widget count '复制本轮 Markdown') == 1 && $(widget count '复制本轮富文本') == 1 ]]
-    widget click '复制本轮富文本'
-    xclip -out -selection clipboard -target text/html > "$HOME/turn.html"
-    grep -q 'Environment confirmed.' "$HOME/turn.html"
-    printf '%s\n' 'Only completed turns show the two copy icons, and both include all of the turn’s replies.'
     widget click '复制代码'
     xclip -out -selection clipboard | grep -qx 'target=staging'
     widget click '保存 PNG'
@@ -283,6 +275,16 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowfocus --sync "$save_dialog"
     xdotool key --clearmodifiers Escape
     xdotool windowfocus --sync "$window"
+    xdotool mousemove --window "$window" 900 360 click --repeat 16 5
+    widget contains 'Environment confirmed.'
+    widget click '复制本轮 Markdown'
+    copied_turn="$(xclip -out -selection clipboard)"
+    [[ $copied_turn == *'| Integration | 12 passed |'* && $copied_turn == *'Environment confirmed.'* ]]
+    [[ $(widget count '复制本轮 Markdown') == 1 && $(widget count '复制本轮富文本') == 1 ]]
+    widget click '复制本轮富文本'
+    xclip -out -selection clipboard -target text/html > "$HOME/turn.html"
+    grep -q 'Environment confirmed.' "$HOME/turn.html"
+    printf '%s\n' 'Only completed turns show the two copy icons, and both include all of the turn’s replies.'
 
     xdotool key --clearmodifiers ctrl+shift+h
     wait_until "the host-scoped session sidebar" test -f "$HOME/agent-catalog"
