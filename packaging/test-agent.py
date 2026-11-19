@@ -242,10 +242,11 @@ for line in sys.stdin:
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
         quoted_prompt = "> span_preview_marker\n\nDraft before quotes"
-        expected_speed = "priority" if message in ("Show the deployment check\n你", quoted_prompt) else "default"
+        continued_prompt = "请继续上一轮未完成的任务。"
+        expected_speed = "priority" if message in ("Show the deployment check\n你", quoted_prompt, continued_prompt) else "default"
         assert params["serviceTierForTurn"] == expected_speed
         assert "serviceTier" not in params
-        if message == "Show the deployment check\n你":
+        if message in ("Show the deployment check\n你", continued_prompt):
             assert params["sandboxPolicy"] == {"type": "readOnly", "networkAccess": False}
             assert params["approvalPolicy"] == "never"
         elif message == "Check the comparison layout":
@@ -286,7 +287,8 @@ for line in sys.stdin:
             (home / "agent-uploaded").touch()
             continue
         assert params["threadId"] == thread
-        assert params["model"] == "gpt-vision-fixture" and params["effort"] == "high"
+        assert params["model"] == "gpt-vision-fixture"
+        assert params["effort"] == ("medium" if message == continued_prompt else "high")
         if message == "Check the comparison layout":
             assert len(params["input"]) == 1
             send({"id": request_id, "result": {"turn": {"id": interruptible_turn, "status": "inProgress"}}})
@@ -306,7 +308,7 @@ for line in sys.stdin:
                 "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-draft",
                 "delta": "**Preparing the comparison table.**"}})
             continue
-        if message == "请继续上一轮未完成的任务。":
+        if message == continued_prompt:
             assert interrupted and len(params["input"]) == 1
             send({"id": request_id, "result": {"turn": {"id": continued_turn, "status": "inProgress"}}})
             send({"method": "item/completed", "params": {"threadId": thread, "turnId": continued_turn,

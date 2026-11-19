@@ -691,6 +691,8 @@ scrolledwindow.terminal-page overshoot,
     background: none;
     box-shadow: none;
     border: 0;
+    border-image: none;
+    outline-width: 0;
 }
 
 scrolledwindow.agent-scroll > scrollbar.vertical,
@@ -714,9 +716,10 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 }
 
 .agent-user {
-    background: #293348;
-    border-radius: 15px;
-    padding: 9px 13px;
+    background: #23252b;
+    border: 1px solid #32353d;
+    border-radius: 11px;
+    padding: 8px 12px;
     font-size: 15px;
 }
 
@@ -845,9 +848,9 @@ scrolledwindow.agent-table-scroll {
 }
 
 .agent-compose-card {
-    background: @chrome;
-    border: 1px solid #393c45;
-    border-radius: 17px;
+    background: #23252b;
+    border: 1px solid #353740;
+    border-radius: 14px;
     padding: 7px 10px 9px;
 }
 
@@ -863,7 +866,7 @@ scrolledwindow.agent-table-scroll {
 
 .draft-quotes,
 .draft-quotes viewport {
-    background: @chrome;
+    background: transparent;
 }
 
 .draft-quotes {
@@ -871,8 +874,8 @@ scrolledwindow.agent-table-scroll {
 }
 
 .draft-quote {
-    background: #2a3240;
-    border: 1px solid #3e4b61;
+    background: #2a2e38;
+    border: 1px solid #3a4150;
     border-left: 2px solid @accent;
     border-radius: 7px;
     padding: 3px 6px 3px 9px;
@@ -908,6 +911,12 @@ scrolledwindow.agent-table-scroll {
     border-radius: 4px;
     background: @surface;
     color: @foreground;
+}
+
+.agent-controls .agent-next-turn {
+    color: @muted;
+    font-size: 11px;
+    margin-left: 4px;
 }
 
 .agent-controls button.agent-picker {

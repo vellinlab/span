@@ -6,7 +6,7 @@ pub enum Icon {
     Terminal,
     Conversation,
     TerminalDrawer,
-    Server,
+    RemoteHost,
     Connect,
     Plus,
     Close,
@@ -118,14 +118,27 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.move_to(12.0, 18.0);
             cr.line_to(16.0, 18.0);
         }
-        Icon::Server => {
-            for y in [4.5, 13.5] {
-                cr.rectangle(3.0, y, 18.0, 6.0);
-                cr.move_to(6.5, y + 3.0);
-                cr.line_to(7.5, y + 3.0);
-                cr.move_to(13.5, y + 3.0);
-                cr.line_to(17.5, y + 3.0);
-            }
+        Icon::RemoteHost => {
+            cr.move_to(10.0, 16.0);
+            cr.line_to(5.0, 16.0);
+            cr.curve_to(3.7, 16.0, 3.0, 15.3, 3.0, 14.0);
+            cr.line_to(3.0, 5.5);
+            cr.curve_to(3.0, 4.2, 3.7, 3.5, 5.0, 3.5);
+            cr.line_to(17.0, 3.5);
+            cr.curve_to(18.3, 3.5, 19.0, 4.2, 19.0, 5.5);
+            cr.line_to(19.0, 9.7);
+            cr.move_to(8.0, 16.0);
+            cr.line_to(8.0, 19.0);
+            cr.move_to(5.5, 19.0);
+            cr.line_to(10.2, 19.0);
+            cr.new_sub_path();
+            cr.arc(17.0, 17.0, 4.8, 0.0, std::f64::consts::TAU);
+            cr.move_to(16.0, 15.6);
+            cr.line_to(14.6, 17.0);
+            cr.line_to(16.0, 18.4);
+            cr.move_to(18.0, 15.6);
+            cr.line_to(19.4, 17.0);
+            cr.line_to(18.0, 18.4);
         }
         Icon::Connect => {
             cr.move_to(4.0, 8.0);

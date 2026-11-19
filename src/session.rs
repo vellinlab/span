@@ -26,7 +26,7 @@ impl Launch {
     pub fn icon(&self) -> Icon {
         match self {
             Self::Local => Icon::Terminal,
-            Self::Ssh(_) => Icon::Server,
+            Self::Ssh(_) => Icon::RemoteHost,
         }
     }
 

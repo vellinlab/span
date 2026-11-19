@@ -326,16 +326,8 @@ impl Workbench {
         tab.set_tooltip_text(Some(&session.launch.description()));
         let mode_icon = gtk::Stack::new();
         mode_icon.style_context().add_class("tab-mode-icon");
-        let terminal_icon = icon(session.launch.icon(), 14);
-        if let Some(accessible) = terminal_icon.accessible() {
-            accessible.set_name("终端标签图标");
-        }
-        let conversation_icon = icon(Icon::Conversation, 14);
-        if let Some(accessible) = conversation_icon.accessible() {
-            accessible.set_name("Codex 会话标签图标");
-        }
-        mode_icon.add_named(&terminal_icon, "terminal");
-        mode_icon.add_named(&conversation_icon, "agent");
+        mode_icon.add_named(&icon(session.launch.icon(), 14), "terminal");
+        mode_icon.add_named(&icon(Icon::Conversation, 14), "agent");
         let weak_icon = mode_icon.downgrade();
         session.page.connect_visible_child_name_notify(move |page| {
             if let (Some(mode_icon), Some(name)) = (weak_icon.upgrade(), page.visible_child_name())
@@ -696,7 +688,7 @@ impl Workbench {
         let contents = row(10);
         let badge = row(0);
         badge.style_context().add_class("host-icon");
-        badge.add(&icon(Icon::Server, 16));
+        badge.add(&icon(Icon::RemoteHost, 16));
         let labels = column(2);
         let name = text_label(&host.name, "host-name");
         let target = text_label(&host.target, "host-target");
@@ -828,7 +820,7 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
         .tooltip_text("显示／隐藏侧栏 (Ctrl+Shift+B)")
         .build();
     hosts.style_context().add_class("quiet-button");
-    hosts.add(&icon(Icon::Server, 17));
+    hosts.add(&icon(Icon::RemoteHost, 17));
     sidebar
         .bind_property("visible", &hosts, "active")
         .bidirectional()

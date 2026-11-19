@@ -32,7 +32,11 @@ pub fn scroll_vertical(scroll: &gtk::ScrolledWindow, delta: f64) -> f64 {
     let previous = adjustment.value();
     let next = (previous + step * delta).clamp(lower, upper);
     adjustment.set_value(next);
-    delta - (next - previous) / step
+    let remaining = delta - (next - previous) / step;
+    if remaining < -0.001 && next == lower {
+        scroll.emit_by_name::<()>("edge-overshot", &[&gtk::PositionType::Top]);
+    }
+    remaining
 }
 
 pub struct Part {

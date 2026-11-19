@@ -12,6 +12,7 @@ pub struct Options {
     model: Picker,
     effort: Picker,
     fast: gtk::ToggleButton,
+    next_turn: gtk::Label,
     turn_speed_supported: Cell<bool>,
     current: RefCell<(String, Option<String>)>,
     catalog: RefCell<Vec<Model>>,
@@ -292,6 +293,7 @@ impl Options {
         let permission = Picker::new("会话权限", "", 0, 172, Some(Icon::Shield));
         let model = Picker::new("选择模型", "", 19, 182, None);
         let effort = Picker::new("思考强度", "思考 · ", 14, 126, None);
+        effort.button.set_tooltip_text(Some("选择下一轮的思考强度"));
         let fast = gtk::ToggleButton::new();
         fast.set_valign(gtk::Align::Center);
         fast.style_context().add_class("agent-picker");
@@ -301,6 +303,11 @@ impl Options {
         if let Some(accessible) = fast.accessible() {
             accessible.set_name("Fast 模式");
         }
+        let next_turn = gtk::Label::new(Some("下一轮"));
+        next_turn.set_valign(gtk::Align::Baseline);
+        next_turn.set_no_show_all(true);
+        next_turn.style_context().add_class("agent-next-turn");
+        actions.pack_start(&next_turn, false, false, 0);
         actions.pack_start(&permission.button, false, false, 0);
         actions.pack_start(&model.button, false, false, 0);
         actions.pack_start(&effort.button, false, false, 0);
@@ -311,6 +318,7 @@ impl Options {
             model,
             effort,
             fast,
+            next_turn,
             turn_speed_supported: Cell::new(false),
             current: RefCell::new((String::new(), None)),
             catalog: RefCell::new(Vec::new()),
@@ -503,11 +511,12 @@ impl Options {
         } else if !model_supports_fast {
             "当前模型未提供 Fast 模式"
         } else {
-            "Fast 模式 · 仅影响 Span 发起的轮次"
+            "Fast 模式 · 从 Span 发起的下一轮起生效"
         }));
     }
 
-    pub fn update(&self, enabled: bool) {
+    pub fn update(&self, enabled: bool, running: bool) {
+        self.next_turn.set_visible(running);
         self.permission.button.set_sensitive(enabled);
         let catalog = self.catalog.borrow();
         self.model
@@ -544,6 +553,15 @@ impl Options {
                 .permission_mode()
                 .filter(|mode| Some(*mode) != self.applied_permission.get()),
         }
+    }
+
+    pub fn current_model_accepts_images(&self) -> bool {
+        let current = self.current.borrow();
+        self.catalog
+            .borrow()
+            .iter()
+            .find(|model| model.id == current.0)
+            .is_none_or(|model| model.images)
     }
 
     pub fn remember(&self) {

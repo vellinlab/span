@@ -217,9 +217,7 @@ SVG
     xdotool key --clearmodifiers Return
     wait_until "returning to the first Bash tab" grep -qsx "$first_bash" "$HOME/current-bash"
 
-    widget bounds '终端标签图标' >/dev/null
     widget click '切换 Codex 会话／终端'
-    widget bounds 'Codex 会话标签图标' >/dev/null
     xdotool windowsize "$window" 1250 940
     sleep 0.2
     xdotool key --clearmodifiers Return
@@ -517,7 +515,19 @@ SVG
     widget contains 'Preparing the comparison table.'
     widget not-contains '**Preparing the comparison table.**'
     widget contains '正在生成回复'
-    widget not-state '会话权限' sensitive
+    widget state '会话权限' sensitive
+    widget bounds '下一轮' >/dev/null
+    widget mouse '会话权限'
+    widget mouse '只读'
+    widget description '会话权限' '只读。从下一轮起生效。'
+    widget mouse '选择模型'
+    widget mouse 'GPT Base'
+    widget mouse '选择模型'
+    widget mouse 'GPT Vision'
+    widget mouse '思考强度'
+    widget mouse '中'
+    widget mouse 'Fast 模式'
+    widget state 'Fast 模式' checked
     widget mouse '已完成 · 2 项活动'
     timeline_wheel 5 2
     widget contains 'Thinking after the progress update.'
@@ -565,6 +575,7 @@ SVG
     widget click '继续推理'
     widget contains 'AgentScope'
     widget bounds '发送' >/dev/null
+    [[ $(widget count '下一轮') == 0 ]]
 
     table_geometry() {
         local row_y row_height actions_y
@@ -607,8 +618,10 @@ SVG
     wait_until "resuming a saved Codex session" test -f "$HOME/agent-resumed"
     read -r _ _ dot_width _ <<< "$(widget bounds '就绪')"
     [[ $dot_width -le 10 ]]
-    widget click '加载更早的对话'
-    wait_until "loading an older page" test -f "$HOME/agent-older-page"
+    widget contains 'Latest deployment notes'
+    [[ ! -f "$HOME/agent-older-page" ]]
+    timeline_wheel 4 1
+    wait_until "loading an older page by scrolling" test -f "$HOME/agent-older-page"
     widget contains 'Earlier deployment notes'
     widget mouse '已完成 · 3 项活动'
     widget contains 'Checked the saved deployment plan.'

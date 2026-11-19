@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 const INITIAL_TURNS: usize = 4;
 const OLDER_TURNS: usize = 12;
+const HISTORY_PREFETCH_DISTANCE: f64 = 64.0;
 const CATALOG_FRESHNESS: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Copy)]
@@ -123,6 +124,8 @@ pub struct Agent {
     history: gtk::Box,
     older: gtk::Button,
     history_cursor: RefCell<Option<String>>,
+    history_loading: Cell<bool>,
+    history_anchor: RefCell<Option<(gtk::Widget, i32)>>,
     history_generation: Cell<u64>,
     prepend_at: Cell<Option<i32>>,
     opening: Cell<bool>,
@@ -250,12 +253,16 @@ impl Agent {
         if let Some(accessible) = scroll.accessible() {
             accessible.set_name("对话记录");
         }
-        let older = button("加载更早的对话", false);
-        older.set_halign(gtk::Align::Start);
+        let older = button("重试加载较早的对话", false);
+        older.set_halign(gtk::Align::Center);
+        older.set_valign(gtk::Align::Start);
+        older.set_margin_top(8);
         older.set_no_show_all(true);
-        history.add(&older);
         scroll.add(&history);
-        panel.pack_start(&scroll, true, true, 0);
+        let timeline = gtk::Overlay::new();
+        timeline.add(&scroll);
+        timeline.add_overlay(&older);
+        panel.pack_start(&timeline, true, true, 0);
 
         let composer = crate::reading_column::new(0);
         composer.style_context().add_class("agent-composer");
@@ -406,6 +413,8 @@ impl Agent {
             history,
             older,
             history_cursor: RefCell::new(None),
+            history_loading: Cell::new(false),
+            history_anchor: RefCell::new(None),
             history_generation: Cell::new(0),
             prepend_at: Cell::new(None),
             opening: Cell::new(false),
@@ -452,10 +461,38 @@ impl Agent {
         let weak = Rc::downgrade(self);
         self.older.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
-                if let Some(cursor) = agent.history_cursor.borrow().clone() {
-                    agent.older.set_sensitive(false);
-                    agent.turn_page(Some(cursor), true);
-                }
+                agent.load_older_history();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.scroll.connect_edge_overshot(move |_, edge| {
+            if edge == gtk::PositionType::Top
+                && let Some(agent) = weak.upgrade()
+            {
+                agent.load_older_history();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        let adjustment = self.scroll.vadjustment();
+        let previous = Cell::new(adjustment.value());
+        adjustment.connect_value_changed(move |adjustment| {
+            let value = adjustment.value();
+            if value < previous.replace(value)
+                && value - adjustment.lower() <= HISTORY_PREFETCH_DISTANCE
+                && let Some(agent) = weak.upgrade()
+            {
+                agent.load_older_history();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.history.connect_size_allocate(move |_, _| {
+            if let Some(agent) = weak.upgrade()
+                && let Some((anchor, previous_y)) = agent.history_anchor.take()
+            {
+                let adjustment = agent.scroll.vadjustment();
+                adjustment.set_value(
+                    adjustment.value() + f64::from(anchor.allocation().y() - previous_y),
+                );
             }
         });
         let weak = Rc::downgrade(self);
@@ -824,6 +861,19 @@ impl Agent {
         );
     }
 
+    fn load_older_history(&self) {
+        if self.opening.get() || self.history_loading.get() || self.rpc.borrow().is_none() {
+            return;
+        }
+        if let Some(cursor) = self.history_cursor.borrow().clone() {
+            self.history_loading.set(true);
+            self.older.set_label("正在加载较早的对话…");
+            self.older.set_sensitive(false);
+            self.older.show();
+            self.turn_page(Some(cursor), true);
+        }
+    }
+
     fn turn_page(&self, cursor: Option<String>, prepend: bool) {
         if let Some(thread) = self.thread.borrow().as_deref() {
             let generation = self.history_generation.get();
@@ -856,9 +906,15 @@ impl Agent {
 
     fn load_turns(&self, data: &Value, newest_first: bool, prepend: bool) {
         let Some(turns) = data.as_array() else { return };
-        if prepend {
-            self.prepend_at.set(Some(1));
-        }
+        let anchor = if prepend {
+            self.prepend_at.set(Some(0));
+            self.history.children().into_iter().next().map(|widget| {
+                let y = widget.allocation().y();
+                (widget, y)
+            })
+        } else {
+            None
+        };
         let mut running = None;
         let mut latest_status = None;
         let turns: Box<dyn Iterator<Item = &Value>> = if newest_first {
@@ -921,7 +977,9 @@ impl Agent {
                 activity.finish(status);
             }
         }
-        self.prepend_at.set(None);
+        if self.prepend_at.take().is_some_and(|index| index > 0) {
+            self.history_anchor.replace(anchor);
+        }
         if !prepend {
             self.can_continue.set(latest_status == Some("interrupted"));
         }
@@ -932,10 +990,14 @@ impl Agent {
     }
 
     fn update_history_cursor(&self, result: &Value) {
-        let cursor = result["nextCursor"].as_str().map(str::to_owned);
-        self.older.set_visible(cursor.is_some());
-        self.older.set_sensitive(cursor.is_some());
+        let previous = self.history_cursor.take();
+        let cursor = result["nextCursor"]
+            .as_str()
+            .filter(|cursor| !cursor.is_empty() && Some(*cursor) != previous.as_deref())
+            .map(str::to_owned);
         self.history_cursor.replace(cursor);
+        self.history_loading.set(false);
+        self.older.hide();
     }
 
     pub fn reconnect(self: &Rc<Self>) {
@@ -1027,7 +1089,11 @@ impl Agent {
                         prepend,
                         generation,
                     } if generation == self.history_generation.get() => {
-                        self.older.set_sensitive(prepend);
+                        if prepend {
+                            self.history_loading.set(false);
+                            self.older.set_label("重试加载较早的对话");
+                            self.older.set_sensitive(true);
+                        }
                         self.show_status(error);
                     }
                     Request::Send => {
@@ -1105,7 +1171,7 @@ impl Agent {
                 }
                 self.clear_history();
                 self.options.open(result);
-                self.options.model_tooltip("选择下一条消息使用的模型");
+                self.options.model_tooltip("选择下一轮使用的模型");
                 self.usage.clear_tokens();
                 self.model_provider
                     .replace(result["modelProvider"].as_str().map(str::to_owned));
@@ -1337,10 +1403,15 @@ impl Agent {
             self.update_controls();
             return;
         }
+        let images = if turn.is_some() {
+            self.options.current_model_accepts_images()
+        } else {
+            selection.images
+        };
         let message_id = glib::uuid_string_random().to_string();
         let mut params = json!({
             "threadId": thread,
-            "input": files.input(&draft.message, selection.images),
+            "input": files.input(&draft.message, images),
             "clientUserMessageId": message_id,
         });
         let (request, method) = if let Some(turn) = turn {
@@ -1438,15 +1509,15 @@ impl Agent {
         self.approvals.borrow_mut().clear();
         self.questions.borrow_mut().clear();
         self.history_cursor.take();
+        self.history_anchor.take();
+        self.history_loading.set(false);
         self.client_messages.borrow_mut().clear();
         self.pasting.set(false);
         self.can_continue.set(false);
         self.interrupting.set(false);
         self.older.hide();
         for child in self.history.children() {
-            if child != self.older.clone().upcast::<gtk::Widget>() {
-                self.history.remove(&child);
-            }
+            self.history.remove(&child);
         }
     }
 
@@ -1468,6 +1539,8 @@ impl Agent {
         self.quota_started.set(false);
         self.older.hide();
         self.history_cursor.take();
+        self.history_anchor.take();
+        self.history_loading.set(false);
         self.thread.take();
         self.turn.take();
         self.active.set(false);
@@ -2149,8 +2222,7 @@ impl Agent {
             .chips
             .set_sensitive(ready && !opening && !waiting);
         self.quotes.widget.set_sensitive(!waiting);
-        self.options
-            .update(ready && !opening && !waiting && !running);
+        self.options.update(ready && !opening && !waiting, running);
         self.usage.button.set_sensitive(ready);
         self.update_task_status();
         self.update_primary();
