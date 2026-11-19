@@ -1,8 +1,13 @@
-use gtk::glib::{self, translate::from_glib_full};
+use crate::ssh::{Channel, ChannelBuf};
+use gtk::glib;
+#[cfg(unix)]
+use gtk::glib::translate::from_glib_full;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -11,7 +16,7 @@ pub const MAX_ENTRIES: usize = 10_000;
 #[derive(Clone, PartialEq, Eq)]
 pub enum Source {
     Local,
-    Sftp { socket: Option<PathBuf> },
+    Sftp { socket: Option<ChannelBuf> },
 }
 
 impl Source {
@@ -64,7 +69,7 @@ impl Source {
         })
     }
 
-    fn socket(&self) -> Result<&Path, String> {
+    fn socket(&self) -> Result<&Channel, String> {
         match self {
             Self::Sftp {
                 socket: Some(socket),
@@ -96,12 +101,7 @@ fn write_local(
 ) -> Result<(), String> {
     let temporary =
         destination.with_file_name(format!(".span-copy-{}", glib::uuid_string_random()));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temporary)
-        .map_err(file_error)?;
+    let mut file = create_private_file(&temporary).map_err(file_error)?;
     let result = write(&mut file).and_then(|_| file.sync_all().map_err(file_error));
     drop(file);
     let result = result.and_then(|_| {
@@ -120,9 +120,18 @@ fn file_error(error: io::Error) -> String {
     format!("本地文件操作失败：{error}")
 }
 
+pub fn create_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options.open(path)
+}
+
 pub struct ControlSocket(PathBuf);
 
 impl ControlSocket {
+    #[cfg(unix)]
     pub fn new() -> Option<Self> {
         // GLib creates an exclusive 0700 directory. Keep OpenSSH's socket inside it.
         let directory: Option<PathBuf> = unsafe {
@@ -185,7 +194,7 @@ pub struct Entry {
 
 impl Entry {
     pub fn hidden(&self) -> bool {
-        self.name.as_os_str().as_bytes().starts_with(b".")
+        self.name.as_encoded_bytes().starts_with(b".")
     }
 }
 
@@ -208,12 +217,24 @@ fn list_local(path: Option<&Path>) -> io::Result<Directory> {
         let metadata = fs::symlink_metadata(item.path()).ok();
         entries.push(Entry {
             name: item.file_name(),
-            kind: metadata
-                .as_ref()
-                .map_or(Kind::Other, |metadata| Kind::from_mode(metadata.mode())),
-            size: metadata.as_ref().map(MetadataExt::size),
-            modified: metadata.as_ref().map(MetadataExt::mtime),
+            kind: metadata.as_ref().map_or(Kind::Other, |metadata| {
+                let kind = metadata.file_type();
+                if kind.is_symlink() {
+                    Kind::Symlink
+                } else if kind.is_dir() {
+                    Kind::Directory
+                } else if kind.is_file() {
+                    Kind::File
+                } else {
+                    Kind::Other
+                }
+            }),
+            size: metadata.as_ref().map(fs::Metadata::len),
+            modified: metadata.as_ref().and_then(last_modified),
+            #[cfg(unix)]
             mode: metadata.as_ref().map(MetadataExt::mode),
+            #[cfg(windows)]
+            mode: None,
         });
     }
     Ok(Directory {
@@ -221,6 +242,20 @@ fn list_local(path: Option<&Path>) -> io::Result<Directory> {
         entries,
         truncated,
     })
+}
+
+fn last_modified(metadata: &fs::Metadata) -> Option<i64> {
+    #[cfg(unix)]
+    return Some(metadata.mtime());
+    #[cfg(windows)]
+    return metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs()
+        .try_into()
+        .ok();
 }
 
 pub fn display(value: &std::ffi::OsStr) -> String {

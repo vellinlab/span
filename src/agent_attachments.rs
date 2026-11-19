@@ -3,9 +3,10 @@ use gtk::prelude::*;
 use gtk::{gdk_pixbuf, glib, pango};
 use serde_json::{Value, json};
 use std::cell::RefCell;
-use std::fs::{self, DirBuilder, File, OpenOptions};
+use std::fs::{self, DirBuilder, File};
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+#[cfg(unix)]
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -111,17 +112,15 @@ impl Attachments {
         }
         let directory =
             std::env::temp_dir().join(format!("span-clipboard-{}", glib::uuid_string_random()));
-        DirBuilder::new()
-            .mode(0o700)
+        let mut builder = DirBuilder::new();
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder
             .create(&directory)
             .map_err(|error| format!("无法准备剪贴板图片：{error}"))?;
         let path = directory.join("剪贴板图片.png");
-        let result = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)
-            .and_then(|mut file| file.write_all(&data));
+        let result =
+            crate::files::create_private_file(&path).and_then(|mut file| file.write_all(&data));
         if let Err(error) = result {
             remove_pasted(&path);
             return Err(format!("无法暂存剪贴板图片：{error}"));
@@ -217,7 +216,7 @@ impl Prepared {
         }
     }
 
-    pub fn read(paths: Vec<PathBuf>, socket: Option<&Path>) -> Result<Self, String> {
+    pub fn read(paths: Vec<PathBuf>, socket: Option<&crate::ssh::Channel>) -> Result<Self, String> {
         let mut entries = Vec::new();
         let mut files = Vec::new();
         let mut remaining = MAX_BYTES;

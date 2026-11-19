@@ -16,7 +16,7 @@ const MAX_IMAGE: usize = 8 * 1024 * 1024;
 #[derive(Clone)]
 pub struct Context {
     pub cwd: PathBuf,
-    pub socket: Option<PathBuf>,
+    pub socket: Option<crate::ssh::ChannelBuf>,
 }
 
 pub fn response(
@@ -868,7 +868,7 @@ fn save_asset(
     dialog.show();
 }
 
-fn load_image(path: &Path, socket: Option<&Path>) -> Result<Vec<u8>, String> {
+fn load_image(path: &Path, socket: Option<&crate::ssh::Channel>) -> Result<Vec<u8>, String> {
     if let Some(socket) = socket {
         return crate::sftp::read_image(socket, path, MAX_IMAGE);
     }

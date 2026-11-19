@@ -9,7 +9,6 @@ use gtk::glib;
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::ffi::OsStr;
-use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -32,31 +31,51 @@ pub struct Rpc {
 
 impl Rpc {
     pub fn start(
-        socket: Option<&Path>,
+        socket: Option<&crate::ssh::Channel>,
         receive: impl Fn(Result<Value, String>) + 'static,
     ) -> Result<Rc<Self>, String> {
-        let mut argv: Vec<&OsStr> = Vec::new();
         let remote_command = format!("bash -lc '{SERVER_COMMAND}'");
-        if let Some(socket) = socket {
-            argv.extend(
-                [
-                    "/usr/bin/ssh",
-                    "-F",
-                    "/dev/null",
-                    "-T",
-                    "-x",
-                    "-o",
-                    "BatchMode=yes",
-                    "-o",
-                    "ProxyCommand=/bin/false",
-                    "-S",
-                ]
-                .map(OsStr::new),
-            );
-            argv.push(socket.as_os_str());
-            argv.extend(["--", "localhost", &remote_command].map(OsStr::new));
+        let mut argv: Vec<&OsStr> = Vec::new();
+        #[cfg(unix)]
+        {
+            if let Some(socket) = socket {
+                argv.extend(
+                    [
+                        crate::ssh::PROGRAM,
+                        "-F",
+                        "/dev/null",
+                        "-T",
+                        "-x",
+                        "-o",
+                        "BatchMode=yes",
+                        "-o",
+                        "ProxyCommand=/bin/false",
+                        "-S",
+                    ]
+                    .map(OsStr::new),
+                );
+                argv.push(socket.as_os_str());
+                argv.extend(["--", "localhost", &remote_command].map(OsStr::new));
+            } else {
+                argv.extend(["/bin/bash", "-c", SERVER_COMMAND].map(OsStr::new));
+            }
+        }
+        #[cfg(windows)]
+        let route_startup = socket.is_some();
+        #[cfg(unix)]
+        let route_startup = true;
+        #[cfg(windows)]
+        let codex = glib::find_program_in_path("codex.exe");
+        #[cfg(windows)]
+        if let Some(host) = socket {
+            argv.push(OsStr::new(crate::ssh::PROGRAM));
+            argv.extend(crate::ssh::BACKGROUND.iter().map(OsStr::new));
+            argv.extend(["--", host, &remote_command].map(OsStr::new));
         } else {
-            argv.extend(["/bin/bash", "-c", SERVER_COMMAND].map(OsStr::new));
+            let path = codex
+                .as_ref()
+                .ok_or("请安装 Windows Codex CLI，并将 codex.exe 加入 PATH。")?;
+            argv.extend([path.as_os_str(), OsStr::new("app-server")]);
         }
 
         let launcher = gio::SubprocessLauncher::new(
@@ -79,7 +98,7 @@ impl Rpc {
         });
         let weak = Rc::downgrade(&rpc);
         glib::MainContext::default().spawn_local(async move {
-            let result = exchange(stream, requests, |bytes| {
+            let result = exchange(stream, requests, route_startup, |bytes| {
                 if bytes.len() <= MAX_EVENT_BYTES {
                     if let (Some(rpc), Ok(message)) =
                         (weak.upgrade(), serde_json::from_slice(bytes))
@@ -126,6 +145,7 @@ impl Rpc {
 async fn exchange(
     stream: gio::SimpleIOStream,
     mut requests: mpsc::UnboundedReceiver<String>,
+    route_startup: bool,
     receive: impl Fn(&[u8]),
 ) -> Result<(), String> {
     let mut stream = BufReader::new(
@@ -134,24 +154,28 @@ async fn exchange(
             .map_err(|_| "无法打开 Codex 的输入输出流。")?,
     );
     let mut line = Vec::new();
-    let route = async {
-        loop {
-            line.clear();
-            let length = stream
-                .read_until(b'\n', &mut line)
-                .await
-                .map_err(|error| format!("无法读取 Codex 启动状态：{error}"))?;
-            match line.as_slice() {
-                b"span-codex-shared\n" => return Ok::<_, String>(true),
-                b"span-codex-stdio\n" => return Ok(false),
-                _ if length == 0 => return Err("无法启动 Codex。请检查该主机的连接。".into()),
-                _ => {}
+    let shared = if route_startup {
+        let route = async {
+            loop {
+                line.clear();
+                let length = stream
+                    .read_until(b'\n', &mut line)
+                    .await
+                    .map_err(|error| format!("无法读取 Codex 启动状态：{error}"))?;
+                match line.as_slice() {
+                    b"span-codex-shared\n" => return Ok::<_, String>(true),
+                    b"span-codex-stdio\n" => return Ok(false),
+                    _ if length == 0 => return Err("无法启动 Codex。请检查该主机的连接。".into()),
+                    _ => {}
+                }
             }
-        }
+        };
+        with_timeout(15, route)
+            .await
+            .ok_or("等待 Codex 启动超时。")??
+    } else {
+        false
     };
-    let shared = with_timeout(15, route)
-        .await
-        .ok_or("等待 Codex 启动超时。")??;
 
     if shared {
         // The CLI proxy forwards raw bytes. The daemon speaks WebSocket over its socket.

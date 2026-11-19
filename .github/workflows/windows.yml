@@ -1,0 +1,73 @@
+name: Build Windows
+
+on:
+  push:
+    branches:
+      - main
+      - 'platform/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x86_64:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gtk3
+            mingw-w64-x86_64-librsvg
+
+      - name: Build Span and test ConPTY
+        shell: msys2 {0}
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --target x86_64-pc-windows-gnu
+          export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$(cygpath -m /mingw64/bin/gcc.exe)"
+          export PKG_CONFIG="$(cygpath -m /mingw64/bin/pkg-config.exe)"
+          export RUSTFLAGS="-Lnative=$(cygpath -m /mingw64/lib)"
+          cargo +1.98.1 test --locked --release --target x86_64-pc-windows-gnu -- --test-threads=1
+          cargo +1.98.1 build --locked --release --target x86_64-pc-windows-gnu
+          bash packaging/package-windows.sh
+
+      - name: Verify portable package starts without MSYS2
+        shell: pwsh
+        run: |
+          $testPath = Join-Path $env:RUNNER_TEMP "Span relocated"
+          Copy-Item -Recurse dist/windows/Span $testPath
+          $env:Path = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\OpenSSH"
+          $app = Start-Process "$testPath\Span.exe" -WorkingDirectory $env:RUNNER_TEMP -PassThru
+          try {
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Milliseconds 250
+              $app.Refresh()
+              if ($app.HasExited) { throw "Span exited during startup with exit code $($app.ExitCode)" }
+              if ($app.MainWindowHandle -ne [IntPtr]::Zero) { break }
+            }
+            if ($app.MainWindowHandle -eq [IntPtr]::Zero) { throw "Span did not open a native window" }
+          } finally {
+            if (!$app.HasExited) { Stop-Process -Id $app.Id }
+          }
+          $version = (Select-String '^version = "([^"]+)"' Cargo.toml).Matches[0].Groups[1].Value
+          Compress-Archive -Path "dist/windows/Span" -DestinationPath "dist/span-$version-windows-x86_64.zip"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: span-windows-x86_64
+          path: dist/span-*-windows-x86_64.zip
+          if-no-files-found: error

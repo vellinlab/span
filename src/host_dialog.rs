@@ -59,7 +59,9 @@ pub fn edit(
         field.pack_start(entry, false, false, 0);
         body.pack_start(&field, false, false, 0);
     }
-    body.pack_start(&x11, false, false, 0);
+    if cfg!(unix) {
+        body.pack_start(&x11, false, false, 0);
+    }
     if interactive_login {
         let hint = gtk::Label::builder()
             .label("需要密码或验证码时，SSH 会弹出输入窗口，或在终端显示提示。")

@@ -80,15 +80,22 @@ fn safe_relative(path: &str) -> Option<&Path> {
 }
 
 fn local_output(path: &Path, context: &crate::agent_render::Context) -> Option<PathBuf> {
-    if !path.is_absolute() {
+    let absolute = |path: &Path| {
+        if cfg!(windows) && context.socket.is_some() {
+            path.as_os_str().as_encoded_bytes().starts_with(b"/")
+        } else {
+            path.is_absolute()
+        }
+    };
+    if !absolute(path) {
         let path = safe_relative(path.to_str()?)?;
-        if !context.cwd.is_absolute() {
+        if !absolute(&context.cwd) {
             return None;
         }
         return Some(context.cwd.join(path));
     }
     for root in [Path::new("/mnt/data"), context.cwd.as_path()] {
-        if root.is_absolute()
+        if absolute(root)
             && root != Path::new("/")
             && let Ok(relative) = path.strip_prefix(root)
             && safe_relative(relative.to_str()?).is_some()

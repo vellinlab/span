@@ -103,7 +103,7 @@ impl ComposerAction {
 
 pub struct Agent {
     pub panel: gtk::Box,
-    connection: Box<dyn Fn() -> Result<Option<PathBuf>, String>>,
+    connection: Box<dyn Fn() -> Result<Option<crate::ssh::ChannelBuf>, String>>,
     reveal: Box<dyn Fn()>,
     preview: Offer,
     rpc: RefCell<Option<Rc<Rpc>>>,
@@ -166,7 +166,7 @@ impl Agent {
     pub fn new(
         host: &str,
         initial_directory: Option<&std::path::Path>,
-        connection: impl Fn() -> Result<Option<PathBuf>, String> + 'static,
+        connection: impl Fn() -> Result<Option<crate::ssh::ChannelBuf>, String> + 'static,
         toggle_terminal: impl Fn() + 'static,
         reveal: impl Fn() + 'static,
         preview: Offer,

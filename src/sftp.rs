@@ -1,8 +1,12 @@
 use crate::files::{Directory, Entry, Kind, MAX_ENTRIES};
+use crate::ssh::{self, Channel};
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+#[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -26,60 +30,61 @@ const DATA: u8 = 103;
 const NAME: u8 = 104;
 const MAX_PACKET: usize = 256 * 1024;
 
-pub fn list(socket: &Path, path: Option<&Path>) -> Result<Directory, String> {
-    through_socket(socket, "15s", |sftp| sftp.directory(path))
+pub fn list(socket: &Channel, path: Option<&Path>) -> Result<Directory, String> {
+    through_channel(socket, "15s", |sftp| sftp.directory(path))
 }
 
-pub fn read_image(socket: &Path, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+pub fn read_image(socket: &Channel, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
     read_preview(socket, path, limit)
 }
 
-pub fn read_preview(socket: &Path, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+pub fn read_preview(socket: &Channel, path: &Path, limit: usize) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
-    through_socket(socket, "15s", |sftp| {
+    through_channel(socket, "15s", |sftp| {
         sftp.read_into(path, &mut bytes, limit as u64)
     })?;
     Ok(bytes)
 }
 
-pub fn download(socket: &Path, path: &Path, output: &mut fs::File) -> Result<(), String> {
-    through_socket(socket, "600s", |sftp| {
+pub fn download(socket: &Channel, path: &Path, output: &mut fs::File) -> Result<(), String> {
+    through_channel(socket, "600s", |sftp| {
         sftp.read_into(path, output, u64::MAX)
     })
 }
 
-pub fn upload(socket: &Path, path: &Path, input: &mut fs::File) -> Result<(), String> {
+pub fn upload(socket: &Channel, path: &Path, input: &mut fs::File) -> Result<(), String> {
     let temporary =
         path.with_file_name(format!(".span-upload-{}", gtk::glib::uuid_string_random()));
-    through_socket(socket, "600s", |sftp| {
+    through_channel(socket, "600s", |sftp| {
         let finish = sftp.write_file(&temporary, input).and_then(|_| {
-            let mut payload = string_payload(temporary.as_os_str().as_bytes())?;
-            payload.extend(string_payload(path.as_os_str().as_bytes())?);
+            let mut payload = string_payload(&path_bytes(&temporary))?;
+            payload.extend(string_payload(&path_bytes(path))?);
             success(
                 sftp.request_payload(RENAME, &payload)?,
                 "无法保存上传文件（目标可能已存在）",
             )
         });
         if finish.is_err() {
-            let _ = sftp.request(REMOVE, temporary.as_os_str().as_bytes());
+            let _ = sftp.request(REMOVE, &path_bytes(&temporary));
         }
         finish
     })
 }
 
 pub fn upload_attachments(
-    socket: &Path,
+    socket: &Channel,
     files: &[(String, Vec<u8>)],
 ) -> Result<Vec<PathBuf>, String> {
-    if files
-        .iter()
-        .any(|(name, _)| name.is_empty() || name.contains(['/', '\0']))
-    {
+    if files.iter().any(|(name, _)| {
+        name.is_empty()
+            || name.contains(['/', '\0'])
+            || (cfg!(windows) && name.contains(['\\', ':']))
+    }) {
         return Err("附件名称无效。".into());
     }
     let directory = Path::new("/tmp").join(format!("span-{}", gtk::glib::uuid_string_random()));
-    through_socket(socket, "60s", |sftp| {
-        let mut payload = string_payload(directory.as_os_str().as_bytes())?;
+    through_channel(socket, "60s", |sftp| {
+        let mut payload = string_payload(&path_bytes(&directory))?;
         payload.extend_from_slice(&4u32.to_be_bytes()); // SSH_FILEXFER_ATTR_PERMISSIONS
         payload.extend_from_slice(&0o700u32.to_be_bytes());
         let result = sftp.request_payload(MKDIR, &payload)?;
@@ -88,12 +93,14 @@ pub fn upload_attachments(
         for (index, (name, data)) in files.iter().enumerate() {
             let path = directory.join(format!("{:02}-{name}", index + 1));
             let result = sftp.write_file(&path, data.as_slice());
+            #[cfg(windows)]
+            let path = PathBuf::from(path.to_string_lossy().replace('\\', "/"));
             uploaded.push(path);
             if let Err(error) = result {
                 for path in &uploaded {
-                    let _ = sftp.request(REMOVE, path.as_os_str().as_bytes());
+                    let _ = sftp.request(REMOVE, &path_bytes(path));
                 }
-                let _ = sftp.request(RMDIR, directory.as_os_str().as_bytes());
+                let _ = sftp.request(RMDIR, &path_bytes(&directory));
                 return Err(error);
             }
         }
@@ -101,24 +108,29 @@ pub fn upload_attachments(
     })
 }
 
-fn through_socket<T>(
-    socket: &Path,
+fn through_channel<T: Send>(
+    socket: &Channel,
     timeout: &str,
     action: impl FnOnce(
         &mut Sftp<std::process::ChildStdout, std::process::ChildStdin>,
-    ) -> Result<T, String>,
+    ) -> Result<T, String>
+    + Send,
 ) -> Result<T, String> {
-    if !socket_ready(socket) {
+    #[cfg(unix)]
+    if !channel_ready(socket) {
         return Err("请在终端完成 SSH 登录，然后刷新目录。".into());
     }
 
     // Clear the user config for this channel. The shell already used it to establish
     // the transport. A failed multiplex request must not start another connection.
-    let mut child = Command::new("/usr/bin/timeout")
+    #[cfg(unix)]
+    let mut command = Command::new("/usr/bin/timeout");
+    #[cfg(unix)]
+    command
         .args([
             "--kill-after=1s",
             timeout,
-            "/usr/bin/ssh",
+            ssh::PROGRAM,
             "-F",
             "/dev/null",
             "-T",
@@ -130,24 +142,80 @@ fn through_socket<T>(
             "-S",
         ])
         .arg(socket)
-        .args(["-s", "--", "localhost", "sftp"])
+        .args(["-s", "--", "localhost", "sftp"]);
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        let mut command = Command::new(ssh::PROGRAM);
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        command
+            .args(ssh::BACKGROUND)
+            .args(["-s", "--", socket, "sftp"]);
+        command
+    };
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|err| format!("无法启动系统 OpenSSH：{err}"))?;
-    let result = Sftp::start(
-        child.stdout.take().expect("piped SFTP stdout"),
-        child.stdin.take().expect("piped SFTP stdin"),
-    )
-    .map_err(|_| "无法打开 SFTP 通道。请确认 SSH 仍在线，且服务器允许 SFTP。".to_owned())
-    .and_then(|mut connection| action(&mut connection));
+    let stdout = child.stdout.take().expect("piped SFTP stdout");
+    let stdin = child.stdin.take().expect("piped SFTP stdin");
+    let run = move || {
+        Sftp::start(stdout, stdin)
+            .map_err(|_| {
+                "无法打开 SFTP 通道。请检查主机身份、SSH 认证和服务器 SFTP 设置。".to_owned()
+            })
+            .and_then(|mut connection| action(&mut connection))
+    };
+    #[cfg(unix)]
+    let result = run();
+    #[cfg(windows)]
+    let result = std::thread::scope(|scope| {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        scope.spawn(move || {
+            let _ = sender.send(run());
+        });
+        let seconds = timeout
+            .trim_end_matches('s')
+            .parse()
+            .expect("SFTP timeout in seconds");
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(seconds))
+            .unwrap_or_else(|_| {
+                let _ = child.kill();
+                Err("SFTP 操作超时。".into())
+            })
+    });
     let _ = child.wait();
     result
 }
 
-pub fn socket_ready(socket: &Path) -> bool {
+#[cfg(unix)]
+pub fn channel_ready(socket: &Channel) -> bool {
     fs::symlink_metadata(socket).is_ok_and(|meta| meta.file_type().is_socket())
+}
+
+#[cfg(windows)]
+pub fn channel_ready(_: &Channel) -> bool {
+    true
+}
+
+fn path_bytes(path: &Path) -> Cow<'_, [u8]> {
+    #[cfg(unix)]
+    return Cow::Borrowed(path.as_os_str().as_bytes());
+    #[cfg(windows)]
+    return Cow::Owned(path.to_string_lossy().replace('\\', "/").into_bytes());
+}
+
+fn wire_name(bytes: &[u8]) -> Option<OsString> {
+    #[cfg(unix)]
+    return Some(OsString::from_vec(bytes.to_vec()));
+    #[cfg(windows)]
+    return std::str::from_utf8(bytes)
+        .ok()
+        .filter(|name| !name.contains(['\\', ':']))
+        .map(OsString::from);
 }
 
 struct Sftp<R, W> {
@@ -172,8 +240,8 @@ impl<R: Read, W: Write> Sftp<R, W> {
     }
 
     fn directory(&mut self, path: Option<&Path>) -> Result<Directory, String> {
-        let requested = path.map_or(b".".as_slice(), |path| path.as_os_str().as_bytes());
-        let (kind, mut packet) = self.request(REALPATH, requested)?;
+        let requested = path.map_or(Cow::Borrowed(b".".as_slice()), path_bytes);
+        let (kind, mut packet) = self.request(REALPATH, &requested)?;
         if kind != NAME {
             return Err(unexpected(kind, packet, "无法解析目录"));
         }
@@ -184,9 +252,9 @@ impl<R: Read, W: Write> Sftp<R, W> {
         if !bytes.starts_with(b"/") || bytes.contains(&0) {
             return Err("SFTP 返回了无效的目录路径。".into());
         }
-        let path = PathBuf::from(OsString::from_vec(bytes.to_vec()));
+        let path = PathBuf::from(wire_name(bytes).ok_or("SFTP 路径编码无效。")?);
 
-        let (kind, mut packet) = self.request(OPENDIR, path.as_os_str().as_bytes())?;
+        let (kind, mut packet) = self.request(OPENDIR, &path_bytes(&path))?;
         if kind != HANDLE {
             return Err(unexpected(kind, packet, "无法打开目录"));
         }
@@ -252,7 +320,7 @@ impl<R: Read, W: Write> Sftp<R, W> {
         output: &mut impl Write,
         limit: u64,
     ) -> Result<(), String> {
-        let mut payload = string_payload(path.as_os_str().as_bytes())?;
+        let mut payload = string_payload(&path_bytes(path))?;
         payload.extend_from_slice(&1u32.to_be_bytes()); // SSH_FXF_READ
         payload.extend_from_slice(&0u32.to_be_bytes()); // no attributes
         let (kind, mut packet) = self.request_payload(OPEN, &payload)?;
@@ -299,7 +367,7 @@ impl<R: Read, W: Write> Sftp<R, W> {
     }
 
     fn write_file(&mut self, path: &Path, input: impl Read) -> Result<(), String> {
-        let mut payload = string_payload(path.as_os_str().as_bytes())?;
+        let mut payload = string_payload(&path_bytes(path))?;
         payload.extend_from_slice(&42u32.to_be_bytes()); // SSH_FXF_WRITE | CREAT | EXCL
         payload.extend_from_slice(&4u32.to_be_bytes()); // SSH_FILEXFER_ATTR_PERMISSIONS
         payload.extend_from_slice(&0o600u32.to_be_bytes());
@@ -438,8 +506,11 @@ impl Packet {
         {
             return Ok(None);
         }
+        let Some(name) = wire_name(&name) else {
+            return Ok(None);
+        };
         Ok(Some(Entry {
-            name: OsString::from_vec(name),
+            name,
             kind: mode.map_or(Kind::Other, Kind::from_mode),
             size,
             modified,
@@ -474,7 +545,7 @@ fn transport(err: io::Error) -> String {
     format!("SFTP 通信失败：{err}")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -571,6 +642,7 @@ mod tests {
 
     #[test]
     fn uploads_files_privately_through_an_existing_ssh_session() {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let Some(socket) = std::env::var_os("WORKBENCH_TEST_SFTP_SOCKET") else {
             return;

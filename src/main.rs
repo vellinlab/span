@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
+
 mod agent;
 mod agent_activity;
 mod agent_attachments;
@@ -22,7 +24,9 @@ mod reading_column;
 mod session;
 mod sftp;
 mod source_preview;
+mod ssh;
 mod svg;
+#[cfg_attr(windows, path = "windows_terminal.rs")]
 mod vte;
 mod workbench;
 
@@ -33,6 +37,8 @@ const APP_ID: &str = "io.github.zyw02.SshWorkbench";
 const APP_NAME: &str = "Span";
 
 fn main() -> glib::ExitCode {
+    #[cfg(windows)]
+    restrict_dll_search();
     glib::set_application_name(APP_NAME);
     if std::env::var_os("SPAN_SSH_ASKPASS").as_deref() == Some(std::ffi::OsStr::new("1"))
         && let Some(prompt) = std::env::args_os().nth(1)
@@ -53,6 +59,17 @@ fn main() -> glib::ExitCode {
         }
     });
     app.run()
+}
+
+#[cfg(windows)]
+fn restrict_dll_search() {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetDefaultDllDirectories(flags: u32) -> i32;
+    }
+    const LOAD_LIBRARY_SEARCH_DEFAULT_DIRS: u32 = 0x1000;
+    // ConPTY may load a DLL by name. Keep lookup in the application and system directories.
+    unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) };
 }
 
 fn load_theme() {

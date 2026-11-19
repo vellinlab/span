@@ -3,12 +3,22 @@ use crate::files::{ControlSocket, Source};
 use crate::hosts::Host;
 use crate::icons::{self, Icon};
 use crate::preview::Panel;
+use crate::ssh;
 use crate::vte::Terminal;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
+
+#[cfg(unix)]
+const LOCAL_SHELL: &[&str] = &["/bin/bash", "-l"];
+#[cfg(windows)]
+const LOCAL_SHELL: &[&str] = &["powershell.exe", "-NoLogo"];
+#[cfg(unix)]
+const LOCAL_LABEL: &str = "本地 Bash";
+#[cfg(windows)]
+const LOCAL_LABEL: &str = "本地 PowerShell";
 
 pub enum Launch {
     Local,
@@ -18,7 +28,7 @@ pub enum Launch {
 impl Launch {
     pub fn label(&self) -> &str {
         match self {
-            Self::Local => "本地 Bash",
+            Self::Local => LOCAL_LABEL,
             Self::Ssh(host) => &host.name,
         }
     }
@@ -32,7 +42,7 @@ impl Launch {
 
     pub fn description(&self) -> String {
         match self {
-            Self::Local => "本地  /  Bash".into(),
+            Self::Local => LOCAL_LABEL.into(),
             Self::Ssh(host) => format!("SSH  /  {}", host.target),
         }
     }
@@ -155,7 +165,7 @@ impl Session {
                         Source::Local => Ok(None),
                         Source::Sftp {
                             socket: Some(socket),
-                        } if crate::sftp::socket_ready(&socket) => Ok(Some(socket)),
+                        } if crate::sftp::channel_ready(&socket) => Ok(Some(socket)),
                         _ => Err("请先在终端完成 SSH 登录，再打开 Codex 会话。".into()),
                     }
                 },
@@ -338,15 +348,15 @@ impl Session {
         let home = glib::home_dir();
         let control = self.control.borrow();
         let (cwd, argv) = match &self.launch {
-            Launch::Local => (home.to_str(), vec!["/bin/bash", "-l"]),
+            Launch::Local => (home.to_str(), LOCAL_SHELL.to_vec()),
             Launch::Ssh(host) => {
-                let mut argv = vec!["/usr/bin/ssh", "-t"];
-                if host.trusted_x11 {
+                let mut argv = vec![ssh::PROGRAM, "-t"];
+                if cfg!(unix) && host.trusted_x11 {
                     argv.push("-Y");
                 }
                 if let Some(path) = control.as_ref().and_then(|socket| socket.path().to_str()) {
                     argv.extend(["-o", "ControlMaster=no", "-S", path]);
-                } else if host.trusted_x11 {
+                } else if cfg!(unix) && host.trusted_x11 {
                     argv.extend(["-S", "none"]);
                 }
                 argv.extend(["--", host.target.as_str()]);
@@ -410,14 +420,17 @@ impl Session {
     }
 
     pub fn file_source(&self) -> Source {
-        match self.launch {
+        match &self.launch {
             Launch::Local => Source::Local,
-            Launch::Ssh(_) => Source::Sftp {
+            Launch::Ssh(_host) => Source::Sftp {
+                #[cfg(unix)]
                 socket: self
                     .control
                     .borrow()
                     .as_ref()
                     .map(|value| value.path().to_owned()),
+                #[cfg(windows)]
+                socket: (self.state.get() == State::Running).then(|| _host.target.clone()),
             },
         }
     }
@@ -433,15 +446,15 @@ impl Session {
             .as_ref()
             .map(|socket| socket.path().to_owned());
         let (cwd, argv) = match &self.launch {
-            Launch::Local => (home.to_str(), vec!["/bin/bash", "-l"]),
+            Launch::Local => (home.to_str(), LOCAL_SHELL.to_vec()),
             Launch::Ssh(host) => {
-                let mut argv = vec!["/usr/bin/ssh"];
-                if host.trusted_x11 {
+                let mut argv = vec![ssh::PROGRAM];
+                if cfg!(unix) && host.trusted_x11 {
                     argv.push("-Y");
                 }
                 if let Some(path) = socket_path.as_deref().and_then(|path| path.to_str()) {
                     argv.extend(["-M", "-o", "ControlPersist=no", "-S", path]);
-                } else if host.trusted_x11 {
+                } else if cfg!(unix) && host.trusted_x11 {
                     argv.extend(["-S", "none"]);
                 }
                 argv.extend(["--", host.target.as_str()]);
@@ -449,6 +462,7 @@ impl Session {
             }
         };
 
+        #[cfg(unix)]
         if let Some(socket) = socket_path.clone() {
             self.watch_reconnect(socket);
         }
@@ -466,7 +480,18 @@ impl Session {
                         return;
                     }
                     match result {
-                        Ok(()) => session.set_state(State::Running),
+                        Ok(()) => {
+                            session.set_state(State::Running);
+                            #[cfg(windows)]
+                            if let Some(agent) = session
+                                .agent
+                                .borrow()
+                                .as_ref()
+                                .filter(|agent| agent.has_resume())
+                            {
+                                agent.reconnect();
+                            }
+                        }
                         Err(error) => {
                             session.stop_watching();
                             session.control.replace(None);
@@ -482,7 +507,8 @@ impl Session {
     }
 
     fn askpass(&self) -> Vec<String> {
-        if self.quick_connect
+        if cfg!(unix)
+            && self.quick_connect
             && let Ok(exe) = std::env::current_exe()
             && let Some(path) = exe.to_str()
         {
@@ -518,6 +544,7 @@ impl Session {
         self.agent.take();
     }
 
+    #[cfg(unix)]
     fn watch_reconnect(self: &Rc<Self>, socket: PathBuf) {
         let Some(agent) = self
             .agent
@@ -538,7 +565,7 @@ impl Session {
         let weak = Rc::downgrade(self);
         let check = move || {
             if let Some(session) = weak.upgrade() {
-                if crate::sftp::socket_ready(&socket) {
+                if crate::sftp::channel_ready(&socket) {
                     session.stop_watching();
                     agent.reconnect();
                 }
@@ -573,6 +600,7 @@ impl Session {
     }
 }
 
+#[cfg(unix)]
 fn new_control_socket(launch: &Launch) -> Option<ControlSocket> {
     match launch {
         Launch::Local => None,
@@ -580,12 +608,24 @@ fn new_control_socket(launch: &Launch) -> Option<ControlSocket> {
     }
 }
 
+#[cfg(windows)]
+fn new_control_socket(_: &Launch) -> Option<ControlSocket> {
+    None
+}
+
 fn stack_terminal(stack: &gtk::Stack) -> Option<Terminal> {
-    stack
+    let child = stack
         .visible_child()
         .and_downcast::<gtk::ScrolledWindow>()?
+        .child()?;
+    #[cfg(unix)]
+    return child.downcast().ok();
+    #[cfg(windows)]
+    return child
+        .downcast::<gtk::Viewport>()
+        .ok()?
         .child()
-        .and_downcast()
+        .and_downcast();
 }
 
 fn terminal_widget() -> (Terminal, gtk::ScrolledWindow) {
@@ -613,7 +653,11 @@ fn terminal_widget() -> (Terminal, gtk::ScrolledWindow) {
 
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(if cfg!(windows) {
+            gtk::PolicyType::Never
+        } else {
+            gtk::PolicyType::Automatic
+        })
         .overlay_scrolling(true)
         .hexpand(true)
         .vexpand(true)
