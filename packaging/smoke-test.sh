@@ -415,6 +415,7 @@ MARKDOWN
     widget not-contains '**Preparing the comparison table.**'
     widget contains '正在生成回复'
     widget mouse '已完成 · 2 项活动'
+    timeline_wheel 5 2
     widget contains 'Thinking after the progress update.'
     read -r _ progress_y _ _ <<< "$(widget bounds 'I found the comparison data.')"
     read -r _ after_progress_y _ _ <<< "$(widget bounds 'Thinking after the progress update.')"

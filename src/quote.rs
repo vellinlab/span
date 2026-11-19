@@ -62,7 +62,13 @@ impl Popup {
             }
             action(&text);
         });
-        popup.connect_closed(|popup| popup.set_relative_to(gtk::Widget::NONE));
+        popup.connect_closed(|popup| {
+            let popup = popup.clone();
+            glib::idle_add_local_once(move || {
+                popup.hide();
+                popup.set_relative_to(gtk::Widget::NONE);
+            });
+        });
         popup.add(&button);
         button.show();
         self.0.set(Some(&popup));
