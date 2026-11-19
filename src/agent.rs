@@ -100,6 +100,7 @@ pub struct Agent {
     attachments: Rc<Attachments>,
     uploading: Cell<bool>,
     pending_user: RefCell<Option<gtk::Label>>,
+    client_message: RefCell<Option<String>>,
     primary_action: Cell<Option<ComposerAction>>,
     primary: gtk::Button,
     primary_icons: gtk::Stack,
@@ -285,6 +286,7 @@ impl Agent {
             attachments,
             uploading: Cell::new(false),
             pending_user: RefCell::new(None),
+            client_message: RefCell::new(None),
             primary_action: Cell::new(None),
             primary,
             primary_icons,
@@ -785,6 +787,7 @@ impl Agent {
                     Request::Send => {
                         self.active.set(false);
                         self.turn.take();
+                        self.client_message.take();
                         self.finish_activity(Some("failed"));
                         self.remove_pending_user();
                         self.show_status(error);
@@ -981,14 +984,17 @@ impl Agent {
     }
 
     fn begin_turn(&self, thread: String, text: &str, selection: &Selection, files: Prepared) {
+        let message_id = glib::uuid_string_random().to_string();
         let mut params = json!({
             "threadId": thread,
             "input": files.input(text, selection.images),
             "summary": "auto",
+            "clientUserMessageId": message_id,
         });
         selection.apply(&mut params);
         let label = self.add_user(&files.summary(text));
         self.pending_user.replace(Some(label));
+        self.client_message.replace(Some(message_id));
         self.active.set(true);
         self.show_status("Codex 正在处理…");
         self.update_controls();
@@ -1047,6 +1053,7 @@ impl Agent {
         self.approvals.borrow_mut().clear();
         self.questions.borrow_mut().clear();
         self.history_cursor.take();
+        self.client_message.take();
         self.can_continue.set(false);
         self.interrupting.set(false);
         self.older.hide();
@@ -1064,6 +1071,7 @@ impl Agent {
         self.initialized.set(false);
         self.uploading.set(false);
         self.remove_pending_user();
+        self.client_message.take();
         self.options.open(&Value::Null);
         self.usage.disconnect();
         self.quota_started.set(false);
@@ -1135,6 +1143,7 @@ impl Agent {
                 self.active.set(true);
                 self.turn
                     .replace(params["turn"]["id"].as_str().map(str::to_owned));
+                self.show_status("Codex 正在处理…");
                 self.update_controls();
             }
             "turn/diff/updated" => {
@@ -1175,6 +1184,7 @@ impl Agent {
                 self.active.set(false);
                 self.turn.take();
                 self.interrupting.set(false);
+                self.client_message.take();
                 self.can_continue.set(interrupted);
                 for (_, approval) in self.approvals.borrow_mut().drain() {
                     self.history.remove(&approval);
@@ -1281,7 +1291,12 @@ impl Agent {
 
     fn completed_item(&self, item: &Value, loading_history: bool) {
         match item["type"].as_str() {
-            Some("userMessage") if loading_history => {
+            Some("userMessage")
+                if loading_history
+                    || self.client_message.borrow().as_deref().is_none_or(|local| {
+                        item["clientId"].as_str().is_some_and(|id| id != local)
+                    }) =>
+            {
                 let items: Vec<_> = array(&item["content"])
                     .filter_map(|value| match value["type"].as_str() {
                         Some("text") => value["text"].as_str().map(str::to_owned),

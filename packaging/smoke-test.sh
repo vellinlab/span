@@ -167,6 +167,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
     grep -qx 'Show the deployment check' "$HOME/agent-prompt"
     widget contains 'Which deployment environment?'
+    widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
     xdotool mousemove --window "$window" 355 390 click --repeat 16 4
     widget mouse '进行中 · 修改文件 · checks.txt…'
@@ -348,6 +349,8 @@ PY
         xdotool key --clearmodifiers Return
         wait_until "resuming the remote session" grep -qsx stored-deployment "$WORKBENCH_SSH_FIXTURE/agent-resumed"
         widget contains 'Latest deployment notes'
+        widget contains 'Check the rollout from my other device.'
+        widget contains 'The shared rollout is healthy.'
         ssh_socket="$(find "$TMPDIR" -type s -path '*/swb-*/ssh' -print -quit)"
         test -S "$ssh_socket"
         ssh -F /dev/null -S "$ssh_socket" -O exit localhost
@@ -359,7 +362,7 @@ PY
         xdotool type --clearmodifiers 'Read the remote attachment'
         xdotool key --clearmodifiers ctrl+Return
         wait_until "remote file attachment bytes, permissions, and path" test -f "$WORKBENCH_SSH_FIXTURE/agent-uploaded"
-        printf '%s\n' 'A saved remote Codex session was restored after disconnecting and restarting its authenticated SSH tab.'
+        printf '%s\n' 'Span used the remote shared Codex socket, received external turn events and reopened the same session after SSH reconnect.'
         printf '%s\n' 'Picker files, model and effort overrides, token and account usage, and remote attachment uploads passed.'
     fi
 fi

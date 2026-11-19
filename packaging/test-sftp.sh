@@ -2,6 +2,7 @@
 set -euo pipefail
 
 fixture="$(mktemp -d)"
+codex_daemon_pid=
 cleanup() {
     local result="$1"
     if [[ $result -ne 0 && -f "$fixture/sshd.log" ]]; then
@@ -13,6 +14,10 @@ cleanup() {
     ssh -F /dev/null -S "$fixture/control" -O exit localhost 2>/dev/null || true
     if [[ -f "$fixture/sshd.pid" ]]; then
         sudo kill "$(cat "$fixture/sshd.pid")" 2>/dev/null || true
+    fi
+    if [[ -n "$codex_daemon_pid" ]]; then
+        kill "$codex_daemon_pid" 2>/dev/null || true
+        wait "$codex_daemon_pid" 2>/dev/null || true
     fi
     rm -rf -- "$fixture"
 }
@@ -44,16 +49,31 @@ Subsystem sftp /usr/lib/openssh/sftp-server
 CONFIG
 
 if [[ ${WORKBENCH_TEST_AGENT_SSH:-} == 1 ]]; then
+    fixture_codex_home="$fixture/codex state"
+    install -Dm0755 packaging/test-agent.py "$fixture/bin/codex"
+    HOME="$fixture" CODEX_HOME="$fixture_codex_home" /usr/bin/python3 "$fixture/bin/codex" serve-shared &
+    codex_daemon_pid=$!
+    for _ in {1..100}; do
+        if [[ -S "$fixture_codex_home/app-server-control/app-server-control.sock" ]]; then
+            break
+        fi
+        kill -0 "$codex_daemon_pid"
+        sleep 0.1
+    done
+    test -S "$fixture_codex_home/app-server-control/app-server-control.sock"
+
     cat > "$fixture/remote-command" <<SCRIPT
 #!/usr/bin/env bash
 export HOME='$fixture'
+export CODEX_HOME='$fixture_codex_home'
+export PATH='$fixture/bin':"\$PATH"
 case \${SSH_ORIGINAL_COMMAND:-} in
     '')
         printf '%s\n' "\$\$" >> '$fixture/remote-shells'
         exec /bin/bash --noprofile --norc -i
         ;;
-    "bash -lc 'exec codex app-server'")
-        exec /usr/bin/python3 '$PWD/packaging/test-agent.py' app-server
+    "bash -lc '"*"'")
+        exec /bin/bash -c "\${SSH_ORIGINAL_COMMAND:10:-1}"
         ;;
     '/usr/lib/openssh/sftp-server'|'/usr/lib/openssh/sftp-server ')
         exec /usr/lib/openssh/sftp-server

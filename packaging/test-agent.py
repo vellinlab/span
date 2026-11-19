@@ -3,11 +3,14 @@
 
 import json
 import os
+import socket
 import stat
 import sys
+import threading
 from pathlib import Path
 
 home = Path(os.environ["HOME"])
+control_socket = Path(os.environ.get("CODEX_HOME", home / ".codex")) / "app-server-control/app-server-control.sock"
 thread = "preview-thread"
 saved_thread = "stored-deployment"
 turn = "preview-turn"
@@ -66,7 +69,63 @@ def stored_turn(identifier, text):
             {"path": "checks.txt", "diff": diff}]}]}
 
 
-assert sys.argv[1:] == ["app-server"]
+def run_proxy():
+    with socket.socket(socket.AF_UNIX) as peer:
+        peer.connect(str(control_socket))
+
+        def forward():
+            while chunk := os.read(0, 65536):
+                peer.sendall(chunk)
+            peer.shutdown(socket.SHUT_WR)
+
+        threading.Thread(target=forward, daemon=True).start()
+        while chunk := peer.recv(65536):
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+
+
+async def serve_shared():
+    import asyncio
+    import websockets
+
+    async def forward_requests(websocket, process):
+        async for request in websocket:
+            process.stdin.write(request.encode() + b"\n")
+            await process.stdin.drain()
+
+    async def forward_events(websocket, process):
+        async for line in process.stdout:
+            await websocket.send(line.decode().rstrip("\n"))
+
+    async def connection(websocket):
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, __file__, "shared-stdio",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        )
+        requests = asyncio.create_task(forward_requests(websocket, process))
+        events = asyncio.create_task(forward_events(websocket, process))
+        _, pending = await asyncio.wait([requests, events], return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        process.stdin.close()
+        await process.wait()
+        await asyncio.gather(requests, events, return_exceptions=True)
+
+    control_socket.parent.mkdir(parents=True, exist_ok=True)
+    async with websockets.unix_serve(connection, str(control_socket)):
+        await asyncio.Future()
+
+
+args = sys.argv[1:]
+if args == ["app-server", "proxy"]:
+    run_proxy()
+    sys.exit()
+if args == ["serve-shared"]:
+    import asyncio
+    asyncio.run(serve_shared())
+    sys.exit()
+shared = args == ["shared-stdio"]
+assert shared or (args == ["app-server"] and not control_socket.exists())
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
@@ -119,6 +178,17 @@ for line in sys.stdin:
                                    "nextCursor": "older-cursor"}}})
         with (home / "agent-resumed").open("a") as resumes:
             print(saved_thread, file=resumes)
+        if shared:
+            external_turn = {"id": "external-turn", "status": "inProgress"}
+            send({"method": "turn/started", "params": {"threadId": saved_thread, "turn": external_turn}})
+            event = {"threadId": saved_thread, "turnId": external_turn["id"]}
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "external-input", "type": "userMessage", "clientId": None,
+                "content": [{"type": "text", "text": "Check the rollout from my other device."}]}}})
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "external-reply", "type": "agentMessage", "text": "The shared rollout is healthy."}}})
+            send({"method": "turn/completed", "params": {"threadId": saved_thread,
+                  "turn": {**external_turn, "status": "completed"}}})
     elif method == "thread/unsubscribe":
         assert params["threadId"] == thread
         send({"id": request_id, "result": {"status": "unsubscribed"}})
@@ -136,6 +206,7 @@ for line in sys.stdin:
         interrupted = True
     elif method == "turn/start":
         assert params["summary"] == "auto"
+        assert params["clientUserMessageId"]
         (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")
         if params["threadId"] == saved_thread:
             message = params["input"][0]["text"]
@@ -174,6 +245,9 @@ for line in sys.stdin:
         (home / "agent-prompt").write_text(params["input"][0]["text"])
         send({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress"}}})
         event = {"threadId": thread, "turnId": turn}
+        send({"method": "item/completed", "params": {**event, "item": {
+            "id": "same-client-input", "type": "userMessage", "clientId": params["clientUserMessageId"],
+            "content": [{"type": "text", "text": "fixture duplicate prompt sentinel"}]}}})
         send({"method": "item/reasoning/summaryTextDelta", "params": {
             **event, "itemId": "reasoning", "summaryIndex": 0, "delta": "Checking the build "}})
         send({"method": "item/reasoning/summaryTextDelta", "params": {

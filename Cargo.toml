@@ -5,6 +5,9 @@ edition = "2024"
 description = "A Linux desktop terminal for local shells and OpenSSH sessions"
 
 [dependencies]
+async-tungstenite = "0.35"
+futures-channel = "0.3"
+futures-util = { version = "0.3", features = ["io", "sink"] }
 gtk = "0.19"
 pangocairo = "0.22"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

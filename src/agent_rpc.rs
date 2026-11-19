@@ -1,17 +1,30 @@
+use async_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
+use futures_channel::mpsc;
+use futures_util::{
+    SinkExt, StreamExt, TryStreamExt, future,
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+};
 use gtk::gio::{self, prelude::*};
 use gtk::glib;
 use serde_json::{Value, json};
-use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::cell::Cell;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::rc::Rc;
 
+const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
+const SERVER_COMMAND: &str = r#"
+if [ -S "${CODEX_HOME:-$HOME/.codex}/app-server-control/app-server-control.sock" ]; then
+    printf "span-codex-shared\n"
+    exec codex app-server proxy
+fi
+printf "span-codex-stdio\n"
+exec codex app-server
+"#;
+
 pub struct Rpc {
     process: gio::Subprocess,
-    stdin: gio::OutputStream,
-    queue: RefCell<VecDeque<Vec<u8>>>,
-    writing: Cell<bool>,
+    outgoing: mpsc::UnboundedSender<String>,
     next_id: Cell<u64>,
     receive: Box<dyn Fn(Result<Value, String>)>,
 }
@@ -22,6 +35,7 @@ impl Rpc {
         receive: impl Fn(Result<Value, String>) + 'static,
     ) -> Result<Rc<Self>, String> {
         let mut argv: Vec<&OsStr> = Vec::new();
+        let remote_command = format!("bash -lc '{SERVER_COMMAND}'");
         if let Some(socket) = socket {
             argv.extend(
                 [
@@ -39,9 +53,9 @@ impl Rpc {
                 .map(OsStr::new),
             );
             argv.push(socket.as_os_str());
-            argv.extend(["--", "localhost", "bash -lc 'exec codex app-server'"].map(OsStr::new));
+            argv.extend(["--", "localhost", &remote_command].map(OsStr::new));
         } else {
-            argv.extend(["codex", "app-server"].map(OsStr::new));
+            argv.extend(["/bin/bash", "-c", SERVER_COMMAND].map(OsStr::new));
         }
 
         let launcher = gio::SubprocessLauncher::new(
@@ -53,92 +67,154 @@ impl Rpc {
             .spawn(&argv)
             .map_err(|e| format!("无法启动 Codex：{e}"))?;
         let stdin = process.stdin_pipe().expect("Codex stdin pipe");
-        let stdout = gio::DataInputStream::new(&process.stdout_pipe().expect("Codex stdout pipe"));
+        let stdout = process.stdout_pipe().expect("Codex stdout pipe");
+        let stream = gio::SimpleIOStream::new(&stdout, &stdin);
+        let (outgoing, requests) = mpsc::unbounded();
         let rpc = Rc::new(Self {
             process,
-            stdin,
-            queue: RefCell::new(VecDeque::new()),
-            writing: Cell::new(false),
+            outgoing,
             next_id: Cell::new(0),
             receive: Box::new(receive),
         });
         let weak = Rc::downgrade(&rpc);
         glib::MainContext::default().spawn_local(async move {
-            loop {
-                let read = stdout.read_line_utf8_future(glib::Priority::DEFAULT).await;
-                let Some(rpc) = weak.upgrade() else { break };
-                match read {
-                    Ok(Some(bytes)) if bytes.len() <= 16 * 1024 * 1024 => {
-                        if let Ok(message) = serde_json::from_str(bytes.as_str()) {
-                            (rpc.receive)(Ok(message));
-                        }
-                    }
-                    Ok(Some(_)) => (rpc.receive)(Err("Codex 事件超过大小上限。".into())),
-                    Ok(None) => {
-                        (rpc.receive)(Err(
-                            "Codex 已退出。请检查该主机上的 Codex CLI 和登录状态。".into()
-                        ));
-                        break;
-                    }
-                    Err(error) => {
-                        (rpc.receive)(Err(format!("Codex 连接中断：{error}")));
-                        break;
+            let result = exchange(stream, requests, |bytes| {
+                if bytes.len() <= MAX_EVENT_BYTES {
+                    if let (Some(rpc), Ok(message)) =
+                        (weak.upgrade(), serde_json::from_slice(bytes))
+                    {
+                        (rpc.receive)(Ok(message));
                     }
                 }
+            })
+            .await;
+            if let Some(rpc) = weak.upgrade() {
+                let message = result.err().unwrap_or_else(|| {
+                    "Codex 已退出。请检查该主机上的 Codex CLI 和登录状态。".into()
+                });
+                (rpc.receive)(Err(message));
             }
         });
         Ok(rpc)
     }
 
-    pub fn request(self: &Rc<Self>, method: &str, params: Value) -> u64 {
+    pub fn request(&self, method: &str, params: Value) -> u64 {
         let id = self.next_id.get() + 1;
         self.next_id.set(id);
         self.enqueue(json!({"id": id, "method": method, "params": params}));
         id
     }
 
-    pub fn notify(self: &Rc<Self>, method: &str) {
+    pub fn notify(&self, method: &str) {
         self.enqueue(json!({"method": method}));
     }
 
-    pub fn reply(self: &Rc<Self>, id: Value, result: Value) {
+    pub fn reply(&self, id: Value, result: Value) {
         self.enqueue(json!({"id": id, "result": result}));
     }
 
-    pub fn unsupported(self: &Rc<Self>, id: Value) {
+    pub fn unsupported(&self, id: Value) {
         self.enqueue(json!({"id": id, "error": {"code": -32601, "message": "This client does not implement this request"}}));
     }
 
-    fn enqueue(self: &Rc<Self>, value: Value) {
-        let mut line = value.to_string().into_bytes();
-        line.push(b'\n');
-        self.queue.borrow_mut().push_back(line);
-        if self.writing.replace(true) {
-            return;
+    fn enqueue(&self, value: Value) {
+        let _ = self.outgoing.unbounded_send(value.to_string());
+    }
+}
+
+async fn exchange(
+    stream: gio::SimpleIOStream,
+    mut requests: mpsc::UnboundedReceiver<String>,
+    receive: impl Fn(&[u8]),
+) -> Result<(), String> {
+    let mut stream = BufReader::new(
+        stream
+            .into_async_read_write()
+            .map_err(|_| "无法打开 Codex 的输入输出流。")?,
+    );
+    let mut line = Vec::new();
+    let route = async {
+        loop {
+            line.clear();
+            let length = stream
+                .read_until(b'\n', &mut line)
+                .await
+                .map_err(|error| format!("无法读取 Codex 启动状态：{error}"))?;
+            match line.as_slice() {
+                b"span-codex-shared\n" => return Ok::<_, String>(true),
+                b"span-codex-stdio\n" => return Ok(false),
+                _ if length == 0 => return Err("无法启动 Codex。请检查该主机的连接。".into()),
+                _ => {}
+            }
         }
-        let weak = Rc::downgrade(self);
-        glib::MainContext::default().spawn_local(async move {
-            while let Some(rpc) = weak.upgrade() {
-                let Some(line) = rpc.queue.borrow_mut().pop_front() else {
-                    rpc.writing.set(false);
-                    break;
-                };
-                let stdin = rpc.stdin.clone();
-                drop(rpc);
-                let write = stdin.write_all_future(line, glib::Priority::DEFAULT).await;
-                if let Some(rpc) = weak.upgrade() {
-                    let error = match write {
-                        Ok((_, _, error)) => error,
-                        Err((_, error)) => Some(error),
-                    };
-                    if let Some(error) = error {
-                        rpc.writing.set(false);
-                        (rpc.receive)(Err(format!("无法向 Codex 发送消息：{error}")));
-                        break;
-                    }
+    };
+    let shared = with_timeout(15, route)
+        .await
+        .ok_or("等待 Codex 启动超时。")??;
+
+    if shared {
+        // The CLI proxy forwards raw bytes. The daemon speaks WebSocket over its socket.
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(MAX_EVENT_BYTES))
+            .max_frame_size(Some(MAX_EVENT_BYTES));
+        let (websocket, _) = with_timeout(
+            10,
+            async_tungstenite::client_async_with_config("ws://localhost/", stream, Some(config)),
+        )
+        .await
+        .ok_or("连接共享 Codex 后台超时。")?
+        .map_err(|error| format!("无法连接共享 Codex 后台：{error}"))?;
+        let (mut writer, mut reader) = websocket.split();
+        let read = async {
+            while let Some(message) = reader.try_next().await? {
+                if let Message::Text(message) = message {
+                    receive(message.as_bytes());
                 }
             }
-        });
+            Err::<(), _>(async_tungstenite::tungstenite::Error::ConnectionClosed)
+        };
+        let write = async {
+            while let Some(request) = requests.next().await {
+                writer.send(Message::Text(request.into())).await?;
+            }
+            Ok(())
+        };
+        future::try_join(read, write).await.map_err(
+            |error: async_tungstenite::tungstenite::Error| format!("共享 Codex 连接中断：{error}"),
+        )?;
+    } else {
+        let (reader, mut writer) = stream.split();
+        let mut reader = BufReader::new(reader);
+        let read = async {
+            loop {
+                line.clear();
+                if reader.read_until(b'\n', &mut line).await? == 0 {
+                    return Err::<(), _>(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+                }
+                if line.len() > MAX_EVENT_BYTES {
+                    return Err(std::io::Error::other("Codex 事件超过大小上限。"));
+                }
+                receive(&line);
+            }
+        };
+        let write = async {
+            while let Some(mut request) = requests.next().await {
+                request.push('\n');
+                writer.write_all(request.as_bytes()).await?;
+            }
+            Ok(())
+        };
+        future::try_join(read, write)
+            .await
+            .map_err(|error| format!("Codex 连接中断：{error}"))?;
+    }
+    Ok(())
+}
+
+async fn with_timeout<T>(seconds: u32, work: impl Future<Output = T>) -> Option<T> {
+    match future::select(std::pin::pin!(work), glib::timeout_future_seconds(seconds)).await {
+        future::Either::Left((result, _)) => Some(result),
+        future::Either::Right(_) => None,
     }
 }
 

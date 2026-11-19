@@ -54,6 +54,8 @@ span
 - 输入区可以选择当前主机提供的模型和思考强度。点击「用量」可查看会话累计 token、上下文占用和账号返回的额度。
 - 点击「附件」选择本机文件，发送前可移除，每条消息最多 6 个、合计 16 MiB。SSH 会话通过当前连接的 SFTP 将附件放入远端私有临时目录。支持视觉输入的模型会直接收到 PNG、JPEG、GIF 和 WebP 图片，其余附件按文件路径交给 Agent 读取。
 
-运行 Agent 的主机需要安装支持 App Server 的 Codex CLI，并完成其正常登录。如果使用 SSH，先在终端完成登录。会话通过同一条已认证的 SSH 连接启动 App Server，并使用所选工作目录。
+运行 Agent 的主机需要安装支持 App Server 的 Codex CLI，并完成登录。如果使用 SSH，先在终端完成登录。Span 会通过已认证的 SSH 连接访问该主机上的 Codex，并使用所选工作目录。
+
+使用 ChatGPT App 接续时，先在运行 Codex 的主机上配置并启动 Codex 远程控制，再在 Span 中打开会话。Span 会自动接入同一用户、同一 `CODEX_HOME` 下正在运行的共享后台，保留原会话 ID，接收其他客户端的会话更新。关闭 Span 标签只会断开该标签的连接。未运行共享后台时，Span 使用独立的 App Server，可在关闭该会话标签后从其他客户端接续。
 
 Agent 回复支持可滚动和复制的 Markdown 代码卡片、GitHub 风格表格、Mermaid 基础流程图和时序图，以及本机或远端文件中的 PNG/JPEG 图片。表格可以单独复制为 HTML 富文本、CSV 或 Markdown。图片和 Mermaid 图可以放大、复制和保存，Mermaid 图同时提供源码。复杂 Mermaid 语法以源码显示，图片文件预览上限为 8 MiB。
