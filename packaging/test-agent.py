@@ -341,7 +341,9 @@ for line in sys.stdin:
         send({"method": "item/completed", "params": {**event, "item": {
             **command, "status": "completed", "exitCode": 0, "aggregatedOutput": "integration test passed"}}})
         send({"method": "item/completed", "params": {**event, "item": {
-            "id": "web", "type": "webSearch", "query": "deployment checklist documentation"}}})
+            "id": "web", "type": "webSearch", "query": "deployment checklist documentation",
+            "action": {"type": "findInPage", "pattern": "deployment checklist documentation",
+                       "url": "https://example.invalid/activity/checklist?from=span&view=doc"}}}})
         send({"method": "item/fileChange/patchUpdated", "params": {
             **event, "itemId": "checks-edit", "changes": [{"path": "checks.txt", "diff": diff}]}})
         send({"method": "item/agentMessage/delta", "params": {

@@ -26,6 +26,8 @@ pub enum Icon {
     Download,
     Copy,
     CopyRich,
+    Search,
+    Activity,
 }
 
 pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
@@ -258,6 +260,19 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.move_to(17.1, 2.8);
             cr.line_to(17.1, 6.9);
             cr.line_to(13.0, 6.9);
+        }
+        Icon::Search => {
+            cr.arc(10.2, 10.2, 5.8, 0.0, std::f64::consts::TAU);
+            cr.move_to(14.7, 14.7);
+            cr.line_to(20.0, 20.0);
+        }
+        Icon::Activity => {
+            cr.move_to(3.5, 12.0);
+            cr.line_to(7.0, 12.0);
+            cr.line_to(10.0, 5.5);
+            cr.line_to(14.0, 18.5);
+            cr.line_to(17.0, 12.0);
+            cr.line_to(20.5, 12.0);
         }
     }
     let _ = cr.stroke();

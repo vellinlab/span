@@ -544,8 +544,7 @@ impl CodeCard {
         language.set_ellipsize(pango::EllipsizeMode::Start);
         language.set_tooltip_text(Some(&crate::agent::limited(title, 1024)));
         header.pack_start(&language, false, false, 0);
-        let copy = gtk::Button::with_label(copy_label);
-        copy.style_context().add_class("quiet-button");
+        let copy = crate::icons::button(crate::icons::Icon::Copy, copy_label, copy_label);
         header.pack_end(&copy, false, false, 0);
         block.add(&header);
 
@@ -558,6 +557,8 @@ impl CodeCard {
             .right_margin(10)
             .top_margin(8)
             .bottom_margin(8)
+            .pixels_above_lines(1)
+            .pixels_below_lines(1)
             .build();
         view.style_context().add_class("agent-code-view");
         let buffer = view.buffer().expect("code view buffer");
@@ -605,6 +606,11 @@ pub fn code_card(
         let footer = gtk::Label::new(Some(status));
         footer.set_xalign(1.0);
         footer.style_context().add_class("agent-code-status");
+        match status {
+            "成功" => footer.style_context().add_class("status-success"),
+            "失败" | "已拒绝" => footer.style_context().add_class("status-failed"),
+            _ => {}
+        }
         card.panel.add(&footer);
     }
     card.panel

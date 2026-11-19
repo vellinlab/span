@@ -1,14 +1,16 @@
-@define-color canvas #18191d;
-@define-color terminal #14151a;
-@define-color sidebar #202126;
-@define-color chrome #24262c;
-@define-color line #2e3037;
-@define-color surface #292b32;
-@define-color hover #2e3139;
-@define-color selection #303b50;
-@define-color foreground #e9eaf0;
-@define-color muted #b2b6c0;
-@define-color accent #a0baff;
+@define-color canvas #191a1a;
+@define-color terminal #151616;
+@define-color sidebar #202222;
+@define-color chrome #262828;
+@define-color line #303333;
+@define-color surface #2b2d2d;
+@define-color hover #343737;
+@define-color selection #293b3b;
+@define-color foreground #ebedeb;
+@define-color muted #a9b0ad;
+@define-color accent #9bcac6;
+@define-color editor #171919;
+@define-color composer #272a2a;
 
 window.workbench,
 .workbench stack {
@@ -455,9 +457,30 @@ button.agent-send:disabled {
 }
 
 .files-preview-header {
-    padding: 4px 8px;
-    background: @canvas;
+    padding: 6px 9px;
+    background: @sidebar;
     border-bottom: 1px solid @line;
+}
+
+.preview-file-name {
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: @surface;
+}
+
+.preview-file-name drawingarea {
+    color: @accent;
+}
+
+.preview-location {
+    padding: 5px 10px;
+    background: @editor;
+    color: @muted;
+    font-size: 12px;
+}
+
+.preview-location label {
+    padding: 2px 3px;
 }
 
 .workbench .files-preview-header button:disabled {
@@ -482,14 +505,13 @@ button.agent-send:disabled {
 }
 
 .source-preview {
-    background: @terminal;
+    background: @editor;
     border-top: 1px solid @line;
 }
 
 .source-gutter {
-    background: #1b1e25;
-    color: #8f99ad;
-    border-right: 1px solid @line;
+    background: @editor;
+    color: #88918e;
 }
 
 popover.selection-quote {
@@ -715,13 +737,13 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 
 .agent-prose {
     font-size: 15px;
+    font-weight: 400;
 }
 
 .agent-user {
-    background: #23252b;
-    border: 1px solid #32353d;
-    border-radius: 11px;
-    padding: 8px 12px;
+    background: #2b3246;
+    border-radius: 14px 14px 5px 14px;
+    padding: 10px 14px;
     font-size: 15px;
 }
 
@@ -743,33 +765,61 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 }
 
 .agent-activity-heading {
-    font-weight: bold;
+    font-weight: 500;
 }
 
 .agent-activity-heading,
 .agent-activity-row {
-    font-size: 12px;
+    font-size: 13px;
+}
+
+.agent-activity-title {
+    padding: 2px 0;
+}
+
+.agent-activity-title drawingarea {
+    color: #8d9e99;
+}
+
+.agent-activity > title:hover,
+.agent-activity-row > title:hover {
+    color: @foreground;
 }
 
 .agent-activity-rows {
     margin: 6px 0 3px 7px;
-    padding: 4px 0 4px 11px;
+    padding: 0 0 1px 12px;
     border-left: 1px solid @line;
 }
 
 .agent-activity-row {
-    padding: 3px 0;
+    padding: 2px 0;
 }
 
 .agent-activity-detail {
     color: @foreground;
-    padding: 6px 9px;
+    padding: 5px 10px 6px 22px;
     font-size: 13px;
+}
+
+.agent-activity-web {
+    margin: 4px 0 4px 22px;
+}
+
+.agent-activity-web .agent-activity-detail {
+    padding: 1px 0;
+}
+
+.agent-source-link {
+    background: @surface;
+    border-radius: 12px;
+    padding: 4px 9px;
+    font-size: 12px;
 }
 
 .agent-code {
     color: @foreground;
-    background: @terminal;
+    background: #202222;
     border: 1px solid @line;
     border-radius: 9px;
     margin: 3px 0;
@@ -790,10 +840,31 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 .files-preview textview,
 .files-preview textview text {
     color: @foreground;
-    background: @terminal;
-    font-family: "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono CJK SC", monospace;
+    background: #202222;
+    font-family: "Cascadia Mono", "Consolas", "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono CJK SC", monospace;
     font-size: 13px;
 }
+
+.source-preview textview,
+.source-preview textview text {
+    background: @editor;
+    color: #e0e5df;
+}
+
+.workbench .agent-code-view text selection,
+.workbench .source-preview textview text selection {
+    background: #34514f;
+    color: #fff;
+}
+
+.agent-code-status {
+    padding: 4px 9px 6px;
+    color: @muted;
+    font-size: 12px;
+}
+
+.agent-code-status.status-success { color: #9ec5ac; }
+.agent-code-status.status-failed { color: #e5a3a6; }
 
 .agent-diff-stats {
     font-family: "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", monospace;
@@ -850,14 +921,14 @@ scrolledwindow.agent-table-scroll {
 }
 
 .agent-compose-card {
-    background: #23252b;
-    border: 1px solid #353740;
-    border-radius: 14px;
+    background: @composer;
+    border: 1px solid #383d3c;
+    border-radius: 16px;
     padding: 7px 10px 9px;
 }
 
 .agent-compose-card.composer-focused {
-    border-color: #526484;
+    border-color: #5a7873;
 }
 
 .agent-compose-placeholder {
@@ -876,8 +947,8 @@ scrolledwindow.agent-table-scroll {
 }
 
 .draft-quote {
-    background: #2a2e38;
-    border: 1px solid #3a4150;
+    background: #303636;
+    border: 1px solid #414a49;
     border-left: 2px solid @accent;
     border-radius: 7px;
     padding: 3px 6px 3px 9px;
@@ -1055,7 +1126,7 @@ label.agent-markdown link:visited {
 
 .agent-composer textview,
 .agent-composer textview text {
-    background: @chrome;
+    background: @composer;
     color: @foreground;
     caret-color: @accent;
 }

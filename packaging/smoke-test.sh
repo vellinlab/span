@@ -324,6 +324,10 @@ SVG
     widget expanded-contains '读取文件 · checks.txt' 'integration test passed'
     widget mouse '修改文件 · checks.txt…'
     widget expanded-contains '修改文件 · checks.txt…' '+passed'
+    widget mouse '在网页中查找 · deployment checklist documentation'
+    widget expanded-contains '在网页中查找 · deployment checklist documentation' 'example.invalid'
+    widget mouse-text 'example.invalid'
+    wait_until "opening the activity source" grep -qFx 'https://example.invalid/activity/checklist?from=span&view=doc' "$HOME/span-opened-link"
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-activity.png"
     widget mouse '已完成 · 4 项活动'
     timeline_wheel 5 16

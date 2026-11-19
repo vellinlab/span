@@ -62,12 +62,27 @@ fn highlight(path: &Path, text: &str) -> Vec<(i32, i32, (u8, u8, u8))> {
             let end = offset + part.chars().count() as i32;
             if !part.trim().is_empty() && Some(style.foreground) != theme.settings.foreground {
                 let color = style.foreground;
-                spans.push((offset, end, (color.r, color.g, color.b)));
+                spans.push((offset, end, editor_color((color.r, color.g, color.b))));
             }
             offset = end;
         }
     }
     spans
+}
+
+fn editor_color(color: (u8, u8, u8)) -> (u8, u8, u8) {
+    // Recolor the bundled Base16 Ocean grammar without changing its token scopes.
+    match color {
+        (0x65, 0x73, 0x7e) => (0x8b, 0x98, 0x91), // comments
+        (0xb4, 0x8e, 0xad) => (0xd0, 0xae, 0xf4), // keywords
+        (0xa3, 0xbe, 0x8c) => (0xb6, 0xd8, 0x9a), // strings
+        (0xd0, 0x87, 0x70) => (0xea, 0xae, 0x83), // literals
+        (0x8f, 0xa1, 0xb3) => (0x99, 0xc1, 0xf1), // functions
+        (0xeb, 0xcb, 0x8b) => (0xe4, 0xcb, 0x9d), // types
+        (0xbf, 0x61, 0x6a) => (0xe5, 0xa2, 0xa4), // identifiers
+        (0x96, 0xb5, 0xb4) => (0x9c, 0xcf, 0xc8), // escapes and operators
+        _ => color,
+    }
 }
 
 pub fn view(scroll: &gtk::ScrolledWindow, source: SourceText, quote: &quote::Action) -> gtk::Box {
@@ -80,6 +95,8 @@ pub fn view(scroll: &gtk::ScrolledWindow, source: SourceText, quote: &quote::Act
         .right_margin(12)
         .top_margin(10)
         .bottom_margin(10)
+        .pixels_above_lines(1)
+        .pixels_below_lines(2)
         .build();
     view.style_context().add_class("agent-code-view");
     if let Some(accessible) = view.accessible() {

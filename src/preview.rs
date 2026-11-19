@@ -139,6 +139,7 @@ struct History {
 pub struct Panel {
     pub widget: gtk::Box,
     label: gtk::Label,
+    location: gtk::Label,
     detail: gtk::Label,
     body: gtk::Box,
     previous: gtk::Button,
@@ -166,7 +167,11 @@ impl Panel {
             .ellipsize(pango::EllipsizeMode::Middle)
             .build();
         label.style_context().add_class("section-title");
-        header.pack_start(&label, true, true, 0);
+        let file_name = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        file_name.style_context().add_class("preview-file-name");
+        file_name.pack_start(&icons::widget(Icon::File, 14), false, false, 0);
+        file_name.pack_start(&label, true, true, 0);
+        header.pack_start(&file_name, true, true, 0);
         let previous = tool("‹", "上一个预览");
         let next = tool("›", "下一个预览");
         let save = tool("", "保存预览文件");
@@ -182,7 +187,15 @@ impl Panel {
             .ellipsize(pango::EllipsizeMode::End)
             .build();
         detail.style_context().add_class("preview-detail");
-        widget.pack_start(&detail, false, false, 0);
+        let location = gtk::Label::builder()
+            .xalign(0.0)
+            .ellipsize(pango::EllipsizeMode::Start)
+            .build();
+        let path_bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        path_bar.style_context().add_class("preview-location");
+        path_bar.pack_start(&location, true, true, 0);
+        path_bar.pack_end(&detail, false, false, 0);
+        widget.pack_start(&path_bar, false, false, 0);
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         body.style_context().add_class("files-preview");
         widget.pack_start(&body, true, true, 0);
@@ -192,6 +205,7 @@ impl Panel {
         let panel = Rc::new(Self {
             widget,
             label,
+            location,
             detail,
             body,
             previous,
@@ -321,11 +335,8 @@ impl Panel {
                 .get(tab.selection)
                 .is_some_and(|asset| matches!(**asset, Artifact::File { .. })),
         );
-        self.detail.set_text(&format!(
-            "预览 · {} / {}",
-            tab.selection + 1,
-            tab.entries.len()
-        ));
+        self.detail
+            .set_text(&format!("{} / {}", tab.selection + 1, tab.entries.len()));
     }
 
     fn refresh(self: &Rc<Self>) {
@@ -346,6 +357,13 @@ impl Panel {
         self.widget.show();
         self.label.set_text(&item.title());
         self.label.set_tooltip_text(Some(&item.title()));
+        let location = match item.as_ref() {
+            Artifact::File { path, .. } => path.parent().map(|dir| files::display(dir.as_os_str())),
+            _ => None,
+        };
+        self.location
+            .set_text(location.as_deref().unwrap_or_default());
+        self.location.set_tooltip_text(location.as_deref());
         self.notice("正在加载预览…");
         match item.as_ref() {
             Artifact::Mermaid(code) => self.show_content(Ok(Content::Mermaid(code.clone())), None),

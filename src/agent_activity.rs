@@ -1,6 +1,7 @@
 use crate::agent::{append_changes, limited};
 use crate::agent_diff::DiffCard;
 use crate::agent_render;
+use crate::icons::{self, Icon};
 use gtk::pango;
 use gtk::prelude::*;
 use serde_json::Value;
@@ -28,6 +29,10 @@ struct Entry {
 
 enum View {
     Text(gtk::Label),
+    Web {
+        detail: gtk::Label,
+        source: gtk::Label,
+    },
     Command(gtk::Box),
     Patch {
         files: gtk::Label,
@@ -43,6 +48,7 @@ pub struct Record<'a> {
     status: Option<&'a str>,
     patch: Option<String>,
     summary: Vec<String>,
+    web_url: Option<&'a str>,
 }
 
 impl<'a> Record<'a> {
@@ -58,6 +64,7 @@ impl<'a> Record<'a> {
             return Some(Self::patch(id, &item["changes"], status));
         }
         let mut summary = Vec::new();
+        let mut web_url = None;
         let (title, detail) = match kind {
             "reasoning" => {
                 summary = item["summary"]
@@ -82,6 +89,9 @@ impl<'a> Record<'a> {
             "commandExecution" => command(item),
             "webSearch" => {
                 let action = &item["action"];
+                web_url = action["url"]
+                    .as_str()
+                    .filter(|url| agent_render::web_url(url));
                 let (verb, target) = match action["type"].as_str() {
                     Some("openPage") => ("打开网页", action["url"].as_str()),
                     Some("findInPage") => ("在网页中查找", action["pattern"].as_str()),
@@ -90,10 +100,17 @@ impl<'a> Record<'a> {
                         nonempty(item["query"].as_str()).or_else(|| action["query"].as_str()),
                     ),
                 };
-                (
-                    brief(verb, target),
-                    target.map_or_else(String::new, |v| limited(v, 2048)),
-                )
+                let detail = action["queries"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter(|query| Some(*query) != target)
+                    .take(10)
+                    .map(|query| limited(query, 240))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (brief(verb, target), detail)
             }
             "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall" => (
                 brief("调用工具", item["tool"].as_str()),
@@ -112,6 +129,7 @@ impl<'a> Record<'a> {
             status,
             patch: None,
             summary,
+            web_url,
         })
     }
 
@@ -145,6 +163,7 @@ impl<'a> Record<'a> {
             status,
             patch: (!patch.is_empty()).then_some(patch),
             summary: Vec::new(),
+            web_url: None,
         }
     }
 }
@@ -155,7 +174,7 @@ impl Activity {
         widget.style_context().add_class("agent-activity");
         let heading = title_label();
         heading.style_context().add_class("agent-activity-heading");
-        widget.set_label_widget(Some(&heading));
+        set_title_widget(&widget, &heading, Icon::Activity);
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 4);
         rows.style_context().add_class("agent-activity-rows");
         widget.add(&rows);
@@ -181,14 +200,32 @@ impl Activity {
     fn render_record(&mut self, record: Record<'_>, historical: bool) {
         let quote = self.quote.clone();
         let entry = self.entry(record.id, record.kind);
-        entry.title.set_text(&record.title);
-        entry.title.set_tooltip_text(Some(&record.title));
+        set_title(&entry.row, &entry.title, &record.title);
         match &entry.view {
             View::Text(label) if record.kind == "reasoning" => {
                 entry.summary = record.summary;
                 agent_render::set_markdown(label, &record.detail);
             }
             View::Text(label) => label.set_text(&record.detail),
+            View::Web { detail, source } => {
+                detail.set_text(&record.detail);
+                detail.set_visible(!record.detail.is_empty());
+                source.set_visible(record.web_url.is_some());
+                if let Some(url) = record.web_url {
+                    let mut markup = String::new();
+                    agent_render::push_link(&mut markup, url);
+                    let host = url
+                        .split_once("://")
+                        .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
+                        .map(|host| host.rsplit('@').next().unwrap_or(host))
+                        .filter(|host| !host.is_empty())
+                        .unwrap_or(url);
+                    markup.push_str(&gtk::glib::markup_escape_text(host));
+                    markup.push_str("</a>");
+                    source.set_markup(&markup);
+                    source.set_tooltip_text(Some(url));
+                }
+            }
             View::Command(body) => {
                 let status = match record.status {
                     Some("completed") => "成功",
@@ -230,7 +267,7 @@ impl Activity {
 
     pub fn summary(&mut self, id: &str, index: usize, delta: &str) {
         let entry = self.entry(id, "reasoning");
-        entry.title.set_text("推理摘要");
+        set_title(&entry.row, &entry.title, "推理摘要");
         if entry.summary.len() <= index {
             entry.summary.resize_with(index + 1, String::new);
         }
@@ -286,8 +323,7 @@ impl Activity {
     }
 
     fn set_heading(&self, text: &str) {
-        self.heading.set_text(text);
-        self.heading.set_tooltip_text(Some(text));
+        set_title(&self.widget, &self.heading, text);
     }
 
     fn entry(&mut self, id: &str, kind: &str) -> &mut Entry {
@@ -295,7 +331,14 @@ impl Activity {
             let item = gtk::Expander::new(None);
             item.style_context().add_class("agent-activity-row");
             let title = title_label();
-            item.set_label_widget(Some(&title));
+            let icon = match kind {
+                "reasoning" => Icon::Activity,
+                "commandExecution" => Icon::Terminal,
+                "fileChange" => Icon::File,
+                "webSearch" => Icon::Search,
+                _ => Icon::Link,
+            };
+            set_title_widget(&item, &title, icon);
             let view = if kind == "commandExecution" {
                 let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 item.add(&body);
@@ -312,6 +355,22 @@ impl Activity {
                 diff.widget().hide();
                 item.add(&body);
                 View::Patch { files, diff }
+            } else if kind == "webSearch" {
+                let body = gtk::Box::new(gtk::Orientation::Vertical, 4);
+                body.style_context().add_class("agent-activity-web");
+                let detail = agent_render::text("");
+                detail.style_context().add_class("agent-activity-detail");
+                detail.set_no_show_all(true);
+                let source = agent_render::markdown_label();
+                source.style_context().add_class("agent-source-link");
+                source.set_halign(gtk::Align::Start);
+                source.set_ellipsize(pango::EllipsizeMode::Middle);
+                source.set_max_width_chars(52);
+                source.set_no_show_all(true);
+                body.add(&detail);
+                body.add(&source);
+                item.add(&body);
+                View::Web { detail, source }
             } else {
                 let detail = if kind == "reasoning" {
                     agent_render::markdown_label()
@@ -425,4 +484,20 @@ fn title_label() -> gtk::Label {
     label.set_hexpand(true);
     label.set_ellipsize(pango::EllipsizeMode::End);
     label
+}
+
+fn set_title_widget(row: &gtk::Expander, title: &gtk::Label, icon: Icon) {
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    header.style_context().add_class("agent-activity-title");
+    header.pack_start(&icons::widget(icon, 14), false, false, 0);
+    header.pack_start(title, true, true, 0);
+    row.set_label_widget(Some(&header));
+}
+
+fn set_title(row: &gtk::Expander, title: &gtk::Label, text: &str) {
+    title.set_text(text);
+    title.set_tooltip_text(Some(text));
+    if let Some(accessible) = row.accessible() {
+        accessible.set_name(text);
+    }
 }
