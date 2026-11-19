@@ -78,7 +78,7 @@ pub fn response(
                 if matches!(language, "html" | "htm") && !code.trim().is_empty() {
                     artifacts.push(Artifact::Html(code.clone()));
                 }
-                blocks.add(&code_card(language, &code, quote));
+                blocks.add(&code_card(language, &code, None, quote));
             }
             Event::Start(Tag::Image { dest_url, .. }) => {
                 let mut alt = String::new();
@@ -583,7 +583,12 @@ impl CodeCard {
     }
 }
 
-fn code_card(language: &str, code: &str, quote: &quote::Action) -> gtk::Box {
+pub fn code_card(
+    language: &str,
+    code: &str,
+    status: Option<&str>,
+    quote: &quote::Action,
+) -> gtk::Box {
     let card = CodeCard::new(language, "复制代码");
     card.buffer.set_text(&code.replace('\0', "�"));
     card.size_to(code);
@@ -595,6 +600,12 @@ fn code_card(language: &str, code: &str, quote: &quote::Action) -> gtk::Box {
     });
     if let Some(view) = card.scroll.child().and_downcast::<gtk::TextView>() {
         quote::bind_text(&view, quote);
+    }
+    if let Some(status) = status {
+        let footer = gtk::Label::new(Some(status));
+        footer.set_xalign(1.0);
+        footer.style_context().add_class("agent-code-status");
+        card.panel.add(&footer);
     }
     card.panel
 }

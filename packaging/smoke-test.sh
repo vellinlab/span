@@ -246,7 +246,7 @@ MARKDOWN
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
     timeline_wheel 4 16
-    widget mouse '进行中 · 修改文件 · checks.txt…'
+    widget mouse '已完成 · 4 项活动'
     widget contains 'Checking the build before publishing.'
     widget not-contains '**Checking the build'
     widget not-contains 'fixture raw reasoning sentinel'
@@ -255,7 +255,7 @@ MARKDOWN
     widget mouse '修改文件 · checks.txt…'
     widget expanded-contains '修改文件 · checks.txt…' '+passed'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-activity.png"
-    widget mouse '进行中 · 修改文件 · checks.txt…'
+    widget mouse '已完成 · 4 项活动'
     timeline_wheel 5 16
     widget contains 'Which deployment environment?'
     timeline_wheel 5 8
@@ -414,6 +414,13 @@ MARKDOWN
     widget contains 'Preparing the comparison table.'
     widget not-contains '**Preparing the comparison table.**'
     widget contains '正在生成回复'
+    widget mouse '已完成 · 2 项活动'
+    widget contains 'Thinking after the progress update.'
+    read -r _ progress_y _ _ <<< "$(widget bounds 'I found the comparison data.')"
+    read -r _ after_progress_y _ _ <<< "$(widget bounds 'Thinking after the progress update.')"
+    read -r _ draft_y _ _ <<< "$(widget bounds 'Preparing the comparison table.')"
+    ((progress_y < after_progress_y && after_progress_y < draft_y))
+    printf '%s\n' 'Fresh reasoning and commands follow an Agent progress message in the timeline.'
     widget contains 'Esc 中断'
     widget contains '已运行 0:'
     sleep 1.2

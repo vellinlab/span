@@ -57,6 +57,12 @@ struct TurnDiff {
     card: DiffCard,
 }
 
+struct PendingMessage {
+    label: gtk::Label,
+    id: String,
+    text: String,
+}
+
 struct CatalogFetch {
     search: String,
     archived: bool,
@@ -104,8 +110,8 @@ pub struct Agent {
     live: RefCell<Option<Rc<LiveMessage>>>,
     turn_copy: RefCell<Vec<String>>,
     activity: RefCell<Option<(String, Activity)>>,
-    earlier_activity: RefCell<HashMap<String, Vec<String>>>,
-    earlier_reply: RefCell<HashMap<String, String>>,
+    past_activity: RefCell<Vec<Activity>>,
+    past_replies: RefCell<HashMap<String, Vec<Rc<LiveMessage>>>>,
     history: gtk::Box,
     older: gtk::Button,
     history_cursor: RefCell<Option<String>>,
@@ -136,7 +142,7 @@ pub struct Agent {
     attachments: Rc<Attachments>,
     uploading: Cell<bool>,
     pasting: Cell<bool>,
-    pending_user: RefCell<Option<(gtk::Label, String)>>,
+    pending_user: RefCell<Option<PendingMessage>>,
     client_messages: RefCell<HashSet<String>>,
     primary_action: Cell<Option<ComposerAction>>,
     primary: gtk::Button,
@@ -378,8 +384,8 @@ impl Agent {
             live: RefCell::new(None),
             turn_copy: RefCell::new(Vec::new()),
             activity: RefCell::new(None),
-            earlier_activity: RefCell::new(HashMap::new()),
-            earlier_reply: RefCell::new(HashMap::new()),
+            past_activity: RefCell::new(Vec::new()),
+            past_replies: RefCell::new(HashMap::new()),
             history,
             older,
             history_cursor: RefCell::new(None),
@@ -837,11 +843,6 @@ impl Agent {
             let mut assistant_text = Vec::new();
             let status = turn["status"].as_str();
             for item in array(&turn["items"]) {
-                if item["type"] == "userMessage"
-                    && let Some(previous) = activity.take()
-                {
-                    previous.finish(Some("steered"));
-                }
                 if let Some(record) = Record::from_item(item) {
                     let activity = activity.get_or_insert_with(|| self.new_activity());
                     if status == Some("inProgress") {
@@ -850,6 +851,16 @@ impl Agent {
                         activity.record_history(record);
                     }
                 } else {
+                    if matches!(
+                        item["type"].as_str(),
+                        Some("userMessage" | "agentMessage" | "plan" | "imageGeneration")
+                    ) && let Some(mut previous) = activity.take()
+                    {
+                        previous.finish((item["type"] == "userMessage").then_some("steered"));
+                        if status == Some("inProgress") && !prepend {
+                            self.past_activity.borrow_mut().push(previous);
+                        }
+                    }
                     self.completed_item(item, true);
                     if matches!(item["type"].as_str(), Some("agentMessage" | "plan"))
                         && let Some(text) = item["text"].as_str()
@@ -877,7 +888,7 @@ impl Agent {
                     self.activity.replace(Some((id.clone(), activity)));
                 }
             }
-            if let Some(activity) = activity {
+            if let Some(mut activity) = activity {
                 activity.finish(status);
             }
         }
@@ -1118,12 +1129,17 @@ impl Agent {
             }
             Request::Unsubscribe => {}
             Request::Send | Request::Steer => {
-                if self.pending_user.take().is_some() {
+                if let Some(pending) = self.pending_user.take() {
                     if matches!(request, Request::Send) {
                         self.options.remember();
                     }
-                    if let Some(buffer) = self.input.buffer() {
-                        buffer.set_text("");
+                    if let Some(buffer) = self.input.buffer()
+                        && let Some(draft) =
+                            buffer.text(&buffer.start_iter(), &buffer.end_iter(), false)
+                        && let Some(tail) = draft.trim_start().strip_prefix(&pending.text)
+                    {
+                        buffer.set_text(tail.trim_start());
+                        buffer.place_cursor(&buffer.end_iter());
                     }
                     self.attachments
                         .finish_send(self.context.borrow().socket.is_some());
@@ -1135,7 +1151,6 @@ impl Agent {
                     && self.active.get()
                     && !self.interrupting.get()
                 {
-                    self.split_progress();
                     self.show_status("已追加 · Codex 正在处理…");
                 }
                 self.update_controls();
@@ -1292,9 +1307,17 @@ impl Agent {
             (Request::Send, "turn/start")
         };
         self.follow_tail.set(true);
+        if matches!(request, Request::Steer) {
+            self.close_activity(Some("steered"));
+            self.close_reply();
+        }
         let label = self.add_user(&files.summary(text));
         self.client_messages.borrow_mut().insert(message_id.clone());
-        self.pending_user.replace(Some((label, message_id)));
+        self.pending_user.replace(Some(PendingMessage {
+            label,
+            id: message_id,
+            text: text.to_owned(),
+        }));
         self.show_status(if matches!(request, Request::Steer) {
             "正在追加消息…"
         } else {
@@ -1305,9 +1328,9 @@ impl Agent {
     }
 
     fn remove_pending_user(&self) {
-        if let Some((label, id)) = self.pending_user.take() {
-            self.history.remove(&label);
-            self.client_messages.borrow_mut().remove(&id);
+        if let Some(pending) = self.pending_user.take() {
+            self.history.remove(&pending.label);
+            self.client_messages.borrow_mut().remove(&pending.id);
         }
     }
 
@@ -1354,8 +1377,8 @@ impl Agent {
     fn clear_history(&self) {
         self.follow_tail.set(true);
         self.turn_copy.borrow_mut().clear();
-        self.earlier_activity.borrow_mut().clear();
-        self.earlier_reply.borrow_mut().clear();
+        self.past_activity.borrow_mut().clear();
+        self.past_replies.borrow_mut().clear();
         self.history_generation
             .set(self.history_generation.get() + 1);
         self.live.take();
@@ -1378,8 +1401,8 @@ impl Agent {
 
     pub fn disconnect(&self, message: &str) {
         self.turn_copy.borrow_mut().clear();
-        self.earlier_activity.borrow_mut().clear();
-        self.earlier_reply.borrow_mut().clear();
+        self.past_activity.borrow_mut().clear();
+        self.past_replies.borrow_mut().clear();
         self.rpc.take();
         self.pending.borrow_mut().clear();
         self.opening.set(false);
@@ -1432,11 +1455,10 @@ impl Agent {
             }
             "item/started" | "item/completed" => {
                 let item = &params["item"];
-                if let Some(record) = self.activity_record(item) {
-                    if let Some(turn) = params["turnId"].as_str() {
-                        self.update_activity(turn, |activity| activity.record(record));
-                    }
-                } else if method == "item/completed" {
+                if let Some(turn) = params["turnId"].as_str() {
+                    self.record_item(turn, item);
+                }
+                if method == "item/completed" {
                     self.completed_item(item, false);
                 }
                 if method == "item/completed" && item["type"] == "fileChange" {
@@ -1467,7 +1489,7 @@ impl Agent {
                     (params["turnId"].as_str(), params["itemId"].as_str())
                 {
                     let record = Record::patch(id, &params["changes"], Some("inProgress"));
-                    self.update_activity(turn, |activity| activity.record(record));
+                    self.update_record(turn, record);
                 }
             }
             "turn/started" => {
@@ -1486,6 +1508,8 @@ impl Agent {
                     if self.is_active_turn(turn) {
                         let mut live = self.diff.borrow_mut();
                         if live.as_ref().is_none_or(|entry| entry.id != turn) {
+                            self.close_activity(None);
+                            self.close_reply();
                             let (expander, card) = self.add_diff(diff);
                             live.replace(TurnDiff {
                                 id: turn.into(),
@@ -1504,30 +1528,13 @@ impl Agent {
                 let status = turn["status"].as_str();
                 let interrupted = status == Some("interrupted");
                 if let Some(id) = turn["id"].as_str() {
-                    for record in
-                        array(&turn["items"]).filter_map(|item| self.activity_record(item))
-                    {
-                        if !self.earlier_activity.borrow().contains_key(record.id())
-                            || self
-                                .activity
-                                .borrow()
-                                .as_ref()
-                                .is_some_and(|(_, group)| group.has_item(record.id()))
-                        {
-                            self.update_activity(id, |activity| activity.record(record));
-                        }
+                    for item in array(&turn["items"]) {
+                        self.record_item(id, item);
                     }
                 }
                 self.finish_activity(status);
-                self.earlier_activity.borrow_mut().clear();
-                self.earlier_reply.borrow_mut().clear();
-                if interrupted {
-                    if let Some(live) = self.live.take() {
-                        live.render();
-                    }
-                } else {
-                    self.remove_live();
-                }
+                self.close_reply();
+                self.past_replies.borrow_mut().clear();
                 self.active.set(false);
                 self.turn.take();
                 self.interrupting.set(false);
@@ -1585,28 +1592,71 @@ impl Agent {
         activity
     }
 
-    fn activity_record<'a>(&self, item: &'a Value) -> Option<Record<'a>> {
-        let previous = self.earlier_activity.borrow();
-        let summary = item["id"]
-            .as_str()
-            .and_then(|id| previous.get(id))
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        Record::after(item, summary)
+    fn record_item(&self, turn: &str, item: &Value) {
+        let mut earlier = Vec::new();
+        if item["type"] == "reasoning"
+            && let Some(id) = item["id"].as_str()
+        {
+            let past = self.past_activity.borrow();
+            let before = if self
+                .activity
+                .borrow()
+                .as_ref()
+                .is_some_and(|(_, group)| group.has_item(id))
+            {
+                past.len()
+            } else {
+                past.iter()
+                    .rposition(|group| group.has_item(id))
+                    .unwrap_or(0)
+            };
+            for group in &past[..before] {
+                group.extend_summary(id, &mut earlier);
+            }
+        }
+        if let Some(record) = Record::after(item, &earlier) {
+            self.update_record(turn, record);
+        }
     }
 
-    fn split_progress(&self) {
-        if let Some((_, activity)) = self.activity.take() {
-            activity.freeze(&mut self.earlier_activity.borrow_mut());
+    fn update_record(&self, turn: &str, record: Record<'_>) {
+        if !self.is_active_turn(turn) {
+            return;
         }
-        self.diff.take();
+        let in_current = self
+            .activity
+            .borrow()
+            .as_ref()
+            .is_some_and(|(_, group)| group.has_item(record.id()));
+        if !in_current
+            && let Some(group) = self
+                .past_activity
+                .borrow_mut()
+                .iter_mut()
+                .rev()
+                .find(|group| group.has_item(record.id()))
+        {
+            group.record(record);
+            return;
+        }
+        self.update_activity(turn, |group| group.record(record));
+    }
+
+    fn close_activity(&self, status: Option<&str>) {
+        if let Some((_, mut activity)) = self.activity.take() {
+            activity.finish(status);
+            self.past_activity.borrow_mut().push(activity);
+        }
+    }
+
+    fn close_reply(&self) {
         if let Some(live) = self.live.take() {
             live.render();
-            self.earlier_reply
+            self.past_replies
                 .borrow_mut()
                 .entry(live.id.clone())
                 .or_default()
-                .push_str(&live.text.borrow());
+                .push(live);
         }
     }
 
@@ -1616,11 +1666,14 @@ impl Agent {
         }
         let mut current = self.activity.borrow_mut();
         if current.as_ref().is_some_and(|(id, _)| id != turn) {
-            if let Some((_, older)) = current.take() {
+            if let Some((_, mut older)) = current.take() {
                 older.finish(None);
             }
         }
-        let (_, activity) = current.get_or_insert_with(|| (turn.to_owned(), self.new_activity()));
+        let (_, activity) = current.get_or_insert_with(|| {
+            self.close_reply();
+            (turn.to_owned(), self.new_activity())
+        });
         update(activity);
         drop(current);
         self.update_task_status();
@@ -1631,9 +1684,10 @@ impl Agent {
     }
 
     fn finish_activity(&self, status: Option<&str>) {
-        if let Some((_, activity)) = self.activity.take() {
+        if let Some((_, mut activity)) = self.activity.take() {
             activity.finish(status);
         }
+        self.past_activity.borrow_mut().clear();
     }
 
     fn delta(&self, id: &str, delta: &str) {
@@ -1643,7 +1697,8 @@ impl Agent {
             .as_ref()
             .is_some_and(|live| live.id == id);
         if !same {
-            self.remove_live();
+            self.close_reply();
+            self.close_activity(None);
             let label = agent_render::markdown_label();
             label.style_context().add_class("agent-prose");
             crate::quote::bind_label(&label, &self.quote_action());
@@ -1705,31 +1760,32 @@ impl Agent {
                     .collect();
                 if !items.is_empty() {
                     if !loading_history && self.active.get() {
-                        self.split_progress();
+                        self.close_activity(Some("steered"));
+                        self.close_reply();
                     }
                     self.add_user(&items.join("\n"));
                 }
             }
             Some("agentMessage" | "plan") => {
-                self.remove_live();
                 if let Some(text) = item["text"].as_str() {
                     if !loading_history && !text.trim().is_empty() {
                         self.turn_copy.borrow_mut().push(limited(text, 256 * 1024));
                     }
-                    let earlier = item["id"]
-                        .as_str()
-                        .and_then(|id| self.earlier_reply.borrow_mut().remove(id));
-                    let text = earlier
-                        .as_deref()
-                        .and_then(|prefix| text.strip_prefix(prefix))
-                        .unwrap_or(text);
-                    if !text.trim().is_empty() {
-                        self.add_agent(text, loading_history);
+                    if loading_history {
+                        if !text.trim().is_empty() {
+                            self.add_agent(text, true, None);
+                        }
+                    } else {
+                        self.complete_reply(item["id"].as_str(), text);
                     }
                 }
             }
             Some("imageGeneration") => {
                 if let Some(path) = item["savedPath"].as_str() {
+                    if !loading_history {
+                        self.close_activity(None);
+                        self.close_reply();
+                    }
                     let context = self.context.borrow();
                     let image = agent_render::image(path, "生成的图片", &context, !loading_history);
                     if !path.is_empty() && !path.contains(['\0', ':']) {
@@ -1746,6 +1802,38 @@ impl Agent {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn complete_reply(&self, id: Option<&str>, text: &str) {
+        let mut parts = id
+            .and_then(|id| self.past_replies.borrow_mut().remove(id))
+            .unwrap_or_default();
+        if self
+            .live
+            .borrow()
+            .as_ref()
+            .is_some_and(|live| Some(live.id.as_str()) == id)
+        {
+            parts.extend(self.live.take());
+        }
+        if let Some(last) = parts.pop() {
+            let mut tail = text;
+            for part in parts {
+                let prefix = part.text.borrow();
+                tail = tail.strip_prefix(prefix.as_str()).unwrap_or_default();
+            }
+            if !tail.trim().is_empty() {
+                let position = self.history.child_property::<i32>(&last.label, "position");
+                self.history.remove(&last.label);
+                self.add_agent(tail, false, Some(position));
+            } else {
+                last.render();
+            }
+        } else if !text.trim().is_empty() {
+            self.close_activity(None);
+            self.close_reply();
+            self.add_agent(text, false, None);
         }
     }
 
@@ -1768,6 +1856,8 @@ impl Agent {
                 if let Some(previous) = self.questions.borrow_mut().insert(id, card.clone()) {
                     self.history.remove(&previous);
                 }
+                self.close_activity(None);
+                self.close_reply();
                 self.append(&card);
                 self.update_task_status();
                 return;
@@ -1820,6 +1910,8 @@ impl Agent {
         }
         card.add(&actions);
         self.approvals.borrow_mut().insert(id, card.clone());
+        self.close_activity(None);
+        self.close_reply();
         self.append(&card);
         self.update_task_status();
     }
@@ -1885,7 +1977,7 @@ impl Agent {
         label
     }
 
-    fn add_agent(&self, text: &str, loading_history: bool) {
+    fn add_agent(&self, text: &str, loading_history: bool, position: Option<i32>) {
         let text = limited(text, 256 * 1024);
         let message = column(6);
         message.style_context().add_class("agent-response");
@@ -1897,6 +1989,9 @@ impl Agent {
             &self.quote_action(),
         ));
         self.append(&message);
+        if let Some(position) = position {
+            self.history.reorder_child(&message, position);
+        }
     }
 
     fn add_copy_actions(&self, paragraphs: Vec<String>) {

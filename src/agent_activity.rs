@@ -15,6 +15,7 @@ pub struct Activity {
     rows: gtk::Box,
     entries: HashMap<String, Entry>,
     progress: String,
+    finished: bool,
     quote: crate::quote::Action,
 }
 
@@ -41,6 +42,7 @@ pub struct Record<'a> {
     kind: &'a str,
     status: Option<&'a str>,
     patch: Option<String>,
+    summary: Vec<String>,
 }
 
 impl<'a> Record<'a> {
@@ -55,30 +57,27 @@ impl<'a> Record<'a> {
         if kind == "fileChange" {
             return Some(Self::patch(id, &item["changes"], status));
         }
+        let mut summary = Vec::new();
         let (title, detail) = match kind {
             "reasoning" => {
-                let summary = item["summary"]
+                summary = item["summary"]
                     .as_array()?
                     .iter()
-                    .enumerate()
-                    .filter_map(|(index, part)| {
-                        let part = part.as_str()?;
-                        Some(
-                            earlier
-                                .get(index)
-                                .and_then(|prefix| part.strip_prefix(prefix.as_str()))
-                                .unwrap_or(part),
-                        )
-                    })
-                    .filter(|part| !part.is_empty())
                     .take(SUMMARY_PARTS)
-                    .map(|part| limited(part, SUMMARY_LIMIT))
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-                if summary.is_empty() {
+                    .enumerate()
+                    .map(|(index, part)| {
+                        let part = part.as_str().unwrap_or_default();
+                        let tail = earlier.get(index).map_or(part, |prefix| {
+                            part.strip_prefix(prefix.as_str()).unwrap_or("")
+                        });
+                        limited(tail, SUMMARY_LIMIT)
+                    })
+                    .collect();
+                let detail = summary_text(&summary);
+                if detail.is_empty() {
                     return None;
                 }
-                ("推理摘要".into(), summary)
+                ("推理摘要".into(), detail)
             }
             "commandExecution" => command(item),
             "webSearch" => {
@@ -112,6 +111,7 @@ impl<'a> Record<'a> {
             kind,
             status,
             patch: None,
+            summary,
         })
     }
 
@@ -144,6 +144,7 @@ impl<'a> Record<'a> {
             kind: "fileChange",
             status,
             patch: (!patch.is_empty()).then_some(patch),
+            summary: Vec::new(),
         }
     }
 }
@@ -164,6 +165,7 @@ impl Activity {
             rows,
             entries: HashMap::new(),
             progress: String::new(),
+            finished: false,
             quote,
         }
     }
@@ -177,11 +179,13 @@ impl Activity {
     }
 
     fn render_record(&mut self, record: Record<'_>, historical: bool) {
+        let quote = self.quote.clone();
         let entry = self.entry(record.id, record.kind);
         entry.title.set_text(&record.title);
         entry.title.set_tooltip_text(Some(&record.title));
         match &entry.view {
             View::Text(label) if record.kind == "reasoning" => {
+                entry.summary = record.summary;
                 agent_render::set_markdown(label, &record.detail);
             }
             View::Text(label) => label.set_text(&record.detail),
@@ -199,7 +203,8 @@ impl Activity {
                     for child in body.children() {
                         body.remove(&child);
                     }
-                    let card = agent_render::code_card("Shell", &detail, nonempty(Some(status)));
+                    let card =
+                        agent_render::code_card("Shell", &detail, nonempty(Some(status)), &quote);
                     body.add(&card);
                     card.show_all();
                 });
@@ -217,8 +222,10 @@ impl Activity {
                 }
             }
         }
-        self.set_heading(&format!("进行中 · {}", record.title));
-        self.progress = record.title;
+        if !self.finished {
+            self.set_heading(&format!("进行中 · {}", record.title));
+            self.progress = record.title;
+        }
     }
 
     pub fn summary(&mut self, id: &str, index: usize, delta: &str) {
@@ -232,7 +239,7 @@ impl Activity {
             return;
         }
         part.push_str(&limited(delta, SUMMARY_LIMIT - part.len()));
-        let detail = entry.summary.join("\n\n");
+        let detail = summary_text(&entry.summary);
         if let View::Text(label) = &entry.view {
             agent_render::set_markdown(label, &detail);
         }
@@ -250,7 +257,8 @@ impl Activity {
         &self.progress
     }
 
-    pub fn finish(&self, status: Option<&str>) {
+    pub fn finish(&mut self, status: Option<&str>) {
+        self.finished = true;
         let title = match status {
             Some("inProgress") => "进行中",
             Some("interrupted") => "已停止",
@@ -262,17 +270,15 @@ impl Activity {
         self.set_heading(&format!("{title} · {} 项活动", self.entries.len()));
     }
 
-    pub fn freeze(&self, previous: &mut HashMap<String, Vec<String>>) {
-        for (id, entry) in &self.entries {
-            let summary = previous.entry(id.clone()).or_default();
-            if summary.len() < entry.summary.len() {
-                summary.resize_with(entry.summary.len(), String::new);
+    pub fn extend_summary(&self, id: &str, parts: &mut Vec<String>) {
+        if let Some(entry) = self.entries.get(id) {
+            if parts.len() < entry.summary.len() {
+                parts.resize_with(entry.summary.len(), String::new);
             }
-            for (old, new) in summary.iter_mut().zip(&entry.summary) {
+            for (old, new) in parts.iter_mut().zip(&entry.summary) {
                 old.push_str(new);
             }
         }
-        self.finish(Some("steered"));
     }
 
     pub fn has_item(&self, id: &str) -> bool {
@@ -328,6 +334,15 @@ impl Activity {
             }
         })
     }
+}
+
+fn summary_text(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(String::as_str)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 pub fn render_detail(row: &gtk::Expander, deferred: bool, render: impl FnOnce() + 'static) {

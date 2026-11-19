@@ -230,7 +230,8 @@ for line in sys.stdin:
             "summaryIndex": 0, "delta": " Reasoning continues below the follow-up."}})
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": interruptible_turn,
               "item": {"id": "comparison-reasoning", "type": "reasoning",
-                       "summary": ["Reasoning before the follow-up. Reasoning continues below the follow-up."]}}})
+                       "summary": ["Reasoning before the follow-up. Thinking after the progress update. "
+                                   "Reasoning continues below the follow-up."]}}})
         (home / "agent-steered").touch()
     elif method == "turn/start":
         assert params["summary"] == "auto"
@@ -268,6 +269,15 @@ for line in sys.stdin:
             send({"method": "item/reasoning/summaryTextDelta", "params": {
                 "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-reasoning",
                 "summaryIndex": 0, "delta": "Reasoning before the follow-up."}})
+            send({"method": "item/completed", "params": {"threadId": thread, "turnId": interruptible_turn,
+                  "item": {"id": "comparison-progress", "type": "agentMessage",
+                           "text": "I found the comparison data."}}})
+            send({"method": "item/reasoning/summaryTextDelta", "params": {
+                "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-reasoning",
+                "summaryIndex": 0, "delta": " Thinking after the progress update."}})
+            send({"method": "item/completed", "params": {"threadId": thread, "turnId": interruptible_turn,
+                  "item": {"id": "comparison-check", "type": "commandExecution",
+                           "command": "printf comparison", "status": "completed", "exitCode": 0}}})
             send({"method": "item/agentMessage/delta", "params": {
                 "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-draft",
                 "delta": "**Preparing the comparison table.**"}})
