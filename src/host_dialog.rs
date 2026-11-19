@@ -27,7 +27,7 @@ pub fn edit(
 
     let body = dialog.content_area();
     body.style_context().add_class("dialog-body");
-    body.set_spacing(10);
+    body.set_spacing(14);
 
     let name = gtk::Entry::builder()
         .placeholder_text("例如 东京开发")
@@ -49,12 +49,14 @@ pub fn edit(
     error.set_no_show_all(true);
 
     for (label, entry) in [("显示名称（可选）", &name), ("SSH 目标", &target)] {
+        let field = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let label = gtk::Label::builder().label(label).xalign(0.0).build();
         label.set_mnemonic_widget(Some(entry));
-        body.pack_start(&label, false, false, 0);
-        body.pack_start(entry, false, false, 0);
+        field.pack_start(&label, false, false, 0);
+        field.pack_start(entry, false, false, 0);
+        body.pack_start(&field, false, false, 0);
     }
-    body.pack_start(&x11, false, false, 4);
+    body.pack_start(&x11, false, false, 0);
     body.pack_start(&error, false, false, 0);
     dialog.show_all();
     target.grab_focus();

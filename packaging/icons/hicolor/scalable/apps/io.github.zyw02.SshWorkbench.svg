@@ -1,7 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 48 48">
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 64 64">
   <title>Span</title>
+  <defs>
+    <linearGradient id="tile" x2="1" y2="1">
+      <stop stop-color="#283653"/>
+      <stop offset="1" stop-color="#151e34"/>
+    </linearGradient>
+    <linearGradient id="span" x2="1" y2="0.65">
+      <stop stop-color="#a5b8ff"/>
+      <stop offset="1" stop-color="#6d8bff"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="15" fill="url(#tile)"/>
+  <rect x="3.75" y="3.75" width="56.5" height="56.5" rx="14.25"
+        fill="none" stroke="#9bb3ff" stroke-opacity=".26" stroke-width="1.5"/>
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M5 33h4v-3a15 15 0 0 1 30 0v3h4" stroke="#7185F5" stroke-width="5.5"/>
-    <path d="m17 26 5 4-5 4m10 0h6" stroke="#1C9D8F" stroke-width="3.5"/>
+    <path d="M13 47h5V34a14 14 0 0 1 28 0v13h5"
+          transform="translate(0 2)" stroke="#101a35" stroke-width="5"/>
+    <path d="M13 47h5V34a14 14 0 0 1 28 0v13h5"
+          stroke="url(#span)" stroke-width="5"/>
+    <path d="m25 33 5 5-5 5m9 0h6" stroke="#8ef4d9" stroke-width="3.5"/>
   </g>
 </svg>

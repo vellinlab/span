@@ -11,10 +11,17 @@
 @define-color accent #8cbafa;
 
 window.workbench,
-window.workbench-dialog,
 .workbench stack {
     background-color: @canvas;
     color: @foreground;
+}
+
+.workbench,
+.workbench-dialog,
+popover.agent-picker-menu {
+    font-family: "Inter", "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+    font-size: 13px;
+    font-weight: 400;
 }
 
 .workbench .terminal-page {
@@ -42,8 +49,8 @@ window.workbench-dialog,
 
 .app-title {
     color: @foreground;
-    font-size: 13px;
-    font-weight: bold;
+    font-size: 14px;
+    font-weight: 600;
     margin-right: 14px;
 }
 
@@ -369,9 +376,36 @@ button.agent-send:disabled {
     font-weight: bold;
 }
 
-.dialog-body {
-    padding: 16px 20px;
+.workbench-dialog,
+.workbench-dialog .dialog-vbox,
+.workbench-dialog .dialog-body,
+.workbench-dialog .dialog-action-box,
+.workbench-dialog .message-area {
+    background: @sidebar;
     color: @foreground;
+}
+
+.workbench-dialog .dialog-body {
+    padding: 18px 22px 20px;
+}
+
+.workbench-dialog .dialog-body entry {
+    min-height: 34px;
+}
+
+.workbench-dialog .dialog-body checkbutton check {
+    min-width: 14px;
+    min-height: 14px;
+    border: 1px solid #526178;
+    border-radius: 4px;
+    background: @terminal;
+    box-shadow: none;
+}
+
+.workbench-dialog .dialog-body checkbutton check:checked {
+    background: @accent;
+    border-color: @accent;
+    color: @terminal;
 }
 
 .files-split > separator {
@@ -651,19 +685,60 @@ scrolledwindow.agent-table-scroll {
     padding: 8px 8px;
 }
 
-.agent-compose-card .agent-picker button {
+.agent-compose-card button.agent-picker {
     min-height: 22px;
-    padding: 2px 6px;
+    min-width: 0;
+    padding: 2px 5px;
     background: transparent;
     border-color: transparent;
 }
 
-.agent-compose-card .agent-picker button:hover {
+.agent-compose-card button.agent-picker:hover,
+.agent-compose-card button.agent-picker:checked {
     background: @hover;
 }
 
-.agent-compose-card .agent-picker button:focus {
+.agent-compose-card button.agent-picker:focus {
     border-color: @accent;
+}
+
+.agent-compose-card button.agent-picker:disabled {
+    color: @muted;
+}
+
+popover.agent-picker-menu {
+    background: @chrome;
+    border: 1px solid #3b4859;
+    border-radius: 10px;
+    padding: 4px;
+    color: @foreground;
+}
+
+.agent-picker-menu list,
+.agent-picker-menu viewport {
+    background: transparent;
+    color: @foreground;
+}
+
+.agent-picker-menu row {
+    min-height: 22px;
+    padding: 4px 9px;
+    border-radius: 6px;
+}
+
+.agent-picker-menu row:hover {
+    background: @hover;
+    color: @foreground;
+}
+
+.agent-picker-menu row:selected {
+    background: @selection;
+    color: @foreground;
+}
+
+.agent-picker-menu .picker-default {
+    color: @muted;
+    font-size: 11px;
 }
 
 button.agent-send {

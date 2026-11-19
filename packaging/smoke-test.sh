@@ -158,8 +158,16 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     wait_until "the Codex App Server handshake" test -f "$HOME/agent-ready"
     wait_until "the second model catalog page" test -f "$HOME/agent-models"
     sleep 0.25
-    widget combo-next 0
-    widget combo-next 1
+    widget mouse '选择模型'
+    widget contains 'GPT Vision'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-model-picker.png"
+    widget mouse 'GPT Vision'
+    read -r _ _ effort_width _ <<< "$(widget bounds '思考强度')"
+    [[ $effort_width -lt 112 ]]
+    widget mouse '思考强度'
+    widget contains '默认'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-effort-picker.png"
+    widget mouse '高'
     add_attachment "$HOME/test-output.png"
     xdotool type --clearmodifiers 'Show the deployment check'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-compose.png"
@@ -324,6 +332,11 @@ PY
     wait_until "the Quick Connect dialog" dialog_open '快速连接'
     dialog="$(xdotool search --onlyvisible --name '^快速连接$' | head -n1)"
     xdotool windowfocus --sync "$dialog"
+    widget contains 'SSH 目标'
+    widget contains '信任 X11 转发'
+    connect_preview="$(dirname "$WORKBENCH_PREVIEW")/quick-connect.png"
+    import -window "$dialog" "$connect_preview"
+    [[ $(convert "$connect_preview" -crop 1x1+15+80 -colorspace Gray -format '%[fx:mean < 0.35]' info:) == 1 ]]
     xdotool type --clearmodifiers "ssh://127.0.0.1:$(cat "$HOME/ssh-port")"
     xdotool key --clearmodifiers Return
     wait_until "the system OpenSSH banner" grep -qs '^SSH-2.0-OpenSSH_' "$HOME/ssh-banner"

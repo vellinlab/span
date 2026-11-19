@@ -31,16 +31,11 @@ desktop = pyatspi.Registry.getDesktop(0)
 seen = []
 for _ in range(50):
     seen = []
-    combos = []
     for node in descendants(desktop):
         if not visible(node):
             continue
         if node.name:
             seen.append(node.name)
-        if operation == "combo-next" and node.getRole() == pyatspi.ROLE_COMBO_BOX:
-            bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-            if bounds.width > 0 and bounds.height > 0:
-                combos.append((bounds.x + bounds.width // 2, bounds.y + bounds.height // 2))
         if operation in ("contains", "not-contains") and contains(node, name):
             sys.exit(0 if operation == "contains" else f"Unexpected text {name!r}")
         if node.name != name:
@@ -66,12 +61,6 @@ for _ in range(50):
                     field.queryEditableText().setTextContents(values[0])
                     sys.exit(0)
     if operation == "not-contains":
-        sys.exit(0)
-    if operation == "combo-next" and len(combos) == 2:
-        x, y = sorted(combos)[int(name)]
-        subprocess.run(["xdotool", "mousemove", str(x), str(y), "click", "1"], check=True)
-        time.sleep(0.15)
-        subprocess.run(["xdotool", "key", "--clearmodifiers", "Down", "Return"], check=True)
         sys.exit(0)
     time.sleep(0.1)
 

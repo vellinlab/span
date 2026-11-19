@@ -93,7 +93,7 @@ pub struct Agent {
     connect: gtk::Button,
     copy_id: gtk::Button,
     input: gtk::TextView,
-    options: Options,
+    options: Rc<Options>,
     model_provider: RefCell<Option<String>>,
     usage: Usage,
     quota_started: Cell<bool>,
@@ -381,12 +381,6 @@ impl Agent {
                     agent.update_primary();
                 }
             });
-        let weak = Rc::downgrade(self);
-        self.options.model.connect_changed(move |_| {
-            if let Some(agent) = weak.upgrade() {
-                agent.options.model_changed();
-            }
-        });
         let weak = Rc::downgrade(self);
         self.usage.button.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -770,9 +764,7 @@ impl Agent {
                         self.catalog.show_status(error);
                     }
                     Request::Models(generation) if generation == self.history_generation.get() => {
-                        self.options
-                            .model
-                            .set_tooltip_text(Some(&error.replace('\0', "�")));
+                        self.options.model_tooltip(&error.replace('\0', "�"));
                         self.options.render_models();
                         self.update_controls();
                     }
@@ -846,9 +838,7 @@ impl Agent {
                 }
                 self.clear_history();
                 self.options.open(result);
-                self.options
-                    .model
-                    .set_tooltip_text(Some("选择下一条消息使用的模型"));
+                self.options.model_tooltip("选择下一条消息使用的模型");
                 self.usage.clear_tokens();
                 self.model_provider
                     .replace(result["modelProvider"].as_str().map(str::to_owned));
