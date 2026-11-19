@@ -1,7 +1,7 @@
 use crate::browser::Browser;
 use crate::host_dialog;
 use crate::hosts::{self, Host};
-use crate::icons::{Icon, widget as icon};
+use crate::icons::{self, Icon, widget as icon};
 use crate::preview::Panel;
 use crate::session::{Launch, Session, State};
 use crate::{APP_ID, APP_NAME};
