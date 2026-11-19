@@ -33,7 +33,7 @@ impl Picker {
     fn new(name: &str, prefix: &'static str, chars: i32, menu_width: i32) -> Self {
         let button = gtk::MenuButton::new();
         button.set_tooltip_text(Some(name));
-        button.set_direction(gtk::ArrowType::Up);
+        MenuButtonExt::set_direction(&button, gtk::ArrowType::Up);
         button.style_context().add_class("agent-picker");
         if let Some(accessible) = button.accessible() {
             accessible.set_name(name);
