@@ -83,6 +83,28 @@ wait_until() {
     exit 1
 }
 
+sample_memory() {
+    local stage="$1" pid name
+    while read -r pid name; do
+        if [[ -r "/proc/$pid/smaps_rollup" ]]; then
+            awk -v stage="$stage" -v process="$name" -v pid="$pid" '
+                /^(Rss|Pss|Pss_Anon|Pss_File|Private_Clean|Private_Dirty):/ {
+                    printf "%s%s=%s KiB", fields++ ? ", " : "", substr($1, 1, length($1) - 1), $2
+                }
+                END { printf " [%s, %s pid=%s]\n", stage, process, pid }
+            ' "/proc/$pid/smaps_rollup" 2>/dev/null || true
+        fi
+    done < <(ps -eo pid=,ppid=,comm= | awk -v root="$app_pid" '
+        { parent[$1] = $2; name[$1] = $3 }
+        END {
+            print root, name[root]
+            for (pid in parent)
+                for (p = parent[pid]; p > 0; p = parent[p])
+                    if (p == root) { print pid, name[pid]; break }
+        }
+    ')
+}
+
 Xvfb -displayfd 3 -screen 0 1600x980x24 -nolisten tcp -noreset 3>"$HOME/display" &
 xvfb_pid=$!
 wait_until "the Xvfb display" test -s "$HOME/display"
@@ -102,8 +124,7 @@ if grep -q 'Failed to load Workbench theme' "$HOME/app.log"; then
     exit 1
 fi
 printf '%s\n' 'GTK3 window opened on virtual X11 and the local Bash PTY started.'
-awk '/^VmRSS:/ { print "Application RSS with one Bash tab (Xvfb): " $2 " KiB" }' "/proc/$app_pid/status"
-awk '/^Pss:/ { print "Application PSS with one Bash tab (Xvfb): " $2 " KiB" }' "/proc/$app_pid/smaps_rollup"
+sample_memory "one Bash tab"
 
 if [[ $# -eq 2 ]]; then
     LD_LIBRARY_PATH=/usr/lib64/span "$2"
@@ -224,6 +245,7 @@ SVG
     wait_until "the Codex App Server handshake" test -f "$HOME/agent-ready"
     wait_until "the second model catalog page" test -f "$HOME/agent-models"
     sleep 0.25
+    sample_memory "Codex connected"
     read -r _ bar_y _ bar_h <<< "$(widget bounds '附件')"
     for name in '会话权限' '选择模型' '思考强度' 'Fast 模式' '用量' '发送'; do
         read -r _ control_y _ control_h <<< "$(widget bounds "$name")"
@@ -422,6 +444,7 @@ SVG
     widget click '发送'
     wait_until "sending the remaining quote with the draft" test -f "$HOME/agent-quoted"
     [[ $(widget count '移除引用') == 0 ]]
+    sample_memory "rendered reply with table, code and images"
     long_quote="$(sed -n '/^# Keep the full excerpt/,/^# End of the quotation fixture/p' "$HOME/000-preview.md")"
     widget drag-text "$long_quote"
     widget click '引用'
@@ -434,6 +457,7 @@ SVG
     widget click '预览'
     widget bounds '行号' >/dev/null
     widget contains '    return os.getenv("SPAN_TEST_MODE", "standard")'
+    sample_memory "syntax highlighting"
     read -r preview_x preview_y _ _ <<< "$(widget bounds '预览区')"
     xdotool mousemove "$((preview_x + 90))" "$((preview_y + 175))" click --repeat 5 5
     sleep 0.2
@@ -494,6 +518,7 @@ SVG
     xdotool mousemove 15 15
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-workspace-compact.png"
     widget click '关闭预览'
+    sample_memory "file preview closed"
     xdotool key --clearmodifiers ctrl+shift+f
     xdotool windowsize --sync "$window" 1250 940
     printf '%s\n' 'The centered composer adapts to both split layouts, with at least 585 pixels for conversation at 1170 pixels.'
@@ -638,6 +663,7 @@ SVG
     widget mouse '本轮变更 · 查看 diff'
     widget expanded-contains '本轮变更 · 查看 diff' '+passed'
 
+    sample_memory "older history rendered"
     widget click '刷新'
     widget contains '点击会话继续'
     xdotool key --clearmodifiers ctrl+shift+t
