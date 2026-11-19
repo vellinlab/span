@@ -220,7 +220,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowsize --sync "$window" 1580 950
     xdotool key --clearmodifiers ctrl+shift+f
     sleep 0.35
-    xdotool mousemove --window "$window" 690 330 click --repeat 8 4
+    xdotool mousemove --window "$window" 355 390 click --repeat 16 4
     sleep 0.2
     widget contains 'Deployment checklist'
     read -r wide_x _ < <(widget bounds '输入消息，或添加附件')
