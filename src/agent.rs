@@ -921,10 +921,8 @@ impl Agent {
                 self.options.server_ready(result);
                 self.initialized.set(true);
                 self.update_controls();
+                self.load_catalog(None);
                 if browse {
-                    if self.catalog.panel.is_mapped() {
-                        self.load_catalog(None);
-                    }
                     self.show_status("选择会话或新建");
                 } else {
                     self.open_thread();

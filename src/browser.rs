@@ -500,6 +500,9 @@ impl Browser {
 
 fn tool(icon: Icon, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::builder().tooltip_text(tooltip).build();
+    if let Some(accessible) = button.accessible() {
+        accessible.set_name(tooltip);
+    }
     button.style_context().add_class("quiet-button");
     button.add(&icons::widget(icon, 16));
     button
