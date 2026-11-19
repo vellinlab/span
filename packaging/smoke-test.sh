@@ -325,12 +325,23 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains 'Deployment checklist'
     widget mouse 'Build documentation'
     wait_until "opening the clicked Markdown link" grep -qFx 'https://example.invalid/span/docs?from=agent&view=build' "$HOME/span-opened-link"
-    read -r wide_x _ < <(widget bounds '输入消息，或添加附件')
+    composer_width() {
+        local input_x input_width timeline_x timeline_width center_error
+        read -r input_x _ input_width _ < <(widget bounds '消息输入框')
+        read -r timeline_x _ timeline_width _ < <(widget bounds '对话记录')
+        center_error=$((2 * (input_x - timeline_x) + input_width - timeline_width))
+        if ((center_error < -36 || center_error > 36)); then
+            printf 'Composer center differs from the conversation center by %s pixels.\n' "$((center_error / 2))" >&2
+            return 1
+        fi
+        printf '%s\n' "$input_width"
+    }
+    wide_width="$(composer_width)"
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-workspace.png"
     xdotool windowsize --sync "$window" 1170 940
     sleep 0.2
-    read -r narrow_x _ < <(widget bounds '输入消息，或添加附件')
-    ((wide_x > narrow_x + 32))
+    narrow_width="$(composer_width)"
+    ((wide_width > narrow_width + 100))
     widget click '关闭预览'
     xdotool key --clearmodifiers ctrl+shift+f
     xdotool windowsize --sync "$window" 1250 940

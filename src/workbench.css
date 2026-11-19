@@ -181,6 +181,7 @@ button.agent-send:disabled {
 }
 
 .workbench .sidebar-tabs button {
+    min-width: 0;
     min-height: 27px;
     margin: 0 2px;
     padding: 0 8px;
