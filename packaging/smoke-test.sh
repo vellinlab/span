@@ -235,11 +235,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
     widget mouse '输入消息，或添加附件'
     xdotool type --clearmodifiers 'Check the comparison layout'
-    widget mouse '发送'
+    widget click '发送'
     widget contains 'Preparing the comparison table.'
     read -r stop_x stop_y stop_width stop_height < <(widget bounds '中断推理')
     ((stop_width == stop_height))
-    widget mouse '中断推理'
+    widget click '中断推理'
     read -r pause_x pause_y _ < <(widget bounds '继续推理')
     ((stop_x == pause_x && stop_y == pause_y))
     widget contains '已中断'
@@ -249,7 +249,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool type --clearmodifiers 'Another question'
     widget bounds '发送' >/dev/null
     xdotool key --clearmodifiers ctrl+a BackSpace
-    widget mouse '继续推理'
+    widget click '继续推理'
     widget contains 'AgentScope'
     widget bounds '发送' >/dev/null
 

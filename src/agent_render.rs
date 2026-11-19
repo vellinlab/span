@@ -195,6 +195,7 @@ fn table(events: &mut OffsetIter<'_>, markdown: &str, start: usize) -> gtk::Box 
         .property("vscrollbar-policy", gtk::PolicyType::Never)
         .property("overlay-scrolling", false)
         .build();
+    scroll.style_context().add_class("agent-table-scroll");
     scroll.add(&grid);
     let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
@@ -265,14 +266,9 @@ mod table_scroll {
                 let minimum_width = grid.preferred_width().0;
                 let (minimum, natural) = grid.preferred_height_for_width(width.max(minimum_width));
                 let scrollbar = if width < minimum_width {
-                    let height = scroll
+                    scroll
                         .hscrollbar()
-                        .map_or(0, |bar| bar.preferred_height().0);
-                    height
-                        + scroll
-                            .style_get_property("scrollbar-spacing")
-                            .get::<i32>()
-                            .unwrap_or(0)
+                        .map_or(0, |bar| bar.preferred_height().0)
                 } else {
                     0
                 };

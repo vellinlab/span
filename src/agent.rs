@@ -47,6 +47,16 @@ enum ComposerAction {
     Continue,
 }
 
+impl ComposerAction {
+    fn presentation(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::Send => ("send", "发送", "发送（Ctrl+Enter）"),
+            Self::Stop => ("stop", "中断推理", "中断当前推理"),
+            Self::Continue => ("continue", "继续推理", "继续上次任务（Ctrl+Enter）"),
+        }
+    }
+}
+
 pub struct Agent {
     pub panel: gtk::Box,
     connection: Box<dyn Fn() -> Result<Option<PathBuf>, String>>,
@@ -92,6 +102,7 @@ pub struct Agent {
     pending_user: RefCell<Option<gtk::Label>>,
     primary_action: Cell<Option<ComposerAction>>,
     primary: gtk::Button,
+    primary_icons: gtk::Stack,
 }
 
 impl Agent {
@@ -207,7 +218,19 @@ impl Agent {
         primary.style_context().add_class("agent-send");
         primary.set_valign(gtk::Align::Center);
         primary.set_margin_start(4);
-        primary.set_always_show_image(true);
+        let primary_icons = gtk::Stack::new();
+        primary_icons
+            .style_context()
+            .add_class("agent-primary-icons");
+        for (action, icon) in [
+            (ComposerAction::Send, Icon::Up),
+            (ComposerAction::Stop, Icon::Stop),
+            (ComposerAction::Continue, Icon::Pause),
+        ] {
+            primary_icons.add_named(&icons::widget(icon, 17), action.presentation().0);
+        }
+        primary.add(&primary_icons);
+        primary.set_focus_on_click(false);
         inputs.pack_end(&primary, false, false, 0);
         inputs.pack_end(&usage.button, false, false, 0);
         card.pack_start(&editor, false, false, 0);
@@ -264,6 +287,7 @@ impl Agent {
             pending_user: RefCell::new(None),
             primary_action: Cell::new(None),
             primary,
+            primary_icons,
         });
         agent.bind();
         agent.update_controls();
@@ -296,6 +320,14 @@ impl Agent {
                 }
             });
         }
+        let weak = Rc::downgrade(self);
+        self.primary.connect_map(move |button| {
+            if let Some(action) = weak.upgrade().and_then(|agent| agent.primary_action.get()) {
+                if let Some(accessible) = button.accessible() {
+                    accessible.set_name(action.presentation().1);
+                }
+            }
+        });
         let weak = Rc::downgrade(self);
         self.primary.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -1493,15 +1525,13 @@ impl Agent {
             ComposerAction::Send
         };
         if self.primary_action.replace(Some(action)) != Some(action) {
-            let (icon, name, tooltip) = match action {
-                ComposerAction::Send => (Icon::Up, "发送", "发送（Ctrl+Enter）"),
-                ComposerAction::Stop => (Icon::Stop, "中断推理", "中断当前推理"),
-                ComposerAction::Continue => (Icon::Pause, "继续推理", "继续上次任务（Ctrl+Enter）"),
-            };
-            self.primary.set_image(Some(&icons::widget(icon, 17)));
+            let (icon, name, tooltip) = action.presentation();
+            self.primary_icons.set_visible_child_name(icon);
             self.primary.set_tooltip_text(Some(tooltip));
-            if let Some(accessible) = self.primary.accessible() {
-                accessible.set_name(name);
+            if self.primary.is_mapped() {
+                if let Some(accessible) = self.primary.accessible() {
+                    accessible.set_name(name);
+                }
             }
             let style = self.primary.style_context();
             if action == ComposerAction::Continue {
