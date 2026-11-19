@@ -123,6 +123,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
         xdotool search --onlyvisible --name "^$1$" >/dev/null
     }
     widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    timeline_wheel() {
+        local x y height
+        read -r x y _ height < <(widget bounds '对话记录')
+        xdotool mousemove "$((x + 8))" "$((y + height / 2))" click --repeat "$2" "$1"
+    }
     attachment_chooser_closed() {
         ! dialog_open '添加附件'
     }
@@ -132,8 +137,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
         wait_until "the attachment chooser" dialog_open '添加附件'
         chooser="$(xdotool search --onlyvisible --name '^添加附件$' | head -n1)"
         xdotool windowfocus --sync "$chooser"
-        widget mouse "${file##*/}"
-        widget mouse '添加'
+        SPAN_TEST_DIALOG='添加附件' widget mouse "${file##*/}"
+        SPAN_TEST_DIALOG='添加附件' widget mouse '添加'
         wait_until "confirming the selected file" attachment_chooser_closed
         widget contains "${file##*/}"
         xdotool windowfocus --sync "$window"
@@ -219,7 +224,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     [[ $(widget count '复制本轮 Markdown') == 0 && $(widget count '复制本轮富文本') == 0 ]]
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
-    xdotool mousemove --window "$window" 355 390 click --repeat 16 4
+    timeline_wheel 4 16
     widget mouse '进行中 · 修改文件 · checks.txt…'
     widget contains 'Checking the build before publishing.'
     widget not-contains '**Checking the build'
@@ -230,9 +235,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget expanded-contains '修改文件 · checks.txt…' '+passed'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-activity.png"
     widget mouse '进行中 · 修改文件 · checks.txt…'
-    xdotool mousemove --window "$window" 355 390 click --repeat 16 5
+    timeline_wheel 5 16
     widget contains 'Which deployment environment?'
-    xdotool mousemove --window "$window" 900 710 click --repeat 8 5
+    timeline_wheel 5 8
     sleep 0.25
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-question.png"
     widget fill-card 'Which deployment environment?' Staging
@@ -253,7 +258,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget expanded-contains '本轮变更 · 查看 diff' '+passed'
     widget mouse '本轮变更 · 查看 diff'
 
-    xdotool mousemove --window "$window" 900 360 click --repeat 8 4
+    timeline_wheel 4 8
     sleep 0.25
     read -r cell_x cell_y _ cell_height < <(widget bounds 'Check')
     read -r next_x next_y next_width next_height < <(widget bounds 'Result')
@@ -270,7 +275,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     after_scroll="$(widget scroll-value '对话记录')"
     xdotool mouseup 1
     ((after_scroll > before_scroll))
-    xdotool mousemove --window "$window" 900 360 click 4
+    timeline_wheel 4 1
     printf '%s\n' 'Direct text selection copies across table cells and the conversation scrolls during a drag.'
     widget click '复制 CSV'
     xclip -out -selection clipboard | tr -d '\r' > "$HOME/table.csv"
@@ -295,7 +300,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowfocus --sync "$save_dialog"
     xdotool key --clearmodifiers Escape
     xdotool windowfocus --sync "$window"
-    xdotool mousemove --window "$window" 342 440 click --repeat 16 5
+    timeline_wheel 5 16
     widget contains 'Environment confirmed.'
     widget click '复制本轮 Markdown'
     copied_turn="$(xclip -out -selection clipboard)"
@@ -315,7 +320,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget click '预览'
     widget contains 'Split workspace preview'
     sleep 0.35
-    xdotool mousemove --window "$window" 355 390 click --repeat 16 4
+    timeline_wheel 4 16
     sleep 0.2
     widget contains 'Deployment checklist'
     widget mouse 'Build documentation'
@@ -356,7 +361,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains '已追加'
     widget not-contains 'fixture duplicate steer sentinel'
     widget mouse '进行中 · 推理摘要'
-    xdotool mousemove --window "$window" 342 440 click --repeat 3 5
+    timeline_wheel 5 3
     widget contains 'Reasoning continues below the follow-up.'
     read -r _ follow_up_y _ _ <<< "$(widget bounds 'Focus on X11')"
     read -r _ reasoning_y _ _ <<< "$(widget bounds 'Reasoning continues below the follow-up.')"
@@ -392,7 +397,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     wide_row="$(table_geometry)"
     xdotool windowsize --sync "$window" 990 940
     sleep 0.25
-    xdotool mousemove --window "$window" 355 390 click --repeat 12 5
+    timeline_wheel 5 12
     narrow_row="$(table_geometry)"
     ((narrow_row > wide_row))
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-table.png"

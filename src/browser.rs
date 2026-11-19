@@ -77,6 +77,7 @@ impl Browser {
         let path = gtk::Entry::builder()
             .placeholder_text("目录路径")
             .width_chars(12)
+            .max_width_chars(16)
             .build();
         location.pack_start(&path, true, true, 0);
         let refresh = tool(Icon::Refresh, "刷新目录");

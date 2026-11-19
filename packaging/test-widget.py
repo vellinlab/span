@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise labeled GTK widgets through the X11 accessibility bus."""
 
+import os
 import subprocess
 import sys
 import time
@@ -29,11 +30,15 @@ def contains(node, expected):
 
 operation, name, *values = sys.argv[1:]
 desktop = pyatspi.Registry.getDesktop(0)
+dialog = os.environ.get("SPAN_TEST_DIALOG")
 seen = []
 for _ in range(50):
     seen = []
     try:
-        for node in descendants(desktop):
+        roots = (desktop,)
+        if dialog:
+            roots = tuple(node for app in desktop for node in app if node.name == dialog)
+        for node in (node for root in roots for node in descendants(root)):
             if not visible(node):
                 continue
             if node.name:
