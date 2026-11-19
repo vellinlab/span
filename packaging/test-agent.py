@@ -12,6 +12,8 @@ thread = "preview-thread"
 saved_thread = "stored-deployment"
 turn = "preview-turn"
 item = "preview-message"
+interruptible_turn = "comparison-turn"
+continued_turn = "comparison-continued"
 diff = "diff --git a/checks.txt b/checks.txt\n--- a/checks.txt\n+++ b/checks.txt\n@@ -1 +1 @@\n-pending\n+passed\n"
 reply = """## Deployment checklist
 
@@ -34,6 +36,11 @@ A[Inspect] --> B[Test] --> C[Publish]
 
 ![Preview image](test-output.png)
 """
+comparison = """| 框架 | 多 Agent | 会话恢复 | 主动打断 | 可观测性 | 使用场景 |
+| --- | --- | --- | --- | --- | --- |
+| AgentScope | 支持多角色对话、并发执行、消息路由和转交 | 会话状态可保存与加载，应用可自行定义恢复点和会话状态的保留时间 | 支持在模型生成或工具执行期间主动打断 | 可通过 OpenTelemetry 查看执行链路 | 适合需要人与多个角色协作、核对中间结果并及时调整方向的任务。部署前需要验证应用能否按预期保存关键步骤，以及断开连接后怎样恢复已有结果。比较时也要查看不同运行环境的实现，包括多语言内容、表格列宽和不同终端尺寸下的换行效果。 |
+"""
+interrupted = False
 
 def model(slug, name, default, efforts):
     return {"model": slug, "id": slug, "displayName": name, "inputModalities": ["text", "image"],
@@ -121,6 +128,12 @@ for line in sys.stdin:
         send({"id": request_id, "result": {"data": [stored_turn("older-turn", "Earlier deployment notes")],
                                           "nextCursor": None}})
         (home / "agent-older-page").touch()
+    elif method == "turn/interrupt":
+        assert params == {"threadId": thread, "turnId": interruptible_turn}
+        send({"id": request_id, "result": {}})
+        send({"method": "turn/completed", "params": {"threadId": thread,
+              "turn": {"id": interruptible_turn, "status": "interrupted", "error": None}}})
+        interrupted = True
     elif method == "turn/start":
         assert params["summary"] == "auto"
         (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")
@@ -141,6 +154,22 @@ for line in sys.stdin:
             continue
         assert params["threadId"] == thread
         assert params["model"] == "gpt-vision-fixture" and params["effort"] == "high"
+        message = params["input"][0]["text"]
+        if message == "Check the comparison layout":
+            assert len(params["input"]) == 1
+            send({"id": request_id, "result": {"turn": {"id": interruptible_turn, "status": "inProgress"}}})
+            send({"method": "item/agentMessage/delta", "params": {
+                "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-draft",
+                "delta": "Preparing the comparison table."}})
+            continue
+        if message == "请继续上一轮未完成的任务。":
+            assert interrupted and len(params["input"]) == 1
+            send({"id": request_id, "result": {"turn": {"id": continued_turn, "status": "inProgress"}}})
+            send({"method": "item/completed", "params": {"threadId": thread, "turnId": continued_turn,
+                  "item": {"id": "comparison-final", "type": "agentMessage", "text": comparison}}})
+            send({"method": "turn/completed", "params": {"threadId": thread,
+                  "turn": {"id": continued_turn, "status": "completed", "error": None}}})
+            continue
         assert params["input"][1] == {"type": "localImage", "path": str(home / "test-output.png")}
         (home / "agent-prompt").write_text(params["input"][0]["text"])
         send({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress"}}})

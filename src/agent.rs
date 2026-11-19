@@ -6,6 +6,7 @@ use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
 use crate::agent_usage::Usage;
+use crate::icons::{self, Icon};
 use gtk::prelude::*;
 use gtk::{gio, glib, pango};
 use serde_json::{Value, json};
@@ -39,6 +40,13 @@ struct TurnDiff {
     card: DiffCard,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ComposerAction {
+    Send,
+    Stop,
+    Continue,
+}
+
 pub struct Agent {
     pub panel: gtk::Box,
     connection: Box<dyn Fn() -> Result<Option<PathBuf>, String>>,
@@ -49,6 +57,8 @@ pub struct Agent {
     last_thread: RefCell<Option<String>>,
     turn: RefCell<Option<String>>,
     active: Cell<bool>,
+    interrupting: Cell<bool>,
+    can_continue: Cell<bool>,
     context: RefCell<Context>,
     approvals: RefCell<HashMap<Value, gtk::Box>>,
     live: RefCell<Option<LiveMessage>>,
@@ -80,8 +90,8 @@ pub struct Agent {
     attachments: Rc<Attachments>,
     uploading: Cell<bool>,
     pending_user: RefCell<Option<gtk::Label>>,
-    send: gtk::Button,
-    stop: gtk::Button,
+    primary_action: Cell<Option<ComposerAction>>,
+    primary: gtk::Button,
 }
 
 impl Agent {
@@ -192,13 +202,11 @@ impl Agent {
         inputs.pack_start(&attachments.button, false, false, 0);
         let options = Options::new(&inputs);
         let usage = Usage::new();
-        let send = button("发送", true);
-        send.style_context().add_class("agent-send");
-        send.set_tooltip_text(Some("发送（Ctrl+Enter）"));
-        let stop = button("停止", false);
-        stop.set_no_show_all(true);
-        inputs.pack_end(&send, false, false, 0);
-        inputs.pack_end(&stop, false, false, 0);
+        let primary = gtk::Button::new();
+        primary.style_context().add_class("primary");
+        primary.style_context().add_class("agent-send");
+        primary.set_always_show_image(true);
+        inputs.pack_end(&primary, false, false, 0);
         inputs.pack_end(&usage.button, false, false, 0);
         card.pack_start(&editor, false, false, 0);
         card.pack_start(&attachments.chips, false, false, 0);
@@ -216,6 +224,8 @@ impl Agent {
             last_thread: RefCell::new(None),
             turn: RefCell::new(None),
             active: Cell::new(false),
+            interrupting: Cell::new(false),
+            can_continue: Cell::new(false),
             context: RefCell::new(Context {
                 cwd: PathBuf::new(),
                 socket: None,
@@ -250,8 +260,8 @@ impl Agent {
             attachments,
             uploading: Cell::new(false),
             pending_user: RefCell::new(None),
-            send,
-            stop,
+            primary_action: Cell::new(None),
+            primary,
         });
         agent.bind();
         agent.update_controls();
@@ -285,15 +295,13 @@ impl Agent {
             });
         }
         let weak = Rc::downgrade(self);
-        self.send.connect_clicked(move |_| {
+        self.primary.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
-                agent.send();
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.stop.connect_clicked(move |_| {
-            if let Some(agent) = weak.upgrade() {
-                agent.stop();
+                if agent.active.get() {
+                    agent.stop();
+                } else {
+                    agent.submit_prompt();
+                }
             }
         });
         let weak = Rc::downgrade(self);
@@ -311,7 +319,7 @@ impl Agent {
                 && [Return, KP_Enter].contains(&event.keyval())
             {
                 if let Some(agent) = weak.upgrade() {
-                    agent.send();
+                    agent.submit_prompt();
                 }
                 glib::Propagation::Stop
             } else {
@@ -321,6 +329,22 @@ impl Agent {
     }
 
     fn bind_composer(self: &Rc<Self>) {
+        if let Some(buffer) = self.input.buffer() {
+            let weak = Rc::downgrade(self);
+            buffer.connect_changed(move |_| {
+                if let Some(agent) = weak.upgrade().filter(|agent| agent.can_continue.get()) {
+                    agent.update_primary();
+                }
+            });
+        }
+        let weak = Rc::downgrade(self);
+        self.attachments
+            .chips
+            .connect_notify_local(Some("visible"), move |_, _| {
+                if let Some(agent) = weak.upgrade().filter(|agent| agent.can_continue.get()) {
+                    agent.update_primary();
+                }
+            });
         let weak = Rc::downgrade(self);
         self.options.model.connect_changed(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -591,6 +615,7 @@ impl Agent {
             self.prepend_at.set(Some(1));
         }
         let mut running = None;
+        let mut latest_status = None;
         let turns: Box<dyn Iterator<Item = &Value>> = if newest_first {
             Box::new(turns.iter().rev())
         } else {
@@ -613,6 +638,7 @@ impl Agent {
                 self.add_diff(&changes);
             }
             let status = turn["status"].as_str();
+            latest_status = status;
             if !prepend && status == Some("inProgress") {
                 running = turn["id"].as_str().map(str::to_owned);
                 if let (Some(id), Some(activity)) = (&running, activity.take()) {
@@ -624,6 +650,9 @@ impl Agent {
             }
         }
         self.prepend_at.set(None);
+        if !prepend {
+            self.can_continue.set(latest_status == Some("interrupted"));
+        }
         if !prepend && running.is_some() {
             self.active.set(true);
             self.turn.replace(running);
@@ -728,8 +757,10 @@ impl Agent {
                         self.update_controls();
                     }
                     Request::Interrupt => {
-                        self.show_status(error);
-                        self.update_controls();
+                        if self.interrupting.replace(false) {
+                            self.show_status(error);
+                            self.update_controls();
+                        }
                     }
                     _ => {}
                 }
@@ -803,7 +834,11 @@ impl Agent {
                 }
                 self.settings.hide();
                 self.copy_id.show();
-                self.show_status("就绪");
+                self.show_status(if self.can_continue.get() {
+                    "已中断"
+                } else {
+                    "就绪"
+                });
                 self.update_controls();
                 self.input.grab_focus();
             }
@@ -933,15 +968,39 @@ impl Agent {
     }
 
     fn stop(&self) {
+        if !self.active.get() || self.interrupting.get() {
+            return;
+        }
         if let (Some(thread), Some(turn)) =
-            (self.thread.borrow().as_ref(), self.turn.borrow().as_ref())
+            (self.thread.borrow().clone(), self.turn.borrow().clone())
         {
+            self.interrupting.set(true);
             self.request(
                 Request::Interrupt,
                 "turn/interrupt",
                 json!({"threadId":thread,"turnId":turn}),
             );
-            self.show_status("正在停止…");
+            self.show_status("正在中断…");
+            self.update_controls();
+        }
+    }
+
+    fn submit_prompt(self: &Rc<Self>) {
+        if self.active.get() || !self.primary.is_sensitive() {
+            return;
+        }
+        if self.primary_action.get() == Some(ComposerAction::Continue) {
+            let thread = self.thread.borrow().clone();
+            if let Some(thread) = thread {
+                self.begin_turn(
+                    thread,
+                    "请继续上一轮未完成的任务。",
+                    &self.options.selection(),
+                    Prepared::empty(),
+                );
+            }
+        } else {
+            self.send();
         }
     }
 
@@ -954,6 +1013,8 @@ impl Agent {
         self.approvals.borrow_mut().clear();
         self.questions.borrow_mut().clear();
         self.history_cursor.take();
+        self.can_continue.set(false);
+        self.interrupting.set(false);
         self.older.hide();
         for child in self.history.children() {
             if child != self.older.clone().upcast::<gtk::Widget>() {
@@ -977,6 +1038,8 @@ impl Agent {
         self.thread.take();
         self.turn.take();
         self.active.set(false);
+        self.can_continue.set(false);
+        self.interrupting.set(false);
         self.finish_activity(Some("disconnected"));
         self.diff.take();
         self.remove_live();
@@ -1062,17 +1125,28 @@ impl Agent {
             }
             "turn/completed" => {
                 let turn = &params["turn"];
+                let status = turn["status"].as_str();
+                let interrupted = status == Some("interrupted");
                 if let Some(id) = turn["id"].as_str() {
                     for record in array(&turn["items"]).filter_map(Record::from_item) {
                         self.update_activity(id, |activity| activity.record(record));
                     }
                 }
-                self.finish_activity(turn["status"].as_str());
-                self.remove_live();
+                self.finish_activity(status);
+                if interrupted {
+                    self.live.take();
+                } else {
+                    self.remove_live();
+                }
                 self.active.set(false);
                 self.turn.take();
+                self.interrupting.set(false);
+                self.can_continue.set(interrupted);
                 for (_, approval) in self.approvals.borrow_mut().drain() {
                     self.history.remove(&approval);
+                }
+                for (_, question) in self.questions.borrow_mut().drain() {
+                    self.history.remove(&question);
                 }
                 let diff = self.diff.take();
                 if !diff.is_some_and(|entry| turn["id"].as_str() == Some(entry.id.as_str())) {
@@ -1084,14 +1158,11 @@ impl Agent {
                         self.add_diff(&changes);
                     }
                 }
-                let message =
-                    turn["error"]["message"]
-                        .as_str()
-                        .unwrap_or(match turn["status"].as_str() {
-                            Some("failed") => "会话失败",
-                            Some("interrupted") => "已停止",
-                            _ => "已完成",
-                        });
+                let message = turn["error"]["message"].as_str().unwrap_or(match status {
+                    Some("failed") => "会话失败",
+                    Some("interrupted") => "已中断",
+                    _ => "已完成",
+                });
                 self.show_status(message);
                 self.update_controls();
             }
@@ -1401,11 +1472,51 @@ impl Agent {
             .set_sensitive(ready && !opening && !waiting);
         self.options.update(ready && !opening && !waiting);
         self.usage.button.set_sensitive(ready);
-        self.send
-            .set_sensitive(ready && !running && !opening && !waiting);
-        self.stop.set_visible(running);
-        self.stop
-            .set_sensitive(running && self.turn.borrow().is_some());
+        self.update_primary();
+    }
+
+    fn update_primary(&self) {
+        let action = if self.active.get() {
+            ComposerAction::Stop
+        } else if self.can_continue.get()
+            && !self.attachments.chips.is_visible()
+            && self.input.buffer().is_none_or(|buffer| {
+                buffer
+                    .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                    .is_none_or(|text| text.trim().is_empty())
+            })
+        {
+            ComposerAction::Continue
+        } else {
+            ComposerAction::Send
+        };
+        if self.primary_action.replace(Some(action)) != Some(action) {
+            let (icon, name, tooltip) = match action {
+                ComposerAction::Send => (Icon::Up, "发送", "发送（Ctrl+Enter）"),
+                ComposerAction::Stop => (Icon::Stop, "中断推理", "中断当前推理"),
+                ComposerAction::Continue => (Icon::Pause, "继续推理", "继续上次任务（Ctrl+Enter）"),
+            };
+            self.primary.set_image(Some(&icons::widget(icon, 17)));
+            self.primary.set_tooltip_text(Some(tooltip));
+            if let Some(accessible) = self.primary.accessible() {
+                accessible.set_name(name);
+            }
+            let style = self.primary.style_context();
+            if action == ComposerAction::Continue {
+                style.add_class("agent-continue");
+            } else {
+                style.remove_class("agent-continue");
+            }
+        }
+        let enabled = if action == ComposerAction::Stop {
+            self.turn.borrow().is_some() && !self.interrupting.get()
+        } else {
+            self.thread.borrow().is_some()
+                && !self.opening.get()
+                && !self.uploading.get()
+                && self.pending_user.borrow().is_none()
+        };
+        self.primary.set_sensitive(enabled);
     }
 }
 

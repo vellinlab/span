@@ -233,6 +233,46 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowsize --sync "$window" 1250 940
     printf '%s\n' 'The centered composer adapts to both wide and narrow split layouts.'
 
+    widget mouse '输入消息，或添加附件'
+    xdotool type --clearmodifiers 'Check the comparison layout'
+    widget mouse '发送'
+    widget contains 'Preparing the comparison table.'
+    read -r stop_x stop_y stop_width stop_height < <(widget bounds '中断推理')
+    ((stop_width == stop_height))
+    widget mouse '中断推理'
+    read -r pause_x pause_y _ < <(widget bounds '继续推理')
+    ((stop_x == pause_x && stop_y == pause_y))
+    widget contains '已中断'
+    widget contains 'Preparing the comparison table.'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-paused.png"
+    widget mouse '输入消息，或添加附件'
+    xdotool type --clearmodifiers 'Another question'
+    widget bounds '发送' >/dev/null
+    xdotool key --clearmodifiers ctrl+a BackSpace
+    widget mouse '继续推理'
+    widget contains 'AgentScope'
+    widget bounds '发送' >/dev/null
+
+    table_geometry() {
+        local row_y row_height actions_y
+        read -r _ row_y _ row_height < <(widget bounds 'AgentScope')
+        read -r _ actions_y _ < <(widget bounds '复制 HTML')
+        if ((actions_y < row_y + row_height || actions_y > row_y + row_height + 40)); then
+            printf 'Unexpected gap after table: row bottom %s, copy action top %s\n' "$((row_y + row_height))" "$actions_y" >&2
+            return 1
+        fi
+        printf '%s\n' "$row_height"
+    }
+    wide_row="$(table_geometry)"
+    xdotool windowsize --sync "$window" 990 940
+    sleep 0.25
+    xdotool mousemove --window "$window" 355 390 click --repeat 12 5
+    narrow_row="$(table_geometry)"
+    ((narrow_row > wide_row))
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-table.png"
+    xdotool windowsize --sync "$window" 1250 940
+    printf '%s\n' 'The composer interrupts and continues in place, and wrapped tables fit their rows at both widths.'
+
     xdotool key --clearmodifiers ctrl+shift+j
     sleep 0.25
     xdotool type --clearmodifiers 'printf "%s\n" "$BASHPID" > "$HOME/drawer-bash"'

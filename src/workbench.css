@@ -657,10 +657,22 @@ menu menuitem:hover {
 }
 
 .workbench .agent-compose-card button.agent-send {
-    min-height: 24px;
-    padding: 2px 12px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
     margin-left: 4px;
-    border-radius: 14px;
+    border-radius: 17px;
+}
+
+.workbench .agent-compose-card button.agent-continue {
+    background: @selection;
+    border-color: #3f5c7d;
+    color: @accent;
+}
+
+.workbench .agent-compose-card button.agent-continue:hover {
+    background: @hover;
+    color: @foreground;
 }
 
 .agent-attachment {

@@ -190,10 +190,10 @@ fn table(events: &mut OffsetIter<'_>, markdown: &str, start: usize) -> gtk::Box 
     if row > 100 {
         grid.attach(&text("此处显示前 100 行，可复制完整表格。"), 0, 100, 1, 1);
     }
-    let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .vscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_height(true)
+    let scroll = glib::Object::builder::<table_scroll::TableScroll>()
+        .property("hscrollbar-policy", gtk::PolicyType::Automatic)
+        .property("vscrollbar-policy", gtk::PolicyType::Never)
+        .property("overlay-scrolling", false)
         .build();
     scroll.add(&grid);
     let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -213,6 +213,73 @@ fn table(events: &mut OffsetIter<'_>, markdown: &str, start: usize) -> gtk::Box 
     block.add(&scroll);
     block.add(&actions);
     block
+}
+
+mod table_scroll {
+    use gtk::glib;
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+
+    glib::wrapper! {
+        pub struct TableScroll(ObjectSubclass<imp::TableScroll>)
+            @extends gtk::ScrolledWindow, gtk::Bin, gtk::Container, gtk::Widget,
+            @implements gtk::Buildable;
+    }
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct TableScroll;
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for TableScroll {
+            const NAME: &'static str = "SpanTableScroll";
+            type Type = super::TableScroll;
+            type ParentType = gtk::ScrolledWindow;
+        }
+
+        impl ObjectImpl for TableScroll {}
+        impl ContainerImpl for TableScroll {}
+        impl BinImpl for TableScroll {}
+        impl ScrolledWindowImpl for TableScroll {}
+
+        impl WidgetImpl for TableScroll {
+            fn request_mode(&self) -> gtk::SizeRequestMode {
+                gtk::SizeRequestMode::HeightForWidth
+            }
+
+            fn preferred_height(&self) -> (i32, i32) {
+                self.preferred_height_for_width(self.parent_preferred_width().0)
+            }
+
+            fn preferred_height_for_width(&self, width: i32) -> (i32, i32) {
+                let scroll = self.obj();
+                let Some(viewport) = scroll.child().and_downcast::<gtk::Viewport>() else {
+                    return (0, 0);
+                };
+                let Some(grid) = viewport.child().filter(|child| child.is_visible()) else {
+                    return (0, 0);
+                };
+                // GTK3's scrolled window asks for height without passing the allotted width.
+                let minimum_width = grid.preferred_width().0;
+                let (minimum, natural) = grid.preferred_height_for_width(width.max(minimum_width));
+                let scrollbar = if width < minimum_width {
+                    let height = scroll
+                        .hscrollbar()
+                        .map_or(0, |bar| bar.preferred_height().0);
+                    height
+                        + scroll
+                            .style_get_property("scrollbar-spacing")
+                            .get::<i32>()
+                            .unwrap_or(0)
+                } else {
+                    0
+                };
+                (minimum + scrollbar, natural + scrollbar)
+            }
+        }
+    }
 }
 
 fn table_csv(rows: &[Vec<String>]) -> String {

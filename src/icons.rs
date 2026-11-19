@@ -14,6 +14,8 @@ pub enum Icon {
     Link,
     Attachment,
     Up,
+    Stop,
+    Pause,
     Refresh,
 }
 
@@ -139,6 +141,15 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.move_to(6.0, 10.5);
             cr.line_to(12.0, 4.5);
             cr.line_to(18.0, 10.5);
+        }
+        Icon::Stop => {
+            cr.rectangle(6.0, 6.0, 12.0, 12.0);
+            let _ = cr.fill();
+        }
+        Icon::Pause => {
+            cr.rectangle(6.0, 5.0, 4.0, 14.0);
+            cr.rectangle(14.0, 5.0, 4.0, 14.0);
+            let _ = cr.fill();
         }
         Icon::Refresh => {
             cr.arc(12.0, 12.0, 7.2, 0.0, 5.5);
