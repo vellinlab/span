@@ -1,5 +1,5 @@
 use crate::agent_render::{clipboard, open_link};
-use gtk::atk::prelude::*;
+use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
 use std::cell::{Cell, OnceCell};
@@ -170,14 +170,7 @@ impl TextSelection {
                 event.root().1 as i32,
             ) && let Some((position, Some(character))) = view.hit(event.root(), false)
                 && position == drag.start
-                && let Some(links) = view.parts()[position.part]
-                    .label
-                    .accessible()
-                    .and_downcast::<gtk::atk::Hypertext>()
-                && let index = links.link_index(character)
-                && index >= 0
-                && let Some(link) = links.link(index)
-                && let Some(uri) = link.uri(0)
+                && let Some(uri) = view.link_at(position, character)
             {
                 open_link(&uri);
             }
@@ -227,6 +220,19 @@ impl TextSelection {
             .get()
             .map(Vec::as_slice)
             .unwrap_or_default()
+    }
+
+    fn link_at(&self, position: Position, character: i32) -> Option<glib::GString> {
+        let links = self.parts()[position.part]
+            .label
+            .accessible()?
+            .dynamic_cast::<gtk::atk::Hypertext>()
+            .ok()?;
+        let index = links.link_index(character);
+        if index < 0 {
+            return None;
+        }
+        links.link(index)?.uri(0)
     }
 
     fn hit(&self, root: (f64, f64), nearest: bool) -> Option<(Position, Option<i32>)> {
