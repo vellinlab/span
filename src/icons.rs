@@ -14,6 +14,7 @@ pub enum Icon {
     Folder,
     File,
     Link,
+    ExternalLink,
     Attachment,
     Shield,
     ChevronDown,
@@ -100,7 +101,16 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             }
         }
         Icon::Terminal => {
-            cr.rectangle(3.0, 5.0, 18.0, 14.0);
+            cr.move_to(5.0, 5.0);
+            cr.line_to(19.0, 5.0);
+            cr.curve_to(20.1, 5.0, 21.0, 5.9, 21.0, 7.0);
+            cr.line_to(21.0, 17.0);
+            cr.curve_to(21.0, 18.1, 20.1, 19.0, 19.0, 19.0);
+            cr.line_to(5.0, 19.0);
+            cr.curve_to(3.9, 19.0, 3.0, 18.1, 3.0, 17.0);
+            cr.line_to(3.0, 7.0);
+            cr.curve_to(3.0, 5.9, 3.9, 5.0, 5.0, 5.0);
+            cr.close_path();
             cr.move_to(7.0, 9.0);
             cr.line_to(10.0, 12.0);
             cr.line_to(7.0, 15.0);
@@ -152,16 +162,40 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.line_to(18.0, 18.4);
         }
         Icon::Connect => {
-            cr.move_to(4.0, 8.0);
-            cr.line_to(20.0, 8.0);
-            cr.move_to(16.0, 4.0);
-            cr.line_to(20.0, 8.0);
-            cr.line_to(16.0, 12.0);
-            cr.move_to(20.0, 16.0);
-            cr.line_to(4.0, 16.0);
-            cr.move_to(8.0, 12.0);
-            cr.line_to(4.0, 16.0);
-            cr.line_to(8.0, 20.0);
+            cr.move_to(2.5, 12.0);
+            cr.line_to(6.0, 12.0);
+            cr.move_to(12.5, 7.0);
+            cr.line_to(10.0, 7.0);
+            cr.curve_to(7.8, 7.0, 6.0, 8.8, 6.0, 11.0);
+            cr.line_to(6.0, 13.0);
+            cr.curve_to(6.0, 15.2, 7.8, 17.0, 10.0, 17.0);
+            cr.line_to(12.5, 17.0);
+            cr.close_path();
+            cr.move_to(12.5, 10.0);
+            cr.line_to(16.0, 10.0);
+            cr.move_to(12.5, 14.0);
+            cr.line_to(16.0, 14.0);
+            cr.move_to(18.6, 6.0);
+            cr.line_to(19.0, 6.0);
+            cr.curve_to(20.4, 6.0, 21.5, 7.1, 21.5, 8.5);
+            cr.line_to(21.5, 15.5);
+            cr.curve_to(21.5, 16.9, 20.4, 18.0, 19.0, 18.0);
+            cr.line_to(18.6, 18.0);
+        }
+        Icon::ExternalLink => {
+            cr.move_to(10.5, 5.0);
+            cr.line_to(6.5, 5.0);
+            cr.curve_to(5.1, 5.0, 4.0, 6.1, 4.0, 7.5);
+            cr.line_to(4.0, 17.5);
+            cr.curve_to(4.0, 18.9, 5.1, 20.0, 6.5, 20.0);
+            cr.line_to(16.5, 20.0);
+            cr.curve_to(17.9, 20.0, 19.0, 18.9, 19.0, 17.5);
+            cr.line_to(19.0, 13.5);
+            cr.move_to(12.0, 12.0);
+            cr.line_to(20.0, 4.0);
+            cr.move_to(14.5, 4.0);
+            cr.line_to(20.0, 4.0);
+            cr.line_to(20.0, 9.5);
         }
         Icon::Plus => {
             cr.move_to(12.0, 4.5);

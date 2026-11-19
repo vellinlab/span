@@ -149,7 +149,6 @@ pub struct Agent {
     model_provider: RefCell<Option<String>>,
     usage: Usage,
     task_status: TaskStatus,
-    quota_started: Cell<bool>,
     attachments: Rc<Attachments>,
     quotes: Rc<DraftQuotes>,
     uploading: Cell<bool>,
@@ -354,7 +353,7 @@ impl Agent {
         }
         inputs.pack_end(&primary, false, false, 0);
         inputs.pack_end(&stop_button, false, false, 0);
-        inputs.pack_end(&usage.button, false, false, 0);
+        inputs.pack_end(&usage.widget, false, false, 0);
         card.pack_start(&task_status.widget, false, false, 0);
         card.pack_start(&quotes.widget, false, false, 0);
         card.pack_start(&editor, false, false, 0);
@@ -438,7 +437,6 @@ impl Agent {
             model_provider: RefCell::new(None),
             usage,
             task_status,
-            quota_started: Cell::new(false),
             attachments,
             quotes,
             uploading: Cell::new(false),
@@ -607,15 +605,6 @@ impl Agent {
                     agent.update_primary();
                 }
             });
-        let weak = Rc::downgrade(self);
-        self.usage.button.connect_clicked(move |_| {
-            if let Some(agent) = weak.upgrade() {
-                agent.usage.popover.popup();
-                if !agent.quota_started.get() {
-                    agent.read_quota();
-                }
-            }
-        });
         let weak = Rc::downgrade(self);
         self.usage.refresh.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -900,7 +889,6 @@ impl Agent {
 
     fn read_quota(&self) {
         if self.initialized.get() && self.usage.refresh.is_sensitive() {
-            self.quota_started.set(true);
             self.usage.loading();
             self.request(Request::Quota, "account/rateLimits/read", Value::Null);
         }
@@ -1134,6 +1122,7 @@ impl Agent {
                 self.options.server_ready(result);
                 self.initialized.set(true);
                 self.update_controls();
+                self.read_quota();
                 self.load_catalog(None);
                 if browse {
                     self.show_status("选择会话或新建");
@@ -1538,7 +1527,6 @@ impl Agent {
         self.client_messages.borrow_mut().clear();
         self.options.open(&Value::Null);
         self.usage.disconnect();
-        self.quota_started.set(false);
         self.older.hide();
         self.history_cursor.take();
         self.history_anchor.take();
@@ -2225,7 +2213,8 @@ impl Agent {
             .set_sensitive(ready && !opening && !waiting);
         self.quotes.widget.set_sensitive(!waiting);
         self.options.update(ready && !opening && !waiting, running);
-        self.usage.button.set_sensitive(ready);
+        self.usage.context.button.set_sensitive(ready);
+        self.usage.plan.button.set_sensitive(self.initialized.get());
         self.update_task_status();
         self.update_primary();
     }

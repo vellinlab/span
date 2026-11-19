@@ -823,28 +823,46 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
 }
 
 fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
-    let rail = column(4);
+    let rail = column(8);
     rail.style_context().add_class("tool-rail");
     let hosts = gtk::ToggleButton::builder()
         .tooltip_text("显示／隐藏侧栏 (Ctrl+Shift+B)")
         .build();
-    hosts.style_context().add_class("quiet-button");
-    hosts.add(&icon(Icon::RemoteHost, 17));
+    style_rail_button(&hosts, Icon::RemoteHost, "显示／隐藏侧栏");
     sidebar
         .bind_property("visible", &hosts, "active")
         .bidirectional()
         .sync_create()
         .build();
     rail.pack_start(&hosts, false, false, 0);
-    for (symbol, tooltip, action) in [
-        (Icon::Terminal, "新建本地终端 (Ctrl+Shift+T)", "win.local"),
-        (Icon::Connect, "快速连接 (Ctrl+Shift+O)", "win.quick"),
+    for (symbol, name, tooltip, action) in [
+        (
+            Icon::Terminal,
+            "工具栏 · 新建本地终端",
+            "新建本地终端 (Ctrl+Shift+T)",
+            "win.local",
+        ),
+        (
+            Icon::Connect,
+            "工具栏 · 快速连接",
+            "快速连接 (Ctrl+Shift+O)",
+            "win.quick",
+        ),
     ] {
-        let button = icon_button(symbol, tooltip);
+        let button = gtk::Button::builder().tooltip_text(tooltip).build();
+        style_rail_button(&button, symbol, name);
         button.set_action_name(Some(action));
         rail.pack_start(&button, false, false, 0);
     }
     rail
+}
+
+fn style_rail_button(button: &impl IsA<gtk::Button>, symbol: Icon, name: &str) {
+    button.style_context().add_class("rail-button");
+    button.add(&icon(symbol, 22));
+    if let Some(accessible) = button.accessible() {
+        accessible.set_name(name);
+    }
 }
 
 fn host_sidebar() -> (gtk::Box, gtk::SearchEntry, gtk::Box) {

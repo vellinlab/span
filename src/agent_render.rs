@@ -190,7 +190,7 @@ fn inline(markup: &mut String, event: Event<'_>, link: &mut bool) {
         }
         Event::End(TagEnd::Link) => {
             if std::mem::take(link) {
-                markup.push_str("</a>");
+                markup.push_str(LINK_END);
             }
         }
         Event::Code(text) => markup.push_str(&format!("<tt>{}</tt>", escaped(&text))),
@@ -203,10 +203,13 @@ fn inline(markup: &mut String, event: Event<'_>, link: &mut bool) {
     }
 }
 
+pub(crate) const LINK_END: &str = "</span></a>";
+
 pub(crate) fn push_link(markup: &mut String, uri: &str) {
     markup.push_str("<a href=\"");
     markup.push_str(&escaped(uri));
-    markup.push_str("\">");
+    // A low underline is placed below the glyph outline, including fallback fonts.
+    markup.push_str("\"><span underline=\"low\">");
 }
 
 pub(crate) fn web_url(uri: &str) -> bool {
@@ -218,14 +221,14 @@ pub(crate) fn web_url(uri: &str) -> bool {
     })
 }
 
-fn open_link(label: &gtk::Label, uri: &str) {
+pub(crate) fn open_link(widget: &impl IsA<gtk::Widget>, uri: &str) {
     if !web_url(uri) {
         return;
     }
     let Err(error) = gio::AppInfo::launch_default_for_uri(uri, gio::AppLaunchContext::NONE) else {
         return;
     };
-    let parent = label.toplevel().and_downcast::<gtk::Window>();
+    let parent = widget.toplevel().and_downcast::<gtk::Window>();
     let dialog = gtk::MessageDialog::new(
         parent.as_ref(),
         gtk::DialogFlags::DESTROY_WITH_PARENT | gtk::DialogFlags::MODAL,

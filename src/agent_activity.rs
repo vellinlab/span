@@ -37,7 +37,8 @@ enum View {
     Text(gtk::Label),
     Web {
         detail: gtk::Label,
-        source: gtk::Label,
+        source: gtk::LinkButton,
+        domain: gtk::Label,
     },
     Command(gtk::Box),
     Patch {
@@ -224,23 +225,27 @@ impl Activity {
                 agent_render::set_markdown(label, &record.detail);
             }
             View::Text(label) => label.set_text(&record.detail),
-            View::Web { detail, source } => {
+            View::Web {
+                detail,
+                source,
+                domain,
+            } => {
                 detail.set_text(&record.detail);
                 detail.set_visible(!record.detail.is_empty());
                 source.set_visible(record.web_url.is_some());
                 if let Some(url) = record.web_url {
-                    let mut markup = String::new();
-                    agent_render::push_link(&mut markup, url);
                     let host = url
                         .split_once("://")
                         .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
                         .map(|host| host.rsplit('@').next().unwrap_or(host))
                         .filter(|host| !host.is_empty())
                         .unwrap_or(url);
-                    markup.push_str(&gtk::glib::markup_escape_text(host));
-                    markup.push_str("</a>");
-                    source.set_markup(&markup);
+                    domain.set_text(host);
+                    source.set_uri(url);
                     source.set_tooltip_text(Some(url));
+                    if let Some(accessible) = source.accessible() {
+                        accessible.set_name(&format!("打开网页 · {host}"));
+                    }
                 }
             }
             View::Command(body) => {
@@ -374,16 +379,34 @@ impl Activity {
                 let detail = agent_render::text("");
                 detail.style_context().add_class("agent-activity-detail");
                 detail.set_no_show_all(true);
-                let source = agent_render::markdown_label();
+                let source = gtk::LinkButton::with_label("", "");
                 source.style_context().add_class("agent-source-link");
                 source.set_halign(gtk::Align::Start);
-                source.set_ellipsize(pango::EllipsizeMode::Middle);
-                source.set_max_width_chars(52);
+                source.set_focus_on_click(false);
+                if let Some(label) = source.child() {
+                    source.remove(&label);
+                }
+                let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                let domain = gtk::Label::new(None);
+                domain.set_ellipsize(pango::EllipsizeMode::Middle);
+                domain.set_max_width_chars(44);
+                content.pack_start(&domain, true, true, 0);
+                content.pack_start(&icons::widget(Icon::ExternalLink, 13), false, false, 0);
+                source.add(&content);
+                content.show_all();
+                source.connect_activate_link(|button| {
+                    agent_render::open_link(button, &button.uri());
+                    gtk::glib::Propagation::Stop
+                });
                 source.set_no_show_all(true);
                 body.add(&detail);
                 body.add(&source);
                 item.add(&body);
-                View::Web { detail, source }
+                View::Web {
+                    detail,
+                    source,
+                    domain,
+                }
             } else {
                 let detail = if kind == "reasoning" {
                     agent_render::markdown_label()

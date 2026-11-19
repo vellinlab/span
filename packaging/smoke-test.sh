@@ -134,7 +134,20 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowfocus --sync "$window"
     first_bash="$(head -n1 "$HOME/bash-ready")"
 
-    xdotool key --clearmodifiers ctrl+shift+t
+    widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    previous_bottom=0
+    for action in '显示／隐藏侧栏' '工具栏 · 新建本地终端' '工具栏 · 快速连接'; do
+        read -r _ rail_y rail_width rail_height <<< "$(widget bounds "$action")"
+        ((rail_width >= 40 && rail_height >= 40 && rail_y - previous_bottom >= 7))
+        previous_bottom=$((rail_y + rail_height))
+    done
+    widget state '显示／隐藏侧栏' checked
+    widget mouse '显示／隐藏侧栏'
+    widget not-state '显示／隐藏侧栏' checked
+    widget mouse '显示／隐藏侧栏'
+    widget state '显示／隐藏侧栏' checked
+
+    widget mouse '工具栏 · 新建本地终端'
     second_bash_started() {
         [[ $(wc -l < "$HOME/bash-ready") -eq 2 ]]
     }
@@ -144,7 +157,6 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     dialog_open() {
         xdotool search --onlyvisible --name "^$1$" >/dev/null
     }
-    widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
     timeline_wheel() {
         local x y height
         read -r x y _ height < <(widget bounds '对话记录')
@@ -187,6 +199,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
     xdotool windowfocus --sync "$window"
     xdotool mousemove 1250 770
+    widget contains 'CI Host'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/host-workbench.png"
     mkdir "$HOME/Documents" "$HOME/Projects"
     printf 'Workspace notes\n' > "$HOME/notes.txt"
     printf 'Split workspace preview\n' > "$HOME/000-layout.txt"
@@ -325,9 +339,9 @@ SVG
     widget mouse '修改文件 · checks.txt…'
     widget expanded-contains '修改文件 · checks.txt…' '+passed'
     widget mouse '在网页中查找 · deployment checklist documentation'
-    widget expanded-contains '在网页中查找 · deployment checklist documentation' 'example.invalid'
-    widget mouse-text 'example.invalid'
-    wait_until "opening the activity source" grep -qFx 'https://example.invalid/activity/checklist?from=span&view=doc' "$HOME/span-opened-link"
+    widget expanded-contains '在网页中查找 · deployment checklist documentation' 'docs.example.com'
+    widget mouse '打开网页 · docs.example.com'
+    wait_until "opening the activity source" grep -qFx 'https://docs.example.com/activity/checklist?from=span&view=doc' "$HOME/span-opened-link"
     read -r activity_x activity_y _ _ <<< "$(widget bounds '读取文件 · checks.txt')"
     xdotool mousemove "$((activity_x + 14))" "$((activity_y + 10))"
     sleep 0.12
@@ -356,10 +370,18 @@ SVG
     widget contains 'Deployment preview & status'
     widget click '关闭预览'
     printf '%s\n' 'Generated images, diagrams and HTML open in the shared preview pane.'
-    widget click '用量 · 13%'
+    widget description '上下文用量' $'上下文窗口\n已用 13% · 剩余 87%'
+    widget click '上下文用量'
     widget contains '会话累计 · 12,800 tokens'
-    widget contains '5 小时 · 已用 17%'
+    widget contains '667 / 5,000 tokens'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-usage.png"
+    xdotool key --clearmodifiers Escape
+    widget description '套餐额度' $'套餐额度\nPro 套餐'
+    widget click '套餐额度'
+    widget contains '5 小时 · 剩余 83%'
+    widget contains '每周限额 · 剩余 69%'
+    widget contains '点数余额 · 0'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-plan.png"
     xdotool key --clearmodifiers Escape
     widget mouse '本轮变更 · 查看 diff'
     widget expanded-contains '本轮变更 · 查看 diff' '+passed'
@@ -731,7 +753,7 @@ PY
     probe_pid=$!
     wait_until "the local SSH probe" test -s "$HOME/ssh-port"
 
-    xdotool key --clearmodifiers ctrl+shift+o
+    widget mouse '工具栏 · 快速连接'
     wait_until "the Quick Connect dialog" dialog_open '快速连接'
     dialog="$(xdotool search --onlyvisible --name '^快速连接$' | head -n1)"
     xdotool windowfocus --sync "$dialog"

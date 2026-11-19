@@ -1,4 +1,4 @@
-use crate::agent_render::{self, Context, push_link, web_url};
+use crate::agent_render::{self, Context, LINK_END, push_link, web_url};
 use crate::agent_selection::vertical_delta;
 use crate::files::{self, Source};
 use crate::icons::{self, Icon};
@@ -799,7 +799,7 @@ fn html_node(node: &tl::Node<'_>, parser: &tl::Parser<'_>, depth: usize, output:
                 }
             }
             if href.is_some() {
-                output.push_str("</a>");
+                output.push_str(LINK_END);
             }
             output.push_str(end);
         }

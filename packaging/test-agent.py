@@ -166,6 +166,7 @@ for line in sys.stdin:
         send({"id": request_id, "result": {"data": data, "nextCursor": next_cursor}})
     elif method == "account/rateLimits/read":
         send({"id": request_id, "result": {"rateLimits": {"limitId": "codex",
+            "planType": "pro", "credits": {"hasCredits": False, "unlimited": False, "balance": "0"},
             "primary": {"usedPercent": 17, "windowDurationMins": 300},
             "secondary": {"usedPercent": 31, "windowDurationMins": 10080}}}})
     elif method == "thread/list":
@@ -343,7 +344,7 @@ for line in sys.stdin:
         send({"method": "item/completed", "params": {**event, "item": {
             "id": "web", "type": "webSearch", "query": "deployment checklist documentation",
             "action": {"type": "findInPage", "pattern": "deployment checklist documentation",
-                       "url": "https://example.invalid/activity/checklist?from=span&view=doc"}}}})
+                       "url": "https://docs.example.com/activity/checklist?from=span&view=doc"}}}})
         send({"method": "item/fileChange/patchUpdated", "params": {
             **event, "itemId": "checks-edit", "changes": [{"path": "checks.txt", "diff": diff}]}})
         send({"method": "item/agentMessage/delta", "params": {
