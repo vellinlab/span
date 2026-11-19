@@ -613,6 +613,17 @@ button.agent-send:disabled {
     padding: 2px 10px;
 }
 
+.workbench .drawer-picker button {
+    min-height: 24px;
+    padding: 0 7px;
+    background: transparent;
+    border-color: transparent;
+}
+
+.workbench .drawer-picker button:hover {
+    background: @hover;
+}
+
 .agent-settings {
     background: @sidebar;
     padding: 10px 18px;
@@ -625,6 +636,8 @@ button.agent-send:disabled {
 
 scrolledwindow.agent-scroll undershoot,
 scrolledwindow.agent-scroll overshoot,
+scrolledwindow.terminal-page undershoot,
+scrolledwindow.terminal-page overshoot,
 .agent-catalog scrolledwindow undershoot,
 .agent-catalog scrolledwindow overshoot {
     background: none;

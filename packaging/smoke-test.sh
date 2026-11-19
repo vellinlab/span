@@ -562,6 +562,27 @@ PY
         widget contains 'Latest deployment notes'
         widget contains 'Check the rollout from my other device.'
         widget contains 'The shared rollout is healthy.'
+        widget click '会话页终端面板'
+        xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-primary-connection"'
+        xdotool key --clearmodifiers Return
+        wait_until "the original connection in the remote terminal drawer" test -s "$WORKBENCH_SSH_FIXTURE/drawer-primary-connection"
+        widget click '在面板中新建终端'
+        widget state '关闭底部终端' sensitive
+        xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-extra-connection"; seq 1 160'
+        xdotool key --clearmodifiers Return
+        wait_until "a second remote terminal in the drawer" test -s "$WORKBENCH_SSH_FIXTURE/drawer-extra-connection"
+        cmp "$WORKBENCH_SSH_FIXTURE/drawer-primary-connection" "$WORKBENCH_SSH_FIXTURE/drawer-extra-connection"
+        [[ $(sort -u "$WORKBENCH_SSH_FIXTURE/remote-shells" | wc -l) -eq 2 ]]
+        sleep 0.2
+        import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/remote-terminal-drawer.png"
+        widget click '关闭底部终端'
+        widget not-state '关闭底部终端' sensitive
+        xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-returned-connection"'
+        xdotool key --clearmodifiers Return
+        wait_until "input returned to the original remote terminal" test -s "$WORKBENCH_SSH_FIXTURE/drawer-returned-connection"
+        cmp "$WORKBENCH_SSH_FIXTURE/drawer-primary-connection" "$WORKBENCH_SSH_FIXTURE/drawer-returned-connection"
+        widget click '会话页终端面板'
+        printf '%s\n' 'The drawer plus button opens a second SSH shell on the same connection, and closing it returns focus to the first shell.'
         ssh_socket="$(find "$TMPDIR" -type s -path '*/swb-*/ssh' -print -quit)"
         test -S "$ssh_socket"
         ssh -F /dev/null -S "$ssh_socket" -O exit localhost

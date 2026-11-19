@@ -535,7 +535,7 @@ impl Workbench {
             }
         }
         if let Some(session) = self.current_session() {
-            session.terminal.copy_text();
+            session.active_terminal().copy_text();
         }
     }
 
@@ -551,7 +551,7 @@ impl Workbench {
             }
         }
         if let Some(session) = self.current_session() {
-            session.terminal.paste_text();
+            session.active_terminal().paste_text();
         }
     }
 
