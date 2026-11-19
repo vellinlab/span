@@ -203,7 +203,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     if ((files_open)); then
         xdotool key --clearmodifiers ctrl+shift+f
     fi
-    widget contains 'CI Host'
+    widget bounds 'CI Host' >/dev/null
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/host-workbench.png"
     if ((files_open)); then
         xdotool key --clearmodifiers ctrl+shift+f
@@ -346,7 +346,8 @@ SVG
     widget mouse '修改文件 · checks.txt…'
     widget expanded-contains '修改文件 · checks.txt…' '+passed'
     widget mouse '在网页中查找 · deployment checklist documentation'
-    widget expanded-contains '在网页中查找 · deployment checklist documentation' 'docs.example.com'
+    widget state '在网页中查找 · deployment checklist documentation' expanded
+    widget bounds '打开网页 · docs.example.com' >/dev/null
     widget mouse '打开网页 · docs.example.com'
     wait_until "opening the activity source" grep -qFx 'https://docs.example.com/activity/checklist?from=span&view=doc' "$HOME/span-opened-link"
     read -r activity_x activity_y _ _ <<< "$(widget bounds '读取文件 · checks.txt')"
