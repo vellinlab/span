@@ -212,7 +212,11 @@ MARKDOWN
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-permissions.png"
     widget mouse '完全访问'
     wait_until "confirming Full Access explicitly" dialog_open '会话权限'
-    SPAN_TEST_DIALOG='会话权限' widget click '取消'
+    permission_dialog="$(xdotool search --onlyvisible --name '^会话权限$' | head -n1)"
+    xdotool windowfocus --sync "$permission_dialog"
+    widget click '取消'
+    wait_until "closing the permissions confirmation" bash -c '! xdotool search --onlyvisible --name "^会话权限$" >/dev/null'
+    xdotool windowfocus --sync "$window"
     widget description '会话权限' '工作区权限'
     widget mouse '会话权限'
     widget mouse '只读'
@@ -427,7 +431,11 @@ MARKDOWN
     widget mouse '会话权限'
     widget mouse '完全访问'
     wait_until "selecting Full Access" dialog_open '会话权限'
-    SPAN_TEST_DIALOG='会话权限' widget click '启用完全访问'
+    permission_dialog="$(xdotool search --onlyvisible --name '^会话权限$' | head -n1)"
+    xdotool windowfocus --sync "$permission_dialog"
+    widget click '启用完全访问'
+    wait_until "closing the permissions confirmation" bash -c '! xdotool search --onlyvisible --name "^会话权限$" >/dev/null'
+    xdotool windowfocus --sync "$window"
     widget description '会话权限' '完全访问'
     widget mouse '输入消息，或添加附件'
     xdotool type --clearmodifiers 'Check the comparison layout'

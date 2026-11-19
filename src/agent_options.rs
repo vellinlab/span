@@ -627,26 +627,30 @@ impl Options {
                 .button
                 .toplevel()
                 .and_downcast::<gtk::Window>();
-            let dialog = gtk::MessageDialog::builder()
+            let dialog = gtk::Dialog::builder()
                 .title("会话权限")
                 .modal(true)
                 .destroy_with_parent(true)
-                .text("启用完全访问？")
-                .secondary_text(PermissionMode::Full.description())
-                .message_type(gtk::MessageType::Warning)
+                .default_width(390)
+                .use_header_bar(1)
                 .build();
             dialog.set_transient_for(parent.as_ref());
             dialog.style_context().add_class("workbench-dialog");
-            dialog
-                .content_area()
-                .style_context()
-                .add_class("dialog-body");
+            let body = dialog.content_area();
+            body.style_context().add_class("dialog-body");
+            let description = gtk::Label::builder()
+                .label(PermissionMode::Full.description())
+                .wrap(true)
+                .xalign(0.0)
+                .build();
+            body.add(&description);
             dialog.add_button("取消", gtk::ResponseType::Cancel);
             dialog
                 .add_button("启用完全访问", gtk::ResponseType::Accept)
                 .style_context()
                 .add_class("destructive");
             dialog.set_default_response(gtk::ResponseType::Cancel);
+            dialog.show_all();
             let accepted = dialog.run() == gtk::ResponseType::Accept;
             dialog.close();
             if !accepted {
