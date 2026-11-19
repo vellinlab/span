@@ -45,6 +45,14 @@ for _ in range(50):
                 seen.append(node.name)
             if operation in ("contains", "not-contains") and contains(node, name):
                 sys.exit(0 if operation == "contains" else f"Unexpected text {name!r}")
+            if operation == "mouse-text" and contains(node, name):
+                text = node.queryText()
+                index = text.getText(0, -1).index(name) + len(name) // 2
+                x, y, width, height = text.getCharacterExtents(index, pyatspi.DESKTOP_COORDS)
+                if width > 0 and height > 0 and x >= 0 and y >= 0:
+                    subprocess.run(["xdotool", "mousemove", str(x + width // 2),
+                                    str(y + height // 2), "click", "1"], check=True)
+                    sys.exit(0)
             if node.name != name:
                 continue
             if operation in ("state", "not-state"):

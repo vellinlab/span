@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/zyw02/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.8-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-rc.9-1.el8.x86_64.rpm
 span
 ```
 
@@ -22,7 +22,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./span_0.1.0-rc.8_amd64.deb
+sudo apt install ./span_0.1.0-rc.9_amd64.deb
 span
 ```
 
@@ -44,7 +44,7 @@ span
 
 双击文件可在右侧预览 UTF-8 文本、代码、Markdown、HTML、Mermaid 和 PNG/JPEG/SVG 图片。HTML 以静态方式显示标题、正文和列表。上方按钮可上传本机文件到当前目录，或下载选中的文件。上传遇到同名文件时会提示，下载覆盖前会确认。远端文件操作复用已登录的 OpenSSH 连接打开 SFTP 通道。
 
-Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会自动进入同一个右侧预览区。用预览标题栏的箭头切换产物，点击会话里的预览按钮可再次打开。手动选中的预览会保留，新的产物可用箭头切换查看。
+Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会自动进入同一个右侧预览区。用预览标题栏的箭头切换产物，点击会话里的文件链接或预览按钮可再次打开。HTML 预览中的 HTTP／HTTPS 链接由系统默认浏览器打开。手动选中的预览会保留，新的产物可用箭头切换查看。
 
 ## Codex 会话
 

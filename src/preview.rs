@@ -1,3 +1,4 @@
+use crate::agent_render::{push_link, web_url};
 use crate::files::{self, Source};
 use crate::icons::{self, Icon};
 use crate::session::Session;
@@ -595,14 +596,7 @@ fn html_node(node: &tl::Node<'_>, parser: &tl::Parser<'_>, depth: usize, output:
     match node {
         tl::Node::Comment(_) => {}
         tl::Node::Raw(text) => {
-            let text = text.as_utf8_str();
-            let text = text
-                .replace("&nbsp;", " ")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&quot;", "\"")
-                .replace("&#39;", "'")
-                .replace("&amp;", "&");
+            let text = html_text(&text.as_utf8_str());
             let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
             if !collapsed.is_empty() {
                 if text.starts_with(char::is_whitespace) && !output.ends_with([' ', '\n']) {
@@ -616,6 +610,11 @@ fn html_node(node: &tl::Node<'_>, parser: &tl::Parser<'_>, depth: usize, output:
         }
         tl::Node::Tag(tag) => {
             let name = tag.name().as_utf8_str().to_ascii_lowercase();
+            let href = (name == "a")
+                .then(|| tag.attributes().get("href").flatten())
+                .flatten()
+                .map(|url| html_text(&url.as_utf8_str()))
+                .filter(|url| web_url(url));
             let (begin, end) = match name.as_str() {
                 "head" | "style" | "script" | "iframe" | "svg" | "template" | "noscript" => return,
                 "h1" => ("\n\n<span size=\"x-large\" weight=\"bold\">", "</span>\n"),
@@ -632,12 +631,28 @@ fn html_node(node: &tl::Node<'_>, parser: &tl::Parser<'_>, depth: usize, output:
                 _ => ("", ""),
             };
             output.push_str(begin);
+            if let Some(href) = &href {
+                push_link(output, href);
+            }
             for handle in tag.children().top().iter() {
                 if let Some(child) = handle.get(parser) {
                     html_node(child, parser, depth + 1, output);
                 }
             }
+            if href.is_some() {
+                output.push_str("</a>");
+            }
             output.push_str(end);
         }
     }
+}
+
+fn html_text(value: &str) -> String {
+    value
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
 }

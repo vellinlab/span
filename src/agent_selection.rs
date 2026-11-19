@@ -1,4 +1,4 @@
-use crate::agent_render::{clipboard, open_link};
+use crate::agent_render::clipboard;
 use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
@@ -67,6 +67,19 @@ type Range = (Position, Position);
 struct Drag {
     start: Position,
     root: (f64, f64),
+    link_byte: Option<i32>,
+    selecting: bool,
+}
+
+impl Drag {
+    fn moved(self, widget: &gtk::EventBox, root: (f64, f64)) -> bool {
+        widget.drag_check_threshold(
+            self.root.0 as i32,
+            self.root.1 as i32,
+            root.0 as i32,
+            root.1 as i32,
+        )
+    }
 }
 
 glib::wrapper! {
@@ -157,7 +170,7 @@ impl TextSelection {
             if event.button() != 1 {
                 return glib::Propagation::Proceed;
             }
-            let Some((start, _)) = view.hit(event.root(), false) else {
+            let Some((start, link_byte)) = view.hit(event.root(), false) else {
                 return glib::Propagation::Proceed;
             };
             // GTK's viewport scrolls to reveal the focused widget. The pointer
@@ -174,24 +187,28 @@ impl TextSelection {
             view.imp().drag.set(Some(Drag {
                 start,
                 root: event.root(),
+                link_byte,
+                selecting: false,
             }));
             view.imp().grab.replace(widget.downgrade());
             widget.grab_add();
             glib::Propagation::Stop
         });
         let view = self.downgrade();
-        widget.connect_motion_notify_event(move |_, event| {
-            let Some(view) = view
-                .upgrade()
-                .filter(|view| view.imp().drag.get().is_some())
-            else {
+        widget.connect_motion_notify_event(move |widget, event| {
+            let Some(view) = view.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let Some(drag) = view.imp().drag.get() else {
                 return glib::Propagation::Proceed;
             };
             if !event.state().contains(gdk::ModifierType::BUTTON1_MASK) {
                 view.end_drag();
                 return glib::Propagation::Proceed;
             }
-            view.extend_to(event.root());
+            if drag.selecting || drag.moved(widget, event.root()) {
+                view.extend_to(event.root());
+            }
             glib::Propagation::Stop
         });
         let view = self.downgrade();
@@ -199,25 +216,29 @@ impl TextSelection {
             let Some(view) = view.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            if event.button() != 1 || view.imp().drag.get().is_none() {
+            let Some(drag) = view.imp().drag.get().filter(|_| event.button() == 1) else {
                 return glib::Propagation::Proceed;
+            };
+            let root = event.root();
+            if drag.selecting || drag.moved(widget, root) {
+                view.extend_to(root);
             }
-            view.extend_to(event.root());
             let Some(drag) = view.end_drag() else {
                 return glib::Propagation::Proceed;
             };
             if let Some(text) = view.selected_text() {
                 gtk::Clipboard::get(&gdk::SELECTION_PRIMARY).set_text(&text);
-            } else if !widget.drag_check_threshold(
-                drag.root.0 as i32,
-                drag.root.1 as i32,
-                event.root().0 as i32,
-                event.root().1 as i32,
-            ) && let Some((position, Some(character))) = view.hit(event.root(), false)
-                && position == drag.start
-                && let Some(uri) = view.link_at(position, character)
+            } else if !drag.selecting
+                && let Some(start) = drag.link_byte
+                && let Some((position, Some(end))) = view.hit(root, false)
+                && position.part == drag.start.part
             {
-                open_link(&uri);
+                let label = &view.parts()[position.part].label;
+                if let Some(uri) = link_at(label, start)
+                    .filter(|uri| start == end || link_at(label, end).as_ref() == Some(uri))
+                {
+                    label.emit_by_name::<bool>("activate-link", &[&uri.as_str()]);
+                }
             }
             glib::Propagation::Stop
         });
@@ -262,19 +283,6 @@ impl TextSelection {
             .get()
             .map(Vec::as_slice)
             .unwrap_or_default()
-    }
-
-    fn link_at(&self, position: Position, character: i32) -> Option<glib::GString> {
-        let links = self.parts()[position.part]
-            .label
-            .accessible()?
-            .dynamic_cast::<gtk::atk::Hypertext>()
-            .ok()?;
-        let index = links.link_index(character);
-        if index < 0 {
-            return None;
-        }
-        links.link(index)?.uri(0)
     }
 
     fn hit(&self, root: (f64, f64), nearest: bool) -> Option<(Position, Option<i32>)> {
@@ -322,15 +330,18 @@ impl TextSelection {
                 .take(trailing.max(0) as usize)
                 .map(char::len_utf8)
                 .sum::<usize>();
-        let character = (inside && !nearest).then(|| text[..index].chars().count() as i32);
-        Some((Position { part, byte }, character))
+        let link_byte = (inside && !nearest && !suffix.is_empty()).then_some(index as i32);
+        Some((Position { part, byte }, link_byte))
     }
 
     fn extend_to(&self, root: (f64, f64)) {
-        if let (Some(Drag { start, .. }), Some((end, _))) =
-            (self.imp().drag.get(), self.hit(root, true))
-        {
-            self.change_range((start != end).then(|| (start.min(end), start.max(end))));
+        if let Some(mut drag) = self.imp().drag.get() {
+            drag.selecting = true;
+            self.imp().drag.set(Some(drag));
+            if let Some((end, _)) = self.hit(root, true) {
+                let start = drag.start;
+                self.change_range((start != end).then(|| (start.min(end), start.max(end))));
+            }
         }
     }
 
@@ -380,6 +391,19 @@ impl TextSelection {
         clipboard().set_text(&text);
         true
     }
+}
+
+fn link_at(label: &gtk::Label, byte: i32) -> Option<glib::GString> {
+    let links = label
+        .accessible()?
+        .dynamic_cast::<gtk::atk::Hypertext>()
+        .ok()?;
+    // GTK3 forwards this index to GtkLabel's UTF-8 byte ranges.
+    let index = links.link_index(byte);
+    if index < 0 {
+        return None;
+    }
+    links.link(index)?.uri(0)
 }
 
 fn bounds(range: Option<Range>, part: usize) -> Option<(usize, usize)> {

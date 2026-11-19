@@ -246,7 +246,13 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains 'Generated workspace page'
     widget contains 'Deployment preview & status'
     widget not-contains 'fixture script sentinel'
+    widget mouse-text '预览里的链接'
+    wait_until "opening a web link from the HTML preview" grep -qFx 'https://example.invalid/span/preview?a=1&b=2' "$HOME/span-opened-link"
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/generated-preview.png"
+    widget click '关闭预览'
+    timeline_wheel 5 10
+    widget mouse-text 'the generated page'
+    widget contains 'Deployment preview & status'
     widget click '关闭预览'
     printf '%s\n' 'Generated images, diagrams and HTML open in the shared preview pane.'
     widget click '用量 · 13%'
@@ -325,6 +331,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains 'Deployment checklist'
     widget mouse 'Build documentation'
     wait_until "opening the clicked Markdown link" grep -qFx 'https://example.invalid/span/docs?from=agent&view=build' "$HOME/span-opened-link"
+    widget mouse-text '发布说明'
+    wait_until "opening a Markdown link after Chinese text" grep -qFx 'https://example.invalid/span/notes?lang=zh&view=full' "$HOME/span-opened-link"
+    printf '%s\n' 'Clicking Markdown links after Chinese text and inside the HTML preview opens the exact URL.'
     composer_width() {
         local input_x input_width timeline_x timeline_width center_error
         read -r input_x _ input_width _ < <(widget bounds '消息输入框')

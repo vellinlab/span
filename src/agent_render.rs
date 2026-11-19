@@ -20,6 +20,18 @@ pub struct Context {
 
 pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) -> TextSelection {
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    let context = Rc::new(context.clone());
+    let prose_label = || {
+        let context = context.clone();
+        let preview = preview.clone();
+        markdown_label_with(move |label, uri| {
+            if let Some(artifact) = Artifact::output(uri, &context) {
+                preview(artifact, false);
+            } else {
+                open_link(label, uri);
+            }
+        })
+    };
     let mut pending = String::new();
     let mut selectable = Vec::new();
     let mut list_depth: u32 = 0;
@@ -30,11 +42,11 @@ pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) 
     while let Some((event, range)) = events.next() {
         match event {
             Event::Start(Tag::Table(_)) => {
-                flush_text(&blocks, &mut pending, &mut selectable);
+                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
                 blocks.add(&table(&mut events, markdown, range.start, &mut selectable));
             }
             Event::Start(Tag::CodeBlock(kind)) => {
-                flush_text(&blocks, &mut pending, &mut selectable);
+                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
                 let mut code = String::new();
                 for (event, _) in events.by_ref() {
                     match event {
@@ -74,7 +86,7 @@ pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) 
                     pending.push_str(&escaped(&alt));
                     continue;
                 }
-                flush_text(&blocks, &mut pending, &mut selectable);
+                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
                 let relative = Path::new(dest_url.as_ref()).components().all(|part| {
                     matches!(
                         part,
@@ -83,29 +95,31 @@ pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) 
                 });
                 let automatic = live && relative && automatic_images < 3;
                 automatic_images += usize::from(automatic);
-                if let Some(artifact) = Artifact::output(&dest_url, context) {
+                if let Some(artifact) = Artifact::output(&dest_url, &context) {
                     artifacts.push(artifact);
                 }
-                blocks.add(&image(&dest_url, &alt, context, automatic));
+                blocks.add(&image(&dest_url, &alt, &context, automatic));
             }
-            Event::Start(Tag::Link { ref dest_url, .. }) => {
-                if let Some(artifact) = Artifact::output(dest_url, context) {
-                    artifacts.push(artifact);
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                let artifact = Artifact::output(&dest_url, &context);
+                link = web_url(&dest_url) || artifact.is_some();
+                if link {
+                    push_link(&mut pending, &dest_url);
                 }
-                inline(&mut pending, event, &mut link);
+                artifacts.extend(artifact);
             }
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph | TagEnd::Heading(_)) => {
                 if matches!(event, Event::End(TagEnd::Heading(_))) {
                     pending.push_str("</b>");
                 }
-                flush_text(&blocks, &mut pending, &mut selectable);
+                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
             }
             Event::Start(Tag::Heading { .. }) => pending.push_str("<b>"),
             Event::Start(Tag::List(_)) => list_depth = list_depth.saturating_add(1),
             Event::End(TagEnd::List(_)) => {
                 list_depth = list_depth.saturating_sub(1);
-                flush_text(&blocks, &mut pending, &mut selectable);
+                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
             }
             Event::Start(Tag::Item) => {
                 pending.push_str(&"   ".repeat(list_depth.saturating_sub(1).min(8) as usize));
@@ -113,13 +127,13 @@ pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) 
             }
             Event::End(TagEnd::Item) => pending.push('\n'),
             Event::Rule => {
-                flush_text(&blocks, &mut pending, &mut selectable);
+                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
                 blocks.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
             }
             event => inline(&mut pending, event, &mut link),
         }
     }
-    flush_text(&blocks, &mut pending, &mut selectable);
+    flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
     if !artifacts.is_empty() {
         let actions = gtk::Box::new(gtk::Orientation::Vertical, 2);
         actions.style_context().add_class("agent-preview-actions");
@@ -164,7 +178,7 @@ fn inline(markup: &mut String, event: Event<'_>, link: &mut bool) {
         Event::Start(Tag::Link { dest_url, .. }) => {
             *link = web_url(&dest_url);
             if *link {
-                markup.push_str(&format!("<a href=\"{}\">", escaped(&dest_url)));
+                push_link(markup, &dest_url);
             }
         }
         Event::End(TagEnd::Link) => {
@@ -182,7 +196,13 @@ fn inline(markup: &mut String, event: Event<'_>, link: &mut bool) {
     }
 }
 
-fn web_url(uri: &str) -> bool {
+pub(crate) fn push_link(markup: &mut String, uri: &str) {
+    markup.push_str("<a href=\"");
+    markup.push_str(&escaped(uri));
+    markup.push_str("\">");
+}
+
+pub(crate) fn web_url(uri: &str) -> bool {
     uri.split_once("://").is_some_and(|(scheme, rest)| {
         (scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http"))
             && !rest.is_empty()
@@ -191,19 +211,45 @@ fn web_url(uri: &str) -> bool {
     })
 }
 
-pub fn open_link(uri: &str) {
-    if web_url(uri)
-        && let Err(error) = gio::AppInfo::launch_default_for_uri(uri, gio::AppLaunchContext::NONE)
-    {
-        eprintln!("Unable to open link: {error}");
+fn open_link(label: &gtk::Label, uri: &str) {
+    if !web_url(uri) {
+        return;
     }
+    let Err(error) = gio::AppInfo::launch_default_for_uri(uri, gio::AppLaunchContext::NONE) else {
+        return;
+    };
+    let parent = label.toplevel().and_downcast::<gtk::Window>();
+    let dialog = gtk::MessageDialog::new(
+        parent.as_ref(),
+        gtk::DialogFlags::DESTROY_WITH_PARENT | gtk::DialogFlags::MODAL,
+        gtk::MessageType::Error,
+        gtk::ButtonsType::None,
+        "无法用默认浏览器打开链接",
+    );
+    dialog.set_property("secondary-text", error.message());
+    dialog.add_buttons(&[
+        ("关闭", gtk::ResponseType::Close),
+        ("复制链接", gtk::ResponseType::Accept),
+    ]);
+    let uri = uri.to_owned();
+    dialog.connect_response(move |dialog, response| {
+        if response == gtk::ResponseType::Accept {
+            clipboard().set_text(&uri);
+        }
+        dialog.close();
+    });
+    dialog.show();
 }
 
 pub fn markdown_label() -> gtk::Label {
+    markdown_label_with(open_link)
+}
+
+fn markdown_label_with(activate: impl Fn(&gtk::Label, &str) + 'static) -> gtk::Label {
     let label = text("");
     label.style_context().add_class("agent-markdown");
-    label.connect_activate_link(|_, uri| {
-        open_link(uri);
+    label.connect_activate_link(move |label, uri| {
+        activate(label, uri);
         glib::Propagation::Stop
     });
     label
@@ -237,9 +283,14 @@ fn parser(markdown: &str) -> Parser<'_> {
     )
 }
 
-fn flush_text(blocks: &gtk::Box, pending: &mut String, selectable: &mut Vec<Part>) {
+fn flush_text(
+    blocks: &gtk::Box,
+    pending: &mut String,
+    selectable: &mut Vec<Part>,
+    new_label: &impl Fn() -> gtk::Label,
+) {
     if !pending.trim().is_empty() {
-        let label = markdown_label();
+        let label = new_label();
         label.style_context().add_class("agent-prose");
         let markup = pending.trim();
         if markup.contains("<a href=") || pango::parse_markup(markup, '\0').is_ok() {

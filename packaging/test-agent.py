@@ -22,6 +22,8 @@ reply = """## Deployment checklist
 
 [Build documentation](https://example.invalid/span/docs?from=agent&view=build)
 
+要确认当前构建结果，请阅读[发布说明](https://example.invalid/span/notes?lang=zh&view=full)。
+
 | Check | Result |
 | --- | --- |
 | Build | Passed |
@@ -325,6 +327,7 @@ for line in sys.stdin:
         (home / "generated-preview.html").write_text("""<!doctype html><html><head>
             <style>body { background: #123; }</style></head><body>
             <h1>Generated workspace page</h1><p>Deployment preview &amp; status</p>
+            <p>中文预览 <a href="https://example.invalid/span/preview?a=1&amp;b=2">预览里的链接</a></p>
             <script>window.spanPreview = 'fixture script sentinel';</script></body></html>""")
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
               "item": {"id": "environment-reply", "type": "agentMessage",
