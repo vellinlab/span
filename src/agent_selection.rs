@@ -115,7 +115,16 @@ impl TextSelection {
             let Some(anchor) = anchor else {
                 return glib::Propagation::Proceed;
             };
+            // GTK's viewport scrolls to reveal the focused widget. The pointer
+            // is already over the text, and moving the page changes the drag target.
+            let scroll = view
+                .ancestor(gtk::ScrolledWindow::static_type())
+                .and_downcast::<gtk::ScrolledWindow>();
+            let position = scroll.as_ref().map(|scroll| scroll.vadjustment().value());
             view.grab_focus();
+            if let Some((scroll, position)) = scroll.zip(position) {
+                scroll.vadjustment().set_value(position);
+            }
             view.change_range(None);
             view.imp().drag.set(Some(anchor));
             widget.grab_add();
