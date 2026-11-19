@@ -1,14 +1,14 @@
-@define-color canvas #161b23;
-@define-color terminal #131820;
-@define-color sidebar #1a2029;
-@define-color chrome #202733;
-@define-color line #2b3440;
-@define-color surface #242d39;
-@define-color hover #2c3848;
-@define-color selection #2a3d56;
-@define-color foreground #e7ecf3;
-@define-color muted #a6b1c2;
-@define-color accent #8cbafa;
+@define-color canvas #18191d;
+@define-color terminal #14151a;
+@define-color sidebar #1d1f25;
+@define-color chrome #25272f;
+@define-color line #30323b;
+@define-color surface #282b33;
+@define-color hover #2e3139;
+@define-color selection #303b50;
+@define-color foreground #e9eaf0;
+@define-color muted #a8adb9;
+@define-color accent #a0baff;
 
 window.workbench,
 .workbench stack {
@@ -19,7 +19,7 @@ window.workbench,
 .workbench,
 .workbench-dialog,
 popover.agent-picker-menu {
-    font-family: "Inter", "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+    font-family: "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
     font-size: 13px;
     font-weight: 400;
 }
@@ -445,6 +445,29 @@ button.agent-send:disabled {
     padding: 9px;
 }
 
+.files-actions {
+    padding: 0 9px 6px;
+}
+
+.files-preview-header {
+    padding: 6px 9px;
+    background: @sidebar;
+    border-bottom: 1px solid @line;
+}
+
+.files-preview,
+.files-preview textview,
+.files-preview textview text {
+    background: @canvas;
+    color: @foreground;
+}
+
+.files-transfer {
+    padding: 5px 9px;
+    color: @accent;
+    background: @chrome;
+}
+
 .files-table {
     background: @canvas;
     color: @foreground;
@@ -483,12 +506,11 @@ button.agent-send:disabled {
     min-height: 42px;
     padding: 0 16px;
     background: @canvas;
-    border-bottom: 1px solid @line;
 }
 
 .agent-title {
     font-size: 13px;
-    font-weight: bold;
+    font-weight: 600;
 }
 
 .agent-status {
@@ -507,16 +529,39 @@ button.agent-send:disabled {
     color: @foreground;
 }
 
-.agent-catalog-list row {
-    padding: 6px 8px;
+.agent-catalog-list row.agent-catalog-session {
+    padding: 7px 9px;
     border-radius: 7px;
+    transition: none;
+    box-shadow: none;
 }
 
-.agent-catalog-list row:selected,
-.agent-catalog-list row:hover {
+.agent-catalog-list row.agent-catalog-session:hover {
+    background: @hover;
+}
+
+.agent-catalog-list row.current-session {
     background: @selection;
     color: @foreground;
 }
+
+.agent-catalog-list row.agent-catalog-section {
+    padding: 9px 7px 4px;
+    background: transparent;
+    transition: none;
+}
+
+.session-dot {
+    min-width: 7px;
+    min-height: 7px;
+    border-radius: 4px;
+}
+
+.session-dot.dot-idle { background-color: #606673; }
+.session-dot.dot-ready { background-color: #74cda8; }
+.session-dot.dot-running { background-color: #88afff; }
+.session-dot.dot-waiting { background-color: #e9b775; }
+.session-dot.dot-error { background-color: #f393a3; }
 
 .agent-catalog-project {
     color: @muted;
@@ -538,7 +583,32 @@ button.agent-send:disabled {
 }
 
 .agent-history {
-    padding: 24px 18px 12px;
+    padding: 15px 18px 18px;
+}
+
+scrolledwindow.agent-scroll undershoot,
+scrolledwindow.agent-scroll overshoot,
+.agent-catalog scrolledwindow undershoot,
+.agent-catalog scrolledwindow overshoot {
+    background: none;
+    box-shadow: none;
+    border: 0;
+}
+
+scrolledwindow.agent-scroll > scrollbar.vertical,
+.agent-catalog scrolledwindow > scrollbar.vertical {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+}
+
+scrolledwindow.agent-scroll > scrollbar.vertical slider,
+.agent-catalog scrolledwindow > scrollbar.vertical slider {
+    min-width: 5px;
+    background: #565b67;
+    border: 0;
+    border-radius: 4px;
+    transition: none;
 }
 
 .agent-prose {
@@ -546,9 +616,9 @@ button.agent-send:disabled {
 }
 
 .agent-user {
-    background: #233954;
-    border: 1px solid #2e4866;
-    border-radius: 12px 12px 4px 12px;
+    background: #29364a;
+    border: 1px solid #35445d;
+    border-radius: 14px;
     padding: 9px 13px;
     font-size: 14px;
 }
@@ -650,6 +720,12 @@ button.agent-send:disabled {
     border-color: @accent;
 }
 
+.workbench .agent-turn-actions button {
+    padding: 3px 5px;
+    min-width: 22px;
+    min-height: 22px;
+}
+
 .agent-table {
     background: @line;
     border: 1px solid @line;
@@ -677,9 +753,13 @@ scrolledwindow.agent-table-scroll {
 
 .agent-compose-card {
     background: @chrome;
-    border: 1px solid #354252;
-    border-radius: 16px;
-    padding: 5px 8px 7px;
+    border: 1px solid #3a3e49;
+    border-radius: 18px;
+    padding: 7px 10px 8px;
+}
+
+.agent-compose-card.composer-focused {
+    border-color: #677ca4;
 }
 
 .agent-compose-placeholder {

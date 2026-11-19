@@ -11,6 +11,7 @@ use std::cell::Cell;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
 const SERVER_COMMAND: &str = r#"
@@ -166,9 +167,11 @@ async fn exchange(
         .map_err(|error| format!("无法连接共享 Codex 后台：{error}"))?;
         let (mut writer, mut reader) = websocket.split();
         let read = async {
+            let mut slice = Instant::now();
             while let Some(message) = reader.try_next().await? {
                 if let Message::Text(message) = message {
                     receive(message.as_bytes());
+                    yield_for_ui(&mut slice).await;
                 }
             }
             Err::<(), _>(async_tungstenite::tungstenite::Error::ConnectionClosed)
@@ -186,6 +189,7 @@ async fn exchange(
         let (reader, mut writer) = stream.split();
         let mut reader = BufReader::new(reader);
         let read = async {
+            let mut slice = Instant::now();
             loop {
                 line.clear();
                 if reader.read_until(b'\n', &mut line).await? == 0 {
@@ -195,6 +199,7 @@ async fn exchange(
                     return Err(std::io::Error::other("Codex 事件超过大小上限。"));
                 }
                 receive(&line);
+                yield_for_ui(&mut slice).await;
             }
         };
         let write = async {
@@ -209,6 +214,13 @@ async fn exchange(
             .map_err(|error| format!("Codex 连接中断：{error}"))?;
     }
     Ok(())
+}
+
+async fn yield_for_ui(slice: &mut Instant) {
+    if slice.elapsed() >= Duration::from_millis(6) {
+        glib::timeout_future(Duration::from_millis(1)).await;
+        *slice = Instant::now();
+    }
 }
 
 async fn with_timeout<T>(seconds: u32, work: impl Future<Output = T>) -> Option<T> {

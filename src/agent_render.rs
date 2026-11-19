@@ -752,7 +752,7 @@ fn load_image(path: &Path, socket: Option<&Path>) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
+pub(crate) fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
     let kind = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         "png"
     } else if bytes.starts_with(b"\xff\xd8\xff") {

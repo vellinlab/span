@@ -19,6 +19,10 @@ pub enum Icon {
     Stop,
     Pause,
     Refresh,
+    Upload,
+    Download,
+    Copy,
+    CopyRich,
 }
 
 pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
@@ -54,6 +58,33 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
     cr.set_line_join(gtk::cairo::LineJoin::Round);
 
     match icon {
+        Icon::Upload | Icon::Download => {
+            cr.move_to(4.0, 15.0);
+            cr.line_to(4.0, 20.0);
+            cr.line_to(20.0, 20.0);
+            cr.line_to(20.0, 15.0);
+            let (tip, end, shoulder) = match icon {
+                Icon::Upload => (4.0, 15.0, 8.0),
+                _ => (15.0, 4.0, 11.0),
+            };
+            cr.move_to(12.0, end);
+            cr.line_to(12.0, tip);
+            cr.move_to(8.0, shoulder);
+            cr.line_to(12.0, tip);
+            cr.line_to(16.0, shoulder);
+        }
+        Icon::Copy | Icon::CopyRich => {
+            cr.rectangle(8.0, 7.0, 12.0, 13.0);
+            cr.move_to(4.0, 16.0);
+            cr.line_to(4.0, 3.0);
+            cr.line_to(16.0, 3.0);
+            if matches!(icon, Icon::CopyRich) {
+                cr.move_to(11.5, 11.0);
+                cr.line_to(16.5, 11.0);
+                cr.move_to(11.5, 15.5);
+                cr.line_to(16.5, 15.5);
+            }
+        }
         Icon::Terminal => {
             cr.rectangle(3.0, 5.0, 18.0, 14.0);
             cr.move_to(7.0, 9.0);

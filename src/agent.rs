@@ -1,6 +1,6 @@
 use crate::agent_activity::{self, Activity, Record};
 use crate::agent_attachments::{Attachments, Prepared};
-use crate::agent_catalog::{self, Catalog};
+use crate::agent_catalog::{self, Catalog, ThreadState};
 use crate::agent_diff::DiffCard;
 use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
@@ -37,8 +37,17 @@ enum Request {
 
 struct LiveMessage {
     id: String,
-    text: String,
+    text: RefCell<String>,
+    dirty: Cell<bool>,
     label: gtk::Label,
+}
+
+impl LiveMessage {
+    fn render(&self) {
+        if self.dirty.replace(false) {
+            agent_render::set_markdown(&self.label, &self.text.borrow());
+        }
+    }
 }
 
 struct TurnDiff {
@@ -90,7 +99,8 @@ pub struct Agent {
     can_continue: Cell<bool>,
     context: RefCell<Context>,
     approvals: RefCell<HashMap<Value, gtk::Box>>,
-    live: RefCell<Option<LiveMessage>>,
+    live: RefCell<Option<Rc<LiveMessage>>>,
+    turn_copy: RefCell<Vec<String>>,
     activity: RefCell<Option<(String, Activity)>>,
     history: gtk::Box,
     older: gtk::Button,
@@ -106,6 +116,7 @@ pub struct Agent {
     diff: RefCell<Option<TurnDiff>>,
     scroll: gtk::ScrolledWindow,
     scroll_scheduled: Rc<Cell<bool>>,
+    follow_tail: Rc<Cell<bool>>,
     status: gtk::Label,
     settings: gtk::Box,
     cwd: gtk::Entry,
@@ -150,9 +161,6 @@ impl Agent {
         terminal.set_tooltip_text(Some("展开或收起下方终端"));
         terminal.connect_clicked(move |_| toggle_terminal());
         toolbar.pack_end(&terminal, false, false, 0);
-        let catalog_button = button("会话", false);
-        catalog_button.set_action_name(Some("win.agent-catalog"));
-        toolbar.pack_end(&catalog_button, false, false, 0);
         let catalog = Catalog::new(host);
         let copy_id = button("复制会话 ID", false);
         copy_id.set_no_show_all(true);
@@ -161,6 +169,7 @@ impl Agent {
         status.set_selectable(false);
         status.set_ellipsize(pango::EllipsizeMode::End);
         status.style_context().add_class("agent-status");
+        status.set_no_show_all(true);
         toolbar.pack_end(&status, false, false, 0);
         panel.pack_start(&toolbar, false, false, 0);
 
@@ -188,7 +197,18 @@ impl Agent {
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .overlay_scrolling(false)
+            .kinetic_scrolling(false)
             .build();
+        scroll.style_context().add_class("agent-scroll");
+        let follow_tail = Rc::new(Cell::new(true));
+        let following = follow_tail.clone();
+        scroll
+            .vadjustment()
+            .connect_value_changed(move |adjustment| {
+                following
+                    .set(adjustment.upper() - adjustment.page_size() - adjustment.value() <= 48.0);
+            });
         if let Some(accessible) = scroll.accessible() {
             accessible.set_name("对话记录");
         }
@@ -208,12 +228,17 @@ impl Agent {
             .pixels_above_lines(2)
             .pixels_below_lines(2)
             .accepts_tab(false)
+            .cursor_visible(true)
             .build();
+        if let Some(accessible) = input.accessible() {
+            accessible.set_name("消息输入框");
+        }
         let input_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
             .height_request(62)
             .build();
+        input_scroll.style_context().add_class("agent-scroll");
         input_scroll.add(&input);
         let editor = gtk::Overlay::new();
         editor.add(&input_scroll);
@@ -282,7 +307,31 @@ impl Agent {
         card.pack_start(&editor, false, false, 0);
         card.pack_start(&attachments.chips, false, false, 0);
         card.pack_end(&inputs, false, false, 0);
-        composer.add(&card);
+        let focus_area = gtk::EventBox::new();
+        focus_area.set_visible_window(false);
+        focus_area.add(&card);
+        focus_area.add_events(gtk::gdk::EventMask::BUTTON_PRESS_MASK);
+        let editor_input = input.downgrade();
+        focus_area.connect_button_press_event(move |_, event| {
+            if event.button() == 1
+                && let Some(input) = editor_input.upgrade()
+            {
+                input.grab_focus();
+            }
+            glib::Propagation::Proceed
+        });
+        let card = card.downgrade();
+        input.connect_has_focus_notify(move |input| {
+            if let Some(card) = card.upgrade() {
+                let style = card.style_context();
+                if input.has_focus() {
+                    style.add_class("composer-focused");
+                } else {
+                    style.remove_class("composer-focused");
+                }
+            }
+        });
+        composer.add(&focus_area);
         panel.pack_end(&composer, false, false, 0);
 
         let agent = Rc::new(Self {
@@ -303,6 +352,7 @@ impl Agent {
             }),
             approvals: RefCell::new(HashMap::new()),
             live: RefCell::new(None),
+            turn_copy: RefCell::new(Vec::new()),
             activity: RefCell::new(None),
             history,
             older,
@@ -318,6 +368,7 @@ impl Agent {
             diff: RefCell::new(None),
             scroll,
             scroll_scheduled: Rc::new(Cell::new(false)),
+            follow_tail,
             status,
             settings,
             cwd,
@@ -757,6 +808,7 @@ impl Agent {
         for turn in turns {
             let mut changes = String::new();
             let mut activity = None;
+            let mut assistant_text = Vec::new();
             let status = turn["status"].as_str();
             for item in array(&turn["items"]) {
                 if let Some(record) = Record::from_item(item) {
@@ -768,11 +820,22 @@ impl Agent {
                     }
                 } else {
                     self.completed_item(item, true);
+                    if matches!(item["type"].as_str(), Some("agentMessage" | "plan"))
+                        && let Some(text) = item["text"].as_str()
+                        && !text.trim().is_empty()
+                    {
+                        assistant_text.push(limited(text, 256 * 1024));
+                    }
                 }
                 append_file_changes(item, &mut changes);
             }
             if !changes.is_empty() {
                 self.add_history_diff(changes);
+            }
+            if status == Some("completed") {
+                self.add_copy_actions(assistant_text);
+            } else if status == Some("inProgress") && !prepend {
+                self.turn_copy.replace(assistant_text);
             }
             latest_status = status;
             if !prepend && status == Some("inProgress") {
@@ -1187,6 +1250,7 @@ impl Agent {
             self.active.set(true);
             (Request::Send, "turn/start")
         };
+        self.follow_tail.set(true);
         let label = self.add_user(&files.summary(text));
         self.client_messages.borrow_mut().insert(message_id.clone());
         self.pending_user.replace(Some((label, message_id)));
@@ -1247,6 +1311,8 @@ impl Agent {
     }
 
     fn clear_history(&self) {
+        self.follow_tail.set(true);
+        self.turn_copy.borrow_mut().clear();
         self.history_generation
             .set(self.history_generation.get() + 1);
         self.live.take();
@@ -1268,6 +1334,7 @@ impl Agent {
     }
 
     pub fn disconnect(&self, message: &str) {
+        self.turn_copy.borrow_mut().clear();
         self.rpc.take();
         self.pending.borrow_mut().clear();
         self.opening.set(false);
@@ -1384,7 +1451,9 @@ impl Agent {
                 }
                 self.finish_activity(status);
                 if interrupted {
-                    self.live.take();
+                    if let Some(live) = self.live.take() {
+                        live.render();
+                    }
                 } else {
                     self.remove_live();
                 }
@@ -1408,6 +1477,10 @@ impl Agent {
                     if !changes.is_empty() {
                         self.add_diff(&changes);
                     }
+                }
+                let assistant_text = self.turn_copy.take();
+                if status == Some("completed") {
+                    self.add_copy_actions(assistant_text);
                 }
                 let message = turn["error"]["message"].as_str().unwrap_or(match status {
                     Some("failed") => "会话失败",
@@ -1478,19 +1551,30 @@ impl Agent {
             let label = agent_render::markdown_label();
             label.style_context().add_class("agent-prose");
             self.append(&label);
-            self.live.replace(Some(LiveMessage {
+            self.live.replace(Some(Rc::new(LiveMessage {
                 id: id.into(),
-                text: String::new(),
+                text: RefCell::new(String::new()),
+                dirty: Cell::new(false),
                 label,
-            }));
+            })));
             self.update_task_status();
         }
-        if let Some(live) = self.live.borrow_mut().as_mut() {
-            if live.text.len() < 256 * 1024 {
-                live.text.push_str(delta);
-                agent_render::set_markdown(&live.label, &limited(&live.text, 256 * 1024));
-                self.scroll_to_end();
+        if let Some(live) = self.live.borrow().as_ref() {
+            let mut text = live.text.borrow_mut();
+            let remaining = (256 * 1024usize).saturating_sub(text.len());
+            if remaining == 0 {
+                return;
             }
+            text.push_str(&limited(delta, remaining));
+            if !live.dirty.replace(true) {
+                let live = Rc::downgrade(live);
+                glib::timeout_add_local_once(Duration::from_millis(33), move || {
+                    if let Some(live) = live.upgrade() {
+                        live.render();
+                    }
+                });
+            }
+            self.scroll_to_end();
         }
     }
 
@@ -1687,22 +1771,46 @@ impl Agent {
         let text = limited(text, 256 * 1024);
         let message = column(6);
         message.style_context().add_class("agent-response");
-        let actions = row(6);
-        let markdown = button("复制 Markdown", false);
-        let rich = button("复制富文本", false);
-        let payload = text.clone();
-        markdown.connect_clicked(move |_| agent_render::clipboard().set_text(&payload));
-        let payload = text.clone();
-        rich.connect_clicked(move |_| agent_render::copy_rich(payload.clone()));
-        actions.pack_end(&rich, false, false, 0);
-        actions.pack_end(&markdown, false, false, 0);
         message.add(&agent_render::response(
             &text,
             &self.context.borrow(),
             !loading_history,
         ));
-        message.add(&actions);
         self.append(&message);
+        if !loading_history && !text.trim().is_empty() {
+            self.turn_copy.borrow_mut().push(text);
+        }
+    }
+
+    fn add_copy_actions(&self, paragraphs: Vec<String>) {
+        if paragraphs.is_empty() {
+            return;
+        }
+        let actions = row(3);
+        actions.style_context().add_class("agent-turn-actions");
+        let text = Rc::new(paragraphs.join("\n\n"));
+        for (icon, label, rich) in [
+            (Icon::Copy, "复制 Markdown", false),
+            (Icon::CopyRich, "复制富文本", true),
+        ] {
+            let button = gtk::Button::new();
+            button.style_context().add_class("quiet-button");
+            button.set_tooltip_text(Some(label));
+            if let Some(accessible) = button.accessible() {
+                accessible.set_name(label);
+            }
+            button.add(&icons::widget(icon, 16));
+            let text = text.clone();
+            button.connect_clicked(move |_| {
+                if rich {
+                    agent_render::copy_rich(text.as_ref().clone());
+                } else {
+                    agent_render::clipboard().set_text(&text);
+                }
+            });
+            actions.pack_start(&button, false, false, 0);
+        }
+        self.append(&actions);
     }
 
     fn append(&self, widget: &impl IsA<gtk::Widget>) {
@@ -1717,14 +1825,18 @@ impl Agent {
     }
 
     fn scroll_to_end(&self) {
-        if self.scroll_scheduled.replace(true) {
+        if !self.follow_tail.get() || self.scroll_scheduled.replace(true) {
             return;
         }
         let scroll = self.scroll.downgrade();
         let scheduled = self.scroll_scheduled.clone();
+        let follow_tail = self.follow_tail.clone();
         // Give GTK a frame to allocate the cards before reading the scroll range.
-        glib::timeout_add_local_once(std::time::Duration::from_millis(32), move || {
+        glib::timeout_add_local_once(Duration::from_millis(52), move || {
             scheduled.set(false);
+            if !follow_tail.get() {
+                return;
+            }
             if let Some(scroll) = scroll.upgrade() {
                 let selecting = scroll
                     .toplevel()
@@ -1746,8 +1858,16 @@ impl Agent {
     }
 
     pub fn show_status(&self, text: &str) {
-        self.status.set_text(&text.replace('\0', "�"));
-        self.status.set_tooltip_text(Some(&text.replace('\0', "�")));
+        let ordinary = matches!(
+            text,
+            "就绪" | "已完成" | "已中断" | "Codex 正在处理…" | "选择会话或新建"
+        );
+        self.status.set_visible(!ordinary);
+        if !ordinary {
+            let text = text.replace('\0', "�");
+            self.status.set_text(&text);
+            self.status.set_tooltip_text(Some(&text));
+        }
     }
 
     fn update_controls(&self) {
@@ -1758,7 +1878,6 @@ impl Agent {
         let waiting =
             self.uploading.get() || self.pasting.get() || self.pending_user.borrow().is_some();
         self.connect.set_sensitive(!opening && !running && !waiting);
-        self.input.set_sensitive(ready);
         self.input.set_editable(!waiting);
         self.attachments
             .button
@@ -1774,6 +1893,18 @@ impl Agent {
     }
 
     fn update_task_status(&self) {
+        let waiting = !self.approvals.borrow().is_empty() || !self.questions.borrow().is_empty();
+        let state = if waiting {
+            ThreadState::Waiting
+        } else if self.active.get() {
+            ThreadState::Running
+        } else if self.can_continue.get() {
+            ThreadState::Stopped
+        } else {
+            ThreadState::Ready
+        };
+        self.catalog
+            .set_current(self.thread.borrow().as_deref(), state);
         if !self.active.get() {
             self.task_status.update(None, false);
             return;

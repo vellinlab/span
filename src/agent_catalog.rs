@@ -11,7 +11,30 @@ pub struct Entry {
     pub id: String,
     pub project: String,
     pub title: String,
-    pub state: String,
+    state: ThreadState,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ThreadState {
+    Idle,
+    Ready,
+    Running,
+    Waiting,
+    Stopped,
+    Error,
+}
+
+impl ThreadState {
+    fn appearance(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Idle => ("dot-idle", "未打开"),
+            Self::Ready => ("dot-ready", "就绪"),
+            Self::Running => ("dot-running", "运行中"),
+            Self::Waiting => ("dot-waiting", "等待输入"),
+            Self::Stopped => ("dot-waiting", "已中断"),
+            Self::Error => ("dot-error", "异常"),
+        }
+    }
 }
 
 impl Entry {
@@ -32,11 +55,11 @@ impl Entry {
                     .as_array()
                     .is_some_and(|flags| !flags.is_empty()) =>
             {
-                "等待输入"
+                ThreadState::Waiting
             }
-            Some("active") => "运行中",
-            Some("systemError") => "异常",
-            _ => "",
+            Some("active") => ThreadState::Running,
+            Some("systemError") => ThreadState::Error,
+            _ => ThreadState::Idle,
         };
         Some(Self {
             id,
@@ -49,7 +72,7 @@ impl Entry {
                 .chars()
                 .take(200)
                 .collect(),
-            state: state.to_owned(),
+            state,
         })
     }
 }
@@ -64,7 +87,14 @@ pub struct Catalog {
     status: gtk::Label,
     list: gtk::ListBox,
     entries: RefCell<Vec<Entry>>,
+    rows: RefCell<Vec<Option<SessionRow>>>,
+    current: RefCell<Option<(String, ThreadState)>>,
     cursor: RefCell<Option<String>>,
+}
+
+struct SessionRow {
+    widget: gtk::ListBoxRow,
+    dot: gtk::Box,
 }
 
 impl Catalog {
@@ -96,10 +126,13 @@ impl Catalog {
         column.add(&filters);
 
         let list = gtk::ListBox::new();
+        list.set_selection_mode(gtk::SelectionMode::None);
         list.style_context().add_class("agent-catalog-list");
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .overlay_scrolling(false)
+            .kinetic_scrolling(false)
             .build();
         scroll.add(&list);
         column.pack_start(&scroll, true, true, 0);
@@ -123,6 +156,8 @@ impl Catalog {
             status,
             list,
             entries: RefCell::new(Vec::new()),
+            rows: RefCell::new(Vec::new()),
+            current: RefCell::new(None),
             cursor: RefCell::new(None),
         }
     }
@@ -161,6 +196,7 @@ impl Catalog {
     pub fn loading(&self, fresh: bool) {
         if fresh {
             self.entries.borrow_mut().clear();
+            self.rows.borrow_mut().clear();
             self.cursor.take();
             for child in self.list.children() {
                 self.list.remove(&child);
@@ -168,6 +204,23 @@ impl Catalog {
         }
         self.more.set_sensitive(false);
         self.show_status("正在读取会话…");
+    }
+
+    pub fn set_current(&self, id: Option<&str>, state: ThreadState) {
+        let mut current = self.current.borrow_mut();
+        if current.as_ref().map(|(id, state)| (id.as_str(), *state)) == id.map(|id| (id, state)) {
+            return;
+        }
+        let previous = std::mem::replace(&mut *current, id.map(|id| (id.to_owned(), state)));
+        let rows = self.rows.borrow();
+        for (entry, row) in self.entries.borrow().iter().zip(rows.iter()) {
+            if let Some(row) = row
+                && (id == Some(entry.id.as_str())
+                    || previous.as_ref().is_some_and(|(old, _)| old == &entry.id))
+            {
+                row.update(entry, current.as_ref());
+            }
+        }
     }
 
     pub fn show_status(&self, status: &str) {
@@ -200,6 +253,10 @@ impl Catalog {
             return;
         }
         *entries = next;
+        let current = self.current.borrow();
+        let mut rows = self.rows.borrow_mut();
+        rows.clear();
+        rows.resize_with(entries.len(), || None);
         for child in self.list.children() {
             self.list.remove(&child);
         }
@@ -216,6 +273,7 @@ impl Catalog {
         }
         for (project, items) in groups {
             let heading = gtk::ListBoxRow::new();
+            heading.style_context().add_class("agent-catalog-section");
             heading.set_activatable(false);
             heading.set_selectable(false);
             let name = std::path::Path::new(project)
@@ -225,7 +283,6 @@ impl Catalog {
             let label = gtk::Label::new(Some(name));
             label.set_xalign(0.0);
             label.set_ellipsize(pango::EllipsizeMode::Start);
-            label.set_tooltip_text(Some(project));
             label.style_context().add_class("agent-catalog-project");
             let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             line.style_context().add_class("agent-catalog-project");
@@ -237,22 +294,51 @@ impl Catalog {
                 let entry = &entries[index];
                 let row = gtk::ListBoxRow::new();
                 row.set_widget_name(&format!("thread-{index}"));
-                row.set_tooltip_text(Some(&entry.title));
+                row.style_context().add_class("agent-catalog-session");
                 let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
                 let title = gtk::Label::new(Some(&entry.title));
                 title.set_xalign(0.0);
                 title.set_ellipsize(pango::EllipsizeMode::End);
                 line.pack_start(&title, true, true, 0);
-                if !entry.state.is_empty() {
-                    let state = gtk::Label::new(Some(&entry.state));
-                    state.style_context().add_class("agent-status");
-                    line.pack_end(&state, false, false, 0);
-                }
+                let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                dot.set_valign(gtk::Align::Center);
+                dot.style_context().add_class("session-dot");
+                line.pack_end(&dot, false, false, 0);
                 row.add(&line);
                 self.list.add(&row);
+                let row = SessionRow { widget: row, dot };
+                row.update(entry, current.as_ref());
+                rows[index] = Some(row);
             }
         }
         self.list.show_all();
+    }
+}
+
+impl SessionRow {
+    fn update(&self, entry: &Entry, current: Option<&(String, ThreadState)>) {
+        let active = current.filter(|(id, _)| id == &entry.id);
+        let row = self.widget.style_context();
+        if active.is_some() {
+            row.add_class("current-session");
+        } else {
+            row.remove_class("current-session");
+        }
+        let (class, name) = active.map_or(entry.state, |(_, state)| *state).appearance();
+        let style = self.dot.style_context();
+        for old in [
+            "dot-idle",
+            "dot-ready",
+            "dot-running",
+            "dot-waiting",
+            "dot-error",
+        ] {
+            style.remove_class(old);
+        }
+        style.add_class(class);
+        if let Some(accessible) = self.dot.accessible() {
+            accessible.set_name(name);
+        }
     }
 }
 
