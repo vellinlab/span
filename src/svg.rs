@@ -102,7 +102,7 @@ mod tests {
         }
         let stride = surface.stride() as usize;
         let data = surface.data().unwrap();
-        let pixel = |column| {
+        let pixel = |column: usize| {
             let start = 20 * stride + 4 * column;
             u32::from_ne_bytes(data[start..start + 4].try_into().unwrap())
         };

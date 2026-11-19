@@ -37,7 +37,7 @@ Section: utils
 Priority: optional
 Maintainer: Span maintainers <zyw02@users.noreply.github.com>
 Depends: bash, coreutils, openssh-client, librsvg2-common, $libraries
-Recommends: xauth
+Recommends: xauth, fonts-liberation
 Provides: ssh-workbench
 Conflicts: ssh-workbench
 Replaces: ssh-workbench

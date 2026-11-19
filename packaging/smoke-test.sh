@@ -427,6 +427,7 @@ SVG
     read -r canvas_x canvas_y canvas_width _ <<< "$(widget bounds '图片画布')"
     xdotool mousemove "$((canvas_x + canvas_width / 2))" "$((canvas_y + 20))" keydown ctrl click --repeat 7 4 keyup ctrl
     widget contains '400%'
+    sleep 0.2
     read -r canvas_x canvas_y canvas_width _ <<< "$(widget bounds '图片画布')"
     [[ "$canvas_width" == 256 ]]
     xdotool mousemove 12 16

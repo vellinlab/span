@@ -19,8 +19,8 @@ window.workbench,
 .workbench,
 .workbench-dialog,
 popover.agent-picker-menu {
-    font-family: "Ubuntu", "Liberation Sans", "DejaVu Sans", "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
-    font-size: 13px;
+    font-family: "Segoe UI", "Liberation Sans", "Arial", "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", "DejaVu Sans", sans-serif;
+    font-size: 14px;
     font-weight: 400;
 }
 
@@ -54,7 +54,7 @@ popover.agent-picker-menu {
 .app-title {
     color: @foreground;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
     margin-right: 14px;
 }
 
@@ -204,7 +204,7 @@ button.agent-send:disabled {
     background: @surface;
     border-color: @line;
     color: @foreground;
-    font-weight: bold;
+    font-weight: 500;
 }
 
 .sidebar-heading {
@@ -214,7 +214,7 @@ button.agent-send:disabled {
 .section-title {
     color: @foreground;
     font-size: 13px;
-    font-weight: bold;
+    font-weight: 500;
 }
 
 .workbench entry,
@@ -281,7 +281,7 @@ button.agent-send:disabled {
 }
 
 .host-name {
-    font-weight: bold;
+    font-weight: 500;
 }
 
 .host-target, .host-empty {
@@ -573,7 +573,7 @@ popover.selection-quote button:hover {
 
 .agent-toolbar-title {
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .agent-toolbar-host {
@@ -586,7 +586,7 @@ popover.selection-quote button:hover {
 
 .agent-title {
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .agent-status {

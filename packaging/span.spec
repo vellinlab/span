@@ -14,6 +14,7 @@ Requires:       openssh-clients
 Requires:       gtk3 >= 3.22.30
 Requires:       librsvg2
 Recommends:     xorg-x11-xauth
+Recommends:     liberation-sans-fonts
 Provides:       ssh-workbench
 Obsoletes:      ssh-workbench < 0.6.4
 

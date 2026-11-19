@@ -3,7 +3,7 @@ set -euo pipefail
 
 dnf --enablerepo=powertools --setopt=install_weak_deps=False -y install \
     gcc binutils ca-certificates curl pkgconf-pkg-config rpm-build desktop-file-utils \
-    gtk3-devel vte291-devel librsvg2-devel openssh-clients dbus-daemon xorg-x11-server-Xvfb xorg-x11-utils \
+    gtk3-devel vte291-devel librsvg2-devel liberation-sans-fonts openssh-clients dbus-daemon xorg-x11-server-Xvfb xorg-x11-utils \
     gcc-c++ gettext meson ninja-build python39 fribidi-devel gnutls-devel pcre2-devel zlib-devel xz
 
 curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/span-rustup.sh
