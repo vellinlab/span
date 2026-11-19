@@ -23,7 +23,7 @@ impl Attachments {
     pub fn new() -> Rc<Self> {
         let button = gtk::Button::new();
         button.style_context().add_class("agent-picker");
-        button.set_valign(gtk::Align::Center);
+        button.set_valign(gtk::Align::Baseline);
         button.set_tooltip_text(Some(
             "添加本机附件（最多 6 个，共 16 MiB），也可在输入框粘贴图片",
         ));
@@ -31,8 +31,9 @@ impl Attachments {
             accessible.set_name("附件");
         }
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        content.set_baseline_position(gtk::BaselinePosition::Center);
         let label = gtk::Label::new(Some("附件"));
-        label.set_valign(gtk::Align::Center);
+        label.set_valign(gtk::Align::Baseline);
         content.add(&icons::widget(Icon::Attachment, 16));
         content.add(&label);
         button.add(&content);

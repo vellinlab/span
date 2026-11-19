@@ -1,6 +1,6 @@
 [package]
 name = "span"
-version = "0.1.0-rc.10"
+version = "0.1.0-rc.11"
 edition = "2024"
 description = "A Linux desktop terminal for local shells and OpenSSH sessions"
 
@@ -12,6 +12,7 @@ gtk = "0.19"
 pangocairo = "0.22"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde_json = "1"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
 tl = "0.7.8"
 
 [profile.release]

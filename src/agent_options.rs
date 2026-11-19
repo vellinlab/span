@@ -42,7 +42,7 @@ impl Picker {
         icon: Option<Icon>,
     ) -> Self {
         let button = gtk::MenuButton::new();
-        button.set_valign(gtk::Align::Center);
+        button.set_valign(gtk::Align::Baseline);
         button.set_tooltip_text(Some(name));
         MenuButtonExt::set_direction(&button, gtk::ArrowType::Up);
         button.style_context().add_class("agent-picker");
@@ -53,12 +53,13 @@ impl Picker {
             button.remove(&child);
         }
         let label = gtk::Label::new(None);
-        label.set_valign(gtk::Align::Center);
+        label.set_valign(gtk::Align::Baseline);
         if chars > 0 {
             label.set_ellipsize(pango::EllipsizeMode::End);
             label.set_max_width_chars(chars);
         }
         let trigger = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        trigger.set_baseline_position(gtk::BaselinePosition::Center);
         if let Some(icon) = icon {
             trigger.pack_start(&icons::widget(icon, 16), false, false, 0);
         }
@@ -502,7 +503,7 @@ impl Options {
         } else if !model_supports_fast {
             "当前模型未提供 Fast 模式"
         } else {
-            "Fast 模式 · 点亮用快速模式，关闭用标准速度"
+            "Fast 模式 · 仅影响 Span 发起的轮次"
         }));
     }
 

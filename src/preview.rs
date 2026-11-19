@@ -1,10 +1,12 @@
 use crate::agent_render::{self, Context, push_link, web_url};
+use crate::agent_selection::vertical_delta;
 use crate::files::{self, Source};
 use crate::icons::{self, Icon};
 use crate::session::Session;
+use crate::source_preview::{self, SourceText};
 use gtk::gdk::prelude::GdkContextExt;
 use gtk::prelude::*;
-use gtk::{gdk_pixbuf, gio, glib, pango};
+use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
 use std::cell::{Cell, RefCell};
 use std::path::{Component, Path, PathBuf};
 use std::rc::{Rc, Weak};
@@ -416,22 +418,11 @@ impl Panel {
             }
         });
         match content {
-            Content::Text(text) => {
-                let view = gtk::TextView::builder()
-                    .editable(false)
-                    .cursor_visible(false)
-                    .monospace(true)
-                    .wrap_mode(gtk::WrapMode::WordChar)
-                    .left_margin(12)
-                    .right_margin(12)
-                    .top_margin(12)
-                    .bottom_margin(12)
-                    .build();
-                if let Some(buffer) = view.buffer() {
-                    buffer.set_text(&text);
-                }
-                crate::quote::bind_text(&view, &quote);
-                scroll.add(&view);
+            Content::Text(source) => {
+                let view = source_preview::view(&scroll, source, &quote);
+                self.body.pack_start(&view, true, true, 0);
+                view.show_all();
+                return;
             }
             Content::Markup(markup) => {
                 let label = agent_render::markdown_label();
@@ -551,6 +542,17 @@ impl Panel {
                 resize(fit_factor(allocation.width()));
             }
         });
+        let (zoom, current, wheel_fit) = (update.clone(), scale.clone(), auto_fit.clone());
+        scroll.connect_scroll_event(move |_, event| {
+            if event.state().contains(gdk::ModifierType::CONTROL_MASK)
+                && let Some(delta) = vertical_delta(event)
+            {
+                wheel_fit.set(false);
+                zoom(current.get() * 1.25_f64.powf(-delta.clamp(-4.0, 4.0)));
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
         for (button, multiplier) in [(&zoom_out, 0.8), (&zoom_in, 1.25), (&actual, 0.0)] {
             let (update, scale, auto_fit) = (update.clone(), scale.clone(), auto_fit.clone());
             button.connect_clicked(move |_| {
@@ -640,7 +642,7 @@ fn tool(text: &str, name: &str) -> gtk::Button {
 }
 
 enum Content {
-    Text(String),
+    Text(SourceText),
     Markdown(String),
     Markup(String),
     Image(Vec<u8>, &'static str),
@@ -675,7 +677,7 @@ fn read_file(source: &Source, path: &Path) -> Result<Content, String> {
         "html" | "htm" => html_preview(&text).map(Content::Markup),
         "md" | "markdown" => Ok(Content::Markdown(text)),
         "mmd" | "mermaid" => Ok(Content::Mermaid(text)),
-        _ => Ok(Content::Text(text)),
+        _ => Ok(Content::Text(SourceText::new(path, text))),
     }
 }
 

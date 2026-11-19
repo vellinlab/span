@@ -21,6 +21,7 @@ mod quote;
 mod reading_column;
 mod session;
 mod sftp;
+mod source_preview;
 mod vte;
 mod workbench;
 

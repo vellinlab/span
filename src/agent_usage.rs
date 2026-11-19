@@ -61,7 +61,10 @@ impl Usage {
     pub fn new() -> Self {
         let button = gtk::Button::with_label("用量");
         button.style_context().add_class("agent-picker");
-        button.set_valign(gtk::Align::Center);
+        button.set_valign(gtk::Align::Baseline);
+        if let Some(label) = button.child() {
+            label.set_valign(gtk::Align::Baseline);
+        }
         button.set_tooltip_text(Some("查看上下文、会话 token 和账号额度"));
         let popover = gtk::Popover::new(Some(&button));
         popover.style_context().add_class("agent-usage-popover");

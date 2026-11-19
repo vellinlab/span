@@ -9,6 +9,7 @@ use crate::agent_task::TaskStatus;
 use crate::agent_usage::Usage;
 use crate::icons::{self, Icon};
 use crate::preview::{Artifact, Offer};
+use crate::quote::DraftQuotes;
 use gtk::prelude::*;
 use gtk::{gio, glib, pango};
 use serde_json::{Value, json};
@@ -61,6 +62,13 @@ struct PendingMessage {
     label: gtk::Label,
     id: String,
     text: String,
+    quotes: usize,
+}
+
+struct Draft {
+    editor: String,
+    message: String,
+    quotes: usize,
 }
 
 struct CatalogFetch {
@@ -140,6 +148,7 @@ pub struct Agent {
     task_status: TaskStatus,
     quota_started: Cell<bool>,
     attachments: Rc<Attachments>,
+    quotes: Rc<DraftQuotes>,
     uploading: Cell<bool>,
     pasting: Cell<bool>,
     pending_user: RefCell<Option<PendingMessage>>,
@@ -256,6 +265,10 @@ impl Agent {
             .wrap_mode(gtk::WrapMode::WordChar)
             .pixels_above_lines(2)
             .pixels_below_lines(2)
+            .left_margin(7)
+            .right_margin(7)
+            .top_margin(4)
+            .bottom_margin(4)
             .accepts_tab(false)
             .cursor_visible(true)
             .build();
@@ -290,8 +303,10 @@ impl Agent {
             });
         }
         let inputs = row(4);
+        inputs.set_baseline_position(gtk::BaselinePosition::Center);
         inputs.style_context().add_class("agent-controls");
         let attachments = Attachments::new();
+        let quotes = DraftQuotes::new();
         inputs.pack_start(&attachments.button, false, false, 0);
         let options = Options::new(&inputs);
         let usage = Usage::new();
@@ -334,6 +349,7 @@ impl Agent {
         inputs.pack_end(&stop_button, false, false, 0);
         inputs.pack_end(&usage.button, false, false, 0);
         card.pack_start(&task_status.widget, false, false, 0);
+        card.pack_start(&quotes.widget, false, false, 0);
         card.pack_start(&editor, false, false, 0);
         card.pack_start(&attachments.chips, false, false, 0);
         card.pack_end(&inputs, false, false, 0);
@@ -415,6 +431,7 @@ impl Agent {
             task_status,
             quota_started: Cell::new(false),
             attachments,
+            quotes,
             uploading: Cell::new(false),
             pasting: Cell::new(false),
             pending_user: RefCell::new(None),
@@ -538,6 +555,14 @@ impl Agent {
         let weak = Rc::downgrade(self);
         self.attachments
             .chips
+            .connect_notify_local(Some("visible"), move |_, _| {
+                if let Some(agent) = weak.upgrade() {
+                    agent.update_primary();
+                }
+            });
+        let weak = Rc::downgrade(self);
+        self.quotes
+            .widget
             .connect_notify_local(Some("visible"), move |_, _| {
                 if let Some(agent) = weak.upgrade() {
                     agent.update_primary();
@@ -941,9 +966,11 @@ impl Agent {
 
     pub fn quote_action(&self) -> crate::quote::Action {
         let input = self.input.downgrade();
+        let quotes = Rc::downgrade(&self.quotes);
         Rc::new(move |text| {
-            if let Some(input) = input.upgrade() {
-                crate::quote::insert(&input, text);
+            if let (Some(input), Some(quotes)) = (input.upgrade(), quotes.upgrade()) {
+                quotes.add(text);
+                input.grab_focus();
             }
         })
     }
@@ -1055,6 +1082,14 @@ impl Agent {
                     return;
                 };
                 let previous = self.thread.replace(Some(id.to_owned()));
+                if self
+                    .last_thread
+                    .borrow()
+                    .as_deref()
+                    .is_some_and(|previous| previous != id)
+                {
+                    self.quotes.finish_send(usize::MAX);
+                }
                 self.last_thread.replace(Some(id.to_owned()));
                 if let Some(previous) = previous.filter(|previous| previous != id) {
                     self.request(
@@ -1147,6 +1182,7 @@ impl Agent {
                     }
                     self.attachments
                         .finish_send(self.context.borrow().socket.is_some());
+                    self.quotes.finish_send(pending.quotes);
                 }
                 if matches!(request, Request::Send) && self.active.get() {
                     self.turn
@@ -1234,18 +1270,24 @@ impl Agent {
         let Some(text) = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false) else {
             return;
         };
-        let text = text.trim().to_owned();
+        let editor = text.trim().to_owned();
+        let (message, quotes) = self.quotes.message(&editor);
+        let draft = Draft {
+            editor,
+            message,
+            quotes,
+        };
         let paths = self.attachments.paths();
-        if text.is_empty() && paths.is_empty() {
+        if draft.message.is_empty() && paths.is_empty() {
             return;
         }
-        if text.len() > 256 * 1024 {
+        if draft.message.len() > 256 * 1024 {
             self.show_status("输入超过 256 KiB。");
             return;
         }
         let selection = self.options.selection();
         if paths.is_empty() {
-            self.send_prepared(thread, turn, &text, &selection, Prepared::empty());
+            self.send_prepared(thread, turn, draft, &selection, Prepared::empty());
             return;
         }
         let socket = self.context.borrow().socket.clone();
@@ -1268,7 +1310,7 @@ impl Agent {
                 }
                 match result {
                     Ok(attachments) => {
-                        agent.send_prepared(thread, turn, &text, &selection, attachments)
+                        agent.send_prepared(thread, turn, draft, &selection, attachments)
                     }
                     Err(error) => {
                         agent.show_status(&error);
@@ -1283,7 +1325,7 @@ impl Agent {
         &self,
         thread: String,
         turn: Option<String>,
-        text: &str,
+        draft: Draft,
         selection: &Selection,
         files: Prepared,
     ) {
@@ -1298,7 +1340,7 @@ impl Agent {
         let message_id = glib::uuid_string_random().to_string();
         let mut params = json!({
             "threadId": thread,
-            "input": files.input(text, selection.images),
+            "input": files.input(&draft.message, selection.images),
             "clientUserMessageId": message_id,
         });
         let (request, method) = if let Some(turn) = turn {
@@ -1315,12 +1357,13 @@ impl Agent {
             self.close_activity(Some("steered"));
             self.close_reply();
         }
-        let label = self.add_user(&files.summary(text));
+        let label = self.add_user(&files.summary(&draft.message));
         self.client_messages.borrow_mut().insert(message_id.clone());
         self.pending_user.replace(Some(PendingMessage {
             label,
             id: message_id,
-            text: text.to_owned(),
+            text: draft.editor,
+            quotes: draft.quotes,
         }));
         self.show_status(if matches!(request, Request::Steer) {
             "正在追加消息…"
@@ -1368,7 +1411,11 @@ impl Agent {
                 self.send_prepared(
                     thread,
                     None,
-                    "请继续上一轮未完成的任务。",
+                    Draft {
+                        editor: String::new(),
+                        message: "请继续上一轮未完成的任务。".into(),
+                        quotes: 0,
+                    },
                     &self.options.selection(),
                     Prepared::empty(),
                 );
@@ -2101,6 +2148,7 @@ impl Agent {
         self.attachments
             .chips
             .set_sensitive(ready && !opening && !waiting);
+        self.quotes.widget.set_sensitive(!waiting);
         self.options
             .update(ready && !opening && !waiting && !running);
         self.usage.button.set_sensitive(ready);
@@ -2150,6 +2198,7 @@ impl Agent {
     fn update_primary(&self) {
         let has_draft = (self.active.get() || self.can_continue.get())
             && (self.attachments.chips.is_visible()
+                || self.quotes.widget.is_visible()
                 || self.input.buffer().is_some_and(|buffer| {
                     buffer
                         .text(&buffer.start_iter(), &buffer.end_iter(), false)

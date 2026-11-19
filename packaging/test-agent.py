@@ -241,7 +241,8 @@ for line in sys.stdin:
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
-        expected_speed = "priority" if message == "Show the deployment check\n你" else "default"
+        quoted_prompt = "> span_preview_marker\n\nDraft before quotes"
+        expected_speed = "priority" if message in ("Show the deployment check\n你", quoted_prompt) else "default"
         assert params["serviceTierForTurn"] == expected_speed
         assert "serviceTier" not in params
         if message == "Show the deployment check\n你":
@@ -257,6 +258,12 @@ for line in sys.stdin:
             assert params["approvalPolicy"] == "on-request"
         else:
             assert "sandboxPolicy" not in params and "approvalPolicy" not in params
+        if message == quoted_prompt:
+            send({"id": request_id, "result": {"turn": {"id": "quoted-turn", "status": "inProgress"}}})
+            send({"method": "turn/completed", "params": {"threadId": thread,
+                  "turn": {"id": "quoted-turn", "status": "completed", "error": None}}})
+            (home / "agent-quoted").touch()
+            continue
         (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")
         if params["threadId"] == saved_thread:
             assert message.startswith("Read the remote attachment")

@@ -176,6 +176,14 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 span_preview_marker = True
 ```
 MARKDOWN
+    cat > "$HOME/000-source.py" <<'PYTHON'
+# Native source preview
+import os
+
+
+def load_settings():
+    return os.getenv("SPAN_TEST_MODE", "standard")  # preserve spacing
+PYTHON
     xdotool key --clearmodifiers ctrl+shift+f
     sleep 0.5
     read -r sidebar_x sidebar_y sidebar_width sidebar_height < <(widget bounds '工作区侧栏')
@@ -257,6 +265,11 @@ MARKDOWN
     widget bounds '预览区' >/dev/null
     widget click '原始大小'
     widget click '放大图片'
+    widget contains '125%'
+    read -r image_x image_y image_width _ <<< "$(widget bounds '预览区')"
+    xdotool mousemove "$((image_x + image_width / 2))" "$((image_y + 114))" keydown ctrl click 5 keyup ctrl
+    widget contains '100%'
+    xdotool keydown ctrl click 4 keyup ctrl
     widget contains '125%'
     widget click '适合宽度'
     widget click '上一个预览'
@@ -379,21 +392,30 @@ MARKDOWN
     widget drag-text 'Deployment checklist'
     widget click '引用'
     widget contains 'Draft before quotes'
-    widget contains '> Deployment checklist'
+    [[ $(widget count '移除引用') == 1 ]]
     widget mouse '000-preview.md'
     widget click '预览'
     widget contains 'Preview code proof'
     widget bounds 'python' >/dev/null
     widget drag-text 'span_preview_marker'
     widget click '引用'
-    widget contains '> span_preview_marker'
+    [[ $(widget count '移除引用') == 2 ]]
     widget contains 'Draft before quotes'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-quote-preview.png"
-    xdotool key --clearmodifiers ctrl+a BackSpace
+    widget click '移除引用'
+    [[ $(widget count '移除引用') == 1 ]]
+    widget click '发送'
+    wait_until "sending the remaining quote with the draft" test -f "$HOME/agent-quoted"
+    [[ $(widget count '移除引用') == 0 ]]
+    widget mouse '000-source.py'
+    widget click '预览'
+    widget bounds '行号' >/dev/null
+    widget contains '    return os.getenv("SPAN_TEST_MODE", "standard")'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-source-preview.png"
     widget mouse '000-layout.txt'
     widget click '预览'
     widget contains 'Split workspace preview'
-    printf '%s\n' 'Mouse selection quotes conversation text and a Markdown preview code block while preserving the draft.'
+    printf '%s\n' 'Quote cards preserve the draft, remove independently, and send the remaining excerpt. Python preview preserves indentation with a line gutter.'
     printf '%s\n' 'Clicking Markdown links after Chinese text and inside the HTML preview opens the exact URL.'
     composer_width() {
         local input_x input_width timeline_x timeline_width center_error

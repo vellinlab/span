@@ -79,6 +79,7 @@ jobs:
             dist/agent-workspace.png
             dist/agent-workspace-compact.png
             dist/agent-quote-preview.png
+            dist/agent-source-preview.png
             dist/agent-activity.png
             dist/agent-paused.png
             dist/agent-task-status.png

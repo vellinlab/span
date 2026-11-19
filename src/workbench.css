@@ -481,6 +481,17 @@ button.agent-send:disabled {
     font-size: 12px;
 }
 
+.source-preview {
+    background: @terminal;
+    border-top: 1px solid @line;
+}
+
+.source-gutter {
+    background: #1b1e25;
+    color: #8f99ad;
+    border-right: 1px solid @line;
+}
+
 popover.selection-quote {
     background: @surface;
     border: 1px solid @line;
@@ -841,6 +852,36 @@ scrolledwindow.agent-table-scroll {
     font-size: 14px;
 }
 
+.draft-quotes,
+.draft-quotes viewport {
+    background: @chrome;
+}
+
+.draft-quotes {
+    margin: 1px 5px 0;
+}
+
+.draft-quote {
+    background: #2a3240;
+    border: 1px solid #3e4b61;
+    border-left: 2px solid @accent;
+    border-radius: 7px;
+    padding: 3px 6px 3px 9px;
+    color: @foreground;
+}
+
+.draft-quote-glyph {
+    color: @accent;
+    font-weight: 600;
+    font-size: 18px;
+}
+
+.draft-quote button.quiet-button {
+    min-width: 19px;
+    min-height: 19px;
+    padding: 0;
+}
+
 .agent-task-status {
     margin: 0 5px;
     padding: 5px 3px;
@@ -1001,5 +1042,4 @@ label.agent-markdown link:visited {
 
 .agent-composer textview {
     font-size: 14px;
-    padding: 4px 7px;
 }
