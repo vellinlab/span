@@ -205,6 +205,8 @@ impl Agent {
         let primary = gtk::Button::new();
         primary.style_context().add_class("primary");
         primary.style_context().add_class("agent-send");
+        primary.set_valign(gtk::Align::Center);
+        primary.set_margin_start(4);
         primary.set_always_show_image(true);
         inputs.pack_end(&primary, false, false, 0);
         inputs.pack_end(&usage.button, false, false, 0);
