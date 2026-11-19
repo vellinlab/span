@@ -336,10 +336,6 @@ button.agent-send:disabled {
     color: @foreground;
 }
 
-.workspace-tools {
-    padding-left: 6px;
-}
-
 .tab-title {
     font-size: 12px;
 }

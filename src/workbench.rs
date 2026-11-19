@@ -41,7 +41,8 @@ pub fn open(app: &gtk::Application) {
         .default_height(720)
         .build();
     window.style_context().add_class("workbench");
-    window.set_titlebar(Some(&titlebar(&window)));
+    let header = titlebar(&window);
+    window.set_titlebar(Some(&header));
 
     let root = column(0);
     let layout = row(0);
@@ -70,18 +71,15 @@ pub fn open(app: &gtk::Application) {
     tabs.style_context().add_class("terminal-tabs");
     let plus = icons::button(Icon::Plus, "新建本地终端", "新建本地终端 (Ctrl+Shift+T)");
     plus.set_action_name(Some("win.local"));
-    let tools = row(2);
-    tools.style_context().add_class("workspace-tools");
+    plus.show();
+    tabs.set_action_widget(&plus, gtk::PackType::End);
     let agent = icons::button(
         Icon::Conversation,
         "切换 Codex 会话／终端",
         "切换 Codex 会话／终端 (Ctrl+Shift+A)",
     );
     agent.set_action_name(Some("win.agent"));
-    tools.add(&agent);
-    tools.add(&plus);
-    tools.show_all();
-    tabs.set_action_widget(&tools, gtk::PackType::End);
+    header.pack_end(&agent);
 
     let views = gtk::Stack::new();
     views.add_named(&tabs, "terminal");

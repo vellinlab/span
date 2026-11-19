@@ -100,7 +100,7 @@ impl Browser {
         rows.set_enable_search(true);
         rows.set_search_column(0);
         rows.set_tooltip_column(4);
-        for (index, (title, width)) in [("名称", 118), ("大小", 60)].into_iter().enumerate() {
+        for (index, (title, width)) in [("名称", 118), ("大小", 68)].into_iter().enumerate() {
             let renderer = gtk::CellRendererText::new();
             renderer.set_ellipsize(pango::EllipsizeMode::End);
             let column = gtk::TreeViewColumn::new();
