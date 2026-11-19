@@ -1,4 +1,5 @@
 use crate::agent_render::clipboard;
+use crate::quote;
 use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
@@ -98,6 +99,8 @@ mod imp {
         pub(super) drag: Cell<Option<Drag>>,
         pub(super) grab: RefCell<glib::WeakRef<gtk::EventBox>>,
         pub(super) range: Cell<Option<Range>>,
+        pub(super) quote: OnceCell<quote::Action>,
+        pub(super) popup: quote::Popup,
     }
 
     #[glib::object_subclass]
@@ -117,9 +120,10 @@ mod imp {
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 
 impl TextSelection {
-    pub fn new(child: &gtk::Box, parts: Vec<Part>) -> Self {
+    pub fn new(child: &gtk::Box, parts: Vec<Part>, quote: &quote::Action) -> Self {
         let view: Self = glib::Object::new();
         assert!(view.imp().parts.set(parts).is_ok());
+        assert!(view.imp().quote.set(quote.clone()).is_ok());
         view.set_visible_window(false);
         view.set_can_focus(!view.parts().is_empty());
         view.add(child);
@@ -142,6 +146,7 @@ impl TextSelection {
         });
         view.connect_unmap(|view| {
             view.end_drag();
+            view.imp().popup.hide();
         });
         view
     }
@@ -170,6 +175,7 @@ impl TextSelection {
             if event.button() != 1 {
                 return glib::Propagation::Proceed;
             }
+            view.imp().popup.hide();
             let Some((start, link_byte)) = view.hit(event.root(), false) else {
                 return glib::Propagation::Proceed;
             };
@@ -228,6 +234,11 @@ impl TextSelection {
             };
             if let Some(text) = view.selected_text() {
                 gtk::Clipboard::get(&gdk::SELECTION_PRIMARY).set_text(&text);
+                if let Some(action) = view.imp().quote.get() {
+                    view.imp()
+                        .popup
+                        .show(view.upcast_ref(), root, text, action.clone());
+                }
             } else if !drag.selecting
                 && let Some(start) = drag.link_byte
                 && let Some((position, Some(end))) = view.hit(root, false)
@@ -254,6 +265,7 @@ impl TextSelection {
             let (Some(view), Some(delta)) = (view.upgrade(), vertical_delta(event)) else {
                 return glib::Propagation::Proceed;
             };
+            view.imp().popup.hide();
             if view.imp().drag.get().is_some()
                 && !event.state().contains(gdk::ModifierType::BUTTON1_MASK)
             {

@@ -1,6 +1,7 @@
 use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delta};
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
+use crate::quote;
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
 use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
@@ -18,7 +19,13 @@ pub struct Context {
     pub socket: Option<PathBuf>,
 }
 
-pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) -> TextSelection {
+pub fn response(
+    markdown: &str,
+    context: &Context,
+    live: bool,
+    preview: &Offer,
+    quote: &quote::Action,
+) -> TextSelection {
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let context = Rc::new(context.clone());
     let prose_label = || {
@@ -71,7 +78,7 @@ pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) 
                 if matches!(language, "html" | "htm") && !code.trim().is_empty() {
                     artifacts.push(Artifact::Html(code.clone()));
                 }
-                blocks.add(&code_card(language, &code, None));
+                blocks.add(&code_card(language, &code, quote));
             }
             Event::Start(Tag::Image { dest_url, .. }) => {
                 let mut alt = String::new();
@@ -151,7 +158,7 @@ pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) 
         }
         blocks.add(&actions);
     }
-    TextSelection::new(&blocks, selectable)
+    TextSelection::new(&blocks, selectable, quote)
 }
 
 pub fn artifact_button(artifact: Artifact, preview: Offer) -> gtk::Button {
@@ -576,7 +583,7 @@ impl CodeCard {
     }
 }
 
-pub fn code_card(language: &str, code: &str, status: Option<&str>) -> gtk::Box {
+fn code_card(language: &str, code: &str, quote: &quote::Action) -> gtk::Box {
     let card = CodeCard::new(language, "复制代码");
     card.buffer.set_text(&code.replace('\0', "�"));
     card.size_to(code);
@@ -586,11 +593,8 @@ pub fn code_card(language: &str, code: &str, status: Option<&str>) -> gtk::Box {
             clipboard().set_text(&text);
         }
     });
-    if let Some(status) = status {
-        let footer = gtk::Label::new(Some(status));
-        footer.set_xalign(1.0);
-        footer.style_context().add_class("agent-code-status");
-        card.panel.add(&footer);
+    if let Some(view) = card.scroll.child().and_downcast::<gtk::TextView>() {
+        quote::bind_text(&view, quote);
     }
     card.panel
 }

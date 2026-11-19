@@ -104,7 +104,9 @@ impl Terminal {
                 alpha: rgba.alpha(),
             }
         });
-        let font = pango::FontDescription::from_string("Monospace 11");
+        let font = pango::FontDescription::from_string(
+            "Ubuntu Mono,Liberation Mono,DejaVu Sans Mono,Noto Sans Mono CJK SC,monospace 11",
+        );
         unsafe {
             let terminal = self.to_glib_none().0;
             vte_terminal_set_colors(
@@ -177,6 +179,7 @@ impl Terminal {
         &self,
         cwd: Option<&str>,
         argv: &[&str],
+        env: &[&str],
         cancellable: &gio::Cancellable,
         on_spawn: F,
     ) where
@@ -200,14 +203,14 @@ impl Terminal {
             on_spawn(result);
         }
 
-        // VTE copies cwd and argv during this call; a null envv inherits the environment.
+        // VTE copies the arguments and merges the supplied entries into the environment.
         unsafe {
             vte_terminal_spawn_async(
                 self.to_glib_none().0,
                 0,
                 cwd.to_glib_none().0,
                 argv.to_glib_none().0,
-                null_mut(),
+                env.to_glib_none().0,
                 0,
                 None,
                 null_mut(),

@@ -48,8 +48,11 @@ pub fn open(app: &gtk::Application) {
     let layout = row(0);
     let (hosts_view, search, host_list) = host_sidebar();
     let sidebar = column(0);
-    sidebar.set_width_request(232);
+    sidebar.set_width_request(196);
     sidebar.style_context().add_class("host-sidebar");
+    if let Some(accessible) = sidebar.accessible() {
+        accessible.set_name("工作区侧栏");
+    }
     let sidebar_pages = gtk::Stack::new();
     let sidebar_catalog = column(0);
     let preview = Panel::new();
@@ -85,13 +88,17 @@ pub fn open(app: &gtk::Application) {
     views.add_named(&tabs, "terminal");
     views.add_named(&empty_workspace(), "empty");
     layout.pack_start(&tool_rail(&sidebar), false, false, 0);
-    layout.pack_start(&sidebar, false, false, 0);
     let workspace = gtk::Paned::new(gtk::Orientation::Horizontal);
     workspace.style_context().add_class("files-split");
     workspace.pack1(&views, true, true);
     workspace.pack2(&preview.widget, false, false);
     size_preview(&workspace, &preview.widget);
-    layout.pack_start(&workspace, true, true, 0);
+    let split = gtk::Paned::new(gtk::Orientation::Horizontal);
+    split.style_context().add_class("workspace-sidebar-split");
+    split.pack1(&sidebar, false, false);
+    split.pack2(&workspace, true, false);
+    split.set_position(232);
+    layout.pack_start(&split, true, true, 0);
     root.pack_start(&layout, true, true, 0);
 
     let footer = row(9);
@@ -302,11 +309,11 @@ impl Workbench {
     }
 
     fn open_local(self: &Rc<Self>) {
-        self.open_session(Launch::Local);
+        self.open_session(Launch::Local, false);
     }
 
-    fn open_session(self: &Rc<Self>, launch: Launch) {
-        let session = Session::new(launch, Rc::downgrade(&self.preview));
+    fn open_session(self: &Rc<Self>, launch: Launch, quick_connect: bool) {
+        let session = Session::new(launch, Rc::downgrade(&self.preview), quick_connect);
         let tab = row(7);
         tab.style_context().add_class("tab-label");
         let label = text_label(session.launch.label(), "tab-title");
@@ -557,8 +564,10 @@ impl Workbench {
 
     fn quick_connect(self: &Rc<Self>) {
         let parent = self.window.upgrade().expect("Workbench window");
-        if let Some(host) = host_dialog::edit(&parent, "快速连接", "连接", None, |_| Ok(())) {
-            self.open_session(Launch::Ssh(host));
+        if let Some(host) =
+            host_dialog::edit(&parent, "快速连接", "连接", None, true, |_| Ok(()))
+        {
+            self.open_session(Launch::Ssh(host), true);
         }
     }
 
@@ -579,7 +588,7 @@ impl Workbench {
         } else {
             "添加主机"
         };
-        if host_dialog::edit(&parent, title, "保存", previous.as_ref(), |host| {
+        if host_dialog::edit(&parent, title, "保存", previous.as_ref(), false, |host| {
             let mut updated = next.clone();
             match index {
                 Some(i) => updated[i] = host.clone(),
@@ -691,7 +700,7 @@ impl Workbench {
         let host = host.clone();
         action.connect_clicked(move |_| {
             if let Some(workbench) = weak.upgrade() {
-                workbench.open_session(Launch::Ssh(host.clone()));
+                workbench.open_session(Launch::Ssh(host.clone()), false);
             }
         });
         item.pack_start(&action, true, true, 0);

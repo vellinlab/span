@@ -1,11 +1,14 @@
 use crate::hosts::Host;
+use gtk::glib;
 use gtk::prelude::*;
+use std::io::{self, Write};
 
 pub fn edit(
     parent: &gtk::ApplicationWindow,
     title: &str,
     confirm: &str,
     host: Option<&Host>,
+    interactive_login: bool,
     persist: impl Fn(&Host) -> Result<(), String>,
 ) -> Option<Host> {
     let dialog = gtk::Dialog::builder()
@@ -57,6 +60,15 @@ pub fn edit(
         body.pack_start(&field, false, false, 0);
     }
     body.pack_start(&x11, false, false, 0);
+    if interactive_login {
+        let hint = gtk::Label::builder()
+            .label("需要密码或验证码时，SSH 会弹出输入窗口，或在终端显示提示。")
+            .wrap(true)
+            .xalign(0.0)
+            .build();
+        hint.style_context().add_class("preview-detail");
+        body.pack_start(&hint, false, false, 0);
+    }
     body.pack_start(&error, false, false, 0);
     dialog.show_all();
     target.grab_focus();
@@ -84,6 +96,74 @@ pub fn edit(
     }
     dialog.close();
     saved
+}
+
+pub fn askpass(prompt: &str) -> glib::ExitCode {
+    let hint = std::env::var("SSH_ASKPASS_PROMPT").unwrap_or_default();
+    let confirm =
+        hint == "confirm" || prompt.contains("(yes/no") && prompt.contains("continue connecting");
+    let notice = hint == "none";
+    let dialog = gtk::Dialog::builder()
+        .title("SSH 身份验证")
+        .window_position(gtk::WindowPosition::Center)
+        .default_width(440)
+        .modal(true)
+        .use_header_bar(1)
+        .build();
+    dialog.set_keep_above(true);
+    dialog.style_context().add_class("workbench-dialog");
+    dialog.add_button("取消", gtk::ResponseType::Cancel);
+    let ok = if confirm {
+        "继续连接"
+    } else if notice {
+        "继续"
+    } else {
+        "确认"
+    };
+    dialog
+        .add_button(ok, gtk::ResponseType::Accept)
+        .style_context()
+        .add_class("primary");
+    dialog.set_default_response(if confirm {
+        gtk::ResponseType::Cancel
+    } else {
+        gtk::ResponseType::Accept
+    });
+    let body = dialog.content_area();
+    body.style_context().add_class("dialog-body");
+    body.set_spacing(12);
+    let label = gtk::Label::builder()
+        .label(prompt)
+        .wrap(true)
+        .selectable(true)
+        .xalign(0.0)
+        .build();
+    body.add(&label);
+    let secret = gtk::Entry::builder()
+        .visibility(false)
+        .input_purpose(gtk::InputPurpose::Password)
+        .placeholder_text("密码或验证码")
+        .activates_default(true)
+        .build();
+    if !confirm && !notice {
+        body.add(&secret);
+    }
+    dialog.show_all();
+    if !confirm && !notice {
+        secret.grab_focus();
+    }
+    let accepted = dialog.run() == gtk::ResponseType::Accept;
+    let value = secret.text();
+    secret.set_text("");
+    dialog.close();
+    if !accepted {
+        return glib::ExitCode::FAILURE;
+    }
+    let reply = if confirm { "yes" } else { value.as_str() };
+    match writeln!(io::stdout().lock(), "{reply}") {
+        Ok(()) => glib::ExitCode::SUCCESS,
+        Err(_) => glib::ExitCode::FAILURE,
+    }
 }
 
 pub fn confirm_delete(parent: &gtk::ApplicationWindow, host: &Host) -> bool {

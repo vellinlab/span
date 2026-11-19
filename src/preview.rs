@@ -1,7 +1,8 @@
-use crate::agent_render::{push_link, web_url};
+use crate::agent_render::{self, Context, push_link, web_url};
 use crate::files::{self, Source};
 use crate::icons::{self, Icon};
 use crate::session::Session;
+use gtk::gdk::prelude::GdkContextExt;
 use gtk::prelude::*;
 use gtk::{gdk_pixbuf, gio, glib, pango};
 use std::cell::{Cell, RefCell};
@@ -344,9 +345,21 @@ impl Panel {
         self.label.set_tooltip_text(Some(&item.title()));
         self.notice("正在加载预览…");
         match item.as_ref() {
-            Artifact::Mermaid(code) => self.show_content(Ok(Content::Mermaid(code.clone()))),
-            Artifact::Html(html) => self.show_content(html_preview(html).map(Content::Markup)),
+            Artifact::Mermaid(code) => self.show_content(Ok(Content::Mermaid(code.clone())), None),
+            Artifact::Html(html) => {
+                self.show_content(html_preview(html).map(Content::Markup), None)
+            }
             Artifact::File { source, path } => {
+                let context = Context {
+                    cwd: path
+                        .parent()
+                        .unwrap_or_else(|| Path::new("/"))
+                        .to_path_buf(),
+                    socket: match source {
+                        Source::Local => None,
+                        Source::Sftp { socket } => socket.clone(),
+                    },
+                };
                 let (source, path) = (source.clone(), path.clone());
                 let weak = Rc::downgrade(self);
                 glib::MainContext::default().spawn_local(async move {
@@ -354,7 +367,7 @@ impl Panel {
                         .await
                         .unwrap_or_else(|_| Err("预览读取被中断。".into()));
                     if let Some(panel) = weak.upgrade().filter(|panel| panel.load_id.get() == id) {
-                        panel.show_content(result);
+                        panel.show_content(result, Some(context));
                     }
                 });
             }
@@ -384,7 +397,7 @@ impl Panel {
         label.show();
     }
 
-    fn show_content(&self, content: Result<Content, String>) {
+    fn show_content(self: &Rc<Self>, content: Result<Content, String>, context: Option<Context>) {
         let content = match content {
             Ok(content) => content,
             Err(error) => {
@@ -392,11 +405,16 @@ impl Panel {
                 return;
             }
         };
-        let is_html = matches!(&content, Content::Markup(_));
         self.clear();
         let scroll = gtk::ScrolledWindow::builder()
             .overlay_scrolling(false)
             .build();
+        let owner = self.owner.borrow().clone();
+        let quote: crate::quote::Action = Rc::new(move |text| {
+            if let Some(session) = owner.upgrade() {
+                session.quote(text);
+            }
+        });
         match content {
             Content::Text(text) => {
                 let view = gtk::TextView::builder()
@@ -412,23 +430,39 @@ impl Panel {
                 if let Some(buffer) = view.buffer() {
                     buffer.set_text(&text);
                 }
+                crate::quote::bind_text(&view, &quote);
                 scroll.add(&view);
             }
-            Content::Markup(markup) | Content::Markdown(markup) => {
-                let label = crate::agent_render::markdown_label();
+            Content::Markup(markup) => {
+                let label = agent_render::markdown_label();
                 label.set_selectable(true);
                 label.set_valign(gtk::Align::Start);
                 label.set_margin_start(14);
                 label.set_margin_end(14);
                 label.set_margin_top(14);
-                if is_html {
-                    label.set_markup(&markup);
-                } else {
-                    crate::agent_render::set_markdown(&label, &markup);
-                }
+                label.set_markup(&markup);
+                crate::quote::bind_label(&label, &quote);
                 scroll.add(&label);
             }
-            Content::Image(data, kind) => match crate::agent_render::decode_pixbuf(&data, kind) {
+            Content::Markdown(text) => {
+                let context = context.expect("Markdown comes from a preview file");
+                let owner = self.owner.borrow().clone();
+                let panel = Rc::downgrade(self);
+                let offer: Offer = Rc::new(move |artifact, automatic| {
+                    if let (Some(panel), Some(session)) = (panel.upgrade(), owner.upgrade()) {
+                        panel.offer(&session, artifact, automatic);
+                    }
+                });
+                let view = agent_render::response(&text, &context, false, &offer, &quote);
+                view.style_context().add_class("agent-response");
+                view.set_valign(gtk::Align::Start);
+                view.set_margin_start(12);
+                view.set_margin_end(12);
+                view.set_margin_top(12);
+                view.set_margin_bottom(12);
+                scroll.add(&view);
+            }
+            Content::Image(data, kind) => match agent_render::decode_pixbuf(&data, kind) {
                 Ok(image) => self.add_image(&scroll, &image),
                 Err(error) => {
                     self.notice(&error);
@@ -450,18 +484,91 @@ impl Panel {
     }
 
     fn add_image(&self, scroll: &gtk::ScrolledWindow, image: &gdk_pixbuf::Pixbuf) {
-        let width = self.body.allocated_width().max(self.widget.width_request()) - 22;
-        let resized = if image.width() > width {
-            let height = (i64::from(image.height()) * i64::from(width) / i64::from(image.width()))
-                .max(1) as i32;
-            image.scale_simple(width, height, gdk_pixbuf::InterpType::Bilinear)
-        } else {
-            None
-        };
-        let widget = gtk::Image::from_pixbuf(resized.as_ref().or(Some(image)));
-        widget.set_valign(gtk::Align::Start);
-        widget.set_margin_top(12);
-        scroll.add(&widget);
+        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        toolbar.style_context().add_class("preview-zoom");
+        let zoom_out = tool("−", "缩小图片");
+        let zoom_in = tool("+", "放大图片");
+        let actual = tool("100%", "原始大小");
+        let fit = tool("适合宽度", "适合宽度");
+        let level = gtk::Label::new(None);
+        for button in [&zoom_out, &zoom_in, &actual, &fit] {
+            toolbar.pack_start(button, false, false, 0);
+        }
+        toolbar.pack_end(&level, false, false, 0);
+        self.body.pack_start(&toolbar, false, false, 0);
+        toolbar.show_all();
+
+        let canvas = gtk::DrawingArea::new();
+        canvas.set_halign(gtk::Align::Center);
+        canvas.set_valign(gtk::Align::Start);
+        canvas.set_margin_top(10);
+        canvas.set_margin_bottom(10);
+        canvas.set_margin_start(8);
+        canvas.set_margin_end(8);
+        let scale = Rc::new(Cell::new(0.0));
+        let image = image.clone();
+        let paint_scale = scale.clone();
+        let (width, height) = (f64::from(image.width()), f64::from(image.height()));
+        canvas.connect_draw(move |_, cr| {
+            let _ = cr.save();
+            let factor = paint_scale.get();
+            cr.scale(factor, factor);
+            cr.set_source_pixbuf(&image, 0.0, 0.0);
+            let _ = cr.paint();
+            let _ = cr.restore();
+            glib::Propagation::Stop
+        });
+        scroll.add(&canvas);
+
+        let auto_fit = Rc::new(Cell::new(true));
+        let canvas = canvas.downgrade();
+        let level = level.downgrade();
+        let applied = scale.clone();
+        let update = Rc::new(move |factor: f64| {
+            let factor = factor.clamp(0.02, 4.0);
+            if (applied.replace(factor) - factor).abs() > 0.0001 {
+                if let Some(canvas) = canvas.upgrade() {
+                    canvas.set_size_request(
+                        (width * factor).ceil() as i32,
+                        (height * factor).ceil() as i32,
+                    );
+                    canvas.queue_draw();
+                }
+                if let Some(level) = level.upgrade() {
+                    level.set_text(&format!("{:.0}%", factor * 100.0));
+                }
+            }
+        });
+        let fit_factor =
+            move |available: i32| (f64::from((available - 24).max(40)) / width).min(1.0);
+        update(fit_factor(
+            self.body.allocated_width().max(self.widget.width_request()),
+        ));
+        let fit_pending = auto_fit.clone();
+        let resize = update.clone();
+        scroll.connect_size_allocate(move |_, allocation| {
+            if fit_pending.get() {
+                resize(fit_factor(allocation.width()));
+            }
+        });
+        for (button, multiplier) in [(&zoom_out, 0.8), (&zoom_in, 1.25), (&actual, 0.0)] {
+            let (update, scale, auto_fit) = (update.clone(), scale.clone(), auto_fit.clone());
+            button.connect_clicked(move |_| {
+                auto_fit.set(false);
+                update(if multiplier == 0.0 {
+                    1.0
+                } else {
+                    scale.get() * multiplier
+                });
+            });
+        }
+        let scroll = scroll.downgrade();
+        fit.connect_clicked(move |_| {
+            auto_fit.set(true);
+            if let Some(scroll) = scroll.upgrade() {
+                update(fit_factor(scroll.allocated_width()));
+            }
+        });
     }
 
     fn save_file(self: &Rc<Self>, button: &gtk::Button) {

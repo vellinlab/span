@@ -19,7 +19,7 @@ window.workbench,
 .workbench,
 .workbench-dialog,
 popover.agent-picker-menu {
-    font-family: "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+    font-family: "Ubuntu", "Liberation Sans", "DejaVu Sans", "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
     font-size: 13px;
     font-weight: 400;
 }
@@ -177,7 +177,6 @@ button.agent-send:disabled {
 
 .host-sidebar {
     background-color: @sidebar;
-    border-right: 1px solid @line;
 }
 
 .sidebar-tabs {
@@ -414,12 +413,14 @@ button.agent-send:disabled {
     color: @terminal;
 }
 
-.files-split > separator {
+.files-split > separator,
+.workspace-sidebar-split > separator {
     min-width: 3px;
     background: alpha(@line, 0.7);
 }
 
-.files-split > separator:hover {
+.files-split > separator:hover,
+.workspace-sidebar-split > separator:hover {
     background: @accent;
 }
 
@@ -472,6 +473,33 @@ button.agent-send:disabled {
     padding: 5px 12px;
     color: @muted;
     font-size: 12px;
+}
+
+.preview-zoom {
+    color: @muted;
+    padding: 2px 8px 4px;
+    font-size: 12px;
+}
+
+popover.selection-quote {
+    background: @surface;
+    border: 1px solid @line;
+    border-radius: 8px;
+    padding: 3px;
+    color: @foreground;
+}
+
+popover.selection-quote button {
+    background: transparent;
+    border: 1px solid transparent;
+    color: @foreground;
+    padding: 3px 9px;
+    min-height: 20px;
+    font-size: 12px;
+}
+
+popover.selection-quote button:hover {
+    background: @hover;
 }
 
 .agent-preview-actions button {
@@ -733,21 +761,17 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 }
 
 .agent-code-view,
-.agent-code-view text {
+.agent-code-view text,
+.files-preview textview,
+.files-preview textview text {
     color: @foreground;
     background: @terminal;
-    font-size: 12px;
-}
-
-.agent-code-status {
-    padding: 4px 11px 6px;
-    border-top: 1px solid @line;
-    color: @muted;
-    font-size: 11px;
+    font-family: "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono CJK SC", monospace;
+    font-size: 13px;
 }
 
 .agent-diff-stats {
-    font-family: monospace;
+    font-family: "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", monospace;
     font-size: 11px;
 }
 

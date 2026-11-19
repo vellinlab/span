@@ -5,6 +5,7 @@ test_home="$(mktemp -d)"
 app_pid=
 xvfb_pid=
 probe_pid=
+askpass_pid=
 cleanup() {
     if [[ $1 != 0 && -f "$test_home/app.log" ]]; then
         cat "$test_home/app.log" >&2
@@ -16,7 +17,7 @@ cleanup() {
             import -window root "$(dirname "$WORKBENCH_PREVIEW")/test-failure.png" || true
         fi
     fi
-    for pid in "$probe_pid" "$app_pid" "$xvfb_pid"; do
+    for pid in "$askpass_pid" "$probe_pid" "$app_pid" "$xvfb_pid"; do
         if [[ -n "$pid" ]]; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -168,8 +169,24 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     mkdir "$HOME/Documents" "$HOME/Projects"
     printf 'Workspace notes\n' > "$HOME/notes.txt"
     printf 'Split workspace preview\n' > "$HOME/000-layout.txt"
+    cat > "$HOME/000-preview.md" <<'MARKDOWN'
+# Preview code proof
+
+```python
+span_preview_marker = True
+```
+MARKDOWN
     xdotool key --clearmodifiers ctrl+shift+f
     sleep 0.5
+    read -r sidebar_x sidebar_y sidebar_width sidebar_height < <(widget bounds '工作区侧栏')
+    divider_x=$((sidebar_x + sidebar_width + 1))
+    divider_y=$((sidebar_y + sidebar_height / 2))
+    xdotool mousemove "$divider_x" "$divider_y" mousedown 1 sleep 0.1 \
+        mousemove "$((divider_x + 72))" "$divider_y" sleep 0.1 mouseup 1
+    read -r _ _ expanded_sidebar _ < <(widget bounds '工作区侧栏')
+    ((expanded_sidebar >= sidebar_width + 60))
+    xdotool mousemove "$((divider_x + expanded_sidebar - sidebar_width))" "$divider_y" mousedown 1 sleep 0.1 \
+        mousemove "$divider_x" "$divider_y" sleep 0.1 mouseup 1
     import -window "$window" "$WORKBENCH_PREVIEW"
     xdotool key --clearmodifiers ctrl+shift+f
     xdotool key --clearmodifiers ctrl+shift+w
@@ -218,6 +235,10 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     printf '%s\n' 'Enter commits input composition, then sends. Shift+Enter inserts a newline.'
     widget contains '等待你的回复'
     widget bounds '预览区' >/dev/null
+    widget click '原始大小'
+    widget click '放大图片'
+    widget contains '125%'
+    widget click '适合宽度'
     widget click '上一个预览'
     widget bounds 'Mermaid 图' >/dev/null
     widget click '关闭预览'
@@ -333,6 +354,26 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     wait_until "opening the clicked Markdown link" grep -qFx 'https://example.invalid/span/docs?from=agent&view=build' "$HOME/span-opened-link"
     widget mouse-text '发布说明'
     wait_until "opening a Markdown link after Chinese text" grep -qFx 'https://example.invalid/span/notes?lang=zh&view=full' "$HOME/span-opened-link"
+    widget mouse '消息输入框'
+    xdotool type --clearmodifiers 'Draft before quotes'
+    widget drag-text 'Deployment checklist'
+    widget click '引用'
+    widget contains 'Draft before quotes'
+    widget contains '> Deployment checklist'
+    widget mouse '000-preview.md'
+    widget click '预览'
+    widget contains 'Preview code proof'
+    widget bounds 'python' >/dev/null
+    widget drag-text 'span_preview_marker'
+    widget click '引用'
+    widget contains '> span_preview_marker'
+    widget contains 'Draft before quotes'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-quote-preview.png"
+    xdotool key --clearmodifiers ctrl+a BackSpace
+    widget mouse '000-layout.txt'
+    widget click '预览'
+    widget contains 'Split workspace preview'
+    printf '%s\n' 'Mouse selection quotes conversation text and a Markdown preview code block while preserving the draft.'
     printf '%s\n' 'Clicking Markdown links after Chinese text and inside the HTML preview opens the exact URL.'
     composer_width() {
         local input_x input_width timeline_x timeline_width center_error
@@ -540,6 +581,18 @@ PY
     wait_until "the system OpenSSH banner" grep -qs '^SSH-2.0-OpenSSH_' "$HOME/ssh-banner"
     printf '%s\n' 'Tab creation/closing, host creation/persistence and system OpenSSH all passed.'
 
+    SPAN_SSH_ASKPASS=1 "$1" 'Fixture authentication challenge' > "$HOME/askpass-output" &
+    askpass_pid=$!
+    wait_until "the masked SSH authentication dialog" dialog_open 'SSH 身份验证'
+    dialog="$(xdotool search --onlyvisible --name '^SSH 身份验证$' | head -n1)"
+    xdotool windowfocus --sync "$dialog"
+    xdotool type --clearmodifiers 'fixture-only-code'
+    xdotool key --clearmodifiers Return
+    wait "$askpass_pid"
+    askpass_pid=
+    grep -qx 'fixture-only-code' "$HOME/askpass-output"
+    xdotool windowfocus --sync "$window"
+
     if [[ -n ${WORKBENCH_SSH_FIXTURE:-} ]]; then
         xdotool key --clearmodifiers ctrl+shift+o
         wait_until "the remote fixture Quick Connect dialog" dialog_open '快速连接'
@@ -548,9 +601,9 @@ PY
         xdotool type --clearmodifiers "ssh://$WORKBENCH_SSH_USER@127.0.0.1:$WORKBENCH_SSH_PORT"
         xdotool key --clearmodifiers Return
         xdotool windowfocus --sync "$window"
+        wait_until "OpenSSH requesting host key confirmation" dialog_open 'SSH 身份验证'
         widget contains 'Are you sure you want to continue connecting'
-        xdotool type --clearmodifiers yes
-        xdotool key --clearmodifiers Return
+        widget click '继续连接'
         wait_until "the authenticated SSH shell" test -s "$WORKBENCH_SSH_FIXTURE/remote-shells"
         xdotool key --clearmodifiers ctrl+shift+h
         wait_until "the remote session list" test -f "$WORKBENCH_SSH_FIXTURE/agent-catalog"

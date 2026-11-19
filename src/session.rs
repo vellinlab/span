@@ -63,6 +63,7 @@ pub struct Session {
     control: RefCell<Option<ControlSocket>>,
     agent: RefCell<Option<Rc<Agent>>>,
     preview: Weak<Panel>,
+    quick_connect: bool,
     shell: gtk::ScrolledWindow,
     agent_view: RefCell<Option<AgentView>>,
     reconnect: RefCell<Option<gio::FileMonitor>>,
@@ -84,7 +85,7 @@ struct Shell {
 }
 
 impl Session {
-    pub fn new(launch: Launch, preview: Weak<Panel>) -> Rc<Self> {
+    pub fn new(launch: Launch, preview: Weak<Panel>, quick_connect: bool) -> Rc<Self> {
         let (terminal, scroll) = terminal_widget();
         let page = gtk::Stack::new();
         page.set_homogeneous(false);
@@ -104,6 +105,7 @@ impl Session {
             control: RefCell::new(control),
             agent: RefCell::new(None),
             preview,
+            quick_connect,
             shell: scroll,
             agent_view: RefCell::new(None),
             reconnect: RefCell::new(None),
@@ -131,6 +133,11 @@ impl Session {
         let agent = self.agent();
         self.page.set_visible_child_name("agent");
         agent.focus();
+    }
+
+    pub fn quote(self: &Rc<Self>, text: &str) {
+        self.show_agent();
+        (self.agent().quote_action())(text);
     }
 
     pub fn agent(self: &Rc<Self>) -> Rc<Agent> {
@@ -351,7 +358,9 @@ impl Session {
             terminal.feed("\r\n终端已退出。\r\n".as_bytes());
         });
         let target = terminal.downgrade();
-        terminal.spawn(cwd, &argv, &cancellable, move |result| {
+        let askpass = self.askpass();
+        let env: Vec<_> = askpass.iter().map(String::as_str).collect();
+        terminal.spawn(cwd, &argv, &env, &cancellable, move |result| {
             if let (Some(terminal), Err(error)) = (target.upgrade(), result) {
                 terminal.set_input_enabled(false);
                 terminal.feed(format!("\r\n启动失败：{error}\r\n").as_bytes());
@@ -374,7 +383,7 @@ impl Session {
             .checked_sub(1)
             .map_or("primary", |index| shells[index].id.as_str());
         view.picker.set_active_id(Some(next));
-        view.picker.remove((index + 1) as i32);
+        ComboBoxTextExt::remove(&view.picker, (index + 1) as i32);
         old.cancellable.cancel();
         view.tabs.remove(&old.page);
     }
@@ -447,8 +456,10 @@ impl Session {
         self.terminal.reset(true, false);
         self.terminal.set_input_enabled(true);
         let session = Rc::downgrade(self);
+        let askpass = self.askpass();
+        let env: Vec<_> = askpass.iter().map(String::as_str).collect();
         self.terminal
-            .spawn(cwd, &argv, &self.cancellable, move |result| {
+            .spawn(cwd, &argv, &env, &self.cancellable, move |result| {
                 if let Some(session) = session.upgrade() {
                     if session.state.get() != State::Starting || session.cancellable.is_cancelled()
                     {
@@ -468,6 +479,20 @@ impl Session {
                     changed();
                 }
             });
+    }
+
+    fn askpass(&self) -> Vec<String> {
+        if self.quick_connect
+            && let Ok(exe) = std::env::current_exe()
+            && let Some(path) = exe.to_str()
+        {
+            return vec![
+                format!("SSH_ASKPASS={path}"),
+                "SSH_ASKPASS_REQUIRE=force".into(),
+                "SPAN_SSH_ASKPASS=1".into(),
+            ];
+        }
+        Vec::new()
     }
 
     pub fn child_exited(&self, status: i32) {

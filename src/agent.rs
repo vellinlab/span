@@ -924,6 +924,15 @@ impl Agent {
         }
     }
 
+    pub fn quote_action(&self) -> crate::quote::Action {
+        let input = self.input.downgrade();
+        Rc::new(move |text| {
+            if let Some(input) = input.upgrade() {
+                crate::quote::insert(&input, text);
+            }
+        })
+    }
+
     fn request(&self, request: Request, method: &str, params: Value) {
         if let Some(rpc) = self.rpc.borrow().as_ref() {
             let id = rpc.request(method, params);
@@ -1571,7 +1580,7 @@ impl Agent {
     }
 
     fn new_activity(&self) -> Activity {
-        let activity = Activity::new();
+        let activity = Activity::new(self.quote_action());
         self.append(&activity.widget);
         activity
     }
@@ -1637,6 +1646,7 @@ impl Agent {
             self.remove_live();
             let label = agent_render::markdown_label();
             label.style_context().add_class("agent-prose");
+            crate::quote::bind_label(&label, &self.quote_action());
             self.append(&label);
             self.live.replace(Some(Rc::new(LiveMessage {
                 id: id.into(),
@@ -1884,6 +1894,7 @@ impl Agent {
             &self.context.borrow(),
             !loading_history,
             &self.preview,
+            &self.quote_action(),
         ));
         self.append(&message);
     }

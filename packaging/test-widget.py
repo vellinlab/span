@@ -45,13 +45,24 @@ for _ in range(50):
                 seen.append(node.name)
             if operation in ("contains", "not-contains") and contains(node, name):
                 sys.exit(0 if operation == "contains" else f"Unexpected text {name!r}")
-            if operation == "mouse-text" and contains(node, name):
+            if operation in ("mouse-text", "drag-text") and contains(node, name):
                 text = node.queryText()
-                index = text.getText(0, -1).index(name) + len(name) // 2
+                index = text.getText(0, -1).index(name)
+                if operation == "mouse-text":
+                    index += len(name) // 2
                 x, y, width, height = text.getCharacterExtents(index, pyatspi.DESKTOP_COORDS)
                 if width > 0 and height > 0 and x >= 0 and y >= 0:
-                    subprocess.run(["xdotool", "mousemove", str(x + width // 2),
-                                    str(y + height // 2), "click", "1"], check=True)
+                    if operation == "drag-text":
+                        end_x, end_y, end_w, end_h = text.getCharacterExtents(
+                            index + len(name) - 1, pyatspi.DESKTOP_COORDS)
+                        if min(end_x, end_y) < 0 or min(end_w, end_h) <= 0:
+                            continue
+                        command = ["mousemove", str(x + 1), str(y + height // 2), "mousedown", "1",
+                                   "sleep", "0.1", "mousemove", str(end_x + end_w - 1),
+                                   str(end_y + end_h // 2), "sleep", "0.1", "mouseup", "1"]
+                    else:
+                        command = ["mousemove", str(x + width // 2), str(y + height // 2), "click", "1"]
+                    subprocess.run(["xdotool", *command], check=True)
                     sys.exit(0)
             if node.name != name:
                 continue

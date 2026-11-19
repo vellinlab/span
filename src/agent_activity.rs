@@ -15,6 +15,7 @@ pub struct Activity {
     rows: gtk::Box,
     entries: HashMap<String, Entry>,
     progress: String,
+    quote: crate::quote::Action,
 }
 
 struct Entry {
@@ -148,7 +149,7 @@ impl<'a> Record<'a> {
 }
 
 impl Activity {
-    pub fn new() -> Self {
+    pub fn new(quote: crate::quote::Action) -> Self {
         let widget = gtk::Expander::new(None);
         widget.style_context().add_class("agent-activity");
         let heading = title_label();
@@ -163,6 +164,7 @@ impl Activity {
             rows,
             entries: HashMap::new(),
             progress: String::new(),
+            quote,
         }
     }
 
@@ -311,6 +313,7 @@ impl Activity {
                     agent_render::text("")
                 };
                 detail.style_context().add_class("agent-activity-detail");
+                crate::quote::bind_label(&detail, &self.quote);
                 item.add(&detail);
                 View::Text(detail)
             };
