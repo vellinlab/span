@@ -420,8 +420,8 @@ SVG
     widget bounds '行号' >/dev/null
     widget contains '    return os.getenv("SPAN_TEST_MODE", "standard")'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-source-preview.png"
-    widget mouse '000-vector.svg'
-    widget click '预览'
+    read -r row_x row_y row_width row_height <<< "$(widget bounds '000-vector.svg')"
+    xdotool mousemove "$((row_x + row_width / 2))" "$((row_y + row_height / 2))" sleep 0.15 click --repeat 2 1
     widget bounds '图片画布' >/dev/null
     widget click '原始大小'
     read -r canvas_x canvas_y canvas_width _ <<< "$(widget bounds '图片画布')"
@@ -429,13 +429,20 @@ SVG
     widget contains '400%'
     sleep 0.2
     read -r canvas_x canvas_y canvas_width _ <<< "$(widget bounds '图片画布')"
-    [[ "$canvas_width" == 256 ]]
+    if [[ "$canvas_width" != 256 ]]; then
+        printf 'Unexpected SVG canvas width at 400%%: %s\n' "$canvas_width" >&2
+        exit 1
+    fi
     xdotool mousemove 12 16
     sleep 0.2
     svg_preview="$(dirname "$WORKBENCH_PREVIEW")/svg-preview-400.png"
     import -window root "$svg_preview"
-    [[ $(convert "$svg_preview" -crop "4x1+$((canvas_x + 64))+$((canvas_y + 30))" +repage \
-        -format '%[fx:u.p{0,0}.r<0.2&&u.p{1,0}.r>0.95&&u.p{2,0}.r>0.95&&u.p{3,0}.r<0.2]' info:) == 1 ]]
+    stroke_crop="4x1+$((canvas_x + 64))+$((canvas_y + 30))"
+    if [[ $(convert "$svg_preview" -crop "$stroke_crop" +repage \
+        -format '%[fx:u.p{0,0}.r<0.2&&u.p{1,0}.r>0.95&&u.p{2,0}.r>0.95&&u.p{3,0}.r<0.2]' info:) != 1 ]]; then
+        convert "$svg_preview" -crop "$stroke_crop" +repage txt:- >&2
+        exit 1
+    fi
     printf '%s\n' 'SVG zoom resolves a half-pixel source stroke into a sharp two-pixel line at 400%.'
     widget mouse '000-layout.txt'
     widget click '预览'
