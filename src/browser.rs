@@ -192,6 +192,7 @@ impl Browser {
     pub fn reset(&self) {
         self.invalidate();
         self.session.replace(Weak::new());
+        self.cached.borrow_mut().clear();
         self.clear_view();
         self.status.set_text("打开终端标签以浏览文件");
         self.update_controls();
