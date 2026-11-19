@@ -112,9 +112,13 @@ impl Attachments {
         }
         let directory =
             std::env::temp_dir().join(format!("span-clipboard-{}", glib::uuid_string_random()));
-        let mut builder = DirBuilder::new();
+        let builder = DirBuilder::new();
         #[cfg(unix)]
-        builder.mode(0o700);
+        let builder = {
+            let mut builder = builder;
+            builder.mode(0o700);
+            builder
+        };
         builder
             .create(&directory)
             .map_err(|error| format!("无法准备剪贴板图片：{error}"))?;

@@ -35,23 +35,30 @@ jobs:
             mingw-w64-x86_64-gtk3
             mingw-w64-x86_64-librsvg
 
-      - name: Build Span and test ConPTY
+      - name: Build and package Span
         shell: msys2 {0}
         run: |
+          set -euo pipefail
           rustup toolchain install 1.98.1 --profile minimal --target x86_64-pc-windows-gnu
           export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$(cygpath -m /mingw64/bin/gcc.exe)"
           export PKG_CONFIG="$(cygpath -m /mingw64/bin/pkg-config.exe)"
           export RUSTFLAGS="-Lnative=$(cygpath -m /mingw64/lib)"
-          cargo +1.98.1 test --locked --release --target x86_64-pc-windows-gnu -- --test-threads=1
+          cargo +1.98.1 test --locked --release --target x86_64-pc-windows-gnu --no-run
+          tests=(target/x86_64-pc-windows-gnu/release/deps/span-*.exe)
+          [[ ${#tests[@]} -eq 1 ]]
+          install -Dm755 "${tests[0]}" dist/windows/span-tests.exe
           cargo +1.98.1 build --locked --release --target x86_64-pc-windows-gnu
           bash packaging/package-windows.sh
 
-      - name: Verify portable package starts without MSYS2
+      - name: Test relocated portable package without MSYS2
         shell: pwsh
         run: |
           $testPath = Join-Path $env:RUNNER_TEMP "Span relocated"
           Copy-Item -Recurse dist/windows/Span $testPath
+          Copy-Item dist/windows/span-tests.exe "$testPath\span-tests.exe"
           $env:Path = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\OpenSSH"
+          & "$testPath\span-tests.exe" --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed with the packaged runtime" }
           $app = Start-Process "$testPath\Span.exe" -WorkingDirectory $env:RUNNER_TEMP -PassThru
           try {
             for ($i = 0; $i -lt 60; $i++) {

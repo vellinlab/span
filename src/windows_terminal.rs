@@ -349,6 +349,7 @@ impl Terminal {
         }
     }
 
+    #[allow(non_upper_case_globals)] // GDK names the key constants after their keysyms.
     fn key(&self, event: &gdk::EventKey, input: &gtk::IMMulticontext) -> glib::Propagation {
         use gdk::keys::constants::*;
         let modifiers = event.state();

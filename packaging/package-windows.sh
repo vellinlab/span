@@ -34,6 +34,10 @@ collect_dlls() {
     done < <(objdump -p "$1" | awk '/DLL Name:/ { print $3 }')
 }
 collect_dlls "$package/Span.exe"
+for helper in gspawn-win64-helper.exe gspawn-win64-helper-console.exe; do
+    install -m755 "$runtime/bin/$helper" "$package/$helper"
+    collect_dlls "$runtime/bin/$helper"
+done
 for module in "${loader_dlls[@]}"; do
     if [[ -f "$module" ]]; then
         collect_dlls "$module"
