@@ -1,5 +1,6 @@
 use crate::files::{self, Directory, Kind, Source};
 use crate::icons::{self, Icon};
+use crate::preview::{Artifact, Panel};
 use crate::session::Session;
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
@@ -24,11 +25,7 @@ pub struct Browser {
     hidden: gtk::ToggleButton,
     entry_icons: [Option<gdk_pixbuf::Pixbuf>; 3],
     rows: gtk::TreeView,
-    content: gtk::Stack,
-    preview_title: gtk::Label,
-    preview_body: gtk::Box,
-    preview_serial: Cell<u64>,
-    preview_file: RefCell<Option<PathBuf>>,
+    preview: Rc<Panel>,
     transfer_notice: gtk::Label,
     transferring: Cell<bool>,
     session: RefCell<Weak<Session>>,
@@ -57,10 +54,9 @@ struct Request {
 }
 
 impl Browser {
-    pub fn new() -> Rc<Self> {
+    pub fn new(preview: Rc<Panel>) -> Rc<Self> {
         let panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
         panel.style_context().add_class("files-panel");
-        panel.set_width_request(330);
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.style_context().add_class("files-header");
@@ -72,9 +68,6 @@ impl Browser {
         let hidden = gtk::ToggleButton::with_label("隐藏项");
         hidden.set_tooltip_text(Some("显示隐藏文件和目录"));
         header.pack_start(&hidden, false, false, 0);
-        let close = tool(Icon::Close, "收起文件目录");
-        close.set_action_name(Some("win.files"));
-        header.pack_start(&close, false, false, 0);
         panel.pack_start(&header, false, false, 0);
 
         let location = gtk::Box::new(gtk::Orientation::Horizontal, 5);
@@ -105,12 +98,8 @@ impl Browser {
         rows.set_headers_visible(true);
         rows.set_enable_search(true);
         rows.set_search_column(0);
-        rows.set_tooltip_column(0);
-        for (index, (title, width)) in
-            [("名称", 144), ("大小", 61), ("修改时间", 111), ("权限", 76)]
-                .into_iter()
-                .enumerate()
-        {
+        rows.set_tooltip_column(4);
+        for (index, (title, width)) in [("名称", 118), ("大小", 60)].into_iter().enumerate() {
             let renderer = gtk::CellRendererText::new();
             renderer.set_ellipsize(pango::EllipsizeMode::End);
             let column = gtk::TreeViewColumn::new();
@@ -123,7 +112,7 @@ impl Browser {
                 let image = gtk::CellRendererPixbuf::new();
                 image.set_padding(5, 0);
                 TreeViewColumnExt::pack_start(&column, &image, false);
-                TreeViewColumnExt::add_attribute(&column, &image, "pixbuf", 5);
+                TreeViewColumnExt::add_attribute(&column, &image, "pixbuf", 3);
             }
             TreeViewColumnExt::pack_start(&column, &renderer, true);
             TreeViewColumnExt::add_attribute(&column, &renderer, "text", index as i32);
@@ -135,27 +124,7 @@ impl Browser {
             .vscrollbar_policy(gtk::PolicyType::Automatic)
             .build();
         scroll.add(&rows);
-        let content = gtk::Stack::builder().homogeneous(false).build();
-        content.add_named(&scroll, "list");
-        let preview = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let preview_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        preview_header
-            .style_context()
-            .add_class("files-preview-header");
-        let back = gtk::Button::with_label("返回目录");
-        back.style_context().add_class("quiet-button");
-        preview_header.pack_start(&back, false, false, 0);
-        let preview_title = gtk::Label::builder()
-            .xalign(0.0)
-            .ellipsize(pango::EllipsizeMode::Middle)
-            .build();
-        preview_header.pack_start(&preview_title, true, true, 0);
-        preview.pack_start(&preview_header, false, false, 0);
-        let preview_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        preview_body.style_context().add_class("files-preview");
-        preview.pack_start(&preview_body, true, true, 0);
-        content.add_named(&preview, "preview");
-        panel.pack_start(&content, true, true, 0);
+        panel.pack_start(&scroll, true, true, 0);
 
         let transfer_notice = gtk::Label::builder()
             .xalign(0.0)
@@ -174,8 +143,6 @@ impl Browser {
         panel.pack_end(&status, false, false, 0);
 
         panel.show_all();
-        panel.set_no_show_all(true);
-        panel.hide();
         let browser = Rc::new(Self {
             panel,
             path,
@@ -192,11 +159,7 @@ impl Browser {
                 icons::pixbuf(Icon::Link, 16, &gdk::RGBA::new(0.63, 0.68, 0.74, 1.0)),
             ],
             rows,
-            content,
-            preview_title,
-            preview_body,
-            preview_serial: Cell::new(0),
-            preview_file: RefCell::new(None),
+            preview,
             transfer_notice,
             transferring: Cell::new(false),
             session: RefCell::new(Weak::new()),
@@ -208,12 +171,6 @@ impl Browser {
             loading: Cell::new(false),
             monitor: RefCell::new(None),
         });
-        let weak = Rc::downgrade(&browser);
-        back.connect_clicked(move |_| {
-            if let Some(browser) = weak.upgrade() {
-                browser.close_preview();
-            }
-        });
         browser.connect();
         browser.update_controls();
         browser
@@ -221,12 +178,11 @@ impl Browser {
 
     pub fn select(self: &Rc<Self>, session: Option<&Rc<Session>>) {
         let next = session.map(Rc::downgrade).unwrap_or_default();
-        if !self.panel.is_visible() || self.session.borrow().ptr_eq(&next) {
+        if self.session.borrow().ptr_eq(&next) {
             return;
         }
         self.session.replace(next.clone());
         self.invalidate();
-        self.close_preview();
         let current = session.and_then(|session| self.take_cached(&next, &session.file_source()));
         if let Some(view) = current {
             let fresh = view.fetched_at.elapsed() < DIRECTORY_FRESHNESS;
@@ -258,7 +214,6 @@ impl Browser {
         self.invalidate();
         self.session.replace(Weak::new());
         self.cached.borrow_mut().clear();
-        self.close_preview();
         self.clear_view();
         self.status.set_text("打开终端标签以浏览文件");
         self.update_controls();
@@ -391,7 +346,7 @@ impl Browser {
     fn entry_at(&self, row: &gtk::TreePath) -> Option<(PathBuf, Kind)> {
         let model = self.rows.model()?;
         let iter = model.iter(row)?;
-        let index = model.value(&iter, 4).get::<u32>().ok()? as usize;
+        let index = model.value(&iter, 2).get::<u32>().ok()? as usize;
         let directory = self.directory.borrow();
         let directory = directory.as_ref()?;
         let entry = directory.entries.get(index)?;
@@ -404,104 +359,12 @@ impl Browser {
         (kind == Kind::File).then_some(path)
     }
 
-    fn close_preview(&self) {
-        self.preview_serial.set(self.preview_serial.get() + 1);
-        self.preview_file.take();
-        self.content.set_visible_child_name("list");
-        for child in self.preview_body.children() {
-            self.preview_body.remove(&child);
+    fn open_preview(&self, path: PathBuf) {
+        if let Some(session) = self.session.borrow().upgrade() {
+            let source = session.file_source();
+            self.preview
+                .offer(&session, Artifact::File { source, path }, false);
         }
-        self.update_controls();
-    }
-
-    fn open_preview(self: &Rc<Self>, path: PathBuf) {
-        let Some(session) = self.session.borrow().upgrade() else {
-            return;
-        };
-        let source = session.file_source();
-        self.close_preview();
-        let serial = self.preview_serial.get();
-        self.preview_file.replace(Some(path.clone()));
-        self.preview_title.set_text(&file_name(&path));
-        self.preview_title
-            .set_tooltip_text(Some(&files::display(path.as_os_str())));
-        self.show_preview_notice("正在加载预览…");
-        self.content.set_visible_child_name("preview");
-        self.update_controls();
-        let weak = Rc::downgrade(self);
-        glib::MainContext::default().spawn_local(async move {
-            let result = gio::spawn_blocking(move || read_preview(&source, &path))
-                .await
-                .unwrap_or_else(|_| Err("文件预览被中断。".into()));
-            if let Some(browser) = weak
-                .upgrade()
-                .filter(|browser| browser.preview_serial.get() == serial)
-            {
-                browser.show_preview(result);
-            }
-        });
-    }
-
-    fn show_preview(&self, result: Result<Preview, String>) {
-        for child in self.preview_body.children() {
-            self.preview_body.remove(&child);
-        }
-        let scroll = gtk::ScrolledWindow::builder()
-            .overlay_scrolling(false)
-            .build();
-        match result {
-            Ok(Preview::Text(text)) => {
-                let view = gtk::TextView::builder()
-                    .editable(false)
-                    .cursor_visible(false)
-                    .monospace(true)
-                    .wrap_mode(gtk::WrapMode::WordChar)
-                    .left_margin(12)
-                    .right_margin(12)
-                    .top_margin(10)
-                    .bottom_margin(10)
-                    .build();
-                if let Some(buffer) = view.buffer() {
-                    buffer.set_text(&text);
-                }
-                scroll.add(&view);
-            }
-            Ok(Preview::Image(data)) => {
-                let image = match crate::agent_render::decode_image(&data) {
-                    Ok(image) => image,
-                    Err(error) => {
-                        self.show_preview_notice(&error);
-                        return;
-                    }
-                };
-                let width = self.preview_body.allocated_width().clamp(230, 1200) - 20;
-                let scaled = if image.width() > width {
-                    let height = (i64::from(image.height()) * i64::from(width)
-                        / i64::from(image.width()))
-                    .max(1) as i32;
-                    image.scale_simple(width, height, gdk_pixbuf::InterpType::Bilinear)
-                } else {
-                    None
-                };
-                scroll.add(&gtk::Image::from_pixbuf(scaled.as_ref().or(Some(&image))));
-            }
-            Err(error) => {
-                self.show_preview_notice(&error);
-                return;
-            }
-        }
-        self.preview_body.pack_start(&scroll, true, true, 0);
-        scroll.show_all();
-    }
-
-    fn show_preview_notice(&self, text: &str) {
-        let notice = gtk::Label::new(Some(text));
-        notice.set_line_wrap(true);
-        notice.set_margin_top(16);
-        notice.set_margin_start(12);
-        notice.set_margin_end(12);
-        self.preview_body.pack_start(&notice, false, false, 0);
-        notice.show();
     }
 
     fn choose_transfer(self: &Rc<Self>, button: &gtk::Button, upload: bool) {
@@ -511,10 +374,7 @@ impl Browser {
         let target = if upload {
             self.current_path()
         } else {
-            self.preview_file
-                .borrow()
-                .clone()
-                .or_else(|| self.selected_file())
+            self.selected_file()
         };
         let Some(target) = target else { return };
         let source = session.file_source();
@@ -598,7 +458,7 @@ impl Browser {
                                 .cached
                                 .borrow_mut()
                                 .retain(|view| !view.session.ptr_eq(&session));
-                            if browser.panel.is_visible()
+                            if browser.panel.is_mapped()
                                 && browser.session.borrow().ptr_eq(&session)
                                 && browser.current_path().as_ref() == Some(&work_dir)
                             {
@@ -623,9 +483,6 @@ impl Browser {
         let Some(session) = self.session.borrow().upgrade() else {
             return;
         };
-        if path != self.current_path() {
-            self.close_preview();
-        }
         self.invalidate();
         let id = self.request.get();
         let source = session.file_source();
@@ -648,7 +505,7 @@ impl Browser {
     }
 
     pub fn reload(self: &Rc<Self>) {
-        if self.panel.is_visible() {
+        if self.panel.is_mapped() {
             let session = self.session.borrow();
             self.cached
                 .borrow_mut()
@@ -749,10 +606,9 @@ impl Browser {
         let list = gtk::ListStore::new(&[
             String::static_type(),
             String::static_type(),
-            String::static_type(),
-            String::static_type(),
             u32::static_type(),
             gdk_pixbuf::Pixbuf::static_type(),
+            String::static_type(),
         ]);
         for (index, entry) in directory.entries.iter().enumerate() {
             if !show_hidden && entry.hidden() {
@@ -781,10 +637,15 @@ impl Browser {
                 &[
                     (0, &name),
                     (1, &size),
-                    (2, &modified),
-                    (3, &mode),
-                    (4, &(index as u32)),
-                    (5, icon),
+                    (2, &(index as u32)),
+                    (3, icon),
+                    (
+                        4,
+                        &format!(
+                            "{}\n修改时间 {modified} · 权限 {mode}",
+                            glib::markup_escape_text(&name)
+                        ),
+                    ),
                 ],
             );
         }
@@ -817,46 +678,12 @@ impl Browser {
         self.hidden.set_sensitive(available);
         let selected = available && self.selected_file().is_some();
         self.preview_button.set_sensitive(selected);
-        self.download.set_sensitive(
-            (selected || self.preview_file.borrow().is_some()) && !self.transferring.get(),
-        );
+        self.download
+            .set_sensitive(selected && !self.transferring.get());
         self.upload.set_sensitive(
             available && self.directory.borrow().is_some() && !self.transferring.get(),
         );
     }
-}
-
-enum Preview {
-    Text(String),
-    Image(Vec<u8>),
-}
-
-fn read_preview(source: &Source, path: &Path) -> Result<Preview, String> {
-    let image_extension = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            ["png", "jpg", "jpeg"]
-                .iter()
-                .any(|image| ext.eq_ignore_ascii_case(image))
-        });
-    let size_limit = if image_extension {
-        8 * 1024 * 1024
-    } else {
-        256 * 1024
-    };
-    let bytes = source.preview(path, size_limit)?;
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.starts_with(b"\xff\xd8\xff") {
-        return Ok(Preview::Image(bytes));
-    }
-    let text = String::from_utf8(bytes)
-        .ok()
-        .filter(|text| {
-            text.chars()
-                .all(|ch| !ch.is_control() || matches!(ch, '\r' | '\n' | '\t'))
-        })
-        .ok_or("可预览 UTF-8 文本、代码、PNG 和 JPEG。此文件可下载。")?;
-    Ok(Preview::Text(text))
 }
 
 fn file_name(path: &Path) -> String {

@@ -8,6 +8,7 @@ use crate::agent_rpc::Rpc;
 use crate::agent_task::TaskStatus;
 use crate::agent_usage::Usage;
 use crate::icons::{self, Icon};
+use crate::preview::{Artifact, Offer};
 use gtk::prelude::*;
 use gtk::{gio, glib, pango};
 use serde_json::{Value, json};
@@ -89,6 +90,7 @@ pub struct Agent {
     pub panel: gtk::Box,
     connection: Box<dyn Fn() -> Result<Option<PathBuf>, String>>,
     reveal: Box<dyn Fn()>,
+    preview: Offer,
     rpc: RefCell<Option<Rc<Rpc>>>,
     pending: RefCell<HashMap<u64, Request>>,
     thread: RefCell<Option<String>>,
@@ -149,6 +151,7 @@ impl Agent {
         connection: impl Fn() -> Result<Option<PathBuf>, String> + 'static,
         toggle_terminal: impl Fn() + 'static,
         reveal: impl Fn() + 'static,
+        preview: Offer,
     ) -> Rc<Self> {
         let panel = column(0);
         panel.style_context().add_class("agent-panel");
@@ -348,6 +351,7 @@ impl Agent {
             panel,
             connection: Box::new(connection),
             reveal: Box::new(reveal),
+            preview,
             rpc: RefCell::new(None),
             pending: RefCell::new(HashMap::new()),
             thread: RefCell::new(None),
@@ -1416,6 +1420,20 @@ impl Agent {
                 } else if method == "item/completed" {
                     self.completed_item(item, false);
                 }
+                if method == "item/completed" && item["type"] == "fileChange" {
+                    let context = self.context.borrow();
+                    for change in array(&item["changes"])
+                        .filter(|change| change["kind"] == "add" || change["kind"]["type"] == "add")
+                        .take(4)
+                    {
+                        if let Some(artifact) = change["path"]
+                            .as_str()
+                            .and_then(|path| Artifact::output(path, &context))
+                        {
+                            (self.preview)(artifact, true);
+                        }
+                    }
+                }
             }
             "item/reasoning/summaryTextDelta" => {
                 if let (Some(turn), Some((id, index, delta))) = (
@@ -1692,12 +1710,18 @@ impl Agent {
             }
             Some("imageGeneration") => {
                 if let Some(path) = item["savedPath"].as_str() {
-                    let image = agent_render::image(
-                        path,
-                        "生成的图片",
-                        &self.context.borrow(),
-                        !loading_history,
-                    );
+                    let context = self.context.borrow();
+                    let image = agent_render::image(path, "生成的图片", &context, !loading_history);
+                    if !path.is_empty() && !path.contains(['\0', ':']) {
+                        let artifact = Artifact::host_file(context.cwd.join(path), &context);
+                        if !loading_history {
+                            (self.preview)(artifact.clone(), true);
+                        }
+                        image.add(&agent_render::artifact_button(
+                            artifact,
+                            self.preview.clone(),
+                        ));
+                    }
                     self.append(&image);
                 }
             }
@@ -1849,6 +1873,7 @@ impl Agent {
             &text,
             &self.context.borrow(),
             !loading_history,
+            &self.preview,
         ));
         self.append(&message);
     }

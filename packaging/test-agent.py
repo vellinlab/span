@@ -322,8 +322,13 @@ for line in sys.stdin:
                  "isOther": False, "isSecret": False, "options": None}]}})
     elif request_id == "preview-question":
         assert request["result"] == {"answers": {"environment": {"answers": ["Staging"]}}}
+        (home / "generated-preview.html").write_text("""<!doctype html><html><head>
+            <style>body { background: #123; }</style></head><body>
+            <h1>Generated workspace page</h1><p>Deployment preview &amp; status</p>
+            <script>window.spanPreview = 'fixture script sentinel';</script></body></html>""")
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
-              "item": {"id": "environment-reply", "type": "agentMessage", "text": "Environment confirmed."}}})
+              "item": {"id": "environment-reply", "type": "agentMessage",
+                       "text": "Environment confirmed. See [the generated page](./generated-preview.html)."}}})
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
               "item": {"id": "reasoning", "type": "reasoning", "summary": ["Checked the build before publishing."],
                        "content": ["fixture raw reasoning sentinel"]}}})

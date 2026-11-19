@@ -162,6 +162,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool mousemove 1250 770
     mkdir "$HOME/Documents" "$HOME/Projects"
     printf 'Workspace notes\n' > "$HOME/notes.txt"
+    printf 'Split workspace preview\n' > "$HOME/000-layout.txt"
     xdotool key --clearmodifiers ctrl+shift+f
     sleep 0.5
     import -window "$window" "$WORKBENCH_PREVIEW"
@@ -211,6 +212,10 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     [[ $(cat "$HOME/agent-prompt") == "$prompt" ]]
     printf '%s\n' 'Enter commits input composition, then sends. Shift+Enter inserts a newline.'
     widget contains '等待你的回复'
+    widget bounds '预览区' >/dev/null
+    widget click '上一个预览'
+    widget bounds 'Mermaid 图' >/dev/null
+    widget click '关闭预览'
     [[ $(widget count '复制本轮 Markdown') == 0 && $(widget count '复制本轮富文本') == 0 ]]
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
@@ -233,6 +238,12 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget fill-card 'Which deployment environment?' Staging
     widget click '提交答案'
     wait_until "the structured answer" test -f "$HOME/agent-answered"
+    widget contains 'Generated workspace page'
+    widget contains 'Deployment preview & status'
+    widget not-contains 'fixture script sentinel'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/generated-preview.png"
+    widget click '关闭预览'
+    printf '%s\n' 'Generated images, diagrams and HTML open in the shared preview pane.'
     widget click '用量 · 13%'
     widget contains '会话累计 · 12,800 tokens'
     widget contains '5 小时 · 已用 17%'
@@ -269,9 +280,12 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     grep -q '<td>12 passed</td>' "$HOME/table.html"
     read -r code_x code_y _ code_height < <(widget bounds '复制代码')
     before_scroll="$(widget scroll-value '对话记录')"
-    xdotool mousemove "$((code_x - 90))" "$((code_y + code_height + 12))" click 4
+    xdotool mousemove "$((code_x - 90))" "$((code_y + code_height + 12))" click 5
     after_scroll="$(widget scroll-value '对话记录')"
-    ((after_scroll < before_scroll))
+    if ((after_scroll <= before_scroll)); then
+        printf 'Wheel over the code block did not scroll the conversation (%d to %d).\n' "$before_scroll" "$after_scroll" >&2
+        exit 1
+    fi
     printf '%s\n' 'The wheel scrolls the conversation over a code block that has reached its edge.'
     widget click '复制代码'
     xclip -out -selection clipboard | grep -qx 'target=staging'
@@ -297,6 +311,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains 'Deployment rollout'
     xdotool windowsize --sync "$window" 1580 950
     xdotool key --clearmodifiers ctrl+shift+f
+    widget mouse '000-layout.txt'
+    widget click '预览'
+    widget contains 'Split workspace preview'
     sleep 0.35
     xdotool mousemove --window "$window" 355 390 click --repeat 16 4
     sleep 0.2
@@ -309,6 +326,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     sleep 0.2
     read -r narrow_x _ < <(widget bounds '输入消息，或添加附件')
     ((wide_x > narrow_x + 32))
+    widget click '关闭预览'
     xdotool key --clearmodifiers ctrl+shift+f
     xdotool windowsize --sync "$window" 1250 940
     printf '%s\n' 'The centered composer adapts to both wide and narrow split layouts.'
@@ -417,24 +435,25 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
     widget click '刷新'
     widget contains '点击会话继续'
+    xdotool key --clearmodifiers ctrl+shift+t
+    widget contains 'Release checklist'
+    catalog_requests="$(wc -l < "$HOME/agent-catalog-requests")"
+    xdotool key --clearmodifiers ctrl+Page_Up
+    widget contains 'Latest deployment notes'
+    widget not-contains 'Release checklist'
+    xdotool key --clearmodifiers ctrl+Page_Down
+    widget contains 'Release checklist'
+    [[ $(wc -l < "$HOME/agent-catalog-requests") -eq $catalog_requests ]]
+    xdotool key --clearmodifiers ctrl+shift+w
+    widget not-contains 'Release checklist'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'agent-older-page'
     printf 'Workspace preview fixture\n' > "$HOME/000-switch-fixture.txt"
     xdotool key --clearmodifiers ctrl+shift+t
-    widget contains 'Release checklist'
     widget contains '000-switch-fixture.txt'
-    catalog_requests="$(wc -l < "$HOME/agent-catalog-requests")"
     xdotool key --clearmodifiers ctrl+Page_Up
-    widget contains 'Deployment rollout'
     widget contains 'agent-older-page'
-    widget not-contains 'Release checklist'
     widget not-contains '000-switch-fixture.txt'
-    xdotool key --clearmodifiers ctrl+Page_Down
-    widget contains 'Release checklist'
-    widget contains '000-switch-fixture.txt'
-    [[ $(wc -l < "$HOME/agent-catalog-requests") -eq $catalog_requests ]]
-    xdotool key --clearmodifiers ctrl+shift+w
-    widget not-contains 'Release checklist'
     widget click '刷新目录'
     widget contains '000-switch-fixture.txt'
     widget mouse '000-switch-fixture.txt'
@@ -443,8 +462,10 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains 'Workspace preview fixture'
     widget state '下载' sensitive
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/files-preview.png"
-    widget click '返回目录'
     xdotool key --clearmodifiers ctrl+shift+f
+    widget contains 'Workspace preview fixture'
+    widget click '关闭预览'
+    xdotool key --clearmodifiers ctrl+Page_Down ctrl+shift+w
     printf '%s\n' 'Warm tab switches reused their catalogs and directory models. Explicit refresh read the new file.'
     xdotool key --clearmodifiers ctrl+shift+a
     printf '%s\n' 'The Codex session tested formatted table data, structured questions, diff, drawer, search and paginated history.'

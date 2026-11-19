@@ -2,6 +2,7 @@ use crate::browser::Browser;
 use crate::host_dialog;
 use crate::hosts::{self, Host};
 use crate::icons::{Icon, widget as icon};
+use crate::preview::Panel;
 use crate::session::{Launch, Session, State};
 use crate::{APP_ID, APP_NAME};
 use gtk::prelude::*;
@@ -18,8 +19,9 @@ struct Workbench {
     sidebar_pages: gtk::Stack,
     sidebar_catalog: gtk::Box,
     panels_pending: Cell<bool>,
-    workspace: gtk::Paned,
+    files_return: Cell<&'static str>,
     browser: Rc<Browser>,
+    preview: Rc<Panel>,
     search: gtk::SearchEntry,
     host_list: gtk::Box,
     status: gtk::Label,
@@ -49,8 +51,11 @@ pub fn open(app: &gtk::Application) {
     sidebar.style_context().add_class("host-sidebar");
     let sidebar_pages = gtk::Stack::new();
     let sidebar_catalog = column(0);
+    let preview = Panel::new();
+    let browser = Browser::new(preview.clone());
     sidebar_pages.add_titled(&hosts_view, "hosts", "主机");
     sidebar_pages.add_titled(&sidebar_catalog, "sessions", "会话");
+    sidebar_pages.add_titled(&browser.panel, "files", "文件");
     let sidebar_tabs = gtk::StackSwitcher::new();
     sidebar_tabs.style_context().add_class("sidebar-tabs");
     sidebar_tabs.set_homogeneous(true);
@@ -83,11 +88,17 @@ pub fn open(app: &gtk::Application) {
     views.add_named(&empty_workspace(), "empty");
     layout.pack_start(&tool_rail(&sidebar), false, false, 0);
     layout.pack_start(&sidebar, false, false, 0);
-    let browser = Browser::new();
     let workspace = gtk::Paned::new(gtk::Orientation::Horizontal);
     workspace.style_context().add_class("files-split");
     workspace.pack1(&views, true, true);
-    workspace.pack2(&browser.panel, false, false);
+    workspace.pack2(&preview.widget, false, false);
+    let split = workspace.downgrade();
+    preview.widget.connect_show(move |_| {
+        if let Some(split) = split.upgrade() {
+            let width = split.allocated_width();
+            split.set_position((width - (width * 2 / 5).clamp(280, 500)).max(0));
+        }
+    });
     layout.pack_start(&workspace, true, true, 0);
     root.pack_start(&layout, true, true, 0);
 
@@ -118,8 +129,9 @@ pub fn open(app: &gtk::Application) {
         sidebar_pages,
         sidebar_catalog,
         panels_pending: Cell::new(false),
-        workspace,
+        files_return: Cell::new("hosts"),
         browser,
+        preview,
         search,
         host_list,
         status,
@@ -196,7 +208,19 @@ pub fn open(app: &gtk::Application) {
         .sidebar_pages
         .connect_visible_child_name_notify(move |_| {
             if let Some(workbench) = weak.upgrade() {
-                workbench.sync_catalog(workbench.current_session().as_ref(), false);
+                let current = workbench.current_session();
+                match workbench.sidebar_pages.visible_child_name().as_deref() {
+                    Some("files") => workbench.browser.select(current.as_ref()),
+                    other => {
+                        workbench.files_return.set(if other == Some("sessions") {
+                            "sessions"
+                        } else {
+                            "hosts"
+                        });
+                        workbench.browser.reset();
+                        workbench.sync_catalog(current.as_ref(), false);
+                    }
+                }
             }
         });
     let weak = Rc::downgrade(&workbench);
@@ -232,7 +256,10 @@ impl Workbench {
             if let Some(workbench) = weak.upgrade() {
                 workbench.panels_pending.set(false);
                 let session = workbench.current_session();
-                workbench.browser.select(session.as_ref());
+                workbench.preview.select(session.as_ref());
+                if workbench.sidebar_pages.visible_child_name().as_deref() == Some("files") {
+                    workbench.browser.select(session.as_ref());
+                }
                 workbench.sync_catalog(session.as_ref(), false);
             }
         });
@@ -243,7 +270,7 @@ impl Workbench {
     }
 
     fn open_session(self: &Rc<Self>, launch: Launch) {
-        let session = Session::new(launch);
+        let session = Session::new(launch, Rc::downgrade(&self.preview));
         let tab = row(7);
         tab.style_context().add_class("tab-label");
         let label = text_label(session.launch.label(), "tab-title");
@@ -318,6 +345,7 @@ impl Workbench {
         if self.sessions.borrow().is_empty() {
             self.views.set_visible_child_name("empty");
             self.browser.select(None);
+            self.preview.select(None);
             self.sync_catalog(None, false);
         }
         self.refresh_status();
@@ -394,14 +422,14 @@ impl Workbench {
     }
 
     fn toggle_files(self: &Rc<Self>) {
-        if self.browser.panel.is_visible() {
-            self.browser.panel.hide();
-            self.browser.reset();
+        if self.sidebar.is_visible()
+            && self.sidebar_pages.visible_child_name().as_deref() == Some("files")
+        {
+            self.sidebar_pages
+                .set_visible_child_name(self.files_return.get());
         } else {
-            self.browser.panel.show();
-            self.workspace
-                .set_position((self.workspace.allocated_width() - 414).max(0));
-            self.browser.select(self.current_session().as_ref());
+            self.sidebar.show();
+            self.sidebar_pages.set_visible_child_name("files");
         }
     }
 

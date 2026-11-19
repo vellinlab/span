@@ -1,5 +1,6 @@
 use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delta};
 use crate::mermaid::Diagram;
+use crate::preview::{Artifact, Offer};
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
 use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
@@ -17,13 +18,14 @@ pub struct Context {
     pub socket: Option<PathBuf>,
 }
 
-pub fn response(markdown: &str, context: &Context, preview_images: bool) -> TextSelection {
+pub fn response(markdown: &str, context: &Context, live: bool, preview: &Offer) -> TextSelection {
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let mut pending = String::new();
     let mut selectable = Vec::new();
     let mut list_depth: u32 = 0;
     let mut link = false;
     let mut automatic_images = 0;
+    let mut artifacts = Vec::new();
     let mut events = parser(markdown).into_offset_iter();
     while let Some((event, range)) = events.next() {
         match event {
@@ -49,9 +51,13 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
                 };
                 if language == "mermaid" {
                     if let Some(diagram) = Diagram::parse(&code) {
+                        artifacts.push(Artifact::Mermaid(code.clone()));
                         blocks.add(&diagram_widget(diagram, code));
                         continue;
                     }
+                }
+                if matches!(language, "html" | "htm") && !code.trim().is_empty() {
+                    artifacts.push(Artifact::Html(code.clone()));
                 }
                 blocks.add(&code_card(language, &code, None));
             }
@@ -75,9 +81,18 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
                         std::path::Component::Normal(_) | std::path::Component::CurDir
                     )
                 });
-                let automatic = preview_images && relative && automatic_images < 3;
+                let automatic = live && relative && automatic_images < 3;
                 automatic_images += usize::from(automatic);
+                if let Some(artifact) = Artifact::output(&dest_url, context) {
+                    artifacts.push(artifact);
+                }
                 blocks.add(&image(&dest_url, &alt, context, automatic));
+            }
+            Event::Start(Tag::Link { ref dest_url, .. }) => {
+                if let Some(artifact) = Artifact::output(dest_url, context) {
+                    artifacts.push(artifact);
+                }
+                inline(&mut pending, event, &mut link);
             }
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph | TagEnd::Heading(_)) => {
@@ -105,7 +120,33 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
         }
     }
     flush_text(&blocks, &mut pending, &mut selectable);
+    if !artifacts.is_empty() {
+        let actions = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        actions.style_context().add_class("agent-preview-actions");
+        let mut unique = Vec::new();
+        for artifact in artifacts {
+            if !unique.contains(&artifact) {
+                unique.push(artifact);
+            }
+        }
+        for artifact in unique.into_iter().take(8) {
+            if live {
+                preview(artifact.clone(), true);
+            }
+            actions.add(&artifact_button(artifact, preview.clone()));
+        }
+        blocks.add(&actions);
+    }
     TextSelection::new(&blocks, selectable)
+}
+
+pub fn artifact_button(artifact: Artifact, preview: Offer) -> gtk::Button {
+    let label = format!("右侧预览 · {}", artifact.title());
+    let button = gtk::Button::with_label(&label);
+    button.set_halign(gtk::Align::Start);
+    button.style_context().add_class("quiet-button");
+    button.connect_clicked(move |_| preview(artifact.clone(), false));
+    button
 }
 
 fn escaped(text: &str) -> String {
@@ -784,6 +825,10 @@ pub(crate) fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
     } else {
         return Err("图片预览支持 PNG 和 JPEG。".into());
     };
+    decode_pixbuf(bytes, kind)
+}
+
+pub(crate) fn decode_pixbuf(bytes: &[u8], kind: &str) -> Result<gdk_pixbuf::Pixbuf, String> {
     let loader = gdk_pixbuf::PixbufLoader::with_type(kind).map_err(|e| e.to_string())?;
     loader.connect_size_prepared(|loader, w, h| {
         let scale = (1200.0 / f64::from(w.max(1)))

@@ -455,6 +455,22 @@ button.agent-send:disabled {
     border-bottom: 1px solid @line;
 }
 
+.preview-panel {
+    background: @canvas;
+    color: @foreground;
+}
+
+.preview-detail {
+    padding: 5px 10px;
+    color: @muted;
+    font-size: 11px;
+}
+
+.agent-preview-actions button {
+    padding: 3px 7px;
+    color: @accent;
+}
+
 .files-preview,
 .files-preview textview,
 .files-preview textview text {

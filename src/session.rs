@@ -2,12 +2,13 @@ use crate::agent::Agent;
 use crate::files::{ControlSocket, Source};
 use crate::hosts::Host;
 use crate::icons::Icon;
+use crate::preview::Panel;
 use crate::vte::Terminal;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 pub enum Launch {
     Local,
@@ -61,6 +62,7 @@ pub struct Session {
     cancellable: gio::Cancellable,
     control: RefCell<Option<ControlSocket>>,
     agent: RefCell<Option<Rc<Agent>>>,
+    preview: Weak<Panel>,
     shell: gtk::ScrolledWindow,
     agent_view: RefCell<Option<AgentView>>,
     reconnect: RefCell<Option<gio::FileMonitor>>,
@@ -72,7 +74,7 @@ struct AgentView {
 }
 
 impl Session {
-    pub fn new(launch: Launch) -> Rc<Self> {
+    pub fn new(launch: Launch, preview: Weak<Panel>) -> Rc<Self> {
         let terminal = Terminal::new();
         terminal.set_scrollback_lines(10_000);
         terminal.apply_theme();
@@ -121,6 +123,7 @@ impl Session {
             cancellable: gio::Cancellable::new(),
             control: RefCell::new(control),
             agent: RefCell::new(None),
+            preview,
             shell: scroll,
             agent_view: RefCell::new(None),
             reconnect: RefCell::new(None),
@@ -155,6 +158,7 @@ impl Session {
             let weak = Rc::downgrade(self);
             let drawer_session = weak.clone();
             let reveal_session = weak.clone();
+            let preview_session = weak.clone();
             let agent = Agent::new(
                 self.launch.label(),
                 self.directory.borrow().as_deref(),
@@ -178,6 +182,13 @@ impl Session {
                         session.show_agent();
                     }
                 },
+                Rc::new(move |artifact, automatic| {
+                    if let Some(session) = preview_session.upgrade()
+                        && let Some(preview) = session.preview.upgrade()
+                    {
+                        preview.offer(&session, artifact, automatic);
+                    }
+                }),
             );
             let split = gtk::Paned::new(gtk::Orientation::Vertical);
             let drawer = gtk::Box::new(gtk::Orientation::Vertical, 0);
