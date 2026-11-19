@@ -268,7 +268,7 @@ SVG
     sleep 0.25
     sample_memory "Codex connected"
     read -r _ bar_y _ bar_h <<< "$(widget bounds '附件')"
-    for name in '会话权限' '选择模型' '思考强度' 'Fast 模式' '用量' '发送'; do
+    for name in '会话权限' '选择模型' '思考强度' 'Fast 模式' '套餐额度' '上下文用量' '发送'; do
         read -r _ control_y _ control_h <<< "$(widget bounds "$name")"
         center_delta=$((2 * (control_y - bar_y) + control_h - bar_h))
         ((center_delta >= -2 && center_delta <= 2))
