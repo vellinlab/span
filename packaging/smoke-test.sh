@@ -267,6 +267,12 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget click '复制 HTML'
     xclip -out -selection clipboard -target text/html > "$HOME/table.html"
     grep -q '<td>12 passed</td>' "$HOME/table.html"
+    read -r code_x code_y _ code_height < <(widget bounds '复制代码')
+    before_scroll="$(widget scroll-value '对话记录')"
+    xdotool mousemove "$((code_x - 90))" "$((code_y + code_height + 12))" click 4
+    after_scroll="$(widget scroll-value '对话记录')"
+    ((after_scroll < before_scroll))
+    printf '%s\n' 'The wheel scrolls the conversation over a code block that has reached its edge.'
     widget click '复制代码'
     xclip -out -selection clipboard | grep -qx 'target=staging'
     widget click '保存 PNG'

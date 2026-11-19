@@ -2,7 +2,37 @@ use crate::agent_render::{clipboard, open_link};
 use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, OnceCell, RefCell};
+
+pub fn vertical_delta(event: &gdk::EventScroll) -> Option<f64> {
+    if event.state().contains(gdk::ModifierType::SHIFT_MASK) {
+        return None;
+    }
+    let delta = match event.direction() {
+        gdk::ScrollDirection::Up => -1.0,
+        gdk::ScrollDirection::Down => 1.0,
+        gdk::ScrollDirection::Smooth => {
+            let (x, y) = event.delta();
+            if y.abs() < x.abs() {
+                return None;
+            }
+            y
+        }
+        _ => return None,
+    };
+    (delta.is_finite() && delta != 0.0).then_some(delta)
+}
+
+pub fn scroll_vertical(scroll: &gtk::ScrolledWindow, delta: f64) -> f64 {
+    let adjustment = scroll.vadjustment();
+    let lower = adjustment.lower();
+    let upper = (adjustment.upper() - adjustment.page_size()).max(lower);
+    let step = adjustment.page_size().powf(2.0 / 3.0).max(1.0);
+    let previous = adjustment.value();
+    let next = (previous + step * delta).clamp(lower, upper);
+    adjustment.set_value(next);
+    delta - (next - previous) / step
+}
 
 pub struct Part {
     pub widget: gtk::EventBox,
@@ -53,6 +83,7 @@ mod imp {
     pub struct TextSelection {
         pub(super) parts: OnceCell<Vec<Part>>,
         pub(super) drag: Cell<Option<Drag>>,
+        pub(super) grab: RefCell<glib::WeakRef<gtk::EventBox>>,
         pub(super) range: Cell<Option<Range>>,
     }
 
@@ -93,14 +124,27 @@ impl TextSelection {
             }
         });
         view.connect_focus_out_event(|view, _| {
-            if view.imp().drag.take().is_some()
-                && let Some(grab) = gtk::grab_get_current().filter(|grab| grab.is_ancestor(view))
-            {
-                grab.grab_remove();
-            }
+            view.end_drag();
             glib::Propagation::Proceed
         });
+        view.connect_unmap(|view| {
+            view.end_drag();
+        });
         view
+    }
+
+    fn end_drag(&self) -> Option<Drag> {
+        let drag = self.imp().drag.take();
+        if let Some(widget) = self
+            .imp()
+            .grab
+            .take()
+            .upgrade()
+            .filter(|widget| widget.has_grab())
+        {
+            widget.grab_remove();
+        }
+        drag
     }
 
     fn bind_pointer(&self, widget: &gtk::EventBox) {
@@ -131,6 +175,7 @@ impl TextSelection {
                 start,
                 root: event.root(),
             }));
+            view.imp().grab.replace(widget.downgrade());
             widget.grab_add();
             glib::Propagation::Stop
         });
@@ -142,6 +187,10 @@ impl TextSelection {
             else {
                 return glib::Propagation::Proceed;
             };
+            if !event.state().contains(gdk::ModifierType::BUTTON1_MASK) {
+                view.end_drag();
+                return glib::Propagation::Proceed;
+            }
             view.extend_to(event.root());
             glib::Propagation::Stop
         });
@@ -150,15 +199,11 @@ impl TextSelection {
             let Some(view) = view.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            if event.button() != 1 {
+            if event.button() != 1 || view.imp().drag.get().is_none() {
                 return glib::Propagation::Proceed;
             }
             view.extend_to(event.root());
-            let drag = view.imp().drag.take();
-            if widget.has_grab() {
-                widget.grab_remove();
-            }
-            let Some(drag) = drag else {
+            let Some(drag) = view.end_drag() else {
                 return glib::Propagation::Proceed;
             };
             if let Some(text) = view.selected_text() {
@@ -177,33 +222,30 @@ impl TextSelection {
             glib::Propagation::Stop
         });
         let view = self.downgrade();
-        widget.connect_scroll_event(move |_, event| {
-            let Some(view) = view
-                .upgrade()
-                .filter(|view| view.imp().drag.get().is_some())
-            else {
-                return glib::Propagation::Proceed;
-            };
-            if event.state().contains(gdk::ModifierType::SHIFT_MASK) {
-                return glib::Propagation::Proceed;
+        widget.connect_grab_broken_event(move |_, _| {
+            if let Some(view) = view.upgrade() {
+                view.end_drag();
             }
-            let delta = match event.direction() {
-                gdk::ScrollDirection::Up => -1.0,
-                gdk::ScrollDirection::Down => 1.0,
-                gdk::ScrollDirection::Smooth => event.delta().1,
-                _ => 0.0,
-            };
-            if delta == 0.0 {
+            glib::Propagation::Proceed
+        });
+        let view = self.downgrade();
+        widget.connect_scroll_event(move |_, event| {
+            let (Some(view), Some(delta)) = (view.upgrade(), vertical_delta(event)) else {
                 return glib::Propagation::Proceed;
+            };
+            if view.imp().drag.get().is_some()
+                && !event.state().contains(gdk::ModifierType::BUTTON1_MASK)
+            {
+                view.end_drag();
             }
             if let Some(scroll) = view
                 .ancestor(gtk::ScrolledWindow::static_type())
                 .and_downcast::<gtk::ScrolledWindow>()
             {
-                let adjustment = scroll.vadjustment();
-                let step = adjustment.page_size().powf(2.0 / 3.0);
-                adjustment.set_value(adjustment.value() + step * delta);
-                view.extend_to(event.root());
+                scroll_vertical(&scroll, delta);
+                if view.imp().drag.get().is_some() {
+                    view.extend_to(event.root());
+                }
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed

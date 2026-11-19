@@ -203,13 +203,21 @@ impl Agent {
             .kinetic_scrolling(false)
             .build();
         scroll.style_context().add_class("agent-scroll");
+        scroll.connect_scroll_event(|scroll, event| {
+            if let Some(delta) = crate::agent_selection::vertical_delta(event) {
+                crate::agent_selection::scroll_vertical(scroll, delta);
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
         let follow_tail = Rc::new(Cell::new(true));
         let following = follow_tail.clone();
         scroll
             .vadjustment()
             .connect_value_changed(move |adjustment| {
                 following
-                    .set(adjustment.upper() - adjustment.page_size() - adjustment.value() <= 48.0);
+                    .set(adjustment.upper() - adjustment.page_size() - adjustment.value() <= 1.0);
             });
         if let Some(accessible) = scroll.accessible() {
             accessible.set_name("对话记录");

@@ -1,4 +1,4 @@
-use crate::agent_selection::{Part, TextSelection};
+use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delta};
 use crate::mermaid::Diagram;
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
@@ -313,40 +313,23 @@ fn table(
 
 fn scroll_conversation_at_edges(scroll: &gtk::ScrolledWindow) {
     scroll.connect_scroll_event(|scroll, event| {
-        if event.state().contains(gdk::ModifierType::SHIFT_MASK) {
+        let Some(delta) = vertical_delta(event) else {
             return glib::Propagation::Proceed;
-        }
-        let delta = match event.direction() {
-            gdk::ScrollDirection::Up => -1.0,
-            gdk::ScrollDirection::Down => 1.0,
-            gdk::ScrollDirection::Smooth if event.delta().1.abs() >= event.delta().0.abs() => {
-                event.delta().1
-            }
-            _ => 0.0,
         };
-        if delta == 0.0 {
-            return glib::Propagation::Proceed;
-        }
-        let own = scroll.vadjustment();
-        let remaining = if delta > 0.0 {
-            own.upper() - own.page_size() - own.value()
+        let remaining = if scroll.policy().1 == gtk::PolicyType::Never {
+            delta
         } else {
-            own.value() - own.lower()
+            scroll_vertical(scroll, delta)
         };
-        if scroll.policy().1 != gtk::PolicyType::Never && remaining > 0.5 {
-            return glib::Propagation::Proceed;
+        if remaining.abs() > 0.001
+            && let Some(timeline) = scroll
+                .parent()
+                .and_then(|parent| parent.ancestor(gtk::ScrolledWindow::static_type()))
+                .and_downcast::<gtk::ScrolledWindow>()
+        {
+            scroll_vertical(&timeline, remaining);
         }
-        let timeline = scroll
-            .parent()
-            .and_then(|parent| parent.ancestor(gtk::ScrolledWindow::static_type()))
-            .and_downcast::<gtk::ScrolledWindow>();
-        if let Some(timeline) = timeline {
-            let adjustment = timeline.vadjustment();
-            let step = adjustment.page_size().powf(2.0 / 3.0);
-            adjustment.set_value(adjustment.value() + step * delta);
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
+        glib::Propagation::Stop
     });
 }
 
