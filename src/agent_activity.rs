@@ -14,6 +14,7 @@ pub struct Activity {
     heading: gtk::Label,
     rows: gtk::Box,
     entries: HashMap<String, Entry>,
+    progress: String,
 }
 
 struct Entry {
@@ -140,6 +141,7 @@ impl Activity {
             heading,
             rows,
             entries: HashMap::new(),
+            progress: String::new(),
         }
     }
 
@@ -174,6 +176,7 @@ impl Activity {
             }
         }
         self.set_heading(&format!("进行中 · {}", record.title));
+        self.progress = record.title;
     }
 
     pub fn summary(&mut self, id: &str, index: usize, delta: &str) {
@@ -192,6 +195,17 @@ impl Activity {
             label.set_text(&detail);
         }
         self.set_heading("进行中 · 推理摘要");
+        if let Some(headline) = detail
+            .lines()
+            .map(|line| line.trim().trim_matches('*'))
+            .find(|line| !line.is_empty())
+        {
+            self.progress = limited(headline, 180);
+        }
+    }
+
+    pub fn progress(&self) -> &str {
+        &self.progress
     }
 
     pub fn finish(&self, status: Option<&str>) {

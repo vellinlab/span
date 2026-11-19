@@ -216,6 +216,12 @@ for line in sys.stdin:
             assert uploaded.read_text() == "Workspace notes\n"
             assert stat.S_IMODE(uploaded.stat().st_mode) == 0o600
             assert stat.S_IMODE(uploaded.parent.stat().st_mode) == 0o700
+            pasted = params["input"][1]
+            assert pasted["type"] == "localImage"
+            image = Path(pasted["path"])
+            assert image.parent == uploaded.parent and image.name == "02-剪贴板图片.png"
+            assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+            image.unlink()
             uploaded.unlink()
             uploaded.parent.rmdir()
             send({"id": request_id, "result": {"turn": {"id": "uploaded-turn", "status": "completed"}}})
@@ -242,6 +248,12 @@ for line in sys.stdin:
                   "turn": {"id": continued_turn, "status": "completed", "error": None}}})
             continue
         assert params["input"][1] == {"type": "localImage", "path": str(home / "test-output.png")}
+        pasted = params["input"][2]
+        assert pasted["type"] == "localImage"
+        image = Path(pasted["path"])
+        assert image.name == "剪贴板图片.png"
+        assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        assert stat.S_IMODE(image.stat().st_mode) == 0o600
         (home / "agent-prompt").write_text(params["input"][0]["text"])
         send({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress"}}})
         event = {"threadId": thread, "turnId": turn}

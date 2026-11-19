@@ -124,6 +124,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
         xdotool windowfocus --sync "$window"
         widget mouse '输入消息，或添加附件'
     }
+    paste_image() {
+        xclip -in -selection clipboard -target image/png "$HOME/test-output.png"
+        xdotool key --clearmodifiers ctrl+v
+        widget contains '剪贴板图片.png'
+    }
     wait_until "the Add Host dialog" dialog_open '添加主机'
     dialog="$(xdotool search --onlyvisible --name '^添加主机$' | head -n1)"
     xdotool windowfocus --sync "$dialog"
@@ -169,12 +174,16 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-effort-picker.png"
     widget mouse '高'
     add_attachment "$HOME/test-output.png"
-    xdotool type --clearmodifiers 'Show the deployment check'
+    paste_image
+    printf '%s' 'Show the deployment check' | xclip -in -selection clipboard
+    xdotool key --clearmodifiers ctrl+v
+    widget contains 'Show the deployment check'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-compose.png"
     xdotool key --clearmodifiers ctrl+Return
     wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
     grep -qx 'Show the deployment check' "$HOME/agent-prompt"
     widget contains 'Which deployment environment?'
+    widget contains '等待你的回复'
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
     xdotool mousemove --window "$window" 355 390 click --repeat 16 4
@@ -211,7 +220,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool mousemove "$((cell_x + 5))" "$((cell_y + cell_height / 2))" mousedown 1 \
         mousemove "$((next_x + next_width / 2))" "$((next_y + next_height / 2))" mouseup 1
     xdotool key --clearmodifiers ctrl+c
-    [[ $(xclip -out -selection clipboard) == $'Check\tResult' ]]
+    selected_text="$(xclip -out -selection clipboard)"
+    if [[ $selected_text != $'Check\tResult' ]]; then
+        printf 'Unexpected text after dragging across cells: %q\n' "$selected_text" >&2
+        exit 1
+    fi
     before_scroll="$(widget scroll-value '对话记录')"
     xdotool mousemove "$((cell_x + 5))" "$((cell_y + cell_height / 2))" mousedown 1 click 5
     after_scroll="$(widget scroll-value '对话记录')"
@@ -259,9 +272,15 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool type --clearmodifiers 'Check the comparison layout'
     widget click '发送'
     widget contains 'Preparing the comparison table.'
+    widget contains '正在生成回复'
+    widget contains 'Esc 中断'
+    widget contains '已运行 0:'
+    sleep 1.2
+    widget not-contains '已运行 0:00'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-task-status.png"
     read -r stop_x stop_y stop_width stop_height < <(widget bounds '中断推理')
     ((stop_width == stop_height))
-    widget click '中断推理'
+    xdotool key --clearmodifiers Escape
     read -r pause_x pause_y _ < <(widget bounds '继续推理')
     ((stop_x == pause_x && stop_y == pause_y))
     widget contains '已中断'
@@ -293,7 +312,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     ((narrow_row > wide_row))
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-table.png"
     xdotool windowsize --sync "$window" 1250 940
-    printf '%s\n' 'The composer interrupts and continues in place, and wrapped tables fit their rows at both widths.'
+    printf '%s\n' 'The composer reports elapsed task time, interrupts with Esc, continues in place, and wraps tables at both widths.'
 
     xdotool key --clearmodifiers ctrl+shift+j
     sleep 0.25
@@ -385,6 +404,7 @@ PY
         wait_until "automatic restoration on SSH reconnect" resumed_twice
         widget contains 'Latest deployment notes'
         add_attachment "$HOME/notes.txt"
+        paste_image
         xdotool type --clearmodifiers 'Read the remote attachment'
         xdotool key --clearmodifiers ctrl+Return
         wait_until "remote file attachment bytes, permissions, and path" test -f "$WORKBENCH_SSH_FIXTURE/agent-uploaded"

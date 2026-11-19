@@ -4,6 +4,7 @@ use gtk::{gdk, glib, pango};
 use std::cell::{Cell, OnceCell};
 
 pub struct Part {
+    pub widget: gtk::EventBox,
     label: gtk::Label,
     separator: &'static str,
 }
@@ -11,7 +12,12 @@ pub struct Part {
 impl Part {
     pub fn new(label: &gtk::Label, separator: &'static str) -> Self {
         label.set_selectable(false);
+        let widget = gtk::EventBox::new();
+        widget.set_visible_window(false);
+        widget.set_above_child(true);
+        widget.add(label);
         Self {
+            widget,
             label: label.clone(),
             separator,
         }
@@ -66,8 +72,33 @@ impl TextSelection {
         view.set_visible_window(false);
         view.set_can_focus(!view.parts().is_empty());
         view.add(child);
-        view.add_events(gdk::EventMask::SCROLL_MASK | gdk::EventMask::SMOOTH_SCROLL_MASK);
-        view.connect_button_press_event(|view, event| {
+        for part in view.parts() {
+            view.bind_pointer(&part.widget);
+        }
+        view.connect_key_press_event(|view, event| {
+            if event.state().contains(gdk::ModifierType::CONTROL_MASK)
+                && event.keyval().to_lower() == gdk::keys::constants::c
+                && view.copy()
+            {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        view.connect_focus_out_event(|view, _| {
+            view.imp().drag.set(None);
+            glib::Propagation::Proceed
+        });
+        view
+    }
+
+    fn bind_pointer(&self, widget: &gtk::EventBox) {
+        widget.add_events(gdk::EventMask::SCROLL_MASK | gdk::EventMask::SMOOTH_SCROLL_MASK);
+        let view = self.downgrade();
+        widget.connect_button_press_event(move |_, event| {
+            let Some(view) = view.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
             if event.button() != 1 {
                 return glib::Propagation::Proceed;
             }
@@ -79,14 +110,22 @@ impl TextSelection {
             view.imp().drag.set(Some(anchor));
             glib::Propagation::Stop
         });
-        view.connect_motion_notify_event(|view, event| {
-            if view.imp().drag.get().is_none() {
+        let view = self.downgrade();
+        widget.connect_motion_notify_event(move |_, event| {
+            let Some(view) = view
+                .upgrade()
+                .filter(|view| view.imp().drag.get().is_some())
+            else {
                 return glib::Propagation::Proceed;
-            }
+            };
             view.extend_to(event.root());
             glib::Propagation::Stop
         });
-        view.connect_button_release_event(|view, event| {
+        let view = self.downgrade();
+        widget.connect_button_release_event(move |_, event| {
+            let Some(view) = view.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
             if event.button() != 1 || view.imp().drag.get().is_none() {
                 return glib::Propagation::Proceed;
             }
@@ -97,10 +136,15 @@ impl TextSelection {
             }
             glib::Propagation::Stop
         });
-        view.connect_scroll_event(|view, event| {
-            if view.imp().drag.get().is_none()
-                || event.state().contains(gdk::ModifierType::SHIFT_MASK)
-            {
+        let view = self.downgrade();
+        widget.connect_scroll_event(move |_, event| {
+            let Some(view) = view
+                .upgrade()
+                .filter(|view| view.imp().drag.get().is_some())
+            else {
+                return glib::Propagation::Proceed;
+            };
+            if event.state().contains(gdk::ModifierType::SHIFT_MASK) {
                 return glib::Propagation::Proceed;
             }
             let delta = match event.direction() {
@@ -117,28 +161,17 @@ impl TextSelection {
                 .and_downcast::<gtk::ScrolledWindow>()
             {
                 let adjustment = scroll.vadjustment();
-                let step = adjustment.step_increment().max(16.0);
-                adjustment.set_value(adjustment.value() + 3.0 * step * delta);
+                let step = adjustment.page_size().powf(2.0 / 3.0);
+                adjustment.set_value(adjustment.value() + step * delta);
                 view.extend_to(event.root());
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed
         });
-        view.connect_key_press_event(|view, event| {
-            if event.state().contains(gdk::ModifierType::CONTROL_MASK)
-                && event.keyval().to_lower() == gdk::keys::constants::c
-                && view.copy()
-            {
-                glib::Propagation::Stop
-            } else {
-                glib::Propagation::Proceed
-            }
-        });
-        view.connect_focus_out_event(|view, _| {
-            view.imp().drag.set(None);
-            glib::Propagation::Proceed
-        });
-        view
+    }
+
+    pub fn is_selecting(&self) -> bool {
+        self.imp().drag.get().is_some() || self.imp().range.get().is_some()
     }
 
     fn parts(&self) -> &[Part] {

@@ -1,10 +1,11 @@
 use crate::icons::{self, Icon};
-use gtk::pango;
 use gtk::prelude::*;
+use gtk::{gdk_pixbuf, glib, pango};
 use serde_json::{Value, json};
 use std::cell::RefCell;
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, DirBuilder, File, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -15,13 +16,16 @@ pub struct Attachments {
     pub button: gtk::Button,
     pub chips: gtk::FlowBox,
     files: RefCell<Vec<PathBuf>>,
+    pasted: RefCell<Vec<PathBuf>>,
 }
 
 impl Attachments {
     pub fn new() -> Rc<Self> {
         let button = gtk::Button::with_label("附件");
         button.style_context().add_class("quiet-button");
-        button.set_tooltip_text(Some("添加本机附件（最多 6 个，共 16 MiB）"));
+        button.set_tooltip_text(Some(
+            "添加本机附件（最多 6 个，共 16 MiB），也可在输入框粘贴图片",
+        ));
         button.set_image(Some(&icons::widget(Icon::Attachment, 15)));
         button.set_always_show_image(true);
         let chips = gtk::FlowBox::new();
@@ -34,6 +38,7 @@ impl Attachments {
             button,
             chips,
             files: RefCell::new(Vec::new()),
+            pasted: RefCell::new(Vec::new()),
         })
     }
 
@@ -82,8 +87,51 @@ impl Attachments {
         Ok(())
     }
 
-    pub fn clear(self: &Rc<Self>) {
+    pub fn paste_image(self: &Rc<Self>, image: &gdk_pixbuf::Pixbuf) -> Result<(), String> {
+        if self.files.borrow().len() == MAX_FILES {
+            return Err("每条消息最多添加 6 个附件。".into());
+        }
+        if i64::from(image.width()) * i64::from(image.height()) > 24_000_000 {
+            return Err("剪贴板图片像素过多，请缩小后再粘贴。".into());
+        }
+        let data = image
+            .save_to_bufferv("png", &[("compression", "3")])
+            .map_err(|error| format!("无法编码剪贴板图片：{error}"))?;
+        if data.len() > MAX_BYTES {
+            return Err("剪贴板图片超过 16 MiB。".into());
+        }
+        let directory =
+            std::env::temp_dir().join(format!("span-clipboard-{}", glib::uuid_string_random()));
+        DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .map_err(|error| format!("无法准备剪贴板图片：{error}"))?;
+        let path = directory.join("剪贴板图片.png");
+        let result = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .and_then(|mut file| file.write_all(&data));
+        if let Err(error) = result {
+            remove_pasted(&path);
+            return Err(format!("无法暂存剪贴板图片：{error}"));
+        }
+        self.files.borrow_mut().push(path.clone());
+        self.pasted.borrow_mut().push(path);
+        self.render();
+        Ok(())
+    }
+
+    pub fn finish_send(self: &Rc<Self>, remote: bool) {
         self.files.borrow_mut().clear();
+        // The local App Server may still load accepted image paths after the response.
+        let pasted = self.pasted.take();
+        if remote {
+            for path in &pasted {
+                remove_pasted(path);
+            }
+        }
         self.render();
     }
 
@@ -110,6 +158,10 @@ impl Attachments {
             remove.connect_clicked(move |_| {
                 if let Some(list) = weak.upgrade() {
                     list.files.borrow_mut().retain(|path| path != &entry);
+                    let mut pasted = list.pasted.borrow_mut();
+                    if let Some(index) = pasted.iter().position(|path| path == &entry) {
+                        remove_pasted(&pasted.remove(index));
+                    }
                     list.render();
                 }
             });
@@ -121,6 +173,21 @@ impl Attachments {
             }
         }
         self.chips.set_visible(!files.is_empty());
+    }
+}
+
+impl Drop for Attachments {
+    fn drop(&mut self) {
+        for path in self.pasted.get_mut() {
+            remove_pasted(path);
+        }
+    }
+}
+
+fn remove_pasted(path: &Path) {
+    let _ = fs::remove_file(path);
+    if let Some(directory) = path.parent() {
+        let _ = fs::remove_dir(directory);
     }
 }
 

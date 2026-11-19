@@ -687,6 +687,25 @@ scrolledwindow.agent-table-scroll {
     padding: 8px 8px;
 }
 
+.agent-task-status {
+    margin: 0 5px;
+    padding: 5px 3px;
+    color: @muted;
+    font-size: 12px;
+    border-bottom: 1px solid @line;
+}
+
+.agent-task-status spinner {
+    color: @accent;
+}
+
+.agent-task-key {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: @surface;
+    color: @foreground;
+}
+
 .agent-compose-card button.agent-picker {
     min-height: 22px;
     min-width: 0;

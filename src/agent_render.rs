@@ -138,8 +138,9 @@ fn flush_text(blocks: &gtk::Box, pending: &mut String, selectable: &mut Vec<Part
         } else {
             label.set_text(pending.trim());
         }
-        selectable.push(Part::new(&label, "\n\n"));
-        blocks.add(&label);
+        let part = Part::new(&label, "\n\n");
+        blocks.add(&part.widget);
+        selectable.push(part);
     }
     pending.clear();
 }
@@ -181,8 +182,9 @@ fn table(
                         (_, 0) => "\n",
                         _ => "\t",
                     };
-                    selectable.push(Part::new(&label, separator));
-                    grid.attach(&label, col, row, 1, 1);
+                    let part = Part::new(&label, separator);
+                    grid.attach(&part.widget, col, row, 1, 1);
+                    selectable.push(part);
                 }
                 cells.push(std::mem::take(&mut cell));
                 col += 1;

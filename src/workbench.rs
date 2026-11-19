@@ -460,6 +460,16 @@ impl Workbench {
     }
 
     fn paste(self: &Rc<Self>) {
+        if let Some(focused) = self
+            .window
+            .upgrade()
+            .and_then(|window| window.focused_widget())
+        {
+            if focused.is::<gtk::TextView>() || focused.is::<gtk::Entry>() {
+                focused.emit_by_name::<()>("paste-clipboard", &[]);
+                return;
+            }
+        }
         if let Some(session) = self.current_session() {
             session.terminal.paste_text();
         }

@@ -8,6 +8,7 @@ mod agent_question;
 mod agent_render;
 mod agent_rpc;
 mod agent_selection;
+mod agent_task;
 mod agent_usage;
 mod browser;
 mod files;

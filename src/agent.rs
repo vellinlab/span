@@ -5,6 +5,7 @@ use crate::agent_diff::DiffCard;
 use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
+use crate::agent_task::TaskStatus;
 use crate::agent_usage::Usage;
 use crate::icons::{self, Icon};
 use gtk::prelude::*;
@@ -96,9 +97,11 @@ pub struct Agent {
     options: Rc<Options>,
     model_provider: RefCell<Option<String>>,
     usage: Usage,
+    task_status: TaskStatus,
     quota_started: Cell<bool>,
     attachments: Rc<Attachments>,
     uploading: Cell<bool>,
+    pasting: Cell<bool>,
     pending_user: RefCell<Option<gtk::Label>>,
     client_message: RefCell<Option<String>>,
     primary_action: Cell<Option<ComposerAction>>,
@@ -217,6 +220,7 @@ impl Agent {
         inputs.pack_start(&attachments.button, false, false, 0);
         let options = Options::new(&inputs);
         let usage = Usage::new();
+        let task_status = TaskStatus::new();
         let primary = gtk::Button::new();
         primary.style_context().add_class("primary");
         primary.style_context().add_class("agent-send");
@@ -237,6 +241,7 @@ impl Agent {
         primary.set_focus_on_click(false);
         inputs.pack_end(&primary, false, false, 0);
         inputs.pack_end(&usage.button, false, false, 0);
+        card.pack_start(&task_status.widget, false, false, 0);
         card.pack_start(&editor, false, false, 0);
         card.pack_start(&attachments.chips, false, false, 0);
         card.pack_end(&inputs, false, false, 0);
@@ -285,9 +290,11 @@ impl Agent {
             options,
             model_provider: RefCell::new(None),
             usage,
+            task_status,
             quota_started: Cell::new(false),
             attachments,
             uploading: Cell::new(false),
+            pasting: Cell::new(false),
             pending_user: RefCell::new(None),
             client_message: RefCell::new(None),
             primary_action: Cell::new(None),
@@ -360,6 +367,23 @@ impl Agent {
                 if let Some(agent) = weak.upgrade() {
                     agent.submit_prompt();
                 }
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.input.connect_paste_clipboard(move |input| {
+            input.stop_signal_emission_by_name("paste-clipboard");
+            if let Some(agent) = weak.upgrade().filter(|agent| agent.input.is_editable()) {
+                agent.paste();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.panel.connect_key_press_event(move |_, event| {
+            if event.keyval() == gtk::gdk::keys::constants::Escape
+                && weak.upgrade().is_some_and(|agent| agent.stop())
+            {
                 glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
@@ -674,6 +698,8 @@ impl Agent {
             latest_status = status;
             if !prepend && status == Some("inProgress") {
                 running = turn["id"].as_str().map(str::to_owned);
+                self.task_status
+                    .sync_from_server(turn["startedAt"].as_u64());
                 if let (Some(id), Some(activity)) = (&running, activity.take()) {
                     self.activity.replace(Some((id.clone(), activity)));
                 }
@@ -904,7 +930,8 @@ impl Agent {
                     if let Some(buffer) = self.input.buffer() {
                         buffer.set_text("");
                     }
-                    self.attachments.clear();
+                    self.attachments
+                        .finish_send(self.context.borrow().socket.is_some());
                 }
                 if self.active.get() {
                     self.turn
@@ -916,10 +943,52 @@ impl Agent {
         }
     }
 
+    fn paste(self: &Rc<Self>) {
+        if self.pasting.replace(true) {
+            return;
+        }
+        self.update_controls();
+        let generation = self.history_generation.get();
+        let weak = Rc::downgrade(self);
+        agent_render::clipboard().request_contents(
+            &gtk::gdk::Atom::intern("TARGETS"),
+            move |clipboard, data| {
+                let Some(agent) = weak.upgrade().filter(|agent| {
+                    agent.pasting.get() && agent.history_generation.get() == generation
+                }) else {
+                    return;
+                };
+                if data.targets_include_image(false) {
+                    clipboard.request_image(move |_, image| {
+                        if let Some(agent) = weak.upgrade().filter(|agent| {
+                            agent.pasting.get() && agent.history_generation.get() == generation
+                        }) {
+                            agent.pasting.set(false);
+                            let result = image
+                                .ok_or_else(|| "无法读取剪贴板图片。".into())
+                                .and_then(|image| agent.attachments.paste_image(image));
+                            if let Err(error) = result {
+                                agent.show_status(&error);
+                            }
+                            agent.update_controls();
+                        }
+                    });
+                } else {
+                    agent.pasting.set(false);
+                    agent.update_controls();
+                    if let Some(buffer) = agent.input.buffer() {
+                        buffer.paste_clipboard(clipboard, None, agent.input.is_editable());
+                    }
+                }
+            },
+        );
+    }
+
     fn send(self: &Rc<Self>) {
         if self.active.get()
             || self.opening.get()
             || self.uploading.get()
+            || self.pasting.get()
             || self.pending_user.borrow().is_some()
         {
             return;
@@ -1000,9 +1069,9 @@ impl Agent {
         }
     }
 
-    fn stop(&self) {
+    fn stop(&self) -> bool {
         if !self.active.get() || self.interrupting.get() {
-            return;
+            return false;
         }
         if let (Some(thread), Some(turn)) =
             (self.thread.borrow().clone(), self.turn.borrow().clone())
@@ -1015,7 +1084,9 @@ impl Agent {
             );
             self.show_status("正在中断…");
             self.update_controls();
+            return true;
         }
+        false
     }
 
     fn submit_prompt(self: &Rc<Self>) {
@@ -1047,6 +1118,7 @@ impl Agent {
         self.questions.borrow_mut().clear();
         self.history_cursor.take();
         self.client_message.take();
+        self.pasting.set(false);
         self.can_continue.set(false);
         self.interrupting.set(false);
         self.older.hide();
@@ -1063,6 +1135,7 @@ impl Agent {
         self.opening.set(false);
         self.initialized.set(false);
         self.uploading.set(false);
+        self.pasting.set(false);
         self.remove_pending_user();
         self.client_message.take();
         self.options.open(&Value::Null);
@@ -1134,6 +1207,8 @@ impl Agent {
             }
             "turn/started" => {
                 self.active.set(true);
+                self.task_status
+                    .sync_from_server(params["turn"]["startedAt"].as_u64());
                 self.turn
                     .replace(params["turn"]["id"].as_str().map(str::to_owned));
                 self.show_status("Codex 正在处理…");
@@ -1210,6 +1285,7 @@ impl Agent {
                 if let Some(question) = self.questions.borrow_mut().remove(&params["requestId"]) {
                     self.history.remove(&question);
                 }
+                self.update_task_status();
             }
             "error" => {
                 if let Some(message) = params["error"]["message"].as_str() {
@@ -1230,14 +1306,16 @@ impl Agent {
         if !self.is_active_turn(turn) {
             return;
         }
-        let mut activity = self.activity.borrow_mut();
-        if activity.as_ref().is_some_and(|(id, _)| id != turn) {
-            if let Some((_, older)) = activity.take() {
+        let mut current = self.activity.borrow_mut();
+        if current.as_ref().is_some_and(|(id, _)| id != turn) {
+            if let Some((_, older)) = current.take() {
                 older.finish(None);
             }
         }
-        let (_, activity) = activity.get_or_insert_with(|| (turn.to_owned(), self.new_activity()));
+        let (_, activity) = current.get_or_insert_with(|| (turn.to_owned(), self.new_activity()));
         update(activity);
+        drop(current);
+        self.update_task_status();
     }
 
     fn is_active_turn(&self, turn: &str) -> bool {
@@ -1266,6 +1344,7 @@ impl Agent {
                 text: String::new(),
                 label,
             }));
+            self.update_task_status();
         }
         if let Some(live) = self.live.borrow_mut().as_mut() {
             if live.text.len() < 256 * 1024 {
@@ -1340,6 +1419,7 @@ impl Agent {
                             rpc.reply(request.clone(), answers);
                         }
                     }
+                    agent.update_task_status();
                 }
             });
             if let Some(card) = card {
@@ -1347,6 +1427,7 @@ impl Agent {
                     self.history.remove(&previous);
                 }
                 self.append(&card);
+                self.update_task_status();
                 return;
             }
         }
@@ -1391,12 +1472,14 @@ impl Agent {
                             rpc.reply(id.clone(), json!({"decision":value}));
                         }
                     }
+                    agent.update_task_status();
                 }
             });
         }
         card.add(&actions);
         self.approvals.borrow_mut().insert(id, card.clone());
         self.append(&card);
+        self.update_task_status();
     }
 
     fn add_diff(&self, diff: &str) -> (gtk::Expander, DiffCard) {
@@ -1484,6 +1567,17 @@ impl Agent {
         glib::timeout_add_local_once(std::time::Duration::from_millis(32), move || {
             scheduled.set(false);
             if let Some(scroll) = scroll.upgrade() {
+                let selecting = scroll
+                    .toplevel()
+                    .and_downcast::<gtk::Window>()
+                    .and_then(|window| window.focused_widget())
+                    .and_downcast::<crate::agent_selection::TextSelection>()
+                    .is_some_and(|selection| {
+                        selection.is_ancestor(&scroll) && selection.is_selecting()
+                    });
+                if selecting {
+                    return;
+                }
                 let adjustment = scroll.vadjustment();
                 adjustment.set_value(
                     (adjustment.upper() - adjustment.page_size()).max(adjustment.lower()),
@@ -1502,7 +1596,8 @@ impl Agent {
         let ready = self.thread.borrow().is_some();
         let opening =
             self.opening.get() || (self.rpc.borrow().is_some() && !self.initialized.get());
-        let waiting = self.uploading.get() || self.pending_user.borrow().is_some();
+        let waiting =
+            self.uploading.get() || self.pasting.get() || self.pending_user.borrow().is_some();
         self.connect.set_sensitive(!opening && !running && !waiting);
         self.input.set_sensitive(ready);
         self.input.set_editable(!waiting);
@@ -1514,7 +1609,35 @@ impl Agent {
             .set_sensitive(ready && !opening && !waiting);
         self.options.update(ready && !opening && !waiting);
         self.usage.button.set_sensitive(ready);
+        self.update_task_status();
         self.update_primary();
+    }
+
+    fn update_task_status(&self) {
+        if !self.active.get() {
+            self.task_status.update(None, false);
+            return;
+        }
+        let activity = self.activity.borrow();
+        let message = if self.interrupting.get() {
+            "正在中断"
+        } else if !self.approvals.borrow().is_empty() {
+            "等待你的确认"
+        } else if !self.questions.borrow().is_empty() {
+            "等待你的回复"
+        } else if self.live.borrow().is_some() {
+            "正在生成回复"
+        } else {
+            activity
+                .as_ref()
+                .map(|(_, activity)| activity.progress())
+                .filter(|progress| !progress.is_empty())
+                .unwrap_or("正在处理")
+        };
+        self.task_status.update(
+            Some(message),
+            self.turn.borrow().is_some() && !self.interrupting.get(),
+        );
     }
 
     fn update_primary(&self) {
@@ -1554,6 +1677,7 @@ impl Agent {
             self.thread.borrow().is_some()
                 && !self.opening.get()
                 && !self.uploading.get()
+                && !self.pasting.get()
                 && self.pending_user.borrow().is_none()
         };
         self.primary.set_sensitive(enabled);
