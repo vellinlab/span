@@ -163,6 +163,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     wait_until "the Codex App Server handshake" test -f "$HOME/agent-ready"
     wait_until "the second model catalog page" test -f "$HOME/agent-models"
     sleep 0.25
+    widget not-state 'Fast 模式' sensitive
     widget mouse '选择模型'
     widget contains 'GPT Vision'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-model-picker.png"
@@ -173,6 +174,10 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains '默认'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-effort-picker.png"
     widget mouse '高'
+    widget state 'Fast 模式' sensitive
+    widget not-state 'Fast 模式' checked
+    widget mouse 'Fast 模式'
+    widget state 'Fast 模式' checked
     add_attachment "$HOME/test-output.png"
     paste_image
     printf '%s' 'Show the deployment check' | xclip -in -selection clipboard
@@ -268,6 +273,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowsize --sync "$window" 1250 940
     printf '%s\n' 'The centered composer adapts to both wide and narrow split layouts.'
 
+    widget mouse 'Fast 模式'
+    widget not-state 'Fast 模式' checked
     widget mouse '输入消息，或添加附件'
     xdotool type --clearmodifiers 'Check the comparison layout'
     widget click '发送'
@@ -312,7 +319,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     ((narrow_row > wide_row))
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-table.png"
     xdotool windowsize --sync "$window" 1250 940
-    printf '%s\n' 'The composer reports elapsed task time, interrupts with Esc, continues in place, and wraps tables at both widths.'
+    printf '%s\n' 'The composer applies both fast and standard speeds, reports elapsed task time, interrupts with Esc, and continues in place.'
 
     xdotool key --clearmodifiers ctrl+shift+j
     sleep 0.25

@@ -40,6 +40,10 @@ for _ in range(50):
             sys.exit(0 if operation == "contains" else f"Unexpected text {name!r}")
         if node.name != name:
             continue
+        if operation in ("state", "not-state"):
+            state = getattr(pyatspi, "STATE_" + values[0].upper())
+            if node.getState().contains(state) == (operation == "state"):
+                sys.exit(0)
         if operation == "scroll-value":
             for child in node:
                 if (child.getRole() == pyatspi.ROLE_SCROLL_BAR

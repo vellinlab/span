@@ -14,6 +14,7 @@ pub enum Icon {
     Link,
     Attachment,
     ChevronDown,
+    Bolt,
     Up,
     Stop,
     Pause,
@@ -141,6 +142,15 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.move_to(5.0, 9.0);
             cr.line_to(12.0, 16.0);
             cr.line_to(19.0, 9.0);
+        }
+        Icon::Bolt => {
+            cr.move_to(13.5, 2.5);
+            cr.line_to(5.0, 13.5);
+            cr.line_to(11.0, 13.5);
+            cr.line_to(10.5, 21.5);
+            cr.line_to(19.0, 10.5);
+            cr.line_to(13.0, 10.5);
+            cr.close_path();
         }
         Icon::Up => {
             cr.move_to(12.0, 19.5);

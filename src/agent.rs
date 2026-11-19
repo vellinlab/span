@@ -834,6 +834,7 @@ impl Agent {
                 if let Some(rpc) = self.rpc.borrow().as_ref() {
                     rpc.notify("initialized");
                 }
+                self.options.server_ready(result);
                 self.initialized.set(true);
                 self.update_controls();
                 if browse {

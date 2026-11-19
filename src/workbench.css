@@ -727,6 +727,21 @@ scrolledwindow.agent-table-scroll {
     color: @muted;
 }
 
+.agent-compose-card button.agent-fast {
+    min-width: 20px;
+    color: @muted;
+}
+
+.agent-compose-card button.agent-fast:checked {
+    color: #f8c373;
+    background: #413529;
+    border-color: #6a5134;
+}
+
+.agent-compose-card button.agent-fast:disabled {
+    color: #657184;
+}
+
 popover.agent-picker-menu {
     background: @chrome;
     border: 1px solid #3b4859;

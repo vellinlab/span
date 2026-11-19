@@ -135,7 +135,7 @@ for line in sys.stdin:
         assert params["clientInfo"]["name"] == "span"
         assert params["clientInfo"]["title"] == "Span"
         assert params["capabilities"]["experimentalApi"]
-        send({"id": request_id, "result": {"userAgent": "fixture"}})
+        send({"id": request_id, "result": {"userAgent": "span/0.169.1 (fixture)"}})
     elif method == "initialized":
         continue
     elif method == "thread/start":
@@ -153,6 +153,7 @@ for line in sys.stdin:
         else:
             assert params["cursor"] == "fixture-vision"
             data = [model("gpt-vision-fixture", "GPT Vision", "medium", ["medium", "high"])]
+            data[0]["serviceTiers"] = [{"id": "priority", "name": "Fast", "description": "Fast"}]
             next_cursor = None
             (home / "agent-models").touch()
         send({"id": request_id, "result": {"data": data, "nextCursor": next_cursor}})
@@ -207,9 +208,12 @@ for line in sys.stdin:
     elif method == "turn/start":
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
+        message = params["input"][0]["text"]
+        expected_speed = "priority" if message == "Show the deployment check" else "default"
+        assert params["serviceTierForTurn"] == expected_speed
+        assert "serviceTier" not in params
         (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")
         if params["threadId"] == saved_thread:
-            message = params["input"][0]["text"]
             assert message.startswith("Read the remote attachment")
             uploaded = Path(json.loads(message.splitlines()[-1].removeprefix("- ")))
             assert uploaded.parent.parent == Path("/tmp") and uploaded.parent.name.startswith("span-")
@@ -231,7 +235,6 @@ for line in sys.stdin:
             continue
         assert params["threadId"] == thread
         assert params["model"] == "gpt-vision-fixture" and params["effort"] == "high"
-        message = params["input"][0]["text"]
         if message == "Check the comparison layout":
             assert len(params["input"]) == 1
             send({"id": request_id, "result": {"turn": {"id": interruptible_turn, "status": "inProgress"}}})

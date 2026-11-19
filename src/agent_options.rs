@@ -9,6 +9,8 @@ use std::rc::Rc;
 pub struct Options {
     model: Picker,
     effort: Picker,
+    fast: gtk::ToggleButton,
+    turn_speed_supported: Cell<bool>,
     current: RefCell<(String, Option<String>)>,
     catalog: RefCell<Vec<Model>>,
     cursors: RefCell<HashSet<String>>,
@@ -139,6 +141,7 @@ struct Model {
     efforts: Vec<String>,
     default_effort: Option<String>,
     images: bool,
+    fast: bool,
 }
 
 impl Model {
@@ -167,6 +170,15 @@ impl Model {
             images: value["inputModalities"]
                 .as_array()
                 .is_none_or(|items| items.is_empty() || items.iter().any(|item| item == "image")),
+            fast: value["serviceTiers"]
+                .as_array()
+                .filter(|tiers| !tiers.is_empty())
+                .map(|tiers| tiers.iter().any(|tier| tier["id"] == "priority"))
+                .unwrap_or_else(|| {
+                    value["additionalSpeedTiers"]
+                        .as_array()
+                        .is_some_and(|tiers| tiers.iter().any(|tier| tier == "fast"))
+                }),
         })
     }
 }
@@ -175,6 +187,7 @@ pub struct Selection {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub images: bool,
+    speed: Option<&'static str>,
 }
 
 impl Selection {
@@ -185,6 +198,9 @@ impl Selection {
         if let Some(effort) = &self.effort {
             params["effort"] = json!(effort);
         }
+        if let Some(speed) = self.speed {
+            params["serviceTierForTurn"] = json!(speed);
+        }
     }
 }
 
@@ -192,11 +208,22 @@ impl Options {
     pub fn new(actions: &gtk::Box) -> Rc<Self> {
         let model = Picker::new("选择模型", "", 19, 182);
         let effort = Picker::new("思考强度", "思考 · ", 14, 126);
+        let fast = gtk::ToggleButton::new();
+        fast.style_context().add_class("agent-picker");
+        fast.style_context().add_class("agent-fast");
+        fast.set_focus_on_click(false);
+        fast.add(&icons::widget(Icon::Bolt, 16));
+        if let Some(accessible) = fast.accessible() {
+            accessible.set_name("Fast 模式");
+        }
         actions.pack_start(&model.button, false, false, 0);
         actions.pack_start(&effort.button, false, false, 0);
+        actions.pack_start(&fast, false, false, 0);
         let options = Rc::new(Self {
             model,
             effort,
+            fast,
+            turn_speed_supported: Cell::new(false),
             current: RefCell::new((String::new(), None)),
             catalog: RefCell::new(Vec::new()),
             cursors: RefCell::new(HashSet::new()),
@@ -223,7 +250,26 @@ impl Options {
         self.model.button.set_tooltip_text(Some(text));
     }
 
+    pub fn server_ready(&self, result: &Value) {
+        // Codex reports the server version in the first user-agent token.
+        // 0.151 introduced per-turn speeds, which leave shared session defaults intact.
+        let supported = result["userAgent"]
+            .as_str()
+            .and_then(|agent| agent.split_ascii_whitespace().next())
+            .and_then(|product| product.rsplit_once('/'))
+            .is_some_and(|(_, version)| {
+                let mut parts = version.split('.');
+                let major = parts.next().and_then(|part| part.parse::<u32>().ok());
+                let minor = parts.next().and_then(|part| part.parse::<u32>().ok());
+                major
+                    .zip(minor)
+                    .is_some_and(|(major, minor)| major > 0 || minor >= 151)
+            });
+        self.turn_speed_supported.set(supported);
+    }
+
     pub fn open(&self, result: &Value) {
+        self.fast.set_active(false);
         let model = result["model"]
             .as_str()
             .unwrap_or_default()
@@ -336,6 +382,26 @@ impl Options {
         self.effort
             .button
             .set_sensitive(self.model.button.is_sensitive() && !efforts.is_empty());
+        self.update_fast(
+            self.model.button.is_sensitive(),
+            model.is_some_and(|model| model.fast),
+        );
+    }
+
+    fn update_fast(&self, enabled: bool, model_supports_fast: bool) {
+        let server_supports_speed = self.turn_speed_supported.get();
+        let available = server_supports_speed && model_supports_fast;
+        if !available {
+            self.fast.set_active(false);
+        }
+        self.fast.set_sensitive(enabled && available);
+        self.fast.set_tooltip_text(Some(if !server_supports_speed {
+            "Fast 模式需要 Codex CLI 0.151 或更新版本"
+        } else if !model_supports_fast {
+            "当前模型未提供 Fast 模式"
+        } else {
+            "Fast 模式 · 点亮用快速模式，关闭用标准速度"
+        }));
     }
 
     pub fn update(&self, enabled: bool) {
@@ -344,10 +410,12 @@ impl Options {
             .button
             .set_sensitive(enabled && !catalog.is_empty());
         let choice = self.model.active_id();
-        let efforts = catalog
+        let model = catalog
             .iter()
-            .any(|model| choice.as_deref() == Some(&model.id) && !model.efforts.is_empty());
+            .find(|model| choice.as_deref() == Some(&model.id));
+        let efforts = model.is_some_and(|model| !model.efforts.is_empty());
         self.effort.button.set_sensitive(enabled && efforts);
+        self.update_fast(enabled, model.is_some_and(|model| model.fast));
     }
 
     pub fn selection(&self) -> Selection {
@@ -360,6 +428,14 @@ impl Options {
             model: model.map(|model| model.id.clone()),
             effort: self.effort.active_id().filter(|id| !id.is_empty()),
             images: model.is_none_or(|model| model.images),
+            speed: self
+                .turn_speed_supported
+                .get()
+                .then_some(if self.fast.is_active() {
+                    "priority"
+                } else {
+                    "default"
+                }),
         }
     }
 
