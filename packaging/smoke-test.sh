@@ -275,7 +275,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowfocus --sync "$save_dialog"
     xdotool key --clearmodifiers Escape
     xdotool windowfocus --sync "$window"
-    xdotool mousemove --window "$window" 900 360 click --repeat 16 5
+    xdotool mousemove --window "$window" 342 440 click --repeat 16 5
     widget contains 'Environment confirmed.'
     widget click '复制本轮 Markdown'
     copied_turn="$(xclip -out -selection clipboard)"

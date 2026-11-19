@@ -291,6 +291,7 @@ fn table(
         .build();
     scroll.style_context().add_class("agent-table-scroll");
     scroll.add(&grid);
+    scroll_conversation_at_edges(scroll.upcast_ref());
     let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let source: Rc<str> = Rc::from(markdown.get(start..end).unwrap_or_default().trim_end());
@@ -308,6 +309,45 @@ fn table(
     block.add(&scroll);
     block.add(&actions);
     block
+}
+
+fn scroll_conversation_at_edges(scroll: &gtk::ScrolledWindow) {
+    scroll.connect_scroll_event(|scroll, event| {
+        if event.state().contains(gdk::ModifierType::SHIFT_MASK) {
+            return glib::Propagation::Proceed;
+        }
+        let delta = match event.direction() {
+            gdk::ScrollDirection::Up => -1.0,
+            gdk::ScrollDirection::Down => 1.0,
+            gdk::ScrollDirection::Smooth if event.delta().1.abs() >= event.delta().0.abs() => {
+                event.delta().1
+            }
+            _ => 0.0,
+        };
+        if delta == 0.0 {
+            return glib::Propagation::Proceed;
+        }
+        let own = scroll.vadjustment();
+        let remaining = if delta > 0.0 {
+            own.upper() - own.page_size() - own.value()
+        } else {
+            own.value() - own.lower()
+        };
+        if scroll.policy().1 != gtk::PolicyType::Never && remaining > 0.5 {
+            return glib::Propagation::Proceed;
+        }
+        let timeline = scroll
+            .parent()
+            .and_then(|parent| parent.ancestor(gtk::ScrolledWindow::static_type()))
+            .and_downcast::<gtk::ScrolledWindow>();
+        if let Some(timeline) = timeline {
+            let adjustment = timeline.vadjustment();
+            let step = adjustment.page_size().powf(2.0 / 3.0);
+            adjustment.set_value(adjustment.value() + step * delta);
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
 }
 
 mod table_scroll {
@@ -444,6 +484,7 @@ impl CodeCard {
             .vscrollbar_policy(gtk::PolicyType::Automatic)
             .build();
         scroll.add(&view);
+        scroll_conversation_at_edges(&scroll);
         block.add(&scroll);
         Self {
             panel: block,
