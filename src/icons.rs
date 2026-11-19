@@ -29,6 +29,10 @@ pub enum Icon {
 }
 
 pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
+    changing_widget(size, move || icon)
+}
+
+pub fn changing_widget(size: i32, symbol: impl Fn() -> Icon + 'static) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::new();
     area.set_size_request(size, size);
     area.set_halign(gtk::Align::Center);
@@ -36,7 +40,7 @@ pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
     area.connect_draw(move |area, cr| {
         let style = area.style_context();
         let color = style.color(area.state_flags());
-        draw(cr, icon, size, &color);
+        draw(cr, symbol(), size, &color);
         glib::Propagation::Proceed
     });
     area

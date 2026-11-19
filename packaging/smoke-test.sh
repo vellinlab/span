@@ -619,7 +619,10 @@ SVG
     read -r _ _ dot_width _ <<< "$(widget bounds '就绪')"
     [[ $dot_width -le 10 ]]
     widget contains 'Latest deployment notes'
-    [[ ! -f "$HOME/agent-older-page" ]]
+    if [[ -f "$HOME/agent-older-page" ]]; then
+        printf '%s\n' 'An older page was requested before the user scrolled up.' >&2
+        exit 1
+    fi
     timeline_wheel 4 1
     wait_until "loading an older page by scrolling" test -f "$HOME/agent-older-page"
     widget contains 'Earlier deployment notes'

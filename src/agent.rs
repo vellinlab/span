@@ -473,17 +473,19 @@ impl Agent {
             }
         });
         let weak = Rc::downgrade(self);
-        let adjustment = self.scroll.vadjustment();
-        let previous = Cell::new(adjustment.value());
-        adjustment.connect_value_changed(move |adjustment| {
-            let value = adjustment.value();
-            if value < previous.replace(value)
-                && value - adjustment.lower() <= HISTORY_PREFETCH_DISTANCE
-                && let Some(agent) = weak.upgrade()
-            {
-                agent.load_older_history();
-            }
-        });
+        if let Some(scrollbar) = self.scroll.vscrollbar().and_downcast::<gtk::Scrollbar>() {
+            scrollbar.connect_change_value(move |_, _, value| {
+                if let Some(agent) = weak.upgrade() {
+                    let adjustment = agent.scroll.vadjustment();
+                    if value <= adjustment.lower() + HISTORY_PREFETCH_DISTANCE
+                        && value < adjustment.value()
+                    {
+                        agent.load_older_history();
+                    }
+                }
+                glib::Propagation::Proceed
+            });
+        }
         let weak = Rc::downgrade(self);
         self.history.connect_size_allocate(move |_, _| {
             if let Some(agent) = weak.upgrade()

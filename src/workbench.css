@@ -330,11 +330,6 @@ button.agent-send:disabled {
     color: @foreground;
 }
 
-.workbench stack.tab-mode-icon {
-    background-color: transparent;
-    color: inherit;
-}
-
 .terminal-tabs > header > tabs > tab:checked {
     background: @surface;
     color: @foreground;
@@ -696,19 +691,26 @@ scrolledwindow.terminal-page overshoot,
 }
 
 scrolledwindow.agent-scroll > scrollbar.vertical,
-.agent-catalog scrolledwindow > scrollbar.vertical {
+.agent-catalog scrolledwindow > scrollbar.vertical,
+.preview-panel scrolledwindow > scrollbar,
+.preview-panel scrolledwindow > junction {
     background: transparent;
     border: 0;
     box-shadow: none;
 }
 
 scrolledwindow.agent-scroll > scrollbar.vertical slider,
-.agent-catalog scrolledwindow > scrollbar.vertical slider {
+.agent-catalog scrolledwindow > scrollbar.vertical slider,
+.preview-panel scrolledwindow > scrollbar slider {
     min-width: 5px;
     background: #565b67;
     border: 0;
     border-radius: 4px;
     transition: none;
+}
+
+.preview-panel scrolledwindow > scrollbar.horizontal slider {
+    min-height: 5px;
 }
 
 .agent-prose {

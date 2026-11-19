@@ -324,15 +324,22 @@ impl Workbench {
             .0;
         label.set_width_request(title_width.clamp(64, 160));
         tab.set_tooltip_text(Some(&session.launch.description()));
-        let mode_icon = gtk::Stack::new();
-        mode_icon.style_context().add_class("tab-mode-icon");
-        mode_icon.add_named(&icon(session.launch.icon(), 14), "terminal");
-        mode_icon.add_named(&icon(Icon::Conversation, 14), "agent");
-        let weak_icon = mode_icon.downgrade();
-        session.page.connect_visible_child_name_notify(move |page| {
-            if let (Some(mode_icon), Some(name)) = (weak_icon.upgrade(), page.visible_child_name())
+        let page = session.page.downgrade();
+        let terminal_icon = session.launch.icon();
+        let mode_icon = icons::changing_widget(14, move || {
+            if page
+                .upgrade()
+                .is_some_and(|page| page.visible_child_name().as_deref() == Some("agent"))
             {
-                mode_icon.set_visible_child_name(&name);
+                Icon::Conversation
+            } else {
+                terminal_icon
+            }
+        });
+        let weak_icon = mode_icon.downgrade();
+        session.page.connect_visible_child_name_notify(move |_| {
+            if let Some(mode_icon) = weak_icon.upgrade() {
+                mode_icon.queue_draw();
             }
         });
         tab.pack_start(&mode_icon, false, false, 0);
