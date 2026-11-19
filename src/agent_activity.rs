@@ -395,7 +395,9 @@ impl Activity {
                 source.add(&content);
                 content.show_all();
                 source.connect_activate_link(|button| {
-                    agent_render::open_link(button, &button.uri());
+                    if let Some(uri) = button.uri() {
+                        agent_render::open_link(button, &uri);
+                    }
                     gtk::glib::Propagation::Stop
                 });
                 source.set_no_show_all(true);

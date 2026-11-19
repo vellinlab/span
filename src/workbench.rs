@@ -828,7 +828,7 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
     let hosts = gtk::ToggleButton::builder()
         .tooltip_text("显示／隐藏侧栏 (Ctrl+Shift+B)")
         .build();
-    style_rail_button(&hosts, Icon::RemoteHost, "显示／隐藏侧栏");
+    style_rail_button(hosts.upcast_ref(), Icon::RemoteHost, "显示／隐藏侧栏");
     sidebar
         .bind_property("visible", &hosts, "active")
         .bidirectional()
@@ -857,7 +857,7 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
     rail
 }
 
-fn style_rail_button(button: &impl IsA<gtk::Button>, symbol: Icon, name: &str) {
+fn style_rail_button(button: &gtk::Button, symbol: Icon, name: &str) {
     button.style_context().add_class("rail-button");
     button.add(&icon(symbol, 22));
     if let Some(accessible) = button.accessible() {
