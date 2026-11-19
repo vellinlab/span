@@ -860,25 +860,31 @@ scrolledwindow.agent-table-scroll {
     color: @foreground;
 }
 
-.agent-compose-card button.agent-picker {
-    min-height: 22px;
+.agent-controls button.agent-picker {
+    min-height: 26px;
     min-width: 0;
-    padding: 2px 5px;
+    padding: 0 5px;
     background: transparent;
     border-color: transparent;
 }
 
-.agent-compose-card button.agent-picker:hover,
-.agent-compose-card button.agent-picker:checked {
+.agent-controls button.agent-picker:hover,
+.agent-controls button.agent-picker:checked {
     background: @hover;
 }
 
-.agent-compose-card button.agent-picker:focus {
+.agent-controls button.agent-picker:focus {
     border-color: @accent;
 }
 
-.agent-compose-card button.agent-picker:disabled {
-    color: @muted;
+.agent-controls button.agent-picker:disabled,
+.agent-controls button.agent-picker:disabled label,
+.agent-controls button.agent-picker:disabled drawingarea {
+    color: #9097a5;
+}
+
+.agent-controls button.agent-full-access:not(:disabled) {
+    color: #f8c373;
 }
 
 .agent-compose-card button.agent-fast {
@@ -890,10 +896,6 @@ scrolledwindow.agent-table-scroll {
     color: #f8c373;
     background: #413529;
     border-color: #6a5134;
-}
-
-.agent-compose-card button.agent-fast:disabled {
-    color: #657184;
 }
 
 popover.agent-picker-menu {

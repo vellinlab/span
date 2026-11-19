@@ -201,6 +201,22 @@ MARKDOWN
     wait_until "the Codex App Server handshake" test -f "$HOME/agent-ready"
     wait_until "the second model catalog page" test -f "$HOME/agent-models"
     sleep 0.25
+    read -r _ bar_y _ bar_h <<< "$(widget bounds '附件')"
+    for name in '会话权限' '选择模型' '思考强度' 'Fast 模式' '用量' '发送'; do
+        read -r _ control_y _ control_h <<< "$(widget bounds "$name")"
+        center_delta=$((2 * (control_y - bar_y) + control_h - bar_h))
+        ((center_delta >= -2 && center_delta <= 2))
+    done
+    widget contains '工作区权限'
+    widget mouse '会话权限'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-permissions.png"
+    widget mouse '完全访问'
+    wait_until "confirming Full Access explicitly" dialog_open '会话权限'
+    SPAN_TEST_DIALOG='会话权限' widget click '取消'
+    widget contains '工作区权限'
+    widget mouse '会话权限'
+    widget mouse '只读'
+    widget contains '只读'
     widget not-state 'Fast 模式' sensitive
     widget mouse '选择模型'
     widget contains 'GPT Vision'
@@ -408,12 +424,18 @@ MARKDOWN
 
     widget mouse 'Fast 模式'
     widget not-state 'Fast 模式' checked
+    widget mouse '会话权限'
+    widget mouse '完全访问'
+    wait_until "selecting Full Access" dialog_open '会话权限'
+    SPAN_TEST_DIALOG='会话权限' widget click '启用完全访问'
+    widget contains '完全访问'
     widget mouse '输入消息，或添加附件'
     xdotool type --clearmodifiers 'Check the comparison layout'
     widget click '发送'
     widget contains 'Preparing the comparison table.'
     widget not-contains '**Preparing the comparison table.**'
     widget contains '正在生成回复'
+    widget not-state '会话权限' sensitive
     widget mouse '已完成 · 2 项活动'
     timeline_wheel 5 2
     widget contains 'Thinking after the progress update.'
@@ -651,11 +673,15 @@ PY
         resumed_twice() { [[ $(wc -l < "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 2 ]]; }
         wait_until "automatic restoration on SSH reconnect" resumed_twice
         widget contains 'Latest deployment notes'
+        widget contains '只读'
+        widget mouse '会话权限'
+        widget mouse '工作区权限'
         add_attachment "$HOME/notes.txt"
         paste_image
         xdotool type --clearmodifiers 'Read the remote attachment'
         xdotool key --clearmodifiers ctrl+Return
         wait_until "remote file attachment bytes, permissions, and path" test -f "$WORKBENCH_SSH_FIXTURE/agent-uploaded"
+        printf '%s\n' 'Composer controls share the same centerline, and permission changes reach the local and remote Codex servers.'
         printf '%s\n' 'Span used the remote shared Codex socket, received external turn events and reopened the same session after SSH reconnect.'
         printf '%s\n' 'Picker files, model and effort overrides, token and account usage, and remote attachment uploads passed.'
     fi

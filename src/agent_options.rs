@@ -7,6 +7,8 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 pub struct Options {
+    permission: Picker,
+    applied_permission: Cell<Option<PermissionMode>>,
     model: Picker,
     effort: Picker,
     fast: gtk::ToggleButton,
@@ -32,8 +34,15 @@ struct Picker {
 }
 
 impl Picker {
-    fn new(name: &str, prefix: &'static str, chars: i32, menu_width: i32) -> Self {
+    fn new(
+        name: &str,
+        prefix: &'static str,
+        chars: i32,
+        menu_width: i32,
+        icon: Option<Icon>,
+    ) -> Self {
         let button = gtk::MenuButton::new();
+        button.set_valign(gtk::Align::Center);
         button.set_tooltip_text(Some(name));
         MenuButtonExt::set_direction(&button, gtk::ArrowType::Up);
         button.style_context().add_class("agent-picker");
@@ -44,9 +53,13 @@ impl Picker {
             button.remove(&child);
         }
         let label = gtk::Label::new(None);
+        label.set_valign(gtk::Align::Center);
         label.set_ellipsize(pango::EllipsizeMode::End);
         label.set_max_width_chars(chars);
         let trigger = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        if let Some(icon) = icon {
+            trigger.pack_start(&icons::widget(icon, 16), false, false, 0);
+        }
         trigger.pack_start(&label, false, false, 0);
         trigger.pack_start(&icons::widget(Icon::ChevronDown, 12), false, false, 0);
         button.add(&trigger);
@@ -117,13 +130,17 @@ impl Picker {
         }
     }
 
+    fn dismiss(&self) {
+        if let Some(popover) = self.button.popover() {
+            popover.popdown();
+        }
+    }
+
     fn activate(&self, row: &gtk::ListBoxRow) -> bool {
         let index = row.index() as usize;
         let changed = self.selected.get() != index;
         self.select(index);
-        if let Some(popover) = self.button.popover() {
-            popover.popdown();
-        }
+        self.dismiss();
         changed
     }
 
@@ -132,6 +149,65 @@ impl Picker {
             .borrow()
             .get(self.selected.get())
             .map(|item| item.id.clone())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum PermissionMode {
+    Workspace,
+    ReadOnly,
+    Full,
+}
+
+impl PermissionMode {
+    const ALL: [Self; 3] = [Self::Workspace, Self::ReadOnly, Self::Full];
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspaceWrite",
+            Self::ReadOnly => "readOnly",
+            Self::Full => "dangerFullAccess",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Workspace => "工作区权限",
+            Self::ReadOnly => "只读",
+            Self::Full => "完全访问",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Workspace => "可修改工作区文件，超出范围时由 Codex 请求审批。",
+            Self::ReadOnly => "可读取文件，禁止写入或联网，且不允许通过审批提升权限。",
+            Self::Full => "可按当前用户的权限访问文件和网络，命令无需逐次审批。",
+        }
+    }
+
+    fn approval_policy(self) -> &'static str {
+        if self == Self::Workspace {
+            "on-request"
+        } else {
+            "never"
+        }
+    }
+
+    fn apply(self, params: &mut Value) {
+        params["sandboxPolicy"] = match self {
+            Self::Workspace => json!({
+                "type": self.id(),
+                "writableRoots": [],
+                "networkAccess": false,
+                "excludeTmpdirEnvVar": false,
+                "excludeSlashTmp": false,
+            }),
+            Self::ReadOnly => json!({"type": self.id(), "networkAccess": false}),
+            Self::Full => json!({"type": self.id()}),
+        };
+        params["approvalPolicy"] = json!(self.approval_policy());
+        params["approvalsReviewer"] = json!("user");
     }
 }
 
@@ -188,6 +264,7 @@ pub struct Selection {
     pub effort: Option<String>,
     pub images: bool,
     speed: Option<&'static str>,
+    permission: Option<PermissionMode>,
 }
 
 impl Selection {
@@ -201,14 +278,19 @@ impl Selection {
         if let Some(speed) = self.speed {
             params["serviceTierForTurn"] = json!(speed);
         }
+        if let Some(mode) = self.permission {
+            mode.apply(params);
+        }
     }
 }
 
 impl Options {
     pub fn new(actions: &gtk::Box) -> Rc<Self> {
-        let model = Picker::new("选择模型", "", 19, 182);
-        let effort = Picker::new("思考强度", "思考 · ", 14, 126);
+        let permission = Picker::new("会话权限", "", 9, 172, Some(Icon::Shield));
+        let model = Picker::new("选择模型", "", 19, 182, None);
+        let effort = Picker::new("思考强度", "思考 · ", 14, 126, None);
         let fast = gtk::ToggleButton::new();
+        fast.set_valign(gtk::Align::Center);
         fast.style_context().add_class("agent-picker");
         fast.style_context().add_class("agent-fast");
         fast.set_focus_on_click(false);
@@ -216,10 +298,13 @@ impl Options {
         if let Some(accessible) = fast.accessible() {
             accessible.set_name("Fast 模式");
         }
+        actions.pack_start(&permission.button, false, false, 0);
         actions.pack_start(&model.button, false, false, 0);
         actions.pack_start(&effort.button, false, false, 0);
         actions.pack_start(&fast, false, false, 0);
         let options = Rc::new(Self {
+            permission,
+            applied_permission: Cell::new(None),
             model,
             effort,
             fast,
@@ -228,6 +313,15 @@ impl Options {
             catalog: RefCell::new(Vec::new()),
             cursors: RefCell::new(HashSet::new()),
         });
+        let weak = Rc::downgrade(&options);
+        options
+            .permission
+            .list
+            .connect_row_activated(move |_, row| {
+                if let Some(options) = weak.upgrade() {
+                    options.select_permission(row);
+                }
+            });
         let weak = Rc::downgrade(&options);
         options.model.list.connect_row_activated(move |_, row| {
             if let Some(options) = weak.upgrade()
@@ -270,6 +364,12 @@ impl Options {
 
     pub fn open(&self, result: &Value) {
         self.fast.set_active(false);
+        let mode = PermissionMode::ALL.into_iter().find(|mode| {
+            result["sandbox"]["type"] == mode.id()
+                && result["approvalPolicy"] == mode.approval_policy()
+                && (*mode == PermissionMode::Full || result["sandbox"]["networkAccess"] != true)
+        });
+        self.render_permissions(mode);
         let model = result["model"]
             .as_str()
             .unwrap_or_default()
@@ -405,6 +505,7 @@ impl Options {
     }
 
     pub fn update(&self, enabled: bool) {
+        self.permission.button.set_sensitive(enabled);
         let catalog = self.catalog.borrow();
         self.model
             .button
@@ -436,14 +537,119 @@ impl Options {
                 } else {
                     "default"
                 }),
+            permission: self
+                .permission_mode()
+                .filter(|mode| Some(*mode) != self.applied_permission.get()),
         }
     }
 
     pub fn remember(&self) {
         let selection = self.selection();
+        if let Some(mode) = selection.permission {
+            self.render_permissions(Some(mode));
+        }
         if let Some(model) = selection.model {
             self.current.replace((model, selection.effort));
         }
+    }
+
+    fn render_permissions(&self, mode: Option<PermissionMode>) {
+        self.applied_permission.set(mode);
+        let mut choices = Vec::new();
+        if mode.is_none() {
+            choices.push(Choice {
+                id: String::new(),
+                name: "沿用会话".into(),
+                is_default: false,
+            });
+        }
+        let offset = choices.len();
+        choices.extend(PermissionMode::ALL.map(|mode| Choice {
+            id: mode.id().into(),
+            name: mode.name().into(),
+            is_default: mode == PermissionMode::Workspace,
+        }));
+        self.permission
+            .replace(choices, mode.map_or("", PermissionMode::id));
+        for (index, mode) in PermissionMode::ALL.into_iter().enumerate() {
+            if let Some(row) = self.permission.list.row_at_index((offset + index) as i32) {
+                row.set_tooltip_text(Some(mode.description()));
+            }
+        }
+        self.update_permission();
+    }
+
+    fn permission_mode(&self) -> Option<PermissionMode> {
+        let id = self.permission.active_id()?;
+        PermissionMode::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+
+    fn update_permission(&self) {
+        let mode = self.permission_mode();
+        let button = &self.permission.button;
+        if mode == Some(PermissionMode::Full) {
+            button.style_context().add_class("agent-full-access");
+        } else {
+            button.style_context().remove_class("agent-full-access");
+        }
+        let description = mode.map_or(
+            "沿用 Codex 会话现有的权限配置。",
+            PermissionMode::description,
+        );
+        let tooltip = if mode == self.applied_permission.get() {
+            description.to_owned()
+        } else {
+            format!("从下一轮起生效。{description}")
+        };
+        button.set_tooltip_text(Some(&tooltip));
+    }
+
+    fn select_permission(&self, row: &gtk::ListBoxRow) {
+        let index = row.index() as usize;
+        let full = self
+            .permission
+            .choices
+            .borrow()
+            .get(index)
+            .is_some_and(|choice| {
+                choice.id == PermissionMode::Full.id() && index != self.permission.selected.get()
+            });
+        self.permission.dismiss();
+        if full {
+            let parent = self
+                .permission
+                .button
+                .toplevel()
+                .and_downcast::<gtk::Window>();
+            let dialog = gtk::MessageDialog::builder()
+                .title("会话权限")
+                .modal(true)
+                .destroy_with_parent(true)
+                .text("启用完全访问？")
+                .secondary_text(PermissionMode::Full.description())
+                .message_type(gtk::MessageType::Warning)
+                .build();
+            dialog.set_transient_for(parent.as_ref());
+            dialog.style_context().add_class("workbench-dialog");
+            dialog
+                .content_area()
+                .style_context()
+                .add_class("dialog-body");
+            dialog.add_button("取消", gtk::ResponseType::Cancel);
+            dialog
+                .add_button("启用完全访问", gtk::ResponseType::Accept)
+                .style_context()
+                .add_class("destructive");
+            dialog.set_default_response(gtk::ResponseType::Cancel);
+            let accepted = dialog.run() == gtk::ResponseType::Accept;
+            dialog.close();
+            if !accepted {
+                self.permission.select(self.permission.selected.get());
+                return;
+            }
+        }
+        self.permission.select(index);
+        self.update_permission();
     }
 }
 

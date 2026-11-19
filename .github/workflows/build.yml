@@ -74,6 +74,7 @@ jobs:
             dist/agent-compose.png
             dist/agent-model-picker.png
             dist/agent-effort-picker.png
+            dist/agent-permissions.png
             dist/agent-usage.png
             dist/agent-workspace.png
             dist/agent-workspace-compact.png

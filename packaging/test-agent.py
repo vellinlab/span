@@ -148,6 +148,8 @@ for line in sys.stdin:
         assert params["approvalPolicy"] == "on-request"
         send({"id": request_id, "result": {"thread": {"id": thread, "turns": []},
                                           "cwd": str(home), "model": "gpt-base-fixture",
+                                          "sandbox": {"type": "workspaceWrite", "networkAccess": False},
+                                          "approvalPolicy": "on-request",
                                           "modelProvider": "fixture", "reasoningEffort": "low"}})
         (home / "agent-ready").touch()
     elif method == "model/list":
@@ -179,9 +181,11 @@ for line in sys.stdin:
         (home / ("agent-searched" if search else "agent-catalog")).touch()
     elif method == "thread/resume":
         assert params["threadId"] == saved_thread and params["excludeTurns"]
+        assert all(field not in params for field in ("sandbox", "approvalPolicy", "approvalsReviewer"))
         assert params["initialTurnsPage"] == {"limit": 4, "sortDirection": "desc", "itemsView": "full"}
         send({"id": request_id, "result": {"thread": entry(saved_thread, "Deployment rollout", "Projects/Operations"),
               "model": "gpt-base-fixture", "modelProvider": "fixture", "reasoningEffort": "low",
+              "sandbox": {"type": "readOnly", "networkAccess": False}, "approvalPolicy": "never",
               "initialTurnsPage": {"data": [stored_turn("saved-turn", "Latest deployment notes")],
                                    "nextCursor": "older-cursor"}}})
         with (home / "agent-resumed").open("a") as resumes:
@@ -240,6 +244,19 @@ for line in sys.stdin:
         expected_speed = "priority" if message == "Show the deployment check\n你" else "default"
         assert params["serviceTierForTurn"] == expected_speed
         assert "serviceTier" not in params
+        if message == "Show the deployment check\n你":
+            assert params["sandboxPolicy"] == {"type": "readOnly", "networkAccess": False}
+            assert params["approvalPolicy"] == "never"
+        elif message == "Check the comparison layout":
+            assert params["sandboxPolicy"] == {"type": "dangerFullAccess"}
+            assert params["approvalPolicy"] == "never"
+        elif params["threadId"] == saved_thread:
+            assert params["sandboxPolicy"] == {"type": "workspaceWrite", "writableRoots": [],
+                                                "networkAccess": False, "excludeTmpdirEnvVar": False,
+                                                "excludeSlashTmp": False}
+            assert params["approvalPolicy"] == "on-request"
+        else:
+            assert "sandboxPolicy" not in params and "approvalPolicy" not in params
         (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")
         if params["threadId"] == saved_thread:
             assert message.startswith("Read the remote attachment")

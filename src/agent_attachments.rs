@@ -21,13 +21,21 @@ pub struct Attachments {
 
 impl Attachments {
     pub fn new() -> Rc<Self> {
-        let button = gtk::Button::with_label("附件");
-        button.style_context().add_class("quiet-button");
+        let button = gtk::Button::new();
+        button.style_context().add_class("agent-picker");
+        button.set_valign(gtk::Align::Center);
         button.set_tooltip_text(Some(
             "添加本机附件（最多 6 个，共 16 MiB），也可在输入框粘贴图片",
         ));
-        button.set_image(Some(&icons::widget(Icon::Attachment, 15)));
-        button.set_always_show_image(true);
+        if let Some(accessible) = button.accessible() {
+            accessible.set_name("附件");
+        }
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let label = gtk::Label::new(Some("附件"));
+        label.set_valign(gtk::Align::Center);
+        content.add(&icons::widget(Icon::Attachment, 16));
+        content.add(&label);
+        button.add(&content);
         let chips = gtk::FlowBox::new();
         chips.set_selection_mode(gtk::SelectionMode::None);
         chips.set_max_children_per_line(5);

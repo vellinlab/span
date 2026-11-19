@@ -15,6 +15,7 @@ pub enum Icon {
     File,
     Link,
     Attachment,
+    Shield,
     ChevronDown,
     Bolt,
     Up,
@@ -191,6 +192,18 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.line_to(10.5, 18.6);
             cr.curve_to(6.9, 22.2, 1.8, 17.1, 5.4, 13.5);
             cr.line_to(14.5, 4.4);
+        }
+        Icon::Shield => {
+            cr.move_to(12.0, 3.0);
+            cr.line_to(19.0, 6.0);
+            cr.line_to(19.0, 11.5);
+            cr.curve_to(19.0, 16.0, 16.0, 19.0, 12.0, 21.0);
+            cr.curve_to(8.0, 19.0, 5.0, 16.0, 5.0, 11.5);
+            cr.line_to(5.0, 6.0);
+            cr.close_path();
+            cr.move_to(9.0, 11.5);
+            cr.line_to(11.0, 13.5);
+            cr.line_to(15.0, 9.5);
         }
         Icon::ChevronDown => {
             cr.set_line_width(2.5);

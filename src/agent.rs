@@ -290,6 +290,7 @@ impl Agent {
             });
         }
         let inputs = row(4);
+        inputs.style_context().add_class("agent-controls");
         let attachments = Attachments::new();
         inputs.pack_start(&attachments.button, false, false, 0);
         let options = Options::new(&inputs);
@@ -766,7 +767,7 @@ impl Agent {
 
     fn open_thread(&self) {
         let resume = self.resume.text();
-        let mut params = json!({"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"workspace-write"});
+        let mut params = json!({});
         let resume_existing = !resume.trim().is_empty();
         let method = if resume_existing {
             params["threadId"] = json!(resume.trim());
@@ -775,6 +776,9 @@ impl Agent {
                 json!({"limit": INITIAL_TURNS, "sortDirection": "desc", "itemsView":"full"});
             "thread/resume"
         } else {
+            params["approvalPolicy"] = json!("on-request");
+            params["approvalsReviewer"] = json!("user");
+            params["sandbox"] = json!("workspace-write");
             let cwd = self.cwd.text();
             if !cwd.trim().is_empty() {
                 params["cwd"] = json!(cwd.trim());
