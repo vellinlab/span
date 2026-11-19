@@ -82,6 +82,7 @@ jobs:
             dist/agent-source-preview.png
             dist/svg-preview-400.png
             dist/agent-activity.png
+            dist/agent-activity-hover.png
             dist/agent-paused.png
             dist/agent-task-status.png
             dist/agent-follow-up.png

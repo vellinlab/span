@@ -1,7 +1,7 @@
 use gtk::prelude::*;
 use gtk::{cairo, gdk, gdk_pixbuf, glib};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Terminal,
     Conversation,
@@ -17,6 +17,7 @@ pub enum Icon {
     Attachment,
     Shield,
     ChevronDown,
+    ChevronRight,
     Bolt,
     Up,
     Stop,
@@ -28,6 +29,10 @@ pub enum Icon {
     CopyRich,
     Search,
     Activity,
+    Book,
+    Edit,
+    Globe,
+    Tool,
 }
 
 pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
@@ -230,6 +235,12 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.line_to(12.0, 16.0);
             cr.line_to(19.0, 9.0);
         }
+        Icon::ChevronRight => {
+            cr.set_line_width(2.5);
+            cr.move_to(9.0, 5.0);
+            cr.line_to(16.0, 12.0);
+            cr.line_to(9.0, 19.0);
+        }
         Icon::Bolt => {
             cr.move_to(13.5, 2.5);
             cr.line_to(5.0, 13.5);
@@ -273,6 +284,47 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.line_to(14.0, 18.5);
             cr.line_to(17.0, 12.0);
             cr.line_to(20.5, 12.0);
+        }
+        Icon::Book => {
+            cr.move_to(12.0, 5.5);
+            cr.curve_to(9.5, 3.0, 6.5, 3.5, 3.5, 4.5);
+            cr.line_to(3.5, 18.0);
+            cr.curve_to(6.5, 17.0, 9.5, 17.0, 12.0, 19.5);
+            cr.curve_to(14.5, 17.0, 17.5, 17.0, 20.5, 18.0);
+            cr.line_to(20.5, 4.5);
+            cr.curve_to(17.5, 3.5, 14.5, 3.0, 12.0, 5.5);
+            cr.line_to(12.0, 19.5);
+        }
+        Icon::Edit => {
+            cr.move_to(4.0, 20.0);
+            cr.line_to(5.5, 14.5);
+            cr.line_to(16.5, 3.5);
+            cr.line_to(20.5, 7.5);
+            cr.line_to(9.5, 18.5);
+            cr.close_path();
+            cr.move_to(14.0, 6.0);
+            cr.line_to(18.0, 10.0);
+        }
+        Icon::Globe => {
+            cr.arc(12.0, 12.0, 8.0, 0.0, std::f64::consts::TAU);
+            cr.new_sub_path();
+            cr.move_to(4.0, 12.0);
+            cr.line_to(20.0, 12.0);
+            cr.new_sub_path();
+            cr.move_to(12.0, 4.0);
+            cr.curve_to(17.0, 8.0, 17.0, 16.0, 12.0, 20.0);
+            cr.curve_to(7.0, 16.0, 7.0, 8.0, 12.0, 4.0);
+        }
+        Icon::Tool => {
+            cr.move_to(21.0, 7.0);
+            cr.line_to(17.0, 11.0);
+            cr.line_to(13.0, 7.0);
+            cr.line_to(17.0, 3.0);
+            cr.curve_to(12.0, 2.0, 9.0, 6.0, 10.5, 10.0);
+            cr.line_to(4.0, 16.5);
+            cr.curve_to(2.0, 18.5, 5.5, 22.0, 7.5, 20.0);
+            cr.line_to(14.0, 13.5);
+            cr.curve_to(18.5, 15.0, 22.0, 11.5, 21.0, 7.0);
         }
     }
     let _ = cr.stroke();

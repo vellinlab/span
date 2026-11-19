@@ -505,13 +505,13 @@ button.agent-send:disabled {
 }
 
 .source-preview {
-    background: @editor;
+    background: #181818;
     border-top: 1px solid @line;
 }
 
 .source-gutter {
-    background: @editor;
-    color: #88918e;
+    background: #181818;
+    color: #a1a1a1;
 }
 
 popover.selection-quote {
@@ -774,36 +774,56 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 }
 
 .agent-activity-title {
-    padding: 2px 0;
+    color: #a2a2a2;
+    padding: 3px 0;
 }
 
-.agent-activity-title drawingarea {
-    color: #8d9e99;
+.agent-activity > title > arrow,
+.agent-activity-row > title > arrow {
+    -gtk-icon-source: none;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border-width: 0;
 }
 
-.agent-activity > title:hover,
-.agent-activity-row > title:hover {
-    color: @foreground;
+.agent-activity-icon {
+    color: #949997;
+}
+
+.agent-activity-disclosure {
+    color: transparent;
+}
+
+.agent-activity > title:hover > .agent-activity-title,
+.agent-activity-row > title:hover > .agent-activity-title {
+    color: #c9ccca;
+}
+
+.agent-activity > title:hover .agent-activity-disclosure,
+.agent-activity-row > title:hover .agent-activity-disclosure,
+.agent-activity:focus > title .agent-activity-disclosure,
+.agent-activity-row:focus > title .agent-activity-disclosure {
+    color: #b8bcb9;
 }
 
 .agent-activity-rows {
-    margin: 6px 0 3px 7px;
-    padding: 0 0 1px 12px;
-    border-left: 1px solid @line;
+    margin: 5px 0 4px 7px;
+    padding: 0 0 1px 13px;
+    border-left: 1px solid #323333;
 }
 
-.agent-activity-row {
-    padding: 2px 0;
+.agent-activity-content {
+    margin: 2px 0 4px 7px;
+    padding: 1px 0 2px 13px;
+    border-left: 1px solid #383939;
 }
 
 .agent-activity-detail {
     color: @foreground;
-    padding: 5px 10px 6px 22px;
+    padding: 3px 8px 4px 0;
     font-size: 13px;
-}
-
-.agent-activity-web {
-    margin: 4px 0 4px 22px;
 }
 
 .agent-activity-web .agent-activity-detail {
@@ -811,10 +831,19 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 }
 
 .agent-source-link {
-    background: @surface;
+    background: #292a2a;
     border-radius: 12px;
     padding: 4px 9px;
     font-size: 12px;
+}
+
+label.agent-markdown.agent-source-link link,
+label.agent-markdown.agent-source-link link:visited {
+    color: #bdc2c0;
+}
+
+label.agent-markdown.agent-source-link link:hover {
+    color: #edf0ee;
 }
 
 .agent-code {
@@ -847,8 +876,11 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 
 .source-preview textview,
 .source-preview textview text {
-    background: @editor;
-    color: #e0e5df;
+    background: #181818;
+    color: #e6e6e6;
+    font-family: "Consolas", "Cascadia Mono", "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono CJK SC", monospace;
+    font-size: 12px;
+    font-weight: 400;
 }
 
 .workbench .agent-code-view text selection,
