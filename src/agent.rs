@@ -1790,8 +1790,8 @@ impl Agent {
         actions.style_context().add_class("agent-turn-actions");
         let text = Rc::new(paragraphs.join("\n\n"));
         for (icon, label, rich) in [
-            (Icon::Copy, "复制 Markdown", false),
-            (Icon::CopyRich, "复制富文本", true),
+            (Icon::Copy, "复制本轮 Markdown", false),
+            (Icon::CopyRich, "复制本轮富文本", true),
         ] {
             let button = gtk::Button::new();
             button.style_context().add_class("quiet-button");

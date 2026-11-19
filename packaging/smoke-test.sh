@@ -211,7 +211,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     [[ $(cat "$HOME/agent-prompt") == "$prompt" ]]
     printf '%s\n' 'Enter commits input composition, then sends. Shift+Enter inserts a newline.'
     widget contains '等待你的回复'
-    [[ $(widget count '复制 Markdown') == 0 && $(widget count '复制富文本') == 0 ]]
+    [[ $(widget count '复制本轮 Markdown') == 0 && $(widget count '复制本轮富文本') == 0 ]]
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
     xdotool mousemove --window "$window" 355 390 click --repeat 16 4
@@ -267,10 +267,14 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget click '复制 HTML'
     xclip -out -selection clipboard -target text/html > "$HOME/table.html"
     grep -q '<td>12 passed</td>' "$HOME/table.html"
-    widget click '复制 Markdown'
+    widget click '复制本轮 Markdown'
     copied_turn="$(xclip -out -selection clipboard)"
     [[ $copied_turn == *'| Integration | 12 passed |'* && $copied_turn == *'Environment confirmed.'* ]]
-    [[ $(widget count '复制 Markdown') == 1 && $(widget count '复制富文本') == 1 ]]
+    [[ $(widget count '复制本轮 Markdown') == 1 && $(widget count '复制本轮富文本') == 1 ]]
+    widget click '复制本轮富文本'
+    xclip -out -selection clipboard -target text/html > "$HOME/turn.html"
+    grep -q 'Environment confirmed.' "$HOME/turn.html"
+    printf '%s\n' 'Only completed turns show the two copy icons, and both include all of the turn’s replies.'
     widget click '复制代码'
     xclip -out -selection clipboard | grep -qx 'target=staging'
     widget click '保存 PNG'
