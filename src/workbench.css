@@ -826,6 +826,10 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
     font-size: 13px;
 }
 
+.agent-activity-content.agent-activity-detail {
+    padding-left: 13px;
+}
+
 .agent-activity-web .agent-activity-detail {
     padding: 1px 0;
 }

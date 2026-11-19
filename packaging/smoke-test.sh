@@ -468,10 +468,10 @@ SVG
     widget bounds '行号' >/dev/null
     widget contains '    return os.getenv("SPAN_TEST_MODE", "standard")'
     sample_memory "syntax highlighting"
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-source-preview.png"
     read -r preview_x preview_y _ _ <<< "$(widget bounds '预览区')"
     xdotool mousemove "$((preview_x + 90))" "$((preview_y + 175))" click --repeat 5 5
     sleep 0.2
-    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-source-preview.png"
     read -r row_x row_y row_width row_height <<< "$(widget bounds '000-vector.svg')"
     xdotool mousemove "$((row_x + row_width / 2))" "$((row_y + row_height / 2))" sleep 0.15 click --repeat 2 1
     widget bounds '图片画布' >/dev/null
