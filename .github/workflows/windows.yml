@@ -56,7 +56,12 @@ jobs:
           $testPath = Join-Path $env:RUNNER_TEMP "Span relocated"
           Copy-Item -Recurse dist/windows/Span $testPath
           Copy-Item dist/windows/span-tests.exe "$testPath\span-tests.exe"
-          $env:Path = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\OpenSSH"
+          $env:Path = @(
+            "$env:SystemRoot\System32"
+            "$env:SystemRoot"
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+            "$env:SystemRoot\System32\OpenSSH"
+          ) -join ';'
           & "$testPath\span-tests.exe" --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw "Tests failed with the packaged runtime" }
           $app = Start-Process "$testPath\Span.exe" -WorkingDirectory $env:RUNNER_TEMP -PassThru
