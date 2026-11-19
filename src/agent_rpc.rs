@@ -1,7 +1,7 @@
 use async_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use futures_channel::mpsc;
 use futures_util::{
-    SinkExt, StreamExt, TryStreamExt, future,
+    StreamExt, TryStreamExt, future,
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
 };
 use gtk::gio::{self, prelude::*};

@@ -238,6 +238,7 @@ impl Terminal {
         let channel = event_loop.channel();
         self.imp().grid.replace(Some(grid));
         self.imp().channel.replace(Some(channel.clone()));
+        self.set_input_enabled(true);
         drop(event_loop.spawn());
         cancellable.connect_cancelled(move |_| {
             let _ = channel.send(Msg::Shutdown);
@@ -369,17 +370,17 @@ impl Terminal {
         if !ctrl && !alt && input.filter_keypress(event) {
             return glib::Propagation::Stop;
         }
-        let cursor = self.mode(TermMode::APP_CURSOR);
+        let app_cursor = self.mode(TermMode::APP_CURSOR);
         let sequence = match key {
             Return | KP_Enter => "\r",
             BackSpace => "\x7f",
             Escape => "\x1b",
             Tab if shift => "\x1b[Z",
             Tab => "\t",
-            Up if cursor => "\x1bOA",
-            Down if cursor => "\x1bOB",
-            Right if cursor => "\x1bOC",
-            Left if cursor => "\x1bOD",
+            Up if app_cursor => "\x1bOA",
+            Down if app_cursor => "\x1bOB",
+            Right if app_cursor => "\x1bOC",
+            Left if app_cursor => "\x1bOD",
             Up => "\x1b[A",
             Down => "\x1b[B",
             Right => "\x1b[C",
@@ -509,6 +510,19 @@ impl Terminal {
         };
         let grid = grid.lock();
         let content = grid.renderable_content();
+        let mut text = String::with_capacity(size.columns());
+        let mut origin = (0.0, 0.0);
+        let mut previous = None;
+        let mut foreground = rgb(0xd8e1ed);
+        let flush = |text: &mut String, (x, y), color| {
+            if !text.trim_end().is_empty() {
+                layout.set_text(text.trim_end());
+                paint_color(cr, color);
+                cr.move_to(x, y);
+                pangocairo::functions::show_layout(cr, &layout);
+            }
+            text.clear();
+        };
         for cell in content.display_iter {
             let x = cell.point.column.0 as f64 * width;
             let y = (cell.point.line.0 + content.display_offset as i32) as f64 * height;
@@ -526,28 +540,42 @@ impl Terminal {
             {
                 bg = rgb(0x304c78);
             }
+            let point = cell.point;
+            let marks = cell.zerowidth();
+            let batch = cell.c.is_ascii() && marks.is_none() && bg == rgb(BACKGROUND);
+            let continues = batch
+                && previous.is_some_and(|last: Point| {
+                    last.line == point.line
+                        && last.column.0 + 1 == point.column.0
+                        && foreground == fg
+                });
+            if !continues {
+                flush(&mut text, origin, foreground);
+                origin = (x, y);
+                foreground = fg;
+            }
             if bg != rgb(BACKGROUND) {
                 paint_color(cr, bg);
                 cr.rectangle(x, y, width, height);
                 let _ = cr.fill();
             }
-            if cell.c == ' '
-                || cell.flags.intersects(
-                    Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER | Flags::HIDDEN,
-                )
-            {
+            if cell.flags.intersects(
+                Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER | Flags::HIDDEN,
+            ) {
+                previous = None;
+                flush(&mut text, origin, foreground);
                 continue;
             }
-            let mut text = String::new();
             text.push(cell.c);
-            if let Some(marks) = cell.zerowidth() {
+            if let Some(marks) = marks {
                 text.extend(marks);
             }
-            layout.set_text(&text);
-            paint_color(cr, fg);
-            cr.move_to(x, y);
-            pangocairo::functions::show_layout(cr, &layout);
+            if !batch {
+                flush(&mut text, origin, foreground);
+            }
+            previous = batch.then_some(point);
         }
+        flush(&mut text, origin, foreground);
         let cursor = content.cursor;
         if cursor.shape != CursorShape::Hidden && content.display_offset == 0 {
             paint_color(cr, rgb(0x9bcac6));
@@ -618,7 +646,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_pty_runs_windows_command() {
+    fn native_pty_accepts_input_and_reads_powershell_output() {
         gtk::init().expect("Windows desktop is available");
         let terminal = Terminal::new();
         terminal.set_scrollback_lines(100);
@@ -628,12 +656,16 @@ mod tests {
         let cancellable = gio::Cancellable::new();
         terminal.spawn(
             None,
-            &["cmd.exe", "/C", "echo SPAN_NATIVE_WINDOWS"],
+            &["powershell.exe", "-NoLogo", "-NoProfile"],
             &[],
             &cancellable,
             |result| {
                 result.expect("start Windows ConPTY");
             },
+        );
+        terminal.write(
+            b"Write-Output ('SPAN_NATIVE_' + 'WINDOWS'); exit\r".to_vec(),
+            true,
         );
         let context = glib::MainContext::default();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);

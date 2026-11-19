@@ -766,6 +766,8 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
         "../packaging/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg"
     )))
     .ok();
+    #[cfg(windows)]
+    window.set_icon(logo.as_ref());
     let mark = gtk::Image::from_pixbuf(logo.as_ref());
     brand.pack_start(&mark, false, false, 0);
     brand.pack_start(&text_label(APP_NAME, "app-title"), false, false, 0);

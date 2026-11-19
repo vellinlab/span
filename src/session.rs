@@ -42,7 +42,10 @@ impl Launch {
 
     pub fn description(&self) -> String {
         match self {
-            Self::Local => LOCAL_LABEL.into(),
+            #[cfg(unix)]
+            Self::Local => "本地  /  Bash".into(),
+            #[cfg(windows)]
+            Self::Local => "本地  /  PowerShell".into(),
             Self::Ssh(host) => format!("SSH  /  {}", host.target),
         }
     }

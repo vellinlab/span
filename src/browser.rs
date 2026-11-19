@@ -230,7 +230,7 @@ impl Browser {
         let mut cached = self.cached.borrow_mut();
         cached.retain(|view| view.session.strong_count() > 0);
         if let Source::Sftp { socket } = source
-            && !socket.as_deref().is_some_and(crate::sftp::socket_ready)
+            && !socket.as_deref().is_some_and(crate::sftp::channel_ready)
         {
             return None;
         }
@@ -488,11 +488,12 @@ impl Browser {
         let id = self.request.get();
         let source = session.file_source();
         self.status.set_tooltip_text(None);
+        #[cfg(unix)]
         if let Source::Sftp {
             socket: Some(socket),
         } = &source
         {
-            if !crate::sftp::socket_ready(socket) && self.watch_socket(id, socket, path.clone()) {
+            if !crate::sftp::channel_ready(socket) && self.watch_socket(id, socket, path.clone()) {
                 self.status.set_text("等待 SSH 登录…");
                 self.update_controls();
                 return;
@@ -515,6 +516,7 @@ impl Browser {
         }
     }
 
+    #[cfg(unix)]
     fn watch_socket(self: &Rc<Self>, id: u64, socket: &Path, path: Option<PathBuf>) -> bool {
         let Some(directory) = socket.parent() else {
             return false;
@@ -524,7 +526,7 @@ impl Browser {
         else {
             return false;
         };
-        if crate::sftp::socket_ready(socket) {
+        if crate::sftp::channel_ready(socket) {
             monitor.cancel();
             return false;
         }
@@ -532,7 +534,7 @@ impl Browser {
         let socket = socket.to_path_buf();
         monitor.connect_changed(move |_, _, _, _| {
             if let Some(browser) = weak.upgrade() {
-                if browser.request.get() == id && crate::sftp::socket_ready(&socket) {
+                if browser.request.get() == id && crate::sftp::channel_ready(&socket) {
                     browser.load(path.clone());
                 }
             }

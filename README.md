@@ -2,7 +2,7 @@
 
 <img src="packaging/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg" width="72" height="72" alt="Span 图标">
 
-用 Rust、GTK3 和 VTE 构建的 Linux SSH 终端和 Codex 工作台。左侧管理 SSH 主机，顶部标签在本地 Bash 和远程会话间切换。
+用 Rust 和 GTK3 构建的 SSH 终端和 Codex 工作台。左侧管理 SSH 主机，顶部标签在本地终端和远程会话间切换。
 
 ## 安装
 
@@ -28,16 +28,22 @@ span
 
 安装包与启动命令均使用 `span`。安装时会替换旧的 `ssh-workbench` 软件包，继续读取已有的主机配置。`ssh-workbench` 启动命令仍可作为兼容别名使用。
 
+### Windows x86_64
+
+从通过的 [Build Windows](https://github.com/zyw02/span/actions/workflows/windows.yml) 下载 `span-windows-x86_64` 构建产物。解压后打开 `Span.exe`，使用 Windows 自带的 ConPTY 运行 PowerShell。GTK3 运行库随便携包提供。
+
+远程终端使用系统 OpenSSH 客户端，密码和验证码在终端中输入。Windows 的 SFTP 和远程 Codex 会为同一主机建立后台 SSH 连接，需要可直接使用的密钥或 SSH Agent。先在终端确认主机公钥，后台连接会验证已保存的主机身份。使用本地 Codex 会话需要将已登录的 `codex.exe` 放在 `PATH` 中。本地 Windows Codex 目前使用独立的 App Server。
+
 带 `-alpha.N`、`-beta.N` 或 `-rc.N` 后缀的版本会标记为预发布，供测试使用。
 
 界面英文字体优先使用本机的 Segoe UI，简体中文优先使用微软雅黑 UI 或微软雅黑。安装包附带微软的 [Selawik 1.01](https://github.com/microsoft/Selawik/releases/tag/1.01)，供缺少 Segoe UI 的系统使用。缺少微软雅黑时，优先使用系统已有的思源黑体或 Noto Sans CJK SC。
 
 ## 使用
 
-- 启动后进入本地 Bash。标签栏的「+」打开另一个本地终端，标签可拖动排序。
+- 启动后进入本地终端。Linux 默认使用 Bash，Windows 默认使用 PowerShell。标签栏的「+」打开另一个本地终端，标签可拖动排序。
 - 主机栏的「+」添加配置，点击主机打开 SSH 标签，「…」菜单提供编辑和删除。配置保存在 `$XDG_CONFIG_HOME/ssh-workbench/hosts.ini`，通常是 `~/.config/ssh-workbench/hosts.ini`。
 - 「会话 → 快速连接」适合临时连接。SSH 目标可填 OpenSSH 别名或 `user@host`。系统 OpenSSH 读取现有配置、代理和认证设置。
-- 为可信主机开启「信任 X11 转发」后，应用使用 `ssh -Y` 和当前标签的专用控制套接字。连接后在远端 Codex 中按 `Ctrl+V` 附上本机截图。
+- Linux 下，为可信主机开启「信任 X11 转发」后，应用使用 `ssh -Y` 和当前标签的专用控制套接字。连接后在远端 Codex 中按 `Ctrl+V` 附上本机截图。
 - 文字复制和粘贴使用 `Ctrl+Shift+C` 和 `Ctrl+Shift+V`。用 `Ctrl+Shift+T` 新建本地标签，`Ctrl+Shift+W` 关闭当前标签。
 
 ## 文件目录
