@@ -56,7 +56,7 @@ impl Picker {
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
             .propagate_natural_height(true)
-            .min_content_width(menu_width)
+            .width_request(menu_width)
             .max_content_height(248)
             .build();
         scroll.add(&list);

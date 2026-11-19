@@ -206,6 +206,19 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
     xdotool mousemove --window "$window" 900 360 click --repeat 8 4
     sleep 0.25
+    read -r cell_x cell_y _ cell_height < <(widget bounds 'Check')
+    read -r next_x next_y next_width next_height < <(widget bounds 'Result')
+    xdotool mousemove "$((cell_x + 5))" "$((cell_y + cell_height / 2))" mousedown 1 \
+        mousemove "$((next_x + next_width / 2))" "$((next_y + next_height / 2))" mouseup 1
+    xdotool key --clearmodifiers ctrl+c
+    [[ $(xclip -out -selection clipboard) == $'Check\tResult' ]]
+    before_scroll="$(widget scroll-value '对话记录')"
+    xdotool mousemove "$((cell_x + 5))" "$((cell_y + cell_height / 2))" mousedown 1 click 5
+    after_scroll="$(widget scroll-value '对话记录')"
+    xdotool mouseup 1
+    ((after_scroll > before_scroll))
+    xdotool mousemove --window "$window" 900 360 click 4
+    printf '%s\n' 'Direct text selection copies across table cells and the conversation scrolls during a drag.'
     widget click '复制 CSV'
     xclip -out -selection clipboard | tr -d '\r' > "$HOME/table.csv"
     grep -qx 'Integration,12 passed' "$HOME/table.csv"
@@ -333,7 +346,7 @@ PY
     dialog="$(xdotool search --onlyvisible --name '^快速连接$' | head -n1)"
     xdotool windowfocus --sync "$dialog"
     widget contains 'SSH 目标'
-    widget contains '信任 X11 转发'
+    widget bounds '信任 X11 转发' >/dev/null
     connect_preview="$(dirname "$WORKBENCH_PREVIEW")/quick-connect.png"
     import -window "$dialog" "$connect_preview"
     [[ $(convert "$connect_preview" -crop 1x1+15+80 -colorspace Gray -format '%[fx:mean < 0.35]' info:) == 1 ]]

@@ -436,6 +436,24 @@ impl Workbench {
     }
 
     fn copy(self: &Rc<Self>) {
+        if let Some(focused) = self
+            .window
+            .upgrade()
+            .and_then(|window| window.focused_widget())
+        {
+            if let Some(selection) = focused.downcast_ref::<crate::agent_selection::TextSelection>()
+            {
+                selection.copy();
+                return;
+            }
+            if focused.is::<gtk::Label>()
+                || focused.is::<gtk::TextView>()
+                || focused.is::<gtk::Entry>()
+            {
+                focused.emit_by_name::<()>("copy-clipboard", &[]);
+                return;
+            }
+        }
         if let Some(session) = self.current_session() {
             session.terminal.copy_text();
         }

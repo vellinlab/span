@@ -40,6 +40,12 @@ for _ in range(50):
             sys.exit(0 if operation == "contains" else f"Unexpected text {name!r}")
         if node.name != name:
             continue
+        if operation == "scroll-value":
+            for child in node:
+                if (child.getRole() == pyatspi.ROLE_SCROLL_BAR
+                        and child.getState().contains(pyatspi.STATE_VERTICAL)):
+                    print(int(child.queryValue().currentValue))
+                    sys.exit(0)
         if operation == "click" and "Action" in node.get_interfaces():
             if node.queryAction().doAction(0):
                 sys.exit(0)

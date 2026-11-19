@@ -1,3 +1,4 @@
+use crate::agent_selection::{Part, TextSelection};
 use crate::mermaid::Diagram;
 use gtk::prelude::*;
 use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
@@ -16,20 +17,21 @@ pub struct Context {
     pub socket: Option<PathBuf>,
 }
 
-pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk::Box {
+pub fn response(markdown: &str, context: &Context, preview_images: bool) -> TextSelection {
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let mut pending = String::new();
+    let mut selectable = Vec::new();
     let mut list_depth: u32 = 0;
     let mut automatic_images = 0;
     let mut events = parser(markdown).into_offset_iter();
     while let Some((event, range)) = events.next() {
         match event {
             Event::Start(Tag::Table(_)) => {
-                flush_text(&blocks, &mut pending);
-                blocks.add(&table(&mut events, markdown, range.start));
+                flush_text(&blocks, &mut pending, &mut selectable);
+                blocks.add(&table(&mut events, markdown, range.start, &mut selectable));
             }
             Event::Start(Tag::CodeBlock(kind)) => {
-                flush_text(&blocks, &mut pending);
+                flush_text(&blocks, &mut pending, &mut selectable);
                 let mut code = String::new();
                 for (event, _) in events.by_ref() {
                     match event {
@@ -53,7 +55,7 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk:
                 blocks.add(&code_card(language, &code, None));
             }
             Event::Start(Tag::Image { dest_url, .. }) => {
-                flush_text(&blocks, &mut pending);
+                flush_text(&blocks, &mut pending, &mut selectable);
                 let mut alt = String::new();
                 for (event, _) in events.by_ref() {
                     match event {
@@ -77,7 +79,7 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk:
                 if matches!(event, Event::End(TagEnd::Heading(_))) {
                     pending.push_str("</b>");
                 }
-                flush_text(&blocks, &mut pending);
+                flush_text(&blocks, &mut pending, &mut selectable);
             }
             Event::Start(Tag::Heading { .. } | Tag::Strong) => pending.push_str("<b>"),
             Event::End(TagEnd::Strong) => pending.push_str("</b>"),
@@ -88,7 +90,7 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk:
             Event::Start(Tag::List(_)) => list_depth = list_depth.saturating_add(1),
             Event::End(TagEnd::List(_)) => {
                 list_depth = list_depth.saturating_sub(1);
-                flush_text(&blocks, &mut pending);
+                flush_text(&blocks, &mut pending, &mut selectable);
             }
             Event::Start(Tag::Item) => {
                 pending.push_str(&"   ".repeat(list_depth.saturating_sub(1).min(8) as usize));
@@ -98,7 +100,7 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk:
             Event::SoftBreak => pending.push(' '),
             Event::HardBreak => pending.push('\n'),
             Event::Rule => {
-                flush_text(&blocks, &mut pending);
+                flush_text(&blocks, &mut pending, &mut selectable);
                 blocks.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
             }
             Event::Code(text) => {
@@ -112,8 +114,8 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> gtk:
             _ => {}
         }
     }
-    flush_text(&blocks, &mut pending);
-    blocks
+    flush_text(&blocks, &mut pending, &mut selectable);
+    TextSelection::new(&blocks, selectable)
 }
 
 fn escaped(text: &str) -> String {
@@ -127,7 +129,7 @@ fn parser(markdown: &str) -> Parser<'_> {
     )
 }
 
-fn flush_text(blocks: &gtk::Box, pending: &mut String) {
+fn flush_text(blocks: &gtk::Box, pending: &mut String, selectable: &mut Vec<Part>) {
     if !pending.trim().is_empty() {
         let label = text("");
         label.style_context().add_class("agent-prose");
@@ -136,12 +138,18 @@ fn flush_text(blocks: &gtk::Box, pending: &mut String) {
         } else {
             label.set_text(pending.trim());
         }
+        selectable.push(Part::new(&label, "\n\n"));
         blocks.add(&label);
     }
     pending.clear();
 }
 
-fn table(events: &mut OffsetIter<'_>, markdown: &str, start: usize) -> gtk::Box {
+fn table(
+    events: &mut OffsetIter<'_>,
+    markdown: &str,
+    start: usize,
+    selectable: &mut Vec<Part>,
+) -> gtk::Box {
     let grid = gtk::Grid::builder().column_homogeneous(true).build();
     grid.style_context().add_class("agent-table");
 
@@ -168,6 +176,12 @@ fn table(events: &mut OffsetIter<'_>, markdown: &str, start: usize) -> gtk::Box 
                     if row == 0 {
                         label.style_context().add_class("agent-table-head");
                     }
+                    let separator = match (row, col) {
+                        (0, 0) => "\n\n",
+                        (_, 0) => "\n",
+                        _ => "\t",
+                    };
+                    selectable.push(Part::new(&label, separator));
                     grid.attach(&label, col, row, 1, 1);
                 }
                 cells.push(std::mem::take(&mut cell));

@@ -166,6 +166,9 @@ impl Agent {
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
             .build();
+        if let Some(accessible) = scroll.accessible() {
+            accessible.set_name("对话记录");
+        }
         let older = button("加载更早的对话", false);
         older.set_halign(gtk::Align::Start);
         older.set_no_show_all(true);
