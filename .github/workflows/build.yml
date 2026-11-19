@@ -76,6 +76,7 @@ jobs:
             dist/agent-effort-picker.png
             dist/agent-usage.png
             dist/agent-workspace.png
+            dist/agent-workspace-compact.png
             dist/agent-activity.png
             dist/agent-paused.png
             dist/agent-task-status.png

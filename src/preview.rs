@@ -152,8 +152,8 @@ impl Panel {
         if let Some(accessible) = widget.accessible() {
             accessible.set_name("预览区");
         }
-        widget.set_width_request(280);
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        widget.set_width_request(232);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 3);
         header.style_context().add_class("files-preview-header");
         let label = gtk::Label::builder()
             .label("预览区")
@@ -449,7 +449,7 @@ impl Panel {
     }
 
     fn add_image(&self, scroll: &gtk::ScrolledWindow, image: &gdk_pixbuf::Pixbuf) {
-        let width = self.body.allocated_width().max(280) - 22;
+        let width = self.body.allocated_width().max(self.widget.width_request()) - 22;
         let resized = if image.width() > width {
             let height = (i64::from(image.height()) * i64::from(width) / i64::from(image.width()))
                 .max(1) as i32;

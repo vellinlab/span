@@ -68,17 +68,17 @@ pub fn open(app: &gtk::Application) {
         .group_name("workbench")
         .build();
     tabs.style_context().add_class("terminal-tabs");
-    let plus = icon_button(Icon::Plus, "新建本地终端 (Ctrl+Shift+T)");
+    let plus = icons::button(Icon::Plus, "新建本地终端", "新建本地终端 (Ctrl+Shift+T)");
     plus.set_action_name(Some("win.local"));
-    let files = icon_button(Icon::Folder, "文件目录 (Ctrl+Shift+F)");
-    files.set_action_name(Some("win.files"));
     let tools = row(2);
-    let agent = gtk::Button::with_label("Codex");
-    agent.style_context().add_class("quiet-button");
-    agent.set_tooltip_text(Some("切换 Codex 会话／终端 (Ctrl+Shift+A)"));
+    tools.style_context().add_class("workspace-tools");
+    let agent = icons::button(
+        Icon::Conversation,
+        "切换 Codex 会话／终端",
+        "切换 Codex 会话／终端 (Ctrl+Shift+A)",
+    );
     agent.set_action_name(Some("win.agent"));
     tools.add(&agent);
-    tools.add(&files);
     tools.add(&plus);
     tools.show_all();
     tabs.set_action_widget(&tools, gtk::PackType::End);
@@ -92,13 +92,7 @@ pub fn open(app: &gtk::Application) {
     workspace.style_context().add_class("files-split");
     workspace.pack1(&views, true, true);
     workspace.pack2(&preview.widget, false, false);
-    let split = workspace.downgrade();
-    preview.widget.connect_show(move |_| {
-        if let Some(split) = split.upgrade() {
-            let width = split.allocated_width();
-            split.set_position((width - (width * 2 / 5).clamp(280, 500)).max(0));
-        }
-    });
+    size_preview(&workspace, &preview.widget);
     layout.pack_start(&workspace, true, true, 0);
     root.pack_start(&layout, true, true, 0);
 
@@ -244,6 +238,50 @@ pub fn open(app: &gtk::Application) {
     workbench.rebuild_hosts();
     window.show_all();
     workbench.open_local();
+}
+
+fn size_preview(split: &gtk::Paned, preview: &gtk::Box) {
+    const READING_WIDTH: i32 = 600;
+    const MAX_PREVIEW_WIDTH: i32 = 390;
+
+    let last_width = Cell::new(0);
+    let preview = preview.downgrade();
+    split.connect_size_allocate(move |split, allocation| {
+        let Some(preview) = preview.upgrade().filter(|preview| preview.is_visible()) else {
+            last_width.set(0);
+            return;
+        };
+        let width = allocation.width();
+        let previous = last_width.replace(width);
+        if width <= 1 || (previous > 1 && width >= previous) {
+            return;
+        }
+
+        let minimum = preview.width_request();
+        let available = (width - READING_WIDTH).clamp(minimum, MAX_PREVIEW_WIDTH);
+        let preview_width = if previous <= 1 {
+            (width * 3 / 10).clamp(minimum, available)
+        } else {
+            (width - split.position()).clamp(minimum, available)
+        };
+        let position = width - preview_width;
+        if position == split.position() {
+            return;
+        }
+        let split = split.downgrade();
+        let preview = preview.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(split) = split
+                .upgrade()
+                .filter(|split| split.allocated_width() == width)
+                && preview
+                    .upgrade()
+                    .is_some_and(|preview| preview.is_visible())
+            {
+                split.set_position(position);
+            }
+        });
+    });
 }
 
 impl Workbench {
@@ -852,8 +890,5 @@ fn text_label(text: &str, class: &str) -> gtk::Label {
 }
 
 fn icon_button(symbol: Icon, tooltip: &str) -> gtk::Button {
-    let button = gtk::Button::builder().tooltip_text(tooltip).build();
-    button.style_context().add_class("quiet-button");
-    button.add(&icon(symbol, 16));
-    button
+    icons::button(symbol, tooltip, tooltip)
 }

@@ -156,23 +156,33 @@ impl Agent {
         let panel = column(0);
         panel.style_context().add_class("agent-panel");
 
-        let toolbar = row(10);
+        let toolbar = row(6);
         toolbar.style_context().add_class("agent-toolbar");
-        let title = agent_render::text(&format!("Codex  /  {host}"));
-        title.set_selectable(false);
-        title.style_context().add_class("agent-title");
-        toolbar.pack_start(&title, true, true, 0);
-        let terminal = button("终端", false);
-        terminal.set_tooltip_text(Some("展开或收起下方终端"));
+        let title = gtk::Label::new(Some("Codex"));
+        title.style_context().add_class("agent-toolbar-title");
+        toolbar.pack_start(&title, false, false, 0);
+        let host_label = gtk::Label::builder()
+            .label(host)
+            .xalign(0.0)
+            .ellipsize(pango::EllipsizeMode::End)
+            .build();
+        host_label.style_context().add_class("agent-toolbar-host");
+        toolbar.pack_start(&host_label, true, true, 0);
+        let terminal = icons::button(
+            Icon::TerminalDrawer,
+            "会话页终端面板",
+            "展开或收起下方终端 (Ctrl+Shift+J)",
+        );
         terminal.connect_clicked(move |_| toggle_terminal());
         toolbar.pack_end(&terminal, false, false, 0);
         let catalog = Catalog::new(host);
-        let copy_id = button("复制会话 ID", false);
+        let copy_id = icons::button(Icon::Copy, "复制会话 ID", "复制会话 ID");
         copy_id.set_no_show_all(true);
         toolbar.pack_end(&copy_id, false, false, 0);
         let status = agent_render::text("等待打开会话");
         status.set_selectable(false);
         status.set_ellipsize(pango::EllipsizeMode::End);
+        status.set_max_width_chars(34);
         status.style_context().add_class("agent-status");
         status.set_no_show_all(true);
         toolbar.pack_end(&status, false, false, 0);

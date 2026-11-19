@@ -4,6 +4,8 @@ use gtk::{cairo, gdk, gdk_pixbuf, glib};
 #[derive(Clone, Copy)]
 pub enum Icon {
     Terminal,
+    Conversation,
+    TerminalDrawer,
     Server,
     Connect,
     Plus,
@@ -92,6 +94,28 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
             cr.line_to(7.0, 15.0);
             cr.move_to(13.0, 15.0);
             cr.line_to(17.0, 15.0);
+        }
+        Icon::Conversation => {
+            cr.move_to(3.0, 5.0);
+            cr.line_to(21.0, 5.0);
+            cr.line_to(21.0, 16.0);
+            cr.line_to(10.0, 16.0);
+            cr.line_to(5.0, 20.0);
+            cr.line_to(5.0, 16.0);
+            cr.line_to(3.0, 16.0);
+            cr.close_path();
+            cr.move_to(7.5, 10.5);
+            cr.line_to(16.5, 10.5);
+        }
+        Icon::TerminalDrawer => {
+            cr.rectangle(3.0, 4.0, 18.0, 16.0);
+            cr.move_to(3.0, 11.0);
+            cr.line_to(21.0, 11.0);
+            cr.move_to(7.0, 14.0);
+            cr.line_to(9.0, 16.0);
+            cr.line_to(7.0, 18.0);
+            cr.move_to(12.0, 18.0);
+            cr.line_to(16.0, 18.0);
         }
         Icon::Server => {
             for y in [4.5, 13.5] {
@@ -208,4 +232,16 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
     }
     let _ = cr.stroke();
     let _ = cr.restore();
+}
+
+pub fn button(icon: Icon, label: &str, tooltip: &str) -> gtk::Button {
+    let button = gtk::Button::builder().tooltip_text(tooltip).build();
+    button.style_context().add_class("quiet-button");
+    let icon = widget(icon, 16);
+    icon.show();
+    button.add(&icon);
+    if let Some(accessible) = button.accessible() {
+        accessible.set_name(label);
+    }
+    button
 }

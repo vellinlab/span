@@ -177,7 +177,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool key --clearmodifiers Return
     wait_until "returning to the first Bash tab" grep -qsx "$first_bash" "$HOME/current-bash"
 
-    xdotool key --clearmodifiers ctrl+shift+a
+    widget click '切换 Codex 会话／终端'
     xdotool windowsize "$window" 1250 940
     sleep 0.2
     xdotool key --clearmodifiers Return
@@ -342,10 +342,19 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     sleep 0.2
     narrow_width="$(composer_width)"
     ((wide_width > narrow_width + 100))
+    read -r _ _ timeline_width _ < <(widget bounds '对话记录')
+    read -r _ _ preview_width _ < <(widget bounds '预览区')
+    if ((timeline_width < 585 || preview_width > 295)); then
+        printf 'At 1170 pixels, the conversation width is %s and the preview width is %s.\n' \
+            "$timeline_width" "$preview_width" >&2
+        exit 1
+    fi
+    xdotool mousemove 15 15
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-workspace-compact.png"
     widget click '关闭预览'
     xdotool key --clearmodifiers ctrl+shift+f
     xdotool windowsize --sync "$window" 1250 940
-    printf '%s\n' 'The centered composer adapts to both wide and narrow split layouts.'
+    printf '%s\n' 'The centered composer adapts to both split layouts, with at least 585 pixels for conversation at 1170 pixels.'
 
     widget mouse 'Fast 模式'
     widget not-state 'Fast 模式' checked
@@ -415,7 +424,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowsize --sync "$window" 1250 940
     printf '%s\n' 'The composer applies both fast and standard speeds, reports elapsed task time, interrupts with Esc, and continues in place.'
 
-    xdotool key --clearmodifiers ctrl+shift+j
+    widget click '复制会话 ID'
+    xclip -out -selection clipboard | grep -qx 'preview-thread'
+    widget click '会话页终端面板'
     sleep 0.25
     xdotool type --clearmodifiers 'printf "%s\n" "$BASHPID" > "$HOME/drawer-bash"'
     xdotool key --clearmodifiers Return

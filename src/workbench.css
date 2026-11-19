@@ -1,13 +1,13 @@
 @define-color canvas #18191d;
 @define-color terminal #14151a;
-@define-color sidebar #1d1f25;
-@define-color chrome #25272f;
-@define-color line #30323b;
-@define-color surface #282b33;
+@define-color sidebar #202126;
+@define-color chrome #24262c;
+@define-color line #2e3037;
+@define-color surface #292b32;
 @define-color hover #2e3139;
 @define-color selection #303b50;
 @define-color foreground #e9eaf0;
-@define-color muted #a8adb9;
+@define-color muted #b2b6c0;
 @define-color accent #a0baff;
 
 window.workbench,
@@ -47,6 +47,10 @@ popover.agent-picker-menu {
     color: @foreground;
 }
 
+.workbench-header {
+    min-height: 34px;
+}
+
 .app-title {
     color: @foreground;
     font-size: 14px;
@@ -62,7 +66,7 @@ popover.agent-picker-menu {
 
 .workbench menubar > menuitem {
     border-radius: 5px;
-    padding: 6px 9px;
+    padding: 5px 8px;
 }
 
 .workbench menubar > menuitem:hover,
@@ -304,17 +308,17 @@ button.agent-send:disabled {
 }
 
 .terminal-tabs > header {
-    min-height: 39px;
+    min-height: 34px;
     background: @sidebar;
     border-bottom: 1px solid @line;
     box-shadow: none;
-    padding: 3px 7px 3px 5px;
+    padding: 3px 7px 2px 5px;
 }
 
 .terminal-tabs > header > tabs > tab {
     margin: 0 2px;
     padding: 0 8px;
-    min-height: 32px;
+    min-height: 29px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 7px;
@@ -329,8 +333,11 @@ button.agent-send:disabled {
 
 .terminal-tabs > header > tabs > tab:checked {
     background: @surface;
-    border-color: @line;
     color: @foreground;
+}
+
+.workspace-tools {
+    padding-left: 6px;
 }
 
 .tab-title {
@@ -413,7 +420,7 @@ button.agent-send:disabled {
 
 .files-split > separator {
     min-width: 3px;
-    background: @line;
+    background: alpha(@line, 0.7);
 }
 
 .files-split > separator:hover {
@@ -451,9 +458,13 @@ button.agent-send:disabled {
 }
 
 .files-preview-header {
-    padding: 6px 9px;
-    background: @sidebar;
+    padding: 4px 8px;
+    background: @canvas;
     border-bottom: 1px solid @line;
+}
+
+.workbench .files-preview-header button:disabled {
+    color: #717581;
 }
 
 .preview-panel {
@@ -462,9 +473,9 @@ button.agent-send:disabled {
 }
 
 .preview-detail {
-    padding: 5px 10px;
+    padding: 5px 12px;
     color: @muted;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .agent-preview-actions button {
@@ -488,7 +499,7 @@ button.agent-send:disabled {
 .files-table {
     background: @canvas;
     color: @foreground;
-    font-size: 12px;
+    font-size: 13px;
     -GtkTreeView-vertical-separator: 6;
 }
 
@@ -520,9 +531,22 @@ button.agent-send:disabled {
 }
 
 .agent-toolbar {
-    min-height: 42px;
-    padding: 0 16px;
+    min-height: 36px;
+    padding: 0 12px 0 18px;
     background: @canvas;
+}
+
+.agent-toolbar-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.agent-toolbar-host {
+    margin-left: 4px;
+    padding-left: 9px;
+    border-left: 1px solid @line;
+    color: @muted;
+    font-size: 12px;
 }
 
 .agent-title {
@@ -532,7 +556,7 @@ button.agent-send:disabled {
 
 .agent-status {
     color: @muted;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .agent-catalog {
@@ -582,7 +606,7 @@ button.agent-send:disabled {
 
 .agent-catalog-project {
     color: @muted;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .agent-drawer-header {
@@ -629,15 +653,14 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 }
 
 .agent-prose {
-    font-size: 14px;
+    font-size: 15px;
 }
 
 .agent-user {
-    background: #29364a;
-    border: 1px solid #35445d;
-    border-radius: 14px;
+    background: #293348;
+    border-radius: 15px;
     padding: 9px 13px;
-    font-size: 14px;
+    font-size: 15px;
 }
 
 .agent-card,
@@ -770,18 +793,19 @@ scrolledwindow.agent-table-scroll {
 
 .agent-compose-card {
     background: @chrome;
-    border: 1px solid #3a3e49;
-    border-radius: 18px;
-    padding: 7px 10px 8px;
+    border: 1px solid #393c45;
+    border-radius: 17px;
+    padding: 7px 10px 9px;
 }
 
 .agent-compose-card.composer-focused {
-    border-color: #677ca4;
+    border-color: #526484;
 }
 
 .agent-compose-placeholder {
     color: @muted;
     padding: 8px 8px;
+    font-size: 14px;
 }
 
 .agent-task-status {
@@ -941,6 +965,7 @@ label.agent-markdown link:visited {
 }
 
 .agent-composer textview {
+    font-size: 14px;
     padding: 4px 7px;
     font-size: 14px;
 }
