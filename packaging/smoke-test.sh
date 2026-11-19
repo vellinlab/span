@@ -207,16 +207,16 @@ MARKDOWN
         center_delta=$((2 * (control_y - bar_y) + control_h - bar_h))
         ((center_delta >= -2 && center_delta <= 2))
     done
-    widget contains '工作区权限'
+    widget description '会话权限' '工作区权限'
     widget mouse '会话权限'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-permissions.png"
     widget mouse '完全访问'
     wait_until "confirming Full Access explicitly" dialog_open '会话权限'
     SPAN_TEST_DIALOG='会话权限' widget click '取消'
-    widget contains '工作区权限'
+    widget description '会话权限' '工作区权限'
     widget mouse '会话权限'
     widget mouse '只读'
-    widget contains '只读'
+    widget description '会话权限' '只读'
     widget not-state 'Fast 模式' sensitive
     widget mouse '选择模型'
     widget contains 'GPT Vision'
@@ -428,7 +428,7 @@ MARKDOWN
     widget mouse '完全访问'
     wait_until "selecting Full Access" dialog_open '会话权限'
     SPAN_TEST_DIALOG='会话权限' widget click '启用完全访问'
-    widget contains '完全访问'
+    widget description '会话权限' '完全访问'
     widget mouse '输入消息，或添加附件'
     xdotool type --clearmodifiers 'Check the comparison layout'
     widget click '发送'
@@ -673,7 +673,7 @@ PY
         resumed_twice() { [[ $(wc -l < "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 2 ]]; }
         wait_until "automatic restoration on SSH reconnect" resumed_twice
         widget contains 'Latest deployment notes'
-        widget contains '只读'
+        widget description '会话权限' '只读'
         widget mouse '会话权限'
         widget mouse '工作区权限'
         add_attachment "$HOME/notes.txt"

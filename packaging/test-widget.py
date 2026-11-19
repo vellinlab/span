@@ -66,6 +66,8 @@ for _ in range(50):
                     sys.exit(0)
             if node.name != name:
                 continue
+            if operation == "description" and (node.description or "").startswith(values[0]):
+                sys.exit(0)
             if operation in ("state", "not-state"):
                 state = getattr(pyatspi, "STATE_" + values[0].upper())
                 if node.getState().contains(state) == (operation == "state"):

@@ -54,8 +54,10 @@ impl Picker {
         }
         let label = gtk::Label::new(None);
         label.set_valign(gtk::Align::Center);
-        label.set_ellipsize(pango::EllipsizeMode::End);
-        label.set_max_width_chars(chars);
+        if chars > 0 {
+            label.set_ellipsize(pango::EllipsizeMode::End);
+            label.set_max_width_chars(chars);
+        }
         let trigger = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         if let Some(icon) = icon {
             trigger.pack_start(&icons::widget(icon, 16), false, false, 0);
@@ -286,7 +288,7 @@ impl Selection {
 
 impl Options {
     pub fn new(actions: &gtk::Box) -> Rc<Self> {
-        let permission = Picker::new("会话权限", "", 9, 172, Some(Icon::Shield));
+        let permission = Picker::new("会话权限", "", 0, 172, Some(Icon::Shield));
         let model = Picker::new("选择模型", "", 19, 182, None);
         let effort = Picker::new("思考强度", "思考 · ", 14, 126, None);
         let fast = gtk::ToggleButton::new();
@@ -602,6 +604,10 @@ impl Options {
             format!("从下一轮起生效。{description}")
         };
         button.set_tooltip_text(Some(&tooltip));
+        if let Some(accessible) = button.accessible() {
+            let name = mode.map_or("沿用会话", PermissionMode::name);
+            accessible.set_description(&format!("{name}。{tooltip}"));
+        }
     }
 
     fn select_permission(&self, row: &gtk::ListBoxRow) {
