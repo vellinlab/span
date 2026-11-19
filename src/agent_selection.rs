@@ -1,4 +1,5 @@
-use crate::agent_render::clipboard;
+use crate::agent_render::{clipboard, open_link};
+use gtk::atk::prelude::*;
 use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
 use std::cell::{Cell, OnceCell};
@@ -32,6 +33,12 @@ struct Position {
 
 type Range = (Position, Position);
 
+#[derive(Clone, Copy)]
+struct Drag {
+    start: Position,
+    root: (f64, f64),
+}
+
 glib::wrapper! {
     pub struct TextSelection(ObjectSubclass<imp::TextSelection>)
         @extends gtk::EventBox, gtk::Bin, gtk::Container, gtk::Widget,
@@ -45,7 +52,7 @@ mod imp {
     #[derive(Default)]
     pub struct TextSelection {
         pub(super) parts: OnceCell<Vec<Part>>,
-        pub(super) drag: Cell<Option<Position>>,
+        pub(super) drag: Cell<Option<Drag>>,
         pub(super) range: Cell<Option<Range>>,
     }
 
@@ -106,7 +113,7 @@ impl TextSelection {
             if event.button() != 1 {
                 return glib::Propagation::Proceed;
             }
-            let Some(anchor) = view.hit(event.root(), false) else {
+            let Some((start, _)) = view.hit(event.root(), false) else {
                 return glib::Propagation::Proceed;
             };
             // GTK's viewport scrolls to reveal the focused widget. The pointer
@@ -120,7 +127,10 @@ impl TextSelection {
                 scroll.vadjustment().set_value(position);
             }
             view.change_range(None);
-            view.imp().drag.set(Some(anchor));
+            view.imp().drag.set(Some(Drag {
+                start,
+                root: event.root(),
+            }));
             widget.grab_add();
             glib::Propagation::Stop
         });
@@ -148,11 +158,28 @@ impl TextSelection {
             if widget.has_grab() {
                 widget.grab_remove();
             }
-            if drag.is_none() {
+            let Some(drag) = drag else {
                 return glib::Propagation::Proceed;
-            }
+            };
             if let Some(text) = view.selected_text() {
                 gtk::Clipboard::get(&gdk::SELECTION_PRIMARY).set_text(&text);
+            } else if !widget.drag_check_threshold(
+                drag.root.0 as i32,
+                drag.root.1 as i32,
+                event.root().0 as i32,
+                event.root().1 as i32,
+            ) && let Some((position, Some(character))) = view.hit(event.root(), false)
+                && position == drag.start
+                && let Some(links) = view.parts()[position.part]
+                    .label
+                    .accessible()
+                    .and_downcast::<gtk::atk::Hypertext>()
+                && let index = links.link_index(character)
+                && index >= 0
+                && let Some(link) = links.link(index)
+                && let Some(uri) = link.uri(0)
+            {
+                open_link(&uri);
             }
             glib::Propagation::Stop
         });
@@ -202,7 +229,7 @@ impl TextSelection {
             .unwrap_or_default()
     }
 
-    fn hit(&self, root: (f64, f64), nearest: bool) -> Option<Position> {
+    fn hit(&self, root: (f64, f64), nearest: bool) -> Option<(Position, Option<i32>)> {
         let top = self.toplevel()?;
         let (_, origin_x, origin_y) = top.window()?.origin();
         let (x, y) =
@@ -234,7 +261,7 @@ impl TextSelection {
         // Labels have no GDK window. GTK reports layout offsets in the
         // containing window, while x and y above are relative to the label.
         let allocation = label.allocation();
-        let (_, index, trailing) = label.layout()?.xy_to_index(
+        let (inside, index, trailing) = label.layout()?.xy_to_index(
             (x + allocation.x() - left).saturating_mul(pango::SCALE),
             (y + allocation.y() - top).saturating_mul(pango::SCALE),
         );
@@ -247,11 +274,14 @@ impl TextSelection {
                 .take(trailing.max(0) as usize)
                 .map(char::len_utf8)
                 .sum::<usize>();
-        Some(Position { part, byte })
+        let character = (inside && !nearest).then(|| text[..index].chars().count() as i32);
+        Some((Position { part, byte }, character))
     }
 
     fn extend_to(&self, root: (f64, f64)) {
-        if let (Some(start), Some(end)) = (self.imp().drag.get(), self.hit(root, true)) {
+        if let (Some(Drag { start, .. }), Some((end, _))) =
+            (self.imp().drag.get(), self.hit(root, true))
+        {
             self.change_range((start != end).then(|| (start.min(end), start.max(end))));
         }
     }

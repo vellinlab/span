@@ -22,6 +22,7 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
     let mut pending = String::new();
     let mut selectable = Vec::new();
     let mut list_depth: u32 = 0;
+    let mut link = false;
     let mut automatic_images = 0;
     let mut events = parser(markdown).into_offset_iter();
     while let Some((event, range)) = events.next() {
@@ -55,7 +56,6 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
                 blocks.add(&code_card(language, &code, None));
             }
             Event::Start(Tag::Image { dest_url, .. }) => {
-                flush_text(&blocks, &mut pending, &mut selectable);
                 let mut alt = String::new();
                 for (event, _) in events.by_ref() {
                     match event {
@@ -64,6 +64,11 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
                         _ => {}
                     }
                 }
+                if link {
+                    pending.push_str(&escaped(&alt));
+                    continue;
+                }
+                flush_text(&blocks, &mut pending, &mut selectable);
                 let relative = Path::new(dest_url.as_ref()).components().all(|part| {
                     matches!(
                         part,
@@ -81,12 +86,7 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
                 }
                 flush_text(&blocks, &mut pending, &mut selectable);
             }
-            Event::Start(Tag::Heading { .. } | Tag::Strong) => pending.push_str("<b>"),
-            Event::End(TagEnd::Strong) => pending.push_str("</b>"),
-            Event::Start(Tag::Emphasis) => pending.push_str("<i>"),
-            Event::End(TagEnd::Emphasis) => pending.push_str("</i>"),
-            Event::Start(Tag::Strikethrough) => pending.push_str("<s>"),
-            Event::End(TagEnd::Strikethrough) => pending.push_str("</s>"),
+            Event::Start(Tag::Heading { .. }) => pending.push_str("<b>"),
             Event::Start(Tag::List(_)) => list_depth = list_depth.saturating_add(1),
             Event::End(TagEnd::List(_)) => {
                 list_depth = list_depth.saturating_sub(1);
@@ -97,21 +97,11 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
                 pending.push_str("• ");
             }
             Event::End(TagEnd::Item) => pending.push('\n'),
-            Event::SoftBreak => pending.push(' '),
-            Event::HardBreak => pending.push('\n'),
             Event::Rule => {
                 flush_text(&blocks, &mut pending, &mut selectable);
                 blocks.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
             }
-            Event::Code(text) => {
-                pending.push_str("<tt>");
-                pending.push_str(&escaped(&text));
-                pending.push_str("</tt>");
-            }
-            Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
-                pending.push_str(&escaped(&text))
-            }
-            _ => {}
+            event => inline(&mut pending, event, &mut link),
         }
     }
     flush_text(&blocks, &mut pending, &mut selectable);
@@ -120,6 +110,83 @@ pub fn response(markdown: &str, context: &Context, preview_images: bool) -> Text
 
 fn escaped(text: &str) -> String {
     glib::markup_escape_text(&text.replace('\0', "�")).to_string()
+}
+
+fn inline(markup: &mut String, event: Event<'_>, link: &mut bool) {
+    match event {
+        Event::Start(Tag::Strong) => markup.push_str("<b>"),
+        Event::End(TagEnd::Strong) => markup.push_str("</b>"),
+        Event::Start(Tag::Emphasis) => markup.push_str("<i>"),
+        Event::End(TagEnd::Emphasis) => markup.push_str("</i>"),
+        Event::Start(Tag::Strikethrough) => markup.push_str("<s>"),
+        Event::End(TagEnd::Strikethrough) => markup.push_str("</s>"),
+        Event::Start(Tag::Link { dest_url, .. }) => {
+            *link = web_url(&dest_url);
+            if *link {
+                markup.push_str(&format!("<a href=\"{}\">", escaped(&dest_url)));
+            }
+        }
+        Event::End(TagEnd::Link) => {
+            if std::mem::take(link) {
+                markup.push_str("</a>");
+            }
+        }
+        Event::Code(text) => markup.push_str(&format!("<tt>{}</tt>", escaped(&text))),
+        Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
+            markup.push_str(&escaped(&text));
+        }
+        Event::SoftBreak => markup.push(' '),
+        Event::HardBreak => markup.push('\n'),
+        _ => {}
+    }
+}
+
+fn web_url(uri: &str) -> bool {
+    uri.split_once("://").is_some_and(|(scheme, rest)| {
+        (scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http"))
+            && !rest.is_empty()
+            && !rest.chars().any(char::is_whitespace)
+            && !rest.chars().any(char::is_control)
+    })
+}
+
+pub fn open_link(uri: &str) {
+    if web_url(uri)
+        && let Err(error) = gio::AppInfo::launch_default_for_uri(uri, gio::AppLaunchContext::NONE)
+    {
+        eprintln!("Unable to open link: {error}");
+    }
+}
+
+pub fn markdown_label() -> gtk::Label {
+    let label = text("");
+    label.style_context().add_class("agent-markdown");
+    label.connect_activate_link(|_, uri| {
+        open_link(uri);
+        glib::Propagation::Stop
+    });
+    label
+}
+
+pub fn set_markdown(label: &gtk::Label, markdown: &str) {
+    let mut markup = String::new();
+    let mut link = false;
+    for event in parser(markdown) {
+        match event {
+            Event::Start(Tag::Heading { .. }) => markup.push_str("<b>"),
+            Event::End(TagEnd::Heading(_)) => markup.push_str("</b>\n\n"),
+            Event::Start(Tag::CodeBlock(_)) => markup.push_str("<tt>"),
+            Event::End(TagEnd::CodeBlock) => markup.push_str("</tt>\n\n"),
+            Event::End(TagEnd::Paragraph | TagEnd::TableRow | TagEnd::TableHead) => {
+                markup.push_str("\n\n");
+            }
+            Event::End(TagEnd::TableCell) => markup.push_str("   "),
+            Event::Start(Tag::Item) => markup.push_str("• "),
+            Event::End(TagEnd::Item) => markup.push('\n'),
+            event => inline(&mut markup, event, &mut link),
+        }
+    }
+    label.set_markup(markup.trim_end());
 }
 
 fn parser(markdown: &str) -> Parser<'_> {
@@ -131,12 +198,13 @@ fn parser(markdown: &str) -> Parser<'_> {
 
 fn flush_text(blocks: &gtk::Box, pending: &mut String, selectable: &mut Vec<Part>) {
     if !pending.trim().is_empty() {
-        let label = text("");
+        let label = markdown_label();
         label.style_context().add_class("agent-prose");
-        if pango::parse_markup(pending.trim(), '\0').is_ok() {
-            label.set_markup(pending.trim());
+        let markup = pending.trim();
+        if markup.contains("<a href=") || pango::parse_markup(markup, '\0').is_ok() {
+            label.set_markup(markup);
         } else {
-            label.set_text(pending.trim());
+            label.set_text(markup);
         }
         let part = Part::new(&label, "\n\n");
         blocks.add(&part.widget);
@@ -157,6 +225,8 @@ fn table(
     let mut row = 0;
     let mut col = 0;
     let mut cell = String::new();
+    let mut cell_markup = String::new();
+    let mut link = false;
     let mut cells = Vec::new();
     let mut rows = Vec::new();
     let mut end = start;
@@ -165,12 +235,14 @@ fn table(
         match event {
             Event::Start(Tag::TableCell) => {
                 cell.clear();
+                cell_markup.clear();
                 in_cell = true;
             }
             Event::End(TagEnd::TableCell) => {
                 in_cell = false;
                 if row < 100 && col < 20 {
-                    let label = text(&cell);
+                    let label = markdown_label();
+                    label.set_markup(&cell_markup);
                     label.set_hexpand(true);
                     label.set_width_chars(9);
                     label.set_max_width_chars(48);
@@ -194,11 +266,17 @@ fn table(
                 row += 1;
                 col = 0;
             }
-            Event::Text(value) | Event::Code(value) if in_cell => cell.push_str(&value),
-            Event::HardBreak | Event::SoftBreak if in_cell => cell.push('\n'),
             Event::End(TagEnd::Table) => {
                 end = range.end;
                 break;
+            }
+            event if in_cell => {
+                match &event {
+                    Event::Text(value) | Event::Code(value) => cell.push_str(value),
+                    Event::SoftBreak | Event::HardBreak => cell.push('\n'),
+                    _ => {}
+                }
+                inline(&mut cell_markup, event, &mut link);
             }
             _ => {}
         }
@@ -719,12 +797,17 @@ pub fn copy_rich(markdown: String) {
 
 fn rich_html(markdown: &str) -> String {
     let mut formatted = String::new();
+    let mut link = false;
     html::push_html(
         &mut formatted,
         parser(markdown).filter_map(|event| match event {
             Event::Html(text) | Event::InlineHtml(text) => Some(Event::Text(text)),
-            Event::Start(Tag::Link { .. } | Tag::Image { .. })
-            | Event::End(TagEnd::Link | TagEnd::Image) => None,
+            Event::Start(Tag::Link { ref dest_url, .. }) => {
+                link = web_url(dest_url);
+                link.then_some(event)
+            }
+            Event::End(TagEnd::Link) => std::mem::take(&mut link).then_some(event),
+            Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) => None,
             event => Some(event),
         }),
     );
@@ -741,6 +824,15 @@ mod tests {
         assert!(html.contains("<table>"));
         assert!(html.contains("<td>2</td>"));
         assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn rich_clipboard_keeps_web_links_and_filters_other_schemes() {
+        let html =
+            rich_html("[Docs](https://example.invalid/?x=1&y=2) [Local](file:///tmp/example)");
+        assert!(html.contains(r#"<a href="https://example.invalid/?x=1&amp;y=2">Docs</a>"#));
+        assert!(html.contains("Local"));
+        assert!(!html.contains("file:"));
     }
 
     #[test]

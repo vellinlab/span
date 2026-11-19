@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/zyw02/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.4-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-rc.5-1.el8.x86_64.rpm
 span
 ```
 
@@ -22,7 +22,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./span_0.1.0-rc.4_amd64.deb
+sudo apt install ./span_0.1.0-rc.5_amd64.deb
 span
 ```
 
@@ -52,7 +52,8 @@ span
 - 「终端」（`Ctrl+Shift+J`）在会话页下方展开当前标签的真实终端。「加入选区」把终端中选中的文字放进输入框，供编辑后发送。
 - 每轮的活动区展示 Codex 提供的推理摘要、命令、代码搜索、网页搜索和文件变更。运行中可以展开查看命令输出或带行号的实时 diff，并复制原始补丁。Codex 的问题和审批以可操作卡片呈现。
 - 输入区可以选择当前主机提供的模型和思考强度。点亮闪电使用 Fast，关闭恢复标准速度，设置从下一条消息起生效。Fast 需要支持该模式的模型及 Codex CLI 0.151 或更新版本。任务运行时，输入区上方显示进度和用时，按 `Esc` 可中断。点击「用量」可查看会话累计 token、上下文占用和账号返回的额度。
-- 在会话输入框按 `Enter` 发送，按 `Shift+Enter` 换行。`Ctrl+Enter` 也可发送。
+- 在会话输入框按 `Enter` 发送，按 `Shift+Enter` 换行。`Ctrl+Enter` 也可发送。任务运行时输入新内容再按 `Enter`，可将消息追加到当前任务，同时可用方块按钮或 `Esc` 中断。
+- 推理摘要、生成中的回复和已完成的回复支持 Markdown 加粗与可点击的 HTTP／HTTPS 链接。复制富文本时保留网页链接。
 - 点击「附件」选择本机文件，或在输入框按 `Ctrl+V` 粘贴剪贴板图片。发送前可移除，每条消息最多 6 个、合计 16 MiB。SSH 会话通过当前连接的 SFTP 将附件放入远端私有临时目录。支持视觉输入的模型会直接收到 PNG、JPEG、GIF 和 WebP 图片，其余附件按文件路径交给 Agent 读取。
 
 运行 Agent 的主机需要安装支持 App Server 的 Codex CLI，并完成登录。如果使用 SSH，先在终端完成登录。Span 会通过已认证的 SSH 连接访问该主机上的 Codex，并使用所选工作目录。

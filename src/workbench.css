@@ -800,6 +800,20 @@ button.agent-send.agent-continue:hover {
     color: @foreground;
 }
 
+button.agent-send.agent-secondary-stop {
+    background: @surface;
+    border-color: @line;
+}
+
+button.agent-send.agent-secondary-stop:hover {
+    background: @hover;
+}
+
+label.agent-markdown link,
+label.agent-markdown link:visited {
+    color: @accent;
+}
+
 .workbench stack.agent-primary-icons {
     background: transparent;
 }

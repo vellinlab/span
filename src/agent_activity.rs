@@ -150,6 +150,9 @@ impl Activity {
         entry.title.set_text(&record.title);
         entry.title.set_tooltip_text(Some(&record.title));
         match &entry.view {
+            View::Text(label) if record.kind == "reasoning" => {
+                agent_render::set_markdown(label, &record.detail);
+            }
             View::Text(label) => label.set_text(&record.detail),
             View::Command(body) => {
                 let status = match record.status {
@@ -192,7 +195,7 @@ impl Activity {
         part.push_str(&limited(delta, SUMMARY_LIMIT - part.len()));
         let detail = entry.summary.join("\n\n");
         if let View::Text(label) = &entry.view {
-            label.set_text(&detail);
+            agent_render::set_markdown(label, &detail);
         }
         self.set_heading("进行中 · 推理摘要");
         if let Some(headline) = detail
@@ -247,7 +250,11 @@ impl Activity {
                 item.add(&body);
                 View::Patch { files, diff }
             } else {
-                let detail = agent_render::text("");
+                let detail = if kind == "reasoning" {
+                    agent_render::markdown_label()
+                } else {
+                    agent_render::text("")
+                };
                 detail.style_context().add_class("agent-activity-detail");
                 item.add(&detail);
                 View::Text(detail)

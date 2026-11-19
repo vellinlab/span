@@ -12,7 +12,7 @@ use gtk::prelude::*;
 use gtk::{gio, glib, pango};
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -26,6 +26,7 @@ enum Request {
     Turns { prepend: bool, generation: u64 },
     Unsubscribe,
     Send,
+    Steer,
     Interrupt,
 }
 
@@ -44,6 +45,7 @@ struct TurnDiff {
 #[derive(Clone, Copy, PartialEq)]
 enum ComposerAction {
     Send,
+    Steer,
     Stop,
     Continue,
 }
@@ -52,6 +54,11 @@ impl ComposerAction {
     fn presentation(self) -> (&'static str, &'static str, &'static str) {
         match self {
             Self::Send => ("send", "发送", "Enter 发送 · Shift+Enter 换行"),
+            Self::Steer => (
+                "steer",
+                "追加消息",
+                "Enter 追加到当前任务 · Shift+Enter 换行",
+            ),
             Self::Stop => ("stop", "中断推理", "中断当前推理"),
             Self::Continue => ("continue", "继续推理", "Enter 继续 · Shift+Enter 换行"),
         }
@@ -102,11 +109,12 @@ pub struct Agent {
     attachments: Rc<Attachments>,
     uploading: Cell<bool>,
     pasting: Cell<bool>,
-    pending_user: RefCell<Option<gtk::Label>>,
-    client_message: RefCell<Option<String>>,
+    pending_user: RefCell<Option<(gtk::Label, String)>>,
+    client_messages: RefCell<HashSet<String>>,
     primary_action: Cell<Option<ComposerAction>>,
     primary: gtk::Button,
     primary_icons: gtk::Stack,
+    stop_button: gtk::Button,
 }
 
 impl Agent {
@@ -232,6 +240,7 @@ impl Agent {
             .add_class("agent-primary-icons");
         for (action, icon) in [
             (ComposerAction::Send, Icon::Up),
+            (ComposerAction::Steer, Icon::Up),
             (ComposerAction::Stop, Icon::Stop),
             (ComposerAction::Continue, Icon::Pause),
         ] {
@@ -239,7 +248,23 @@ impl Agent {
         }
         primary.add(&primary_icons);
         primary.set_focus_on_click(false);
+        let stop_button = gtk::Button::new();
+        stop_button.style_context().add_class("agent-send");
+        stop_button
+            .style_context()
+            .add_class("agent-secondary-stop");
+        stop_button.set_valign(gtk::Align::Center);
+        stop_button.set_focus_on_click(false);
+        stop_button.set_no_show_all(true);
+        stop_button.set_tooltip_text(Some("中断当前推理（Esc）"));
+        let stop_icon = icons::widget(Icon::Stop, 17);
+        stop_icon.show();
+        stop_button.add(&stop_icon);
+        if let Some(accessible) = stop_button.accessible() {
+            accessible.set_name("中断推理");
+        }
         inputs.pack_end(&primary, false, false, 0);
+        inputs.pack_end(&stop_button, false, false, 0);
         inputs.pack_end(&usage.button, false, false, 0);
         card.pack_start(&task_status.widget, false, false, 0);
         card.pack_start(&editor, false, false, 0);
@@ -296,10 +321,11 @@ impl Agent {
             uploading: Cell::new(false),
             pasting: Cell::new(false),
             pending_user: RefCell::new(None),
-            client_message: RefCell::new(None),
+            client_messages: RefCell::new(HashSet::new()),
             primary_action: Cell::new(None),
             primary,
             primary_icons,
+            stop_button,
         });
         agent.bind();
         agent.update_controls();
@@ -343,11 +369,17 @@ impl Agent {
         let weak = Rc::downgrade(self);
         self.primary.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
-                if agent.active.get() {
+                if agent.primary_action.get() == Some(ComposerAction::Stop) {
                     agent.stop();
                 } else {
                     agent.submit_prompt();
                 }
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.stop_button.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                agent.stop();
             }
         });
         let weak = Rc::downgrade(self);
@@ -401,7 +433,7 @@ impl Agent {
         if let Some(buffer) = self.input.buffer() {
             let weak = Rc::downgrade(self);
             buffer.connect_changed(move |_| {
-                if let Some(agent) = weak.upgrade().filter(|agent| agent.can_continue.get()) {
+                if let Some(agent) = weak.upgrade() {
                     agent.update_primary();
                 }
             });
@@ -410,7 +442,7 @@ impl Agent {
         self.attachments
             .chips
             .connect_notify_local(Some("visible"), move |_, _| {
-                if let Some(agent) = weak.upgrade().filter(|agent| agent.can_continue.get()) {
+                if let Some(agent) = weak.upgrade() {
                     agent.update_primary();
                 }
             });
@@ -814,8 +846,12 @@ impl Agent {
                     Request::Send => {
                         self.active.set(false);
                         self.turn.take();
-                        self.client_message.take();
                         self.finish_activity(Some("failed"));
+                        self.remove_pending_user();
+                        self.show_status(error);
+                        self.update_controls();
+                    }
+                    Request::Steer => {
                         self.remove_pending_user();
                         self.show_status(error);
                         self.update_controls();
@@ -931,18 +967,25 @@ impl Agent {
                 }
             }
             Request::Unsubscribe => {}
-            Request::Send => {
+            Request::Send | Request::Steer => {
                 if self.pending_user.take().is_some() {
-                    self.options.remember();
+                    if matches!(request, Request::Send) {
+                        self.options.remember();
+                    }
                     if let Some(buffer) = self.input.buffer() {
                         buffer.set_text("");
                     }
                     self.attachments
                         .finish_send(self.context.borrow().socket.is_some());
                 }
-                if self.active.get() {
+                if matches!(request, Request::Send) && self.active.get() {
                     self.turn
                         .replace(result["turn"]["id"].as_str().map(str::to_owned));
+                } else if matches!(request, Request::Steer)
+                    && self.active.get()
+                    && !self.interrupting.get()
+                {
+                    self.show_status("已追加 · Codex 正在处理…");
                 }
                 self.update_controls();
             }
@@ -992,8 +1035,7 @@ impl Agent {
     }
 
     fn send(self: &Rc<Self>) {
-        if self.active.get()
-            || self.opening.get()
+        if self.opening.get()
             || self.uploading.get()
             || self.pasting.get()
             || self.pending_user.borrow().is_some()
@@ -1002,6 +1044,19 @@ impl Agent {
         }
         let Some(thread) = self.thread.borrow().clone() else {
             return;
+        };
+        let turn = if self.active.get() {
+            let Some(turn) = self
+                .turn
+                .borrow()
+                .clone()
+                .filter(|_| !self.interrupting.get())
+            else {
+                return;
+            };
+            Some(turn)
+        } else {
+            None
         };
         let Some(buffer) = self.input.buffer() else {
             return;
@@ -1020,7 +1075,7 @@ impl Agent {
         }
         let selection = self.options.selection();
         if paths.is_empty() {
-            self.begin_turn(thread, &text, &selection, Prepared::empty());
+            self.send_prepared(thread, turn, &text, &selection, Prepared::empty());
             return;
         }
         let socket = self.context.borrow().socket.clone();
@@ -1042,7 +1097,9 @@ impl Agent {
                     return;
                 }
                 match result {
-                    Ok(attachments) => agent.begin_turn(thread, &text, &selection, attachments),
+                    Ok(attachments) => {
+                        agent.send_prepared(thread, turn, &text, &selection, attachments)
+                    }
                     Err(error) => {
                         agent.show_status(&error);
                         agent.update_controls();
@@ -1052,27 +1109,53 @@ impl Agent {
         });
     }
 
-    fn begin_turn(&self, thread: String, text: &str, selection: &Selection, files: Prepared) {
+    fn send_prepared(
+        &self,
+        thread: String,
+        turn: Option<String>,
+        text: &str,
+        selection: &Selection,
+        files: Prepared,
+    ) {
+        if turn.as_deref() != self.turn.borrow().as_deref()
+            || self.interrupting.get()
+            || self.active.get() != turn.is_some()
+        {
+            self.show_status("任务状态已变更，内容保留在输入框中。");
+            self.update_controls();
+            return;
+        }
         let message_id = glib::uuid_string_random().to_string();
         let mut params = json!({
             "threadId": thread,
             "input": files.input(text, selection.images),
-            "summary": "auto",
             "clientUserMessageId": message_id,
         });
-        selection.apply(&mut params);
+        let (request, method) = if let Some(turn) = turn {
+            params["expectedTurnId"] = json!(turn);
+            (Request::Steer, "turn/steer")
+        } else {
+            params["summary"] = json!("auto");
+            selection.apply(&mut params);
+            self.active.set(true);
+            (Request::Send, "turn/start")
+        };
         let label = self.add_user(&files.summary(text));
-        self.pending_user.replace(Some(label));
-        self.client_message.replace(Some(message_id));
-        self.active.set(true);
-        self.show_status("Codex 正在处理…");
+        self.client_messages.borrow_mut().insert(message_id.clone());
+        self.pending_user.replace(Some((label, message_id)));
+        self.show_status(if matches!(request, Request::Steer) {
+            "正在追加消息…"
+        } else {
+            "Codex 正在处理…"
+        });
         self.update_controls();
-        self.request(Request::Send, "turn/start", params);
+        self.request(request, method, params);
     }
 
     fn remove_pending_user(&self) {
-        if let Some(label) = self.pending_user.take() {
+        if let Some((label, id)) = self.pending_user.take() {
             self.history.remove(&label);
+            self.client_messages.borrow_mut().remove(&id);
         }
     }
 
@@ -1097,14 +1180,15 @@ impl Agent {
     }
 
     fn submit_prompt(self: &Rc<Self>) {
-        if self.active.get() || !self.primary.is_sensitive() {
+        if !self.primary.is_sensitive() || self.primary_action.get() == Some(ComposerAction::Stop) {
             return;
         }
         if self.primary_action.get() == Some(ComposerAction::Continue) {
             let thread = self.thread.borrow().clone();
             if let Some(thread) = thread {
-                self.begin_turn(
+                self.send_prepared(
                     thread,
+                    None,
                     "请继续上一轮未完成的任务。",
                     &self.options.selection(),
                     Prepared::empty(),
@@ -1124,7 +1208,7 @@ impl Agent {
         self.approvals.borrow_mut().clear();
         self.questions.borrow_mut().clear();
         self.history_cursor.take();
-        self.client_message.take();
+        self.client_messages.borrow_mut().clear();
         self.pasting.set(false);
         self.can_continue.set(false);
         self.interrupting.set(false);
@@ -1144,7 +1228,7 @@ impl Agent {
         self.uploading.set(false);
         self.pasting.set(false);
         self.remove_pending_user();
-        self.client_message.take();
+        self.client_messages.borrow_mut().clear();
         self.options.open(&Value::Null);
         self.usage.disconnect();
         self.quota_started.set(false);
@@ -1259,7 +1343,7 @@ impl Agent {
                 self.active.set(false);
                 self.turn.take();
                 self.interrupting.set(false);
-                self.client_message.take();
+                self.client_messages.borrow_mut().clear();
                 self.can_continue.set(interrupted);
                 for (_, approval) in self.approvals.borrow_mut().drain() {
                     self.history.remove(&approval);
@@ -1343,7 +1427,7 @@ impl Agent {
             .is_some_and(|live| live.id == id);
         if !same {
             self.remove_live();
-            let label = agent_render::text("");
+            let label = agent_render::markdown_label();
             label.style_context().add_class("agent-prose");
             self.append(&label);
             self.live.replace(Some(LiveMessage {
@@ -1356,7 +1440,7 @@ impl Agent {
         if let Some(live) = self.live.borrow_mut().as_mut() {
             if live.text.len() < 256 * 1024 {
                 live.text.push_str(delta);
-                live.label.set_text(&limited(&live.text, 256 * 1024));
+                agent_render::set_markdown(&live.label, &limited(&live.text, 256 * 1024));
                 self.scroll_to_end();
             }
         }
@@ -1372,9 +1456,10 @@ impl Agent {
         match item["type"].as_str() {
             Some("userMessage")
                 if loading_history
-                    || self.client_message.borrow().as_deref().is_none_or(|local| {
-                        item["clientId"].as_str().is_some_and(|id| id != local)
-                    }) =>
+                    || item["clientId"].as_str().map_or_else(
+                        || self.client_messages.borrow().is_empty(),
+                        |id| !self.client_messages.borrow().contains(id),
+                    ) =>
             {
                 let items: Vec<_> = array(&item["content"])
                     .filter_map(|value| match value["type"].as_str() {
@@ -1614,7 +1699,8 @@ impl Agent {
         self.attachments
             .chips
             .set_sensitive(ready && !opening && !waiting);
-        self.options.update(ready && !opening && !waiting);
+        self.options
+            .update(ready && !opening && !waiting && !running);
         self.usage.button.set_sensitive(ready);
         self.update_task_status();
         self.update_primary();
@@ -1648,16 +1734,20 @@ impl Agent {
     }
 
     fn update_primary(&self) {
+        let has_draft = (self.active.get() || self.can_continue.get())
+            && (self.attachments.chips.is_visible()
+                || self.input.buffer().is_some_and(|buffer| {
+                    buffer
+                        .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                        .is_some_and(|text| !text.trim().is_empty())
+                }));
         let action = if self.active.get() {
-            ComposerAction::Stop
-        } else if self.can_continue.get()
-            && !self.attachments.chips.is_visible()
-            && self.input.buffer().is_none_or(|buffer| {
-                buffer
-                    .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                    .is_none_or(|text| text.trim().is_empty())
-            })
-        {
+            if has_draft {
+                ComposerAction::Steer
+            } else {
+                ComposerAction::Stop
+            }
+        } else if self.can_continue.get() && !has_draft {
             ComposerAction::Continue
         } else {
             ComposerAction::Send
@@ -1678,14 +1768,19 @@ impl Agent {
                 style.remove_class("agent-continue");
             }
         }
-        let enabled = if action == ComposerAction::Stop {
-            self.turn.borrow().is_some() && !self.interrupting.get()
-        } else {
-            self.thread.borrow().is_some()
-                && !self.opening.get()
-                && !self.uploading.get()
-                && !self.pasting.get()
-                && self.pending_user.borrow().is_none()
+        let can_stop = self.turn.borrow().is_some() && !self.interrupting.get();
+        self.stop_button
+            .set_visible(action == ComposerAction::Steer);
+        self.stop_button.set_sensitive(can_stop);
+        let can_send = self.thread.borrow().is_some()
+            && !self.opening.get()
+            && !self.uploading.get()
+            && !self.pasting.get()
+            && self.pending_user.borrow().is_none();
+        let enabled = match action {
+            ComposerAction::Stop => can_stop,
+            ComposerAction::Steer => can_stop && can_send,
+            _ => can_send,
         };
         self.primary.set_sensitive(enabled);
     }

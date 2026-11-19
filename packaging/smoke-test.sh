@@ -26,7 +26,7 @@ cleanup() {
 }
 trap 'cleanup "$?"' EXIT
 
-export HOME="$test_home" XDG_CONFIG_HOME="$test_home/.config" GDK_BACKEND=x11 NO_AT_BRIDGE=1
+export HOME="$test_home" XDG_CONFIG_HOME="$test_home/.config" XDG_DATA_HOME="$test_home/.local/share" GDK_BACKEND=x11 NO_AT_BRIDGE=1
 export TMPDIR="$test_home/tmp"
 mkdir "$TMPDIR"
 cat > "$HOME/.bash_profile" <<'PROFILE'
@@ -49,6 +49,20 @@ target=legacy-ci-host
 trusted-x11=true
 HOSTS
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
+    mkdir -p "$XDG_DATA_HOME/applications"
+    cat > "$HOME/bin/span-test-open-link" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$1" > "$HOME/span-opened-link"
+SCRIPT
+    chmod +x "$HOME/bin/span-test-open-link"
+    cat > "$XDG_DATA_HOME/applications/span-test-open-link.desktop" <<DESKTOP
+[Desktop Entry]
+Name=Span Link Test
+Type=Application
+Exec=$HOME/bin/span-test-open-link %u
+MimeType=x-scheme-handler/https;
+DESKTOP
+    printf '%s\n' '[Default Applications]' 'x-scheme-handler/https=span-test-open-link.desktop;' > "$XDG_CONFIG_HOME/mimeapps.list"
     export PATH="$HOME/bin:$PATH"
     convert -size 340x98 xc:'#233045' -fill '#86b4ff' \
         -draw 'roundrectangle 24,58 85,76 3,3 roundrectangle 102,47 163,76 3,3 roundrectangle 180,34 241,76 3,3 roundrectangle 258,20 319,76 3,3' \
@@ -200,6 +214,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool mousemove --window "$window" 355 390 click --repeat 16 4
     widget mouse '进行中 · 修改文件 · checks.txt…'
     widget contains 'Checking the build before publishing.'
+    widget not-contains '**Checking the build'
     widget not-contains 'fixture raw reasoning sentinel'
     widget mouse '读取文件 · checks.txt'
     widget expanded-contains '读取文件 · checks.txt' 'integration test passed'
@@ -269,6 +284,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool mousemove --window "$window" 355 390 click --repeat 16 4
     sleep 0.2
     widget contains 'Deployment checklist'
+    widget mouse 'Build documentation'
+    wait_until "opening the clicked Markdown link" grep -qFx 'https://example.invalid/span/docs?from=agent&view=build' "$HOME/span-opened-link"
     read -r wide_x _ < <(widget bounds '输入消息，或添加附件')
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-workspace.png"
     xdotool windowsize --sync "$window" 1170 940
@@ -285,12 +302,25 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool type --clearmodifiers 'Check the comparison layout'
     widget click '发送'
     widget contains 'Preparing the comparison table.'
+    widget not-contains '**Preparing the comparison table.**'
     widget contains '正在生成回复'
     widget contains 'Esc 中断'
     widget contains '已运行 0:'
     sleep 1.2
     widget not-contains '已运行 0:00'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-task-status.png"
+    widget mouse '输入消息，或添加附件'
+    xdotool type --clearmodifiers 'Focus on X11'
+    widget bounds '追加消息' >/dev/null
+    widget bounds '中断推理' >/dev/null
+    xdotool key --clearmodifiers Return
+    widget contains 'Fixture steer rejected'
+    widget contains 'Focus on X11'
+    xdotool key --clearmodifiers Return
+    wait_until "the follow-up on the original turn" test -f "$HOME/agent-steered"
+    widget contains '已追加'
+    widget not-contains 'fixture duplicate steer sentinel'
+    printf '%s\n' 'Active-turn messages preserve the draft on rejection and retry on the same turn.'
     read -r stop_x stop_y stop_width stop_height < <(widget bounds '中断推理')
     ((stop_width == stop_height))
     xdotool key --clearmodifiers Escape

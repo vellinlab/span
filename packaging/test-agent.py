@@ -20,7 +20,7 @@ continued_turn = "comparison-continued"
 diff = "diff --git a/checks.txt b/checks.txt\n--- a/checks.txt\n+++ b/checks.txt\n@@ -1 +1 @@\n-pending\n+passed\n"
 reply = """## Deployment checklist
 
-The app renders structured output using native GTK widgets.
+[Build documentation](https://example.invalid/span/docs?from=agent&view=build)
 
 | Check | Result |
 | --- | --- |
@@ -44,6 +44,7 @@ comparison = """| 框架 | 多 Agent | 会话恢复 | 主动打断 | 可观测�
 | AgentScope | 支持多角色对话、并发执行、消息路由和转交 | 会话状态可保存与加载，应用可自行定义恢复点和会话状态的保留时间 | 支持在模型生成或工具执行期间主动打断 | 可通过 OpenTelemetry 查看执行链路 | 适合需要人与多个角色协作、核对中间结果并及时调整方向的任务。部署前需要验证应用能否按预期保存关键步骤，以及断开连接后怎样恢复已有结果。比较时也要查看不同运行环境的实现，包括多语言内容、表格列宽和不同终端尺寸下的换行效果。 |
 """
 interrupted = False
+steer_attempted = False
 
 def model(slug, name, default, efforts):
     return {"model": slug, "id": slug, "displayName": name, "inputModalities": ["text", "image"],
@@ -205,6 +206,20 @@ for line in sys.stdin:
         send({"method": "turn/completed", "params": {"threadId": thread,
               "turn": {"id": interruptible_turn, "status": "interrupted", "error": None}}})
         interrupted = True
+    elif method == "turn/steer":
+        assert set(params) == {"threadId", "expectedTurnId", "input", "clientUserMessageId"}
+        assert params["threadId"] == thread and params["expectedTurnId"] == interruptible_turn
+        assert params["input"] == [{"type": "text", "text": "Focus on X11", "text_elements": []}]
+        if not steer_attempted:
+            steer_attempted = True
+            send({"id": request_id, "error": {"code": -32602, "message": "Fixture steer rejected"}})
+            continue
+        send({"method": "item/completed", "params": {
+            "threadId": thread, "turnId": interruptible_turn, "item": {
+                "id": "steer-input", "type": "userMessage", "clientId": params["clientUserMessageId"],
+                "content": [{"type": "text", "text": "fixture duplicate steer sentinel"}]}}})
+        send({"id": request_id, "result": {"turnId": interruptible_turn}})
+        (home / "agent-steered").touch()
     elif method == "turn/start":
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
@@ -240,7 +255,7 @@ for line in sys.stdin:
             send({"id": request_id, "result": {"turn": {"id": interruptible_turn, "status": "inProgress"}}})
             send({"method": "item/agentMessage/delta", "params": {
                 "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-draft",
-                "delta": "Preparing the comparison table."}})
+                "delta": "**Preparing the comparison table.**"}})
             continue
         if message == "请继续上一轮未完成的任务。":
             assert interrupted and len(params["input"]) == 1
@@ -264,9 +279,9 @@ for line in sys.stdin:
             "id": "same-client-input", "type": "userMessage", "clientId": params["clientUserMessageId"],
             "content": [{"type": "text", "text": "fixture duplicate prompt sentinel"}]}}})
         send({"method": "item/reasoning/summaryTextDelta", "params": {
-            **event, "itemId": "reasoning", "summaryIndex": 0, "delta": "Checking the build "}})
+            **event, "itemId": "reasoning", "summaryIndex": 0, "delta": "**Checking the build "}})
         send({"method": "item/reasoning/summaryTextDelta", "params": {
-            **event, "itemId": "reasoning", "summaryIndex": 0, "delta": "before publishing."}})
+            **event, "itemId": "reasoning", "summaryIndex": 0, "delta": "before publishing.**"}})
         send({"method": "item/reasoning/textDelta", "params": {
             **event, "itemId": "reasoning", "contentIndex": 0, "delta": "fixture raw reasoning sentinel"}})
         command = {"id": "read-checks", "type": "commandExecution", "command": "cat checks.txt",
