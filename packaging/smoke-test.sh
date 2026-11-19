@@ -193,6 +193,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget not-state 'Fast 模式' checked
     widget mouse 'Fast 模式'
     widget state 'Fast 模式' checked
+    widget mouse '消息输入框'
+    widget state '消息输入框' focused
     add_attachment "$HOME/test-output.png"
     paste_image
     printf '%s' 'Show the deployment check' | xclip -in -selection clipboard
@@ -209,6 +211,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     [[ $(cat "$HOME/agent-prompt") == "$prompt" ]]
     printf '%s\n' 'Enter commits input composition, then sends. Shift+Enter inserts a newline.'
     widget contains '等待你的回复'
+    [[ $(widget count '复制 Markdown') == 0 && $(widget count '复制富文本') == 0 ]]
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
     xdotool mousemove --window "$window" 355 390 click --repeat 16 4
@@ -265,7 +268,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xclip -out -selection clipboard -target text/html > "$HOME/table.html"
     grep -q '<td>12 passed</td>' "$HOME/table.html"
     widget click '复制 Markdown'
-    xclip -out -selection clipboard | grep -qF '| Integration | 12 passed |'
+    copied_turn="$(xclip -out -selection clipboard)"
+    [[ $copied_turn == *'| Integration | 12 passed |'* && $copied_turn == *'Environment confirmed.'* ]]
+    [[ $(widget count '复制 Markdown') == 1 && $(widget count '复制富文本') == 1 ]]
     widget click '复制代码'
     xclip -out -selection clipboard | grep -qx 'target=staging'
     widget click '保存 PNG'
@@ -374,6 +379,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     sleep 0.25
     xdotool key --clearmodifiers Return
     wait_until "resuming a saved Codex session" test -f "$HOME/agent-resumed"
+    read -r _ _ dot_width _ <<< "$(widget bounds '就绪')"
+    [[ $dot_width -le 10 ]]
     widget click '加载更早的对话'
     wait_until "loading an older page" test -f "$HOME/agent-older-page"
     widget contains 'Earlier deployment notes'
@@ -393,7 +400,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget contains '点击会话继续'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'agent-older-page'
-    touch "$HOME/000-switch-fixture.txt"
+    printf 'Workspace preview fixture\n' > "$HOME/000-switch-fixture.txt"
     xdotool key --clearmodifiers ctrl+shift+t
     widget contains 'Release checklist'
     widget contains '000-switch-fixture.txt'
@@ -411,6 +418,13 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     widget not-contains 'Release checklist'
     widget click '刷新目录'
     widget contains '000-switch-fixture.txt'
+    widget mouse '000-switch-fixture.txt'
+    widget state '预览' sensitive
+    widget click '预览'
+    widget contains 'Workspace preview fixture'
+    widget state '下载' sensitive
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/files-preview.png"
+    widget click '返回目录'
     xdotool key --clearmodifiers ctrl+shift+f
     printf '%s\n' 'Warm tab switches reused their catalogs and directory models. Explicit refresh read the new file.'
     xdotool key --clearmodifiers ctrl+shift+a

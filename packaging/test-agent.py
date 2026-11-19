@@ -314,6 +314,8 @@ for line in sys.stdin:
     elif request_id == "preview-question":
         assert request["result"] == {"answers": {"environment": {"answers": ["Staging"]}}}
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
+              "item": {"id": "environment-reply", "type": "agentMessage", "text": "Environment confirmed."}}})
+        send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn,
               "item": {"id": "reasoning", "type": "reasoning", "summary": ["Checked the build before publishing."],
                        "content": ["fixture raw reasoning sentinel"]}}})
         (home / "agent-answered").touch()

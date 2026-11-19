@@ -80,6 +80,7 @@ jobs:
             dist/agent-paused.png
             dist/agent-task-status.png
             dist/agent-table.png
+            dist/files-preview.png
             dist/quick-connect.png
             dist/test-failure.png
           if-no-files-found: ignore

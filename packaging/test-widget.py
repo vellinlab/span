@@ -72,6 +72,9 @@ for _ in range(50):
                     if visible(field) and "EditableText" in field.get_interfaces():
                         field.queryEditableText().setTextContents(values[0])
                         sys.exit(0)
+        if operation == "count":
+            print(seen.count(name))
+            sys.exit(0)
     except GLib.Error as error:
         # A dialog or a streaming update can remove a widget while AT-SPI walks it.
         if "does not exist" not in error.message:
