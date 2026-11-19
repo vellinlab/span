@@ -44,6 +44,10 @@ pub struct Record<'a> {
 
 impl<'a> Record<'a> {
     pub fn from_item(item: &'a Value) -> Option<Self> {
+        Self::after(item, &[])
+    }
+
+    pub fn after(item: &'a Value, earlier: &[String]) -> Option<Self> {
         let id = item["id"].as_str()?;
         let kind = item["type"].as_str()?;
         let status = item["status"].as_str();
@@ -55,7 +59,16 @@ impl<'a> Record<'a> {
                 let summary = item["summary"]
                     .as_array()?
                     .iter()
-                    .filter_map(Value::as_str)
+                    .enumerate()
+                    .filter_map(|(index, part)| {
+                        let part = part.as_str()?;
+                        Some(
+                            earlier
+                                .get(index)
+                                .and_then(|prefix| part.strip_prefix(prefix))
+                                .unwrap_or(part),
+                        )
+                    })
                     .filter(|part| !part.is_empty())
                     .take(SUMMARY_PARTS)
                     .map(|part| limited(part, SUMMARY_LIMIT))
@@ -99,6 +112,10 @@ impl<'a> Record<'a> {
             status,
             patch: None,
         })
+    }
+
+    pub fn id(&self) -> &str {
+        self.id
     }
 
     pub fn patch(id: &'a str, changes: &Value, status: Option<&'a str>) -> Self {
@@ -237,9 +254,27 @@ impl Activity {
             Some("interrupted") => "已停止",
             Some("failed") => "执行失败",
             Some("disconnected") => "连接已断开",
+            Some("steered") => "追加前的活动",
             _ => "已完成",
         };
         self.set_heading(&format!("{title} · {} 项活动", self.entries.len()));
+    }
+
+    pub fn freeze(&self, previous: &mut HashMap<String, Vec<String>>) {
+        for (id, entry) in &self.entries {
+            let summary = previous.entry(id.clone()).or_default();
+            if summary.len() < entry.summary.len() {
+                summary.resize_with(entry.summary.len(), String::new);
+            }
+            for (old, new) in summary.iter_mut().zip(&entry.summary) {
+                old.push_str(new);
+            }
+        }
+        self.finish(Some("steered"));
+    }
+
+    pub fn has_item(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
     }
 
     fn set_heading(&self, text: &str) {

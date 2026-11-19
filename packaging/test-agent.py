@@ -223,6 +223,12 @@ for line in sys.stdin:
                 "id": "steer-input", "type": "userMessage", "clientId": params["clientUserMessageId"],
                 "content": [{"type": "text", "text": "fixture duplicate steer sentinel"}]}}})
         send({"id": request_id, "result": {"turnId": interruptible_turn}})
+        send({"method": "item/reasoning/summaryTextDelta", "params": {
+            "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-reasoning",
+            "summaryIndex": 0, "delta": " Reasoning continues below the follow-up."}})
+        send({"method": "item/completed", "params": {"threadId": thread, "turnId": interruptible_turn,
+              "item": {"id": "comparison-reasoning", "type": "reasoning",
+                       "summary": ["Reasoning before the follow-up. Reasoning continues below the follow-up."]}}})
         (home / "agent-steered").touch()
     elif method == "turn/start":
         assert params["summary"] == "auto"
@@ -257,6 +263,9 @@ for line in sys.stdin:
         if message == "Check the comparison layout":
             assert len(params["input"]) == 1
             send({"id": request_id, "result": {"turn": {"id": interruptible_turn, "status": "inProgress"}}})
+            send({"method": "item/reasoning/summaryTextDelta", "params": {
+                "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-reasoning",
+                "summaryIndex": 0, "delta": "Reasoning before the follow-up."}})
             send({"method": "item/agentMessage/delta", "params": {
                 "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-draft",
                 "delta": "**Preparing the comparison table.**"}})

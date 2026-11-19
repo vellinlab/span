@@ -102,6 +102,8 @@ pub struct Agent {
     live: RefCell<Option<Rc<LiveMessage>>>,
     turn_copy: RefCell<Vec<String>>,
     activity: RefCell<Option<(String, Activity)>>,
+    earlier_activity: RefCell<HashMap<String, Vec<String>>>,
+    earlier_reply: RefCell<HashMap<String, String>>,
     history: gtk::Box,
     older: gtk::Button,
     history_cursor: RefCell<Option<String>>,
@@ -354,6 +356,8 @@ impl Agent {
             live: RefCell::new(None),
             turn_copy: RefCell::new(Vec::new()),
             activity: RefCell::new(None),
+            earlier_activity: RefCell::new(HashMap::new()),
+            earlier_reply: RefCell::new(HashMap::new()),
             history,
             older,
             history_cursor: RefCell::new(None),
@@ -1095,6 +1099,7 @@ impl Agent {
                     && self.active.get()
                     && !self.interrupting.get()
                 {
+                    self.split_progress();
                     self.show_status("已追加 · Codex 正在处理…");
                 }
                 self.update_controls();
@@ -1313,6 +1318,8 @@ impl Agent {
     fn clear_history(&self) {
         self.follow_tail.set(true);
         self.turn_copy.borrow_mut().clear();
+        self.earlier_activity.borrow_mut().clear();
+        self.earlier_reply.borrow_mut().clear();
         self.history_generation
             .set(self.history_generation.get() + 1);
         self.live.take();
@@ -1335,6 +1342,8 @@ impl Agent {
 
     pub fn disconnect(&self, message: &str) {
         self.turn_copy.borrow_mut().clear();
+        self.earlier_activity.borrow_mut().clear();
+        self.earlier_reply.borrow_mut().clear();
         self.rpc.take();
         self.pending.borrow_mut().clear();
         self.opening.set(false);
@@ -1387,7 +1396,7 @@ impl Agent {
             }
             "item/started" | "item/completed" => {
                 let item = &params["item"];
-                if let Some(record) = Record::from_item(item) {
+                if let Some(record) = self.activity_record(item) {
                     if let Some(turn) = params["turnId"].as_str() {
                         self.update_activity(turn, |activity| activity.record(record));
                     }
@@ -1445,11 +1454,23 @@ impl Agent {
                 let status = turn["status"].as_str();
                 let interrupted = status == Some("interrupted");
                 if let Some(id) = turn["id"].as_str() {
-                    for record in array(&turn["items"]).filter_map(Record::from_item) {
-                        self.update_activity(id, |activity| activity.record(record));
+                    for record in
+                        array(&turn["items"]).filter_map(|item| self.activity_record(item))
+                    {
+                        if !self.earlier_activity.borrow().contains_key(record.id())
+                            || self
+                                .activity
+                                .borrow()
+                                .as_ref()
+                                .is_some_and(|(_, group)| group.has_item(record.id()))
+                        {
+                            self.update_activity(id, |activity| activity.record(record));
+                        }
                     }
                 }
                 self.finish_activity(status);
+                self.earlier_activity.borrow_mut().clear();
+                self.earlier_reply.borrow_mut().clear();
                 if interrupted {
                     if let Some(live) = self.live.take() {
                         live.render();
@@ -1512,6 +1533,31 @@ impl Agent {
         let activity = Activity::new();
         self.append(&activity.widget);
         activity
+    }
+
+    fn activity_record<'a>(&self, item: &'a Value) -> Option<Record<'a>> {
+        let previous = self.earlier_activity.borrow();
+        let summary = item["id"]
+            .as_str()
+            .and_then(|id| previous.get(id))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        Record::after(item, summary)
+    }
+
+    fn split_progress(&self) {
+        if let Some((_, activity)) = self.activity.take() {
+            activity.freeze(&mut self.earlier_activity.borrow_mut());
+        }
+        self.diff.take();
+        if let Some(live) = self.live.take() {
+            live.render();
+            self.earlier_reply
+                .borrow_mut()
+                .entry(live.id.clone())
+                .or_default()
+                .push_str(&live.text.borrow());
+        }
     }
 
     fn update_activity(&self, turn: &str, update: impl FnOnce(&mut Activity)) {
@@ -1607,13 +1653,28 @@ impl Agent {
                     })
                     .collect();
                 if !items.is_empty() {
+                    if !loading_history && self.active.get() {
+                        self.split_progress();
+                    }
                     self.add_user(&items.join("\n"));
                 }
             }
             Some("agentMessage" | "plan") => {
                 self.remove_live();
                 if let Some(text) = item["text"].as_str() {
-                    self.add_agent(text, loading_history);
+                    if !loading_history && !text.trim().is_empty() {
+                        self.turn_copy.borrow_mut().push(limited(text, 256 * 1024));
+                    }
+                    let earlier = item["id"]
+                        .as_str()
+                        .and_then(|id| self.earlier_reply.borrow_mut().remove(id));
+                    let text = earlier
+                        .as_deref()
+                        .and_then(|prefix| text.strip_prefix(prefix))
+                        .unwrap_or(text);
+                    if !text.trim().is_empty() {
+                        self.add_agent(text, loading_history);
+                    }
                 }
             }
             Some("imageGeneration") => {
@@ -1777,9 +1838,6 @@ impl Agent {
             !loading_history,
         ));
         self.append(&message);
-        if !loading_history && !text.trim().is_empty() {
-            self.turn_copy.borrow_mut().push(text);
-        }
     }
 
     fn add_copy_actions(&self, paragraphs: Vec<String>) {

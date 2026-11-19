@@ -331,6 +331,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     wait_until "the follow-up on the original turn" test -f "$HOME/agent-steered"
     widget contains '已追加'
     widget not-contains 'fixture duplicate steer sentinel'
+    widget mouse '进行中 · 推理摘要'
+    widget contains 'Reasoning continues below the follow-up.'
+    read -r _ follow_up_y _ _ <<< "$(widget bounds 'Focus on X11')"
+    read -r _ reasoning_y _ _ <<< "$(widget bounds 'Reasoning continues below the follow-up.')"
+    ((reasoning_y > follow_up_y))
     printf '%s\n' 'Active-turn messages preserve the draft on rejection and retry on the same turn.'
     read -r stop_x stop_y stop_width stop_height < <(widget bounds '中断推理')
     ((stop_width == stop_height))
