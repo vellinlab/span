@@ -51,9 +51,9 @@ enum ComposerAction {
 impl ComposerAction {
     fn presentation(self) -> (&'static str, &'static str, &'static str) {
         match self {
-            Self::Send => ("send", "发送", "发送（Ctrl+Enter）"),
+            Self::Send => ("send", "发送", "Enter 发送 · Shift+Enter 换行"),
             Self::Stop => ("stop", "中断推理", "中断当前推理"),
-            Self::Continue => ("continue", "继续推理", "继续上次任务（Ctrl+Enter）"),
+            Self::Continue => ("continue", "继续推理", "Enter 继续 · Shift+Enter 换行"),
         }
     }
 }
@@ -359,18 +359,24 @@ impl Agent {
             }
         });
         let weak = Rc::downgrade(self);
-        self.input.connect_key_press_event(move |_, event| {
-            use gtk::gdk::keys::constants::{KP_Enter, Return};
-            if event.state().contains(gtk::gdk::ModifierType::CONTROL_MASK)
-                && [Return, KP_Enter].contains(&event.keyval())
+        self.input.connect_key_press_event(move |input, event| {
+            use gtk::gdk::{
+                ModifierType,
+                keys::constants::{ISO_Enter, KP_Enter, Return},
+            };
+            let modifiers = event.state() & gtk::accelerator_get_default_mod_mask();
+            if ![Return, KP_Enter, ISO_Enter].contains(&event.keyval())
+                || !(modifiers.is_empty() || modifiers == ModifierType::CONTROL_MASK)
             {
-                if let Some(agent) = weak.upgrade() {
-                    agent.submit_prompt();
-                }
-                glib::Propagation::Stop
-            } else {
-                glib::Propagation::Proceed
+                return glib::Propagation::Proceed;
             }
+            // Give the IM context the first chance to confirm composition.
+            if !input.im_context_filter_keypress(event)
+                && let Some(agent) = weak.upgrade()
+            {
+                agent.submit_prompt();
+            }
+            glib::Propagation::Stop
         });
         let weak = Rc::downgrade(self);
         self.input.connect_paste_clipboard(move |input| {

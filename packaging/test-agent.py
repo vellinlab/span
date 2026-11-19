@@ -209,7 +209,7 @@ for line in sys.stdin:
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
-        expected_speed = "priority" if message == "Show the deployment check" else "default"
+        expected_speed = "priority" if message == "Show the deployment check\n你" else "default"
         assert params["serviceTierForTurn"] == expected_speed
         assert "serviceTier" not in params
         (home / "agent-request").write_text(json.dumps(params, ensure_ascii=False) + "\n")

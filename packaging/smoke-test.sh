@@ -36,6 +36,7 @@ PROFILE
 
 if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     unset NO_AT_BRIDGE
+    export GTK_IM_MODULE=gtk-im-context-simple
     profile="$XDG_CONFIG_HOME/ssh-workbench/hosts.ini"
     mkdir -p "$(dirname "$profile")"
     cat > "$profile" <<'HOSTS'
@@ -183,11 +184,16 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     printf '%s' 'Show the deployment check' | xclip -in -selection clipboard
     xdotool key --clearmodifiers ctrl+v
     widget contains 'Show the deployment check'
+    # Commit a composed character with Return before sending the message.
+    xdotool key --clearmodifiers Shift+Return ctrl+shift+u 4 f 6 0 Return
+    prompt=$'Show the deployment check\n你'
+    widget contains "$prompt"
+    [[ ! -e "$HOME/agent-request" ]]
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-compose.png"
-    xdotool key --clearmodifiers ctrl+Return
+    xdotool key --clearmodifiers Return
     wait_until "the structured Agent reply" test -f "$HOME/agent-replied"
-    grep -qx 'Show the deployment check' "$HOME/agent-prompt"
-    widget contains 'Which deployment environment?'
+    [[ $(cat "$HOME/agent-prompt") == "$prompt" ]]
+    printf '%s\n' 'Enter commits input composition, then sends. Shift+Enter inserts a newline.'
     widget contains '等待你的回复'
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
