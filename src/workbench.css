@@ -330,6 +330,11 @@ button.agent-send:disabled {
     color: @foreground;
 }
 
+.workbench stack.tab-mode-icon {
+    background-color: transparent;
+    color: inherit;
+}
+
 .terminal-tabs > header > tabs > tab:checked {
     background: @surface;
     color: @foreground;
@@ -678,7 +683,11 @@ scrolledwindow.agent-scroll overshoot,
 scrolledwindow.terminal-page undershoot,
 scrolledwindow.terminal-page overshoot,
 .agent-catalog scrolledwindow undershoot,
-.agent-catalog scrolledwindow overshoot {
+.agent-catalog scrolledwindow overshoot,
+.draft-quotes undershoot,
+.draft-quotes overshoot,
+.preview-panel scrolledwindow undershoot,
+.preview-panel scrolledwindow overshoot {
     background: none;
     box-shadow: none;
     border: 0;

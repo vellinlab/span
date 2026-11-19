@@ -324,7 +324,26 @@ impl Workbench {
             .0;
         label.set_width_request(title_width.clamp(64, 160));
         tab.set_tooltip_text(Some(&session.launch.description()));
-        tab.pack_start(&icon(session.launch.icon(), 14), false, false, 0);
+        let mode_icon = gtk::Stack::new();
+        mode_icon.style_context().add_class("tab-mode-icon");
+        let terminal_icon = icon(session.launch.icon(), 14);
+        if let Some(accessible) = terminal_icon.accessible() {
+            accessible.set_name("终端标签图标");
+        }
+        let conversation_icon = icon(Icon::Conversation, 14);
+        if let Some(accessible) = conversation_icon.accessible() {
+            accessible.set_name("Codex 会话标签图标");
+        }
+        mode_icon.add_named(&terminal_icon, "terminal");
+        mode_icon.add_named(&conversation_icon, "agent");
+        let weak_icon = mode_icon.downgrade();
+        session.page.connect_visible_child_name_notify(move |page| {
+            if let (Some(mode_icon), Some(name)) = (weak_icon.upgrade(), page.visible_child_name())
+            {
+                mode_icon.set_visible_child_name(&name);
+            }
+        });
+        tab.pack_start(&mode_icon, false, false, 0);
         tab.pack_start(&label, true, true, 0);
         tab.pack_start(&session.indicator, false, false, 0);
         let close = icon_button(Icon::Close, "关闭标签");

@@ -174,6 +174,10 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
 ```python
 span_preview_marker = True
+# Keep the full excerpt visible in the composer.
+# Quotes may contain several lines.
+# The last line must remain readable.
+# End of the quotation fixture.
 ```
 MARKDOWN
     cat > "$HOME/000-source.py" <<'PYTHON'
@@ -184,6 +188,9 @@ import os
 def load_settings():
     return os.getenv("SPAN_TEST_MODE", "standard")  # preserve spacing
 PYTHON
+    for line in {1..96}; do
+        printf '    setting_%s = os.getenv("SPAN_TEST_SETTING_%s", "initialize the full-width source preview for the scrolling regression test")\n' "$line" "$line"
+    done >> "$HOME/000-source.py"
     cat > "$HOME/000-vector.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="58" viewBox="0 0 64 58">
   <rect width="64" height="58" fill="#162234"/>
@@ -210,7 +217,9 @@ SVG
     xdotool key --clearmodifiers Return
     wait_until "returning to the first Bash tab" grep -qsx "$first_bash" "$HOME/current-bash"
 
+    widget bounds '终端标签图标' >/dev/null
     widget click '切换 Codex 会话／终端'
+    widget bounds 'Codex 会话标签图标' >/dev/null
     xdotool windowsize "$window" 1250 940
     sleep 0.2
     xdotool key --clearmodifiers Return
@@ -415,10 +424,21 @@ SVG
     widget click '发送'
     wait_until "sending the remaining quote with the draft" test -f "$HOME/agent-quoted"
     [[ $(widget count '移除引用') == 0 ]]
+    long_quote="$(sed -n '/^# Keep the full excerpt/,/^# End of the quotation fixture/p' "$HOME/000-preview.md")"
+    widget drag-text "$long_quote"
+    widget click '引用'
+    read -r _ excerpt_y _ excerpt_height <<< "$(widget bounds "$long_quote")"
+    read -r _ quote_y _ quote_height <<< "$(widget bounds '引用内容')"
+    ((excerpt_height >= 58 && excerpt_y + excerpt_height <= quote_y + quote_height))
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-quote-preview.png"
+    widget click '移除引用'
     widget mouse '000-source.py'
     widget click '预览'
     widget bounds '行号' >/dev/null
     widget contains '    return os.getenv("SPAN_TEST_MODE", "standard")'
+    read -r preview_x preview_y _ _ <<< "$(widget bounds '预览区')"
+    xdotool mousemove "$((preview_x + 90))" "$((preview_y + 175))" click --repeat 5 5
+    sleep 0.2
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-source-preview.png"
     read -r row_x row_y row_width row_height <<< "$(widget bounds '000-vector.svg')"
     xdotool mousemove "$((row_x + row_width / 2))" "$((row_y + row_height / 2))" sleep 0.15 click --repeat 2 1

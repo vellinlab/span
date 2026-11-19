@@ -1,15 +1,18 @@
 use crate::icons::{self, Icon};
 use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub type Action = Rc<dyn Fn(&str)>;
+
+const MAX_DRAFT_QUOTE_HEIGHT: i32 = 152;
 
 pub struct DraftQuotes {
     pub widget: gtk::ScrolledWindow,
     list: gtk::Box,
     entries: RefCell<Vec<(gtk::Box, String)>>,
+    height_pending: Cell<bool>,
 }
 
 impl DraftQuotes {
@@ -17,22 +20,53 @@ impl DraftQuotes {
         let widget = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .max_content_height(114)
-            .propagate_natural_height(true)
+            .max_content_height(MAX_DRAFT_QUOTE_HEIGHT)
             .no_show_all(true)
             .build();
         widget.style_context().add_class("draft-quotes");
+        if let Some(accessible) = widget.accessible() {
+            accessible.set_name("引用内容");
+        }
         let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
         widget.add(&list);
         list.show_all();
-        if let Some(viewport) = widget.child() {
-            viewport.show();
-        }
-        Rc::new(Self {
+        let quotes = Rc::new(Self {
             widget,
             list,
             entries: RefCell::new(Vec::new()),
-        })
+            height_pending: Cell::new(false),
+        });
+        if let Some(viewport) = quotes.widget.child() {
+            let weak = Rc::downgrade(&quotes);
+            viewport.connect_size_allocate(move |_, _| {
+                if let Some(quotes) = weak.upgrade() {
+                    quotes.queue_height();
+                }
+            });
+            viewport.show();
+        }
+        quotes
+    }
+
+    fn queue_height(self: &Rc<Self>) {
+        if self.height_pending.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        // Measure wrapped labels at their allocated width and resize outside GTK's allocation pass.
+        glib::idle_add_local_once(move || {
+            if let Some(quotes) = weak.upgrade() {
+                quotes.height_pending.set(false);
+                let width = quotes.list.allocated_width();
+                if quotes.widget.is_visible() && width > 1 {
+                    let (_, natural_height) = quotes.list.preferred_height_for_width(width);
+                    let height = natural_height.min(MAX_DRAFT_QUOTE_HEIGHT);
+                    if height != quotes.widget.min_content_height() {
+                        quotes.widget.set_min_content_height(height);
+                    }
+                }
+            }
+        });
     }
 
     pub fn add(self: &Rc<Self>, text: &str) {
@@ -48,10 +82,9 @@ impl DraftQuotes {
         card.pack_start(&glyph, false, false, 0);
         let excerpt = gtk::Label::new(Some(&text));
         excerpt.set_xalign(0.0);
+        excerpt.set_valign(gtk::Align::Start);
         excerpt.set_line_wrap(true);
         excerpt.set_line_wrap_mode(pango::WrapMode::WordChar);
-        excerpt.set_lines(2);
-        excerpt.set_ellipsize(pango::EllipsizeMode::End);
         card.pack_start(&excerpt, true, true, 0);
         let remove = gtk::Button::new();
         remove.style_context().add_class("quiet-button");
@@ -74,12 +107,14 @@ impl DraftQuotes {
                 quotes
                     .widget
                     .set_visible(!quotes.entries.borrow().is_empty());
+                quotes.queue_height();
             }
         });
         self.entries.borrow_mut().push((card.clone(), text));
         self.list.add(&card);
         card.show_all();
         self.widget.show();
+        self.queue_height();
     }
 
     pub fn message(&self, editor: &str) -> (String, usize) {
@@ -97,7 +132,7 @@ impl DraftQuotes {
         (message.trim_end().to_owned(), entries.len())
     }
 
-    pub fn finish_send(&self, count: usize) {
+    pub fn finish_send(self: &Rc<Self>, count: usize) {
         let mut entries = self.entries.borrow_mut();
         let count = count.min(entries.len());
         for (card, _) in entries.drain(..count) {
@@ -106,6 +141,7 @@ impl DraftQuotes {
         let empty = entries.is_empty();
         drop(entries);
         self.widget.set_visible(!empty);
+        self.queue_height();
     }
 }
 
