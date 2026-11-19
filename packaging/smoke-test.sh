@@ -36,6 +36,7 @@ PROFILE
 
 if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     unset NO_AT_BRIDGE
+    export SPAN_TEST_TRACE_SELECTION=1
     profile="$XDG_CONFIG_HOME/ssh-workbench/hosts.ini"
     mkdir -p "$(dirname "$profile")"
     cat > "$profile" <<'HOSTS'
@@ -217,8 +218,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     sleep 0.25
     read -r cell_x cell_y _ cell_height < <(widget bounds 'Check')
     read -r next_x next_y next_width next_height < <(widget bounds 'Result')
+    printf 'Dragging from cell at %s,%s toward %s,%s.\n' "$cell_x" "$cell_y" "$next_x" "$next_y"
     xdotool mousemove "$((cell_x + 5))" "$((cell_y + cell_height / 2))" mousedown 1 \
-        mousemove "$((next_x + next_width / 2))" "$((next_y + next_height / 2))" mouseup 1
+        sleep 0.15 mousemove "$((next_x + next_width / 2))" "$((next_y + next_height / 2))" sleep 0.15 mouseup 1
     xdotool key --clearmodifiers ctrl+c
     selected_text="$(xclip -out -selection clipboard)"
     if [[ $selected_text != $'Check\tResult' ]]; then

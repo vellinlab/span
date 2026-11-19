@@ -24,7 +24,7 @@ impl Part {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Position {
     part: usize,
     byte: usize,
@@ -86,6 +86,12 @@ impl TextSelection {
             }
         });
         view.connect_focus_out_event(|view, _| {
+            if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
+                eprintln!(
+                    "Selection lost focus with anchor {:?}",
+                    view.imp().drag.get()
+                );
+            }
             view.imp().drag.set(None);
             glib::Propagation::Proceed
         });
@@ -95,19 +101,24 @@ impl TextSelection {
     fn bind_pointer(&self, widget: &gtk::EventBox) {
         widget.add_events(gdk::EventMask::SCROLL_MASK | gdk::EventMask::SMOOTH_SCROLL_MASK);
         let view = self.downgrade();
-        widget.connect_button_press_event(move |_, event| {
+        widget.connect_button_press_event(move |widget, event| {
             let Some(view) = view.upgrade() else {
                 return glib::Propagation::Proceed;
             };
             if event.button() != 1 {
                 return glib::Propagation::Proceed;
             }
-            let Some(anchor) = view.hit(event.root(), false) else {
+            let anchor = view.hit(event.root(), false);
+            if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
+                eprintln!("Selection press {:?} at {:?}", anchor, event.root());
+            }
+            let Some(anchor) = anchor else {
                 return glib::Propagation::Proceed;
             };
             view.grab_focus();
             view.change_range(None);
             view.imp().drag.set(Some(anchor));
+            widget.grab_add();
             glib::Propagation::Stop
         });
         let view = self.downgrade();
@@ -122,15 +133,28 @@ impl TextSelection {
             glib::Propagation::Stop
         });
         let view = self.downgrade();
-        widget.connect_button_release_event(move |_, event| {
+        widget.connect_button_release_event(move |widget, event| {
             let Some(view) = view.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            if event.button() != 1 || view.imp().drag.get().is_none() {
+            if event.button() != 1 {
                 return glib::Propagation::Proceed;
             }
             view.extend_to(event.root());
-            view.imp().drag.set(None);
+            if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
+                eprintln!(
+                    "Selection release {:?} at {:?}",
+                    view.imp().range.get(),
+                    event.root()
+                );
+            }
+            let drag = view.imp().drag.take();
+            if widget.has_grab() {
+                widget.grab_remove();
+            }
+            if drag.is_none() {
+                return glib::Propagation::Proceed;
+            }
             if let Some(text) = view.selected_text() {
                 gtk::Clipboard::get(&gdk::SELECTION_PRIMARY).set_text(&text);
             }
@@ -273,6 +297,9 @@ impl TextSelection {
     }
 
     pub fn copy(&self) -> bool {
+        if std::env::var_os("SPAN_TEST_TRACE_SELECTION").is_some() {
+            eprintln!("Selection copy {:?}", self.imp().range.get());
+        }
         let Some(text) = self.selected_text() else {
             return false;
         };
