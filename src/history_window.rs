@@ -83,7 +83,7 @@ const REPLY_EVICTION_DELAY: Duration = Duration::from_millis(900);
 struct Block {
     slot: glib::WeakRef<gtk::Widget>,
     content: glib::WeakRef<gtk::Widget>,
-    texts: Vec<DeferredText>,
+    materialize: Option<Box<dyn Fn(bool)>>,
     visible: Cell<bool>,
 }
 
@@ -91,45 +91,6 @@ struct BlockLayout {
     index: usize,
     top: i32,
     height: i32,
-}
-
-pub struct DeferredText {
-    label: glib::WeakRef<gtk::Label>,
-    source: Rc<str>,
-    uses_markup: bool,
-    loaded: Cell<bool>,
-}
-
-impl DeferredText {
-    pub fn new(label: &gtk::Label, source: Rc<str>, uses_markup: bool) -> Self {
-        label.show();
-        Self {
-            label: label.downgrade(),
-            source,
-            uses_markup,
-            loaded: Cell::new(false),
-        }
-    }
-
-    pub fn prepare(&self) {
-        if !self.loaded.replace(true)
-            && let Some(label) = self.label.upgrade()
-        {
-            if self.uses_markup {
-                label.set_markup(&self.source);
-            } else {
-                label.set_text(&self.source);
-            }
-        }
-    }
-
-    fn release(&self) {
-        if self.loaded.replace(false)
-            && let Some(label) = self.label.upgrade()
-        {
-            label.set_text("");
-        }
-    }
 }
 
 pub struct HistoryWindow {
@@ -223,7 +184,7 @@ impl HistoryWindow {
             self.blocks.borrow_mut().push(Block {
                 slot: slot.upcast_ref::<gtk::Widget>().downgrade(),
                 content: content.upcast_ref::<gtk::Widget>().downgrade(),
-                texts: Vec::new(),
+                materialize: None,
                 visible: Cell::new(true),
             });
         }
@@ -244,12 +205,18 @@ impl HistoryWindow {
         let height = lines.saturating_mul(21).clamp(21, 48_000) as i32;
         let slot = glib::Object::new::<ProseSlot>();
         slot.set_height_request(height);
-        self.register_deferred(
-            parent,
-            &slot,
-            label,
-            vec![DeferredText::new(label, source, uses_markup)],
-        );
+        let text = label.downgrade();
+        self.register_deferred(parent, &slot, label, move |visible| {
+            if let Some(label) = text.upgrade() {
+                if !visible {
+                    label.set_text("");
+                } else if uses_markup {
+                    label.set_markup(&source);
+                } else {
+                    label.set_text(&source);
+                }
+            }
+        });
     }
 
     pub fn reading_width(&self) -> i32 {
@@ -262,11 +229,11 @@ impl HistoryWindow {
         content: &impl IsA<gtk::Widget>,
         min_width: i32,
         height: i32,
-        texts: Vec<DeferredText>,
+        materialize: impl Fn(bool) + 'static,
     ) {
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         slot.set_size_request(min_width, height);
-        self.register_deferred(parent, &slot, content, texts);
+        self.register_deferred(parent, &slot, content, materialize);
     }
 
     fn register_deferred(
@@ -274,7 +241,7 @@ impl HistoryWindow {
         parent: &gtk::Box,
         slot: &impl IsA<gtk::Container>,
         content: &impl IsA<gtk::Widget>,
-        texts: Vec<DeferredText>,
+        materialize: impl Fn(bool) + 'static,
     ) {
         content.set_no_show_all(true);
         content.hide();
@@ -284,7 +251,7 @@ impl HistoryWindow {
         self.blocks.borrow_mut().push(Block {
             slot: slot.downgrade(),
             content: content.upcast_ref::<gtk::Widget>().downgrade(),
-            texts,
+            materialize: Some(Box::new(materialize)),
             visible: Cell::new(false),
         });
         self.invalidate_layout();
@@ -386,15 +353,15 @@ impl HistoryWindow {
             let block = &blocks[index];
             let y_px = f64::from(y);
             let bottom = y_px + f64::from(height);
-            let near_top = if block.texts.is_empty() {
-                top
-            } else {
+            let near_top = if block.materialize.is_some() {
                 visible_top
-            };
-            let (before, after) = if block.texts.is_empty() {
-                (0.85, 0.85)
             } else {
+                top
+            };
+            let (before, after) = if block.materialize.is_some() {
                 (before, after)
+            } else {
+                (0.85, 0.85)
             };
             let far = bottom < near_top - page * (before + 0.90)
                 || y_px > near_top + page * (1.90 + after);
@@ -418,7 +385,7 @@ impl HistoryWindow {
                 anchor = Some((slot.clone(), y, top));
             }
             if hide && !protected(&slot) {
-                if !block.texts.is_empty() && !idle {
+                if block.materialize.is_some() && !idle {
                     // Reversing a wheel gesture must not remap the same GTK
                     // input windows one frame after hiding them.
                     self.schedule_cleanup();
@@ -429,13 +396,13 @@ impl HistoryWindow {
                 content.hide();
                 block.visible.set(false);
                 hidden = true;
-                for text in &block.texts {
-                    text.release();
+                if let Some(materialize) = &block.materialize {
+                    materialize(false);
                 }
             } else if restore {
-                for text in &block.texts {
-                    shaped |= !text.loaded.get();
-                    text.prepare();
+                if let Some(materialize) = &block.materialize {
+                    shaped = true;
+                    materialize(true);
                 }
                 content.set_no_show_all(false);
                 content.show();

@@ -1,5 +1,5 @@
-use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delta};
-use crate::history_window::{DeferredText, wrapped_lines};
+use crate::agent_selection::{LabelSlot, Part, TextSelection, scroll_vertical, vertical_delta};
+use crate::history_window::wrapped_lines;
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
 use crate::quote;
@@ -552,6 +552,23 @@ fn unmarked_text(markup: &str) -> Option<glib::GString> {
         .map(|(_, text, _)| text)
 }
 
+struct DeferredCell {
+    row: i32,
+    column: i32,
+    markup: Rc<str>,
+    label: LabelSlot,
+}
+
+fn table_label(label: &gtk::Label, heading: bool) {
+    label.set_selectable(false);
+    label.set_hexpand(true);
+    label.set_width_chars(9);
+    label.set_max_width_chars(48);
+    if heading {
+        label.style_context().add_class("agent-table-head");
+    }
+}
+
 fn table(
     events: &mut OffsetIter<'_>,
     markdown: &str,
@@ -579,7 +596,7 @@ fn table(
                 .count()
                 >= 18
         });
-    let mut deferred_bands = vec![(region.clone(), Vec::new())];
+    let mut deferred_bands = vec![(region.clone(), grid.clone(), Vec::new())];
 
     let mut row = 0;
     let mut col = 0;
@@ -600,23 +617,6 @@ fn table(
             Event::End(TagEnd::TableCell) => {
                 in_cell = false;
                 if row < 100 && col < 20 {
-                    let label = if defer {
-                        if cell_markup.contains("<a href=") {
-                            markdown_label()
-                        } else {
-                            let label = text("");
-                            label.style_context().add_class("agent-markdown");
-                            label
-                        }
-                    } else {
-                        static_label(&cell_markup, markdown_label)
-                    };
-                    label.set_hexpand(true);
-                    label.set_width_chars(9);
-                    label.set_max_width_chars(48);
-                    if row == 0 {
-                        label.style_context().add_class("agent-table-head");
-                    }
                     let separator = match (row, col) {
                         (0, 0) => "\n\n",
                         (_, 0) => "\n",
@@ -625,22 +625,34 @@ fn table(
                     if col == 0 && row > 0 && row % BAND_ROWS == 0 {
                         (grid, region) = band();
                         if defer {
-                            deferred_bands.push((region.clone(), Vec::new()));
+                            deferred_bands.push((region.clone(), grid.clone(), Vec::new()));
                         }
                     }
-                    grid.attach(&label, col, row % BAND_ROWS, 1, 1);
                     if defer {
-                        let source: Rc<str> = Rc::from(cell_markup.as_str());
-                        let plain = unmarked_text(&source);
-                        let uses_markup = cell_markup.contains("<a href=") || plain.is_some();
-                        let plain =
-                            plain.map_or_else(|| source.clone(), |value| Rc::from(value.as_str()));
-                        if let Some((_, texts)) = deferred_bands.last_mut() {
-                            texts.push(DeferredText::new(&label, source, uses_markup));
-                        }
-                        selectable
-                            .push(Part::deferred_in_region(&label, separator, &region, plain));
+                        let markup: Rc<str> = Rc::from(cell_markup.as_str());
+                        let plain = unmarked_text(&markup)
+                            .map_or_else(|| markup.clone(), |value| Rc::from(value.as_str()));
+                        let label = LabelSlot::default();
+                        selectable.push(Part::deferred_in_region(
+                            label.clone(),
+                            separator,
+                            &region,
+                            plain,
+                        ));
+                        deferred_bands
+                            .last_mut()
+                            .expect("table band")
+                            .2
+                            .push(DeferredCell {
+                                row,
+                                column: col,
+                                markup,
+                                label,
+                            });
                     } else {
+                        let label = static_label(&cell_markup, markdown_label);
+                        table_label(&label, row == 0);
+                        grid.attach(&label, col, row % BAND_ROWS, 1, 1);
                         selectable.push(Part::in_region(&label, separator, &region));
                     }
                 }
@@ -687,12 +699,37 @@ fn table(
                 (lines.clamp(1, 250) * 17 + 13) as i32
             })
             .collect::<Vec<_>>();
-        for ((region, texts), heights) in deferred_bands
+        for ((region, grid, cells), heights) in deferred_bands
             .into_iter()
             .zip(row_heights.chunks(BAND_ROWS as usize))
         {
             bands.remove(&region);
-            window.defer_content(&bands, &region, minimum_width, heights.iter().sum(), texts);
+            let grid = grid.downgrade();
+            window.defer_content(
+                &bands,
+                &region,
+                minimum_width,
+                heights.iter().sum(),
+                move |visible| {
+                    let Some(grid) = grid.upgrade() else { return };
+                    if visible {
+                        for cell in &cells {
+                            let label = static_label(&cell.markup, markdown_label);
+                            table_label(&label, cell.row == 0);
+                            grid.attach(&label, cell.column, cell.row % BAND_ROWS, 1, 1);
+                            cell.label.set(Some(&label));
+                            label.show();
+                        }
+                    } else {
+                        for child in grid.children() {
+                            grid.remove(&child);
+                        }
+                        for cell in &cells {
+                            cell.label.set(None);
+                        }
+                    }
+                },
+            );
         }
     }
     if row > 100 {

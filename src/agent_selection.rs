@@ -42,9 +42,16 @@ pub fn scroll_vertical(scroll: &gtk::ScrolledWindow, delta: f64) -> f64 {
 
 pub struct Part {
     pub widget: gtk::EventBox,
-    label: gtk::Label,
+    label: Label,
     plain: Option<Rc<str>>,
     separator: &'static str,
+}
+
+pub type LabelSlot = Rc<glib::WeakRef<gtk::Label>>;
+
+enum Label {
+    Existing(gtk::Label),
+    Deferred(LabelSlot),
 }
 
 impl Part {
@@ -66,14 +73,17 @@ impl Part {
     }
 
     pub fn deferred_in_region(
-        label: &gtk::Label,
+        label: LabelSlot,
         separator: &'static str,
         widget: &gtk::EventBox,
         plain: Rc<str>,
     ) -> Self {
-        let mut part = Self::in_region(label, separator, widget);
-        part.plain = Some(plain);
-        part
+        Self {
+            widget: widget.clone(),
+            label: Label::Deferred(label),
+            plain: Some(plain),
+            separator,
+        }
     }
 
     pub fn region() -> gtk::EventBox {
@@ -87,9 +97,16 @@ impl Part {
         label.set_selectable(false);
         Self {
             widget: widget.clone(),
-            label: label.clone(),
+            label: Label::Existing(label.clone()),
             plain: None,
             separator,
+        }
+    }
+
+    fn label(&self) -> Option<gtk::Label> {
+        match &self.label {
+            Label::Existing(label) => Some(label.clone()),
+            Label::Deferred(slot) => slot.upgrade(),
         }
     }
 }
@@ -294,10 +311,10 @@ impl TextSelection {
                 && let Some(start) = drag.link_byte
                 && let Some((position, Some(end))) = view.hit(root, false)
                 && position.part == drag.start.part
+                && let Some(label) = view.parts()[position.part].label()
             {
-                let label = &view.parts()[position.part].label;
-                if let Some(uri) = link_at(label, start)
-                    .filter(|uri| start == end || link_at(label, end).as_ref() == Some(uri))
+                if let Some(uri) = link_at(&label, start)
+                    .filter(|uri| start == end || link_at(&label, end).as_ref() == Some(uri))
                 {
                     label.emit_by_name::<bool>("activate-link", &[&uri.as_str()]);
                 }
@@ -356,16 +373,16 @@ impl TextSelection {
         let mut closest = None;
         let mut distance = i32::MAX;
         for (index, part) in self.parts().iter().enumerate() {
-            if !part.label.is_mapped() {
+            let Some(label) = part.label().filter(|label| label.is_mapped()) else {
                 continue;
-            }
-            let Some((left, top)) = part.label.translate_coordinates(self, 0, 0) else {
+            };
+            let Some((left, top)) = label.translate_coordinates(self, 0, 0) else {
                 continue;
             };
             let local_x = x - left;
             let local_y = y - top;
-            let width = part.label.allocated_width();
-            let height = part.label.allocated_height();
+            let width = label.allocated_width();
+            let height = label.allocated_height();
             let dx = (-local_x).max(local_x - width + 1).max(0);
             let dy = (-local_y).max(local_y - height + 1).max(0);
             if dx == 0 && dy == 0 {
@@ -378,7 +395,7 @@ impl TextSelection {
             }
         }
         let (part, x, y) = closest?;
-        let label = &self.parts()[part].label;
+        let label = self.parts()[part].label()?;
         let (left, top) = label.layout_offsets();
         // Labels have no GDK window. GTK reports layout offsets in the
         // containing window, while x and y above are relative to the label.
@@ -428,10 +445,12 @@ impl TextSelection {
         let units = f64::from(pango::SCALE);
         let pixels = |position| f64::from(position) / units;
         for index in start.part..=end.part {
-            let label = &self.parts()[index].label;
-            if !label.is_mapped() {
+            let Some(label) = self.parts()[index]
+                .label()
+                .filter(|label| label.is_mapped())
+            else {
                 continue;
-            }
+            };
             let Some((x, y)) = label.translate_coordinates(self, 0, 0) else {
                 continue;
             };
@@ -489,12 +508,12 @@ impl TextSelection {
         let mut text = String::new();
         for index in start.part..=end.part {
             let part = &self.parts()[index];
-            let label_text = part.label.text();
-            let value = if label_text.is_empty() {
-                part.plain.as_deref().unwrap_or_default()
-            } else {
-                label_text.as_str()
-            };
+            let label_text = part.label().map(|label| label.text());
+            let value = label_text
+                .as_deref()
+                .filter(|text| !text.is_empty())
+                .or(part.plain.as_deref())
+                .unwrap_or_default();
             let (from, to) = bounds(Some((start, end)), index)?;
             if index != start.part {
                 text.push_str(part.separator);
