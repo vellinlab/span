@@ -732,6 +732,8 @@ scrolledwindow.terminal-page overshoot,
 .agent-catalog scrolledwindow overshoot,
 .draft-quotes undershoot,
 .draft-quotes overshoot,
+.files-panel scrolledwindow undershoot,
+.files-panel scrolledwindow overshoot,
 .preview-panel scrolledwindow undershoot,
 .preview-panel scrolledwindow overshoot {
     background: none;

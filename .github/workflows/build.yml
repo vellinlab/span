@@ -90,6 +90,7 @@ jobs:
             dist/agent-follow-up.png
             dist/agent-table.png
             dist/files-preview.png
+            dist/files-completion.png
             dist/generated-preview.png
             dist/remote-terminal-drawer.png
             dist/quick-connect.png

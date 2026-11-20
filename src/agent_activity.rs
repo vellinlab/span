@@ -192,7 +192,8 @@ impl Activity {
         widget.style_context().add_class("agent-activity");
         let heading = title_label();
         heading.style_context().add_class("agent-activity-heading");
-        set_title_widget(&widget, &heading, &icons::widget(Icon::Activity, 15));
+        let leading = icons::aligned_widget(15, &heading, || Icon::Activity);
+        set_title_widget(&widget, &heading, &leading);
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 3);
         rows.style_context().add_class("agent-activity-rows");
         widget.add(&rows);
@@ -355,7 +356,7 @@ impl Activity {
             let title = title_label();
             let symbol = Rc::new(Cell::new(icon));
             let draw_symbol = symbol.clone();
-            let leading = icons::changing_widget(15, move || draw_symbol.get());
+            let leading = icons::aligned_widget(15, &title, move || draw_symbol.get());
             set_title_widget(&item, &title, &leading);
             let view = if kind == "commandExecution" {
                 let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -543,11 +544,12 @@ fn title_label() -> gtk::Label {
 fn set_title_widget(row: &gtk::Expander, title: &gtk::Label, leading: &gtk::DrawingArea) {
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     header.style_context().add_class("agent-activity-title");
+    title.set_valign(gtk::Align::Center);
     leading.style_context().add_class("agent-activity-icon");
     header.pack_start(leading, false, false, 0);
     header.pack_start(title, false, true, 0);
     let weak = row.downgrade();
-    let arrow = icons::changing_widget(12, move || {
+    let arrow = icons::aligned_widget(12, title, move || {
         if weak.upgrade().is_some_and(|row| row.is_expanded()) {
             Icon::ChevronDown
         } else {

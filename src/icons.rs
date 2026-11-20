@@ -41,14 +41,53 @@ pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
 }
 
 pub fn changing_widget(size: i32, symbol: impl Fn() -> Icon + 'static) -> gtk::DrawingArea {
+    drawing_widget(size, None, symbol)
+}
+
+pub fn aligned_widget(
+    size: i32,
+    label: &gtk::Label,
+    symbol: impl Fn() -> Icon + 'static,
+) -> gtk::DrawingArea {
+    drawing_widget(size, Some(label), symbol)
+}
+
+fn drawing_widget(
+    size: i32,
+    label: Option<&gtk::Label>,
+    symbol: impl Fn() -> Icon + 'static,
+) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::new();
-    area.set_size_request(size, size);
+    area.set_size_request(size, if label.is_some() { size + 4 } else { size });
     area.set_halign(gtk::Align::Center);
     area.set_valign(gtk::Align::Center);
+    if let Some(label) = label {
+        let weak = area.downgrade();
+        label.connect_label_notify(move |_| {
+            if let Some(area) = weak.upgrade() {
+                area.queue_draw();
+            }
+        });
+    }
+    let label = label.map(|label| label.downgrade());
     area.connect_draw(move |area, cr| {
         let style = area.style_context();
         let color = style.color(area.state_flags());
-        draw(cr, symbol(), size, &color);
+        let available = f64::from((area.allocated_height() - size).max(0));
+        let y = label
+            .as_ref()
+            .and_then(|label| label.upgrade())
+            .and_then(|label| {
+                let (ink, _) = label.layout()?.pixel_extents();
+                let (_, top) = label.layout_offsets();
+                // Both title widgets are siblings in the same GDK window.
+                let center = f64::from(top + ink.y() - area.allocation().y())
+                    + f64::from(ink.height()) / 2.0;
+                (ink.height() > 0).then_some(center - f64::from(size) / 2.0)
+            })
+            .unwrap_or(available / 2.0)
+            .clamp(0.0, available);
+        draw(cr, symbol(), size, y, &color);
         glib::Propagation::Proceed
     });
     area
@@ -58,14 +97,15 @@ pub fn pixbuf(icon: Icon, size: i32, color: &gdk::RGBA) -> Option<gdk_pixbuf::Pi
     let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, size, size).ok()?;
     {
         let cr = cairo::Context::new(&surface).ok()?;
-        draw(&cr, icon, size, color);
+        draw(&cr, icon, size, 0.0, color);
     }
     gdk::pixbuf_get_from_surface(&surface, 0, 0, size, size)
 }
 
-fn draw(cr: &cairo::Context, icon: Icon, size: i32, color: &gdk::RGBA) {
+fn draw(cr: &cairo::Context, icon: Icon, size: i32, y: f64, color: &gdk::RGBA) {
     let scale = f64::from(size) / 24.0;
     let _ = cr.save();
+    cr.translate(0.0, y);
     cr.scale(scale, scale);
     cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
     cr.set_line_width(1.8);

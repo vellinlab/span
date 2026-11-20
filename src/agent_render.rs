@@ -301,15 +301,28 @@ fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
         f64::from(color.alpha()),
     );
     let mut iter = layout.iter();
+    let mut ranges = ranges.as_slice();
     while let Some(line) = iter.line_readonly() {
         let start = line.start_index();
         let end = start + line.length();
+        while ranges
+            .first()
+            .is_some_and(|&(_, link_end)| link_end <= start)
+        {
+            ranges = &ranges[1..];
+        }
+        if ranges.is_empty() {
+            break;
+        }
         let (ink, logical) = iter.line_extents();
         // Use one position per visual line across all fallback fonts.
         let below_ink = pixels(ink.y() + ink.height()).ceil() + 1.0;
         let line_bottom = pixels(logical.y() + logical.height()).floor() - 1.0;
         let underline = y + below_ink.min(line_bottom);
-        for &(link_start, link_end) in &ranges {
+        for &(link_start, link_end) in ranges
+            .iter()
+            .take_while(|&&(link_start, _)| link_start < end)
+        {
             let seg_start = start.max(link_start);
             let seg_end = end.min(link_end);
             if seg_start < seg_end {

@@ -744,8 +744,10 @@ SVG
     xdotool type --clearmodifiers "$HOME/path-completion-fixture/wid"
     widget contains 'widget-directory'
     widget not-contains 'widget-file.txt'
+    import -window root "$(dirname "$WORKBENCH_PREVIEW")/files-completion.png"
     xdotool key --clearmodifiers Down Return
     widget contains 'completed.txt'
+    printf '%s\n' 'The path popup lists local directories and opens the selected match.'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'Workspace preview fixture'
     widget click '关闭预览'
@@ -820,6 +822,7 @@ PY
         widget contains 'folder'
         xdotool key --clearmodifiers Down Return
         widget contains "$WORKBENCH_SSH_FIXTURE/files/folder"
+        printf '%s\n' 'The path popup completes a remote directory over the current SSH connection.'
         xdotool key --clearmodifiers ctrl+shift+h
         wait_until "the remote session list" test -f "$WORKBENCH_SSH_FIXTURE/agent-catalog"
         xdotool type --clearmodifiers 'Deployment'
