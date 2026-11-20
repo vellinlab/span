@@ -1,5 +1,5 @@
 use crate::agent_selection::{LabelSlot, Part, TextSelection, scroll_vertical, vertical_delta};
-use crate::history_window::wrapped_lines;
+use crate::history_window::{prose_label, wrapped_lines};
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
 use crate::quote;
@@ -42,10 +42,11 @@ pub fn response(
 ) -> TextSelection {
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let context = Rc::new(context.clone());
-    let prose_label = || {
+    let linked_label = |deferred| {
         let context = context.clone();
         let preview = preview.clone();
-        markdown_label_with(move |label, uri| {
+        let label = if deferred { prose_label() } else { text("") };
+        markdown_label_with(label, move |label, uri| {
             if let Some(artifact) = Artifact::output(uri, &context) {
                 preview(artifact, false);
             } else {
@@ -73,7 +74,7 @@ pub fn response(
                     &blocks,
                     &mut pending,
                     &mut selectable,
-                    &prose_label,
+                    &linked_label,
                     deferred,
                 );
                 blocks.add(&table(
@@ -89,7 +90,7 @@ pub fn response(
                     &blocks,
                     &mut pending,
                     &mut selectable,
-                    &prose_label,
+                    &linked_label,
                     deferred,
                 );
                 let mut code = String::new();
@@ -135,7 +136,7 @@ pub fn response(
                     &blocks,
                     &mut pending,
                     &mut selectable,
-                    &prose_label,
+                    &linked_label,
                     deferred,
                 );
                 let relative = Path::new(dest_url.as_ref()).components().all(|part| {
@@ -170,7 +171,7 @@ pub fn response(
                         &blocks,
                         &mut pending,
                         &mut selectable,
-                        &prose_label,
+                        &linked_label,
                         deferred,
                     );
                 } else {
@@ -185,7 +186,7 @@ pub fn response(
                     &blocks,
                     &mut pending,
                     &mut selectable,
-                    &prose_label,
+                    &linked_label,
                     deferred,
                 );
             }
@@ -199,7 +200,7 @@ pub fn response(
                     &blocks,
                     &mut pending,
                     &mut selectable,
-                    &prose_label,
+                    &linked_label,
                     deferred,
                 );
                 blocks.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
@@ -211,7 +212,7 @@ pub fn response(
         &blocks,
         &mut pending,
         &mut selectable,
-        &prose_label,
+        &linked_label,
         deferred,
     );
     let actions = if artifacts.is_empty() {
@@ -343,11 +344,13 @@ pub(crate) fn open_link(widget: &impl IsA<gtk::Widget>, uri: &str) {
 }
 
 pub fn markdown_label() -> gtk::Label {
-    markdown_label_with(open_link)
+    markdown_label_with(text(""), open_link)
 }
 
-fn markdown_label_with(activate: impl Fn(&gtk::Label, &str) + 'static) -> gtk::Label {
-    let label = text("");
+fn markdown_label_with(
+    label: gtk::Label,
+    activate: impl Fn(&gtk::Label, &str) + 'static,
+) -> gtk::Label {
     label.style_context().add_class("agent-markdown");
     label.connect_activate_link(move |label, uri| {
         activate(label, uri);
@@ -507,14 +510,18 @@ fn flush_text(
     blocks: &gtk::Box,
     pending: &mut String,
     selectable: &mut Vec<Part>,
-    new_label: &impl Fn() -> gtk::Label,
+    new_label: &impl Fn(bool) -> gtk::Label,
     deferred: Option<(&Rc<crate::history_window::HistoryWindow>, &gtk::EventBox)>,
 ) {
     let markup = pending.trim();
     if !markup.is_empty() {
         if let Some((window, region)) = deferred {
             let linked = markup.contains("<a href=");
-            let label = if linked { new_label() } else { text("") };
+            let label = if linked {
+                new_label(true)
+            } else {
+                prose_label()
+            };
             label.style_context().add_class("agent-markdown");
             label.style_context().add_class("agent-prose");
             let plain = unmarked_text(markup);
@@ -524,7 +531,7 @@ fn flush_text(
             selectable.push(Part::deferred(&label, region, "\n\n", plain.clone()));
             window.defer_prose(blocks, &label, source, &plain, uses_markup);
         } else {
-            let label = static_label(markup, new_label);
+            let label = static_label(markup, || new_label(false));
             label.style_context().add_class("agent-prose");
             let part = Part::new(&label, "\n\n");
             blocks.add(&part.widget);

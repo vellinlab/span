@@ -1,9 +1,62 @@
 //! Keep distant transcript content and shaped prose out of GTK layout.
 use gtk::glib;
+use gtk::glib::translate::{IntoGlib, from_glib};
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+pub fn prose_label() -> gtk::Label {
+    static TYPE: OnceLock<glib::Type> = OnceLock::new();
+    let label_type = TYPE.get_or_init(|| {
+        unsafe extern "C" fn class_init(class: glib::ffi::gpointer, _: glib::ffi::gpointer) {
+            unsafe extern "C" fn preferred_width(
+                _: *mut gtk::ffi::GtkWidget,
+                minimum: *mut i32,
+                natural: *mut i32,
+            ) {
+                for width in [minimum, natural] {
+                    if let Some(width) = unsafe { width.as_mut() } {
+                        *width = 1;
+                    }
+                }
+            }
+
+            // GtkWidgetClass is the base of the registered GtkLabel subclass.
+            unsafe {
+                (*class.cast::<gtk::ffi::GtkWidgetClass>()).get_preferred_width =
+                    Some(preferred_width)
+            };
+        }
+
+        // gtk-rs does not expose GtkLabel subclassing. Use GLib's public
+        // registration API and leave all other label behavior inherited.
+        unsafe {
+            let parent = gtk::Label::static_type().into_glib();
+            let mut sizes = std::mem::MaybeUninit::<glib::gobject_ffi::GTypeQuery>::uninit();
+            glib::gobject_ffi::g_type_query(parent, sizes.as_mut_ptr());
+            let sizes = sizes.assume_init();
+            from_glib(glib::gobject_ffi::g_type_register_static_simple(
+                parent,
+                c"SpanProseLabel".as_ptr(),
+                sizes.class_size,
+                Some(class_init),
+                sizes.instance_size,
+                None,
+                0,
+            ))
+        }
+    });
+    let label = glib::Object::builder_with_type(*label_type)
+        .property("xalign", 0.0_f32)
+        .property("wrap", true)
+        .property("wrap-mode", gtk::pango::WrapMode::WordChar)
+        .build()
+        .downcast::<gtk::Label>()
+        .expect("SpanProseLabel inherits GtkLabel");
+    label
+}
 
 mod prose_slot {
     use super::*;
