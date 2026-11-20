@@ -510,10 +510,6 @@ label.files-path-label {
     color: @foreground;
 }
 
-drawingarea.files-path-icon {
-    color: @accent;
-}
-
 .files-actions {
     padding: 0 9px 6px;
 }

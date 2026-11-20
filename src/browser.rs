@@ -678,9 +678,7 @@ impl Browser {
             row.set_can_focus(false);
             row.style_context().add_class("files-path-option");
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            let icon = icons::widget(Icon::Folder, 15);
-            icon.style_context().add_class("files-path-icon");
-            content.add(&icon);
+            content.add(&gtk::Image::from_pixbuf(self.entry_icons[0].as_ref()));
             let title = gtk::Label::builder()
                 .label(&label)
                 .xalign(0.0)
