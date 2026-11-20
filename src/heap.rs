@@ -1,10 +1,3 @@
-pub const PRIVATE_ENVIRONMENT: [&str; 2] = ["G_SLICE", "SPAN_INTERNAL_G_SLICE"];
-
-pub fn has_private_allocator() -> bool {
-    cfg!(target_os = "linux")
-        && std::env::var_os("SPAN_INTERNAL_G_SLICE").is_some_and(|value| value == "1")
-}
-
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 pub fn release_after_session_close() {}
 

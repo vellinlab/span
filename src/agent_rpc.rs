@@ -89,10 +89,8 @@ impl Rpc {
                 | gio::SubprocessFlags::STDOUT_PIPE
                 | gio::SubprocessFlags::STDERR_SILENCE,
         );
-        if crate::heap::has_private_allocator() {
-            for variable in crate::heap::PRIVATE_ENVIRONMENT {
-                launcher.unsetenv(variable);
-            }
+        for variable in crate::process_environment::private_variables() {
+            launcher.unsetenv(variable);
         }
         let process = launcher
             .spawn(&argv)

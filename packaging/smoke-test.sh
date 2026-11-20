@@ -61,10 +61,16 @@ Host *.invalid !pattern-exclusion
 Include conf.d/*.conf
 SSH_CONFIG
     printf '%s\n' 'Host=included-dev' > "$HOME/.ssh/conf.d/extra.conf"
+    if [[ ! -v GDK_GL ]]; then
+        export SPAN_TEST_GDK_GL_DEFAULT=1
+    fi
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
     mkdir -p "$XDG_DATA_HOME/applications"
     cat > "$HOME/bin/span-test-open-link" <<'SCRIPT'
 #!/usr/bin/env bash
+if [[ ${SPAN_TEST_GDK_GL_DEFAULT:-0} == 1 && -v GDK_GL ]]; then
+    exit 1
+fi
 printf '%s\n' "$1" > "$HOME/span-opened-link"
 SCRIPT
     chmod +x "$HOME/bin/span-test-open-link"
@@ -130,12 +136,18 @@ window_exists() {
 }
 wait_until "the GTK3 window" window_exists
 wait_until "the local Bash PTY" test -s "$HOME/bash-ready"
+first_bash="$(head -n 1 "$HOME/bash-ready")"
+bash_env="$(tr '\0' '\n' < "/proc/$first_bash/environ")"
+grep -qx 'TERM=xterm-256color' <<< "$bash_env"
+grep -qx 'COLORTERM=truecolor' <<< "$bash_env"
+if [[ -v GDK_GL ]]; then
+    grep -Fqx "GDK_GL=$GDK_GL" <<< "$bash_env"
+elif grep -q '^GDK_GL=' <<< "$bash_env"; then
+    printf '%s\n' 'The private GTK graphics setting reached the terminal.' >&2
+    exit 1
+fi
 if [[ ${SPAN_TEST_RPM_ALLOCATOR:-0} == 1 ]]; then
-    first_bash="$(head -n 1 "$HOME/bash-ready")"
     span_env="$(tr '\0' '\n' < "/proc/$app_pid/environ")"
-    bash_env="$(tr '\0' '\n' < "/proc/$first_bash/environ")"
-    grep -qx 'TERM=xterm-256color' <<< "$bash_env"
-    grep -qx 'COLORTERM=truecolor' <<< "$bash_env"
     if [[ -v G_SLICE ]]; then
         grep -Fqx "G_SLICE=$G_SLICE" <<< "$span_env"
         grep -Fqx "G_SLICE=$G_SLICE" <<< "$bash_env"

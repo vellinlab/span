@@ -329,9 +329,10 @@ pub(crate) fn open_link(widget: &impl IsA<gtk::Widget>, uri: &str) {
     if !web_url(uri) {
         return;
     }
-    let context = crate::heap::has_private_allocator().then(|| {
+    let mut private = crate::process_environment::private_variables().peekable();
+    let context = private.peek().is_some().then(|| {
         let context = gio::AppLaunchContext::new();
-        for variable in crate::heap::PRIVATE_ENVIRONMENT {
+        for variable in private {
             context.unsetenv(variable);
         }
         context

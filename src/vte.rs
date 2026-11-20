@@ -197,12 +197,13 @@ impl Terminal {
             on_spawn(result);
         }
 
-        // Keep the RPM's allocator setting in Span. VTE still adds its usual
+        // Keep Span's process settings private. VTE still adds its usual
         // terminal variables to the filtered environment.
         let environment;
         let filtered;
         let inherited;
-        let (envp, flags): (*mut *mut c_char, c_uint) = if crate::heap::has_private_allocator() {
+        let mut private = crate::process_environment::private_variables().peekable();
+        let (envp, flags): (*mut *mut c_char, c_uint) = if private.peek().is_some() {
             fn key(var: &std::ffi::OsStr) -> &[u8] {
                 var.as_encoded_bytes()
                     .split(|byte| *byte == b'=')
@@ -214,10 +215,7 @@ impl Terminal {
                 // Copying the parent TERM as an override would bypass VTE's
                 // own default TERM. Any explicit override below still works.
                 let name = key(var);
-                name != b"TERM"
-                    && !crate::heap::PRIVATE_ENVIRONMENT
-                        .iter()
-                        .any(|private| name == private.as_bytes())
+                name != b"TERM" && !private.clone().any(|private| name == private.as_bytes())
             });
             for entry in env {
                 let entry = std::ffi::OsStr::new(entry);

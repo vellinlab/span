@@ -25,6 +25,7 @@ mod icons;
 mod mermaid;
 mod plugin_catalog;
 mod preview;
+mod process_environment;
 mod quote;
 mod reading_column;
 mod session;
@@ -44,6 +45,8 @@ const APP_ID: &str = "io.github.zyw02.SshWorkbench";
 const APP_NAME: &str = "Span";
 
 fn main() -> glib::ExitCode {
+    #[cfg(target_os = "linux")]
+    process_environment::configure_graphics();
     #[cfg(windows)]
     restrict_dll_search();
     glib::set_application_name(APP_NAME);

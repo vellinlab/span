@@ -50,7 +50,7 @@ linked_vte="$(ldd /usr/libexec/span | awk '$1 == "libvte-2.91.so.0" { print $3 }
 test "$(realpath "$linked_vte")" = /usr/lib64/span/libvte-2.91.so.0
 env -u G_SLICE SPAN_TEST_RPM_ALLOCATOR=1 TERM=dumb \
     dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/span target/verify-osc
-G_SLICE= SPAN_TEST_RPM_ALLOCATOR=1 TERM=dumb \
+GDK_GL= G_SLICE= SPAN_TEST_RPM_ALLOCATOR=1 TERM=dumb \
     dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/ssh-workbench
 
 # Exercise the two actual RPM executables against the target GTK and bundled VTE.
