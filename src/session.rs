@@ -163,6 +163,13 @@ impl Session {
         (self.agent().quote_action())(text);
     }
 
+    pub fn existing_catalog(&self) -> Option<gtk::Box> {
+        self.agent
+            .borrow()
+            .as_ref()
+            .map(|agent| agent.catalog_panel().clone())
+    }
+
     pub fn agent(self: &Rc<Self>) -> Rc<Agent> {
         if self.agent.borrow().is_none() {
             let weak = Rc::downgrade(self);

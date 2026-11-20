@@ -18,7 +18,7 @@ struct Workbench {
     views: gtk::Stack,
     sidebar: gtk::Box,
     sidebar_pages: gtk::Stack,
-    sidebar_catalog: gtk::Box,
+    sidebar_catalog: gtk::Stack,
     sidebar_extensions: gtk::Box,
     panels_pending: Cell<bool>,
     files_return: Cell<&'static str>,
@@ -58,7 +58,10 @@ pub fn open(app: &gtk::Application) {
     }
     let sidebar_pages = gtk::Stack::new();
     sidebar_pages.set_homogeneous(false);
-    let sidebar_catalog = column(0);
+    let sidebar_catalog = gtk::Stack::new();
+    sidebar_catalog.set_homogeneous(false);
+    let no_catalog = text_label("打开终端标签以查看会话", "host-empty");
+    sidebar_catalog.add_named(&no_catalog, "empty");
     let sidebar_extensions = column(0);
     let preview = Panel::new();
     let browser = Browser::new(preview.clone());
@@ -247,10 +250,11 @@ pub fn open(app: &gtk::Application) {
                     .set_visible(session.notebook_page.upcast_ref::<gtk::Widget>() == page);
             }
             workbench.update_status(active.as_deref());
-            workbench.schedule_panels();
             if let Some(active) = active {
+                workbench.show_cached_catalog(&active);
                 active.focus_terminal();
             }
+            workbench.schedule_panels();
         }
     });
     window.connect_delete_event(|window, _| {
@@ -424,6 +428,11 @@ impl Workbench {
 
     fn close_session(&self, session: &Rc<Session>) {
         session.cancel();
+        if let Some(panel) = session.existing_catalog()
+            && panel.parent().as_ref() == Some(self.sidebar_catalog.upcast_ref())
+        {
+            self.sidebar_catalog.remove(&panel);
+        }
         self.sessions
             .borrow_mut()
             .retain(|active| !Rc::ptr_eq(active, session));
@@ -584,31 +593,36 @@ impl Workbench {
         }
     }
 
+    fn show_cached_catalog(&self, session: &Session) {
+        if self.sidebar_pages.visible_child_name().as_deref() == Some("sessions")
+            && let Some(panel) = session.existing_catalog()
+            && panel.parent().as_ref() == Some(self.sidebar_catalog.upcast_ref())
+        {
+            // The selected transcript and an already loaded catalog can paint
+            // together. Starting the peer and refreshing its data stay deferred.
+            self.sidebar_catalog.set_visible_child(&panel);
+        }
+    }
+
     fn sync_catalog(&self, session: Option<&Rc<Session>>, focus: bool) {
         if self.sidebar_pages.visible_child_name().as_deref() != Some("sessions") {
             return;
         }
-        let children = self.sidebar_catalog.children();
         if let Some(agent) = session.map(Session::agent) {
             let panel = agent.catalog_panel();
-            let current = children.first() == Some(panel.upcast_ref::<gtk::Widget>());
+            let current = self.sidebar_catalog.visible_child().as_ref() == Some(panel.upcast_ref());
             if !current {
-                for child in children {
-                    self.sidebar_catalog.remove(&child);
+                // Reparenting a catalog at every switch drops GTK's window and
+                // style state for all of its rows. Keep it attached until close.
+                if panel.parent().is_none() {
+                    self.sidebar_catalog.add(panel);
+                    panel.show_all();
                 }
-                self.sidebar_catalog.pack_start(panel, true, true, 0);
-                panel.show_all();
+                self.sidebar_catalog.set_visible_child(panel);
             }
-            if !current || focus {
-                agent.show_catalog(focus);
-            }
+            agent.show_catalog(focus);
         } else {
-            for child in children {
-                self.sidebar_catalog.remove(&child);
-            }
-            let hint = text_label("打开终端标签以查看会话", "host-empty");
-            self.sidebar_catalog.add(&hint);
-            hint.show();
+            self.sidebar_catalog.set_visible_child_name("empty");
         }
     }
 

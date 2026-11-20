@@ -80,8 +80,9 @@ def write_image(path, color):
 def benchmark(binary, workload):
     name = Path(binary).parent.name + ("" if workload == "history" else f" {workload}")
     same_directory = workload == "tabs-shared-directory"
+    show_catalog = workload == "tabs-catalog"
     warmup_events = 4
-    switching_tabs = workload == "tabs" or same_directory
+    switching_tabs = workload in ("tabs", "tabs-shared-directory", "tabs-catalog")
     live_scroll = workload == "live-scroll"
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
@@ -101,6 +102,7 @@ def benchmark(binary, workload):
                    SPAN_BENCH_STREAM="scroll" if live_scroll else str(int(workload == "stream")),
                    SPAN_BENCH_TASK_IDLE=str(int(workload == "task-wait")),
                    SPAN_BENCH_TABS=str(int(switching_tabs)),
+                   SPAN_BENCH_CATALOG=str(int(show_catalog)),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         if same_directory:
             # Keep App Server markers outside the folder open in every tab.
@@ -262,6 +264,9 @@ def benchmark(binary, workload):
                       f" app CPU {(painted_cpu - before_cpu) * 1000:.1f} ms", flush=True)
                 time.sleep(max(0, painted_at + 1 - time.monotonic()))
                 if switching_tabs:
+                    if show_catalog:
+                        xdo("key", "ctrl+shift+h")
+                        time.sleep(0.20)
                     xdo("mousemove", "--window", wid, 1040, 20)
                     def directory_pixels():
                         return win.get_image(60, 225, 170, 280, X.ZPixmap, 0xffffffff).data
@@ -269,7 +274,11 @@ def benchmark(binary, workload):
                     directory_frame = directory_pixels() if same_directory else b""
                     if same_directory:
                         assert len(set(directory_frame)) > 32, "the shared file directory is empty"
+                    def catalog_pixels():
+                        return win.get_image(54, 200, 194, 290, X.ZPixmap, 0xffffffff).data
+
                     tab_frames = [pixels()]
+                    catalog_frames = [catalog_pixels()] if show_catalog else []
                     for number in (2, 3):
                         (home / "agent-models").unlink()
                         xdo("key", "ctrl+shift+t")
@@ -283,6 +292,10 @@ def benchmark(binary, workload):
                         frame = pixels()
                         assert len(set(frame)) > 32 and frame not in tab_frames
                         tab_frames.append(frame)
+                        if show_catalog:
+                            sidebar_frame = catalog_pixels()
+                            assert len(set(sidebar_frame)) > 32 and sidebar_frame not in catalog_frames
+                            catalog_frames.append(sidebar_frame)
                     footprint("three loaded sessions")
                     samples = []
                     event_count = 120 if same_directory else 128
@@ -299,7 +312,8 @@ def benchmark(binary, workload):
                         xtest.fake_input(screen, X.KeyRelease, key)
                         xtest.fake_input(screen, X.KeyRelease, ctrl)
                         screen.flush()
-                        while pixels() != tab_frames[1 + offset]:
+                        while (pixels() != tab_frames[1 + offset]
+                               or (show_catalog and catalog_pixels() != catalog_frames[1 + offset])):
                             if time.monotonic() - start > 2:
                                 raise RuntimeError(f"switch {index} did not repaint the expected session")
                             time.sleep(0.001)
@@ -509,5 +523,5 @@ def benchmark(binary, workload):
 
 for package in sys.argv[1:]:
     for workload in ("history", "table", "tools", "images", "stream", "live-scroll",
-                     "task-wait", "tabs", "tabs-shared-directory"):
+                     "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog"):
         benchmark(package, workload)

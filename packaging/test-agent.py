@@ -292,6 +292,9 @@ for line in sys.stdin:
         results = [entry(saved_thread, "Deployment rollout", "Projects/Operations"),
                    entry(thread, "Release checklist", "Projects/Operations"),
                    entry("archive-notes", "Build notes", "Projects/Platform")]
+        if os.environ.get("SPAN_BENCH_CATALOG") == "1":
+            results = [entry(f"benchmark-entry-{index}", f"{os.getpid()} · 事项 {index + 1}",
+                             f"Projects/Group {index // 10 + 1}") for index in range(30)]
         search = params["searchTerm"] or ""
         results = [entry for entry in results if search.lower() in entry["name"].lower()]
         send({"id": request_id, "result": {"data": results, "nextCursor": None}})
