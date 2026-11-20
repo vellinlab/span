@@ -6,10 +6,12 @@ from pathlib import Path
 import shlex
 import shutil
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 
 from Xlib import X, XK, display
 from Xlib.ext import xtest
@@ -25,14 +27,34 @@ def xdo(*args):
     return subprocess.check_output(["xdotool", *map(str, args)], text=True).strip()
 
 
-def until(check):
+def until(check, interval=0.02):
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
         result = check()
         if result:
             return result
-        time.sleep(0.02)
+        time.sleep(interval)
     raise RuntimeError("X11 benchmark setup timed out")
+
+
+IMAGE_COLORS = [(243, 175, 19), (59, 206, 133), (200, 119, 218)]
+
+
+def write_image(path, color):
+    # PNG generated without desktop libraries. The accent stripe gives each
+    # fixture a distinct pixel signature at every fitted preview size.
+    width, height = 2400, 1800
+    red, green, blue = color
+    stripe = bytes((red, green, blue)) * 1640
+    row = b"\0" + stripe + bytes((61, 68, 82)) * (width - 1640)
+
+    def chunk(name, data):
+        crc = zlib.crc32(name + data)
+        return struct.pack(">I", len(data)) + name + data + struct.pack(">I", crc)
+
+    image = b"\x89PNG\r\n\x1a\n" + chunk(
+        b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    path.write_bytes(image + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b""))
 
 
 def benchmark(binary, workload):
@@ -42,11 +64,16 @@ def benchmark(binary, workload):
         (home / "bin").mkdir()
         shutil.copy2("packaging/test-agent.py", home / "bin/codex")
         (home / "bin/codex").chmod(0o755)
+        if workload == "images":
+            (home / ".bench-images").mkdir()
+            for i, color in enumerate(IMAGE_COLORS):
+                write_image(home / ".bench-images" / f"preview-{i}.png", color)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"],
                    SPAN_BENCH_HISTORY=str(int(workload == "history")),
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
+                   SPAN_BENCH_IMAGES=str(int(workload == "images")),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         with subprocess.Popen(["taskset", "-c", str(cpu), binary], env=env) as app:
             try:
@@ -87,6 +114,50 @@ def benchmark(binary, workload):
                 for event in (X.KeyPress, X.KeyRelease):
                     xtest.fake_input(screen, event, enter)
                 screen.flush()
+                if workload == "images":
+                    until(lambda: (home / "agent-models").exists())
+                    time.sleep(0.25)
+                    footprint("before previews")
+                    xdo("type", "Show the three image previews")
+                    before_cpu = cpu_seconds()
+                    start = time.monotonic()
+                    for event in (X.KeyPress, X.KeyRelease):
+                        xtest.fake_input(screen, event, enter)
+                    screen.flush()
+
+                    # GTK keeps the opening card in view while the images
+                    # expand asynchronously. Verify the other end separately
+                    # to avoid timing a fast draw that loaded only one image.
+                    def image_painted(color):
+                        red, green, blue = color
+                        markers = (bytes((blue, green, red, 0)) * 8,
+                                   bytes((blue, green, red, 255)) * 8)
+                        data = win.get_image(565, 140, 135, 555, X.ZPixmap, 0xffffffff).data
+                        return any(marker in data for marker in markers)
+
+                    try:
+                        until(lambda: image_painted(IMAGE_COLORS[0]), interval=0.002)
+                    except RuntimeError:
+                        print("Image response sent by fixture:",
+                              (home / "bench-images-dispatched").exists(), flush=True)
+                        if shutil.which("import"):
+                            Path("dist").mkdir(exist_ok=True)
+                            subprocess.run(["import", "-window", str(wid), "dist/test-failure.png"],
+                                           check=False)
+                        raise
+                    first_visible = (time.monotonic() - start) * 1000
+                    time.sleep(max(0, start + 1.25 - time.monotonic()))
+                    cpu_ms = (cpu_seconds() - before_cpu) * 1000
+                    print(f"{name} first thumbnail paint: {first_visible:.1f} ms,"
+                          f" app CPU {cpu_ms:.0f} ms including settle", flush=True)
+                    xdo("mousemove", "--window", wid, 715, 365)
+                    for _ in range(80):
+                        for event in (X.ButtonPress, X.ButtonRelease):
+                            xtest.fake_input(screen, event, 5)
+                    screen.flush()
+                    until(lambda: image_painted(IMAGE_COLORS[-1]))
+                    footprint("three previews loaded")
+                    return
                 # Backdate the measurement to the first observation of the
                 # final frame. Loading chrome and intermediate height estimates
                 # can also produce non-blank frames before the reply is usable.
@@ -212,5 +283,5 @@ def benchmark(binary, workload):
 
 
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools"):
+    for workload in ("history", "table", "tools", "images"):
         benchmark(package, workload)
