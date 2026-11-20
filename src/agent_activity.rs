@@ -2,10 +2,11 @@ use crate::agent::{append_changes, limited};
 use crate::agent_diff::FoldedDiff;
 use crate::agent_render;
 use crate::icons::{self, Icon};
-use gtk::pango;
 use gtk::prelude::*;
+use gtk::{glib, pango};
 use serde_json::Value;
 use std::borrow::Cow;
+use std::time::Duration;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -31,7 +32,21 @@ struct Entry {
     icon: Rc<Cell<Icon>>,
     leading: gtk::DrawingArea,
     view: View,
-    summary: Vec<String>,
+    summary: Option<Rc<Summary>>,
+}
+
+#[derive(Default)]
+struct Summary {
+    parts: RefCell<Vec<String>>,
+    dirty: Cell<bool>,
+}
+
+impl Summary {
+    fn render(&self, label: &gtk::Label) {
+        if self.dirty.replace(false) {
+            agent_render::set_markdown(label, &summary_text(&self.parts.borrow()));
+        }
+    }
 }
 
 enum View {
@@ -277,7 +292,9 @@ impl Activity {
         set_title(&entry.row, &entry.title, &record.title);
         match &entry.view {
             View::Text(label) if record.kind == "reasoning" => {
-                entry.summary = record.summary;
+                let summary = entry.summary.get_or_insert_with(Rc::default);
+                summary.parts.replace(record.summary);
+                summary.dirty.set(false);
                 agent_render::set_markdown(label, &record.detail);
             }
             View::Text(label) => label.set_text(&record.detail),
@@ -340,25 +357,37 @@ impl Activity {
     pub fn summary(&mut self, id: &str, index: usize, delta: &str) {
         let entry = self.entry(id, "reasoning", Icon::Activity);
         set_title(&entry.row, &entry.title, "推理摘要");
-        if entry.summary.len() <= index {
-            entry.summary.resize_with(index + 1, String::new);
+        let summary = entry.summary.get_or_insert_with(Rc::default);
+        let mut parts = summary.parts.borrow_mut();
+        if parts.len() <= index {
+            parts.resize_with(index + 1, String::new);
         }
-        let part = &mut entry.summary[index];
+        let part = &mut parts[index];
         if part.len() >= SUMMARY_LIMIT {
             return;
         }
         part.push_str(&limited(delta, SUMMARY_LIMIT - part.len()));
-        let detail = summary_text(&entry.summary);
-        if let View::Text(label) = &entry.view {
-            agent_render::set_markdown(label, &detail);
+        if let View::Text(label) = &entry.view
+            && !summary.dirty.replace(true)
+        {
+            let label = label.downgrade();
+            let summary = Rc::downgrade(summary);
+            glib::timeout_add_local_once(Duration::from_millis(33), move || {
+                if let (Some(label), Some(summary)) = (label.upgrade(), summary.upgrade()) {
+                    summary.render(&label);
+                }
+            });
         }
-        self.set_heading("进行中 · 推理摘要");
-        if let Some(headline) = detail
-            .lines()
+        let headline = parts
+            .iter()
+            .flat_map(|part| part.lines())
             .map(|line| line.trim().trim_matches('*'))
             .find(|line| !line.is_empty())
-        {
-            self.progress = limited(headline, 180);
+            .map(|headline| limited(headline, 180));
+        drop(parts);
+        self.set_heading("进行中 · 推理摘要");
+        if let Some(headline) = headline {
+            self.progress = headline;
         }
     }
 
@@ -367,6 +396,11 @@ impl Activity {
     }
 
     pub fn finish(&mut self, status: Option<&str>) {
+        for entry in self.entries.values() {
+            if let (Some(summary), View::Text(label)) = (&entry.summary, &entry.view) {
+                summary.render(label);
+            }
+        }
         self.finished = true;
         self.set_finished_heading(status, self.entries.len());
     }
@@ -384,11 +418,16 @@ impl Activity {
     }
 
     pub fn extend_summary(&self, id: &str, parts: &mut Vec<String>) {
-        if let Some(entry) = self.entries.get(id) {
-            if parts.len() < entry.summary.len() {
-                parts.resize_with(entry.summary.len(), String::new);
+        if let Some(summary) = self
+            .entries
+            .get(id)
+            .and_then(|entry| entry.summary.as_ref())
+        {
+            let summary = summary.parts.borrow();
+            if parts.len() < summary.len() {
+                parts.resize_with(summary.len(), String::new);
             }
-            for (old, new) in parts.iter_mut().zip(&entry.summary) {
+            for (old, new) in parts.iter_mut().zip(summary.iter()) {
                 old.push_str(new);
             }
         }
@@ -485,7 +524,7 @@ impl Activity {
                 icon: symbol,
                 leading,
                 view,
-                summary: Vec::new(),
+                summary: None,
             }
         });
         if entry.icon.replace(icon) != icon {
@@ -630,6 +669,9 @@ fn set_title_widget(row: &gtk::Expander, title: &gtk::Label, leading: &gtk::Draw
 }
 
 fn set_title(row: &gtk::Expander, title: &gtk::Label, text: &str) {
+    if title.text().as_str() == text {
+        return;
+    }
     title.set_text(text);
     title.set_tooltip_text(Some(text));
     if let Some(accessible) = row.accessible() {

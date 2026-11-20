@@ -74,6 +74,7 @@ def benchmark(binary, workload):
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
+                   SPAN_BENCH_STREAM=str(int(workload == "stream")),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         with subprocess.Popen(["taskset", "-c", str(cpu), binary], env=env) as app:
             try:
@@ -114,6 +115,40 @@ def benchmark(binary, workload):
                 for event in (X.KeyPress, X.KeyRelease):
                     xtest.fake_input(screen, event, enter)
                 screen.flush()
+                if workload == "stream":
+                    until(lambda: (home / "agent-models").exists())
+                    time.sleep(0.2)
+                    xdo("type", "Summarize the stream")
+
+                    def conversation_pixels():
+                        return win.get_image(330, 90, 430, 320, X.ZPixmap, 0xffffffff).data
+
+                    initial_frame = conversation_pixels()
+                    before_cpu = cpu_seconds()
+                    for event in (X.KeyPress, X.KeyRelease):
+                        xtest.fake_input(screen, event, enter)
+                    screen.flush()
+                    finished = home / "bench-stream-done"
+                    until(finished.exists)
+                    dispatched = float(finished.read_text())
+                    frame, painted_at = initial_frame, dispatched
+                    deadline = dispatched + 6
+                    while time.monotonic() < deadline:
+                        candidate = conversation_pixels()
+                        now = time.monotonic()
+                        if frame != candidate:
+                            frame, painted_at = candidate, now
+                        if frame != initial_frame and now - painted_at >= 0.45:
+                            break
+                        time.sleep(0.003)
+                    else:
+                        raise RuntimeError("reasoning stream did not settle")
+                    cpu_ms = (cpu_seconds() - before_cpu) * 1000
+                    print(f"{name} streamed reasoning: app CPU {cpu_ms:.0f} ms for 576 deltas, "
+                          f"final paint within {(painted_at - dispatched) * 1000:.1f} ms after dispatch",
+                          flush=True)
+                    footprint("reasoning complete")
+                    return
                 if workload == "images":
                     until(lambda: (home / "agent-models").exists())
                     time.sleep(0.25)
@@ -283,5 +318,5 @@ def benchmark(binary, workload):
 
 
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools", "images"):
+    for workload in ("history", "table", "tools", "images", "stream"):
         benchmark(package, workload)

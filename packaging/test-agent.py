@@ -7,6 +7,7 @@ import socket
 import stat
 import sys
 import threading
+import time
 from pathlib import Path
 
 home = Path(os.environ["HOME"])
@@ -386,6 +387,23 @@ for line in sys.stdin:
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
+        if os.environ.get("SPAN_BENCH_STREAM") == "1":
+            assert message == "Summarize the stream" and params["threadId"] == thread
+            identifier = "reasoning-benchmark"
+            event = {"threadId": thread, "turnId": identifier}
+            send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
+            for index in range(576):
+                send({"method": "item/reasoning/summaryTextDelta", "params": {
+                    **event, "itemId": "reasoning", "summaryIndex": index // 72,
+                    "delta": "Review **build output** and `preview` rows. "}})
+                if index % 6 == 5:
+                    time.sleep(0.008)
+            (home / "bench-stream-done").write_text(str(time.monotonic()))
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "stream-reply", "type": "agentMessage", "text": "Reasoning stream finished."}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": identifier, "status": "completed"}}})
+            continue
         if os.environ.get("SPAN_BENCH_IMAGES") == "1":
             assert message == "Show the three image previews" and params["threadId"] == thread
             image_turn = "image-benchmark-turn"
