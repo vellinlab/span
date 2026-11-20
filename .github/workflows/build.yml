@@ -58,6 +58,8 @@ jobs:
           ln -s "$PWD/target/release/span" "$bench_dir/candidate/span"
           xvfb-run -a -s '-screen 0 1600x980x24' dbus-run-session -- /usr/bin/python3 packaging/bench-interaction.py \
             "$bench_dir/$baseline_tag/span" "$bench_dir/candidate/span" "$bench_dir/candidate/span" "$bench_dir/$baseline_tag/span"
+          xvfb-run -a -s '-screen 0 1600x980x24' dbus-run-session -- /usr/bin/python3 packaging/bench-catalog.py \
+            "$bench_dir/$baseline_tag/span" "$bench_dir/candidate/span" "$bench_dir/candidate/span" "$bench_dir/$baseline_tag/span"
 
       - name: Package and test on X11
         run: |

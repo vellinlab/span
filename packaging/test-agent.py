@@ -287,6 +287,19 @@ for line in sys.stdin:
             "secondary": {"usedPercent": 31, "windowDurationMins": 10080}}}})
     elif method == "thread/list":
         assert params["limit"] == 30 and params["sortKey"] == "updated_at"
+        if os.environ.get("SPAN_BENCH_CATALOG_PAGES") == "1" and not params["searchTerm"]:
+            page = int(params.get("cursor") or 0)
+            assert 0 <= page <= 8
+            first = page * 29
+            indices = list(range(first, first + 29))
+            if page:
+                indices.insert(0, first - 1)
+            results = [entry(f"catalog-{n}", f"Catalog entry #{n:03d}",
+                             f"Projects/Section {n % (3 if n >= 87 else 2) + 1}") for n in indices]
+            (home / f"catalog-page-{page}").touch()
+            send({"id": request_id, "result": {
+                "data": results, "nextCursor": str(page + 1) if page < 8 else None}})
+            continue
         with (home / "agent-catalog-requests").open("a") as requests:
             print(os.getpid(), file=requests)
         results = [entry(saved_thread, "Deployment rollout", "Projects/Operations"),

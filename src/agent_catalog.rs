@@ -4,7 +4,7 @@ use gtk::prelude::*;
 use gtk::{glib, pango};
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Entry {
@@ -87,7 +87,8 @@ pub struct Catalog {
     status: gtk::Label,
     list: gtk::ListBox,
     entries: RefCell<Vec<Entry>>,
-    rows: RefCell<Vec<Option<SessionRow>>>,
+    rows: RefCell<Vec<SessionRow>>,
+    projects: RefCell<HashMap<String, gtk::ListBoxRow>>,
     current: RefCell<Option<(String, ThreadState)>>,
     cursor: RefCell<Option<String>>,
 }
@@ -157,6 +158,7 @@ impl Catalog {
             list,
             entries: RefCell::new(Vec::new()),
             rows: RefCell::new(Vec::new()),
+            projects: RefCell::new(HashMap::new()),
             current: RefCell::new(None),
             cursor: RefCell::new(None),
         }
@@ -196,11 +198,8 @@ impl Catalog {
     pub fn loading(&self, fresh: bool) {
         if fresh {
             self.entries.borrow_mut().clear();
-            self.rows.borrow_mut().clear();
             self.cursor.take();
-            for child in self.list.children() {
-                self.list.remove(&child);
-            }
+            self.clear_rows();
         }
         self.more.set_sensitive(false);
         self.show_status("正在读取会话…");
@@ -214,9 +213,8 @@ impl Catalog {
         let previous = std::mem::replace(&mut *current, id.map(|id| (id.to_owned(), state)));
         let rows = self.rows.borrow();
         for (entry, row) in self.entries.borrow().iter().zip(rows.iter()) {
-            if let Some(row) = row
-                && (id == Some(entry.id.as_str())
-                    || previous.as_ref().is_some_and(|(old, _)| old == &entry.id))
+            if id == Some(entry.id.as_str())
+                || previous.as_ref().is_some_and(|(old, _)| old == &entry.id)
             {
                 row.update(entry, current.as_ref());
             }
@@ -233,89 +231,108 @@ impl Catalog {
 
     pub fn update(&self, result: &Value, replace: bool) {
         let mut entries = self.entries.borrow_mut();
-        let mut next = if replace { Vec::new() } else { entries.clone() };
-        let mut seen: HashSet<_> = next.iter().map(|entry| entry.id.clone()).collect();
-        if let Some(data) = result["data"].as_array() {
-            next.extend(
-                data.iter()
-                    .filter_map(Entry::parse)
-                    .filter(|entry| seen.insert(entry.id.clone())),
-            );
-        }
+        let mut seen: HashSet<_> = if replace {
+            HashSet::new()
+        } else {
+            entries.iter().map(|entry| entry.id.clone()).collect()
+        };
+        let incoming: Vec<_> = result["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Entry::parse)
+            .filter(|entry| seen.insert(entry.id.clone()))
+            .collect();
         self.cursor
             .replace(result["nextCursor"].as_str().map(str::to_owned));
-        self.show_status(if next.is_empty() {
+        self.show_status(if incoming.is_empty() && (replace || entries.is_empty()) {
             "没有匹配的会话"
         } else {
             "点击会话继续"
         });
-        if *entries == next {
-            return;
-        }
-        *entries = next;
-        let current = self.current.borrow();
-        let mut rows = self.rows.borrow_mut();
-        rows.clear();
-        rows.resize_with(entries.len(), || None);
+        let start = if replace {
+            if *entries == incoming {
+                return;
+            }
+            self.clear_rows();
+            *entries = incoming;
+            0
+        } else {
+            let start = entries.len();
+            entries.extend(incoming);
+            start
+        };
+        self.append_rows(start, &entries[start..]);
+    }
+
+    fn clear_rows(&self) {
+        self.rows.borrow_mut().clear();
+        self.projects.borrow_mut().clear();
         for child in self.list.children() {
             self.list.remove(&child);
         }
-        let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
-        for (index, entry) in entries.iter().enumerate() {
-            if let Some((_, items)) = groups
-                .iter_mut()
-                .find(|(project, _)| *project == entry.project)
-            {
-                items.push(index);
-            } else {
-                groups.push((&entry.project, vec![index]));
-            }
+    }
+
+    fn append_rows(&self, start: usize, entries: &[Entry]) {
+        let current = self.current.borrow();
+        let mut rows = self.rows.borrow_mut();
+        let mut projects = self.projects.borrow_mut();
+        for (offset, entry) in entries.iter().enumerate() {
+            let last = projects
+                .entry(entry.project.clone())
+                .or_insert_with(|| self.append_project(&entry.project));
+            let row = SessionRow::new(start + offset, entry, current.as_ref());
+            self.list.insert(&row.widget, last.index() + 1);
+            row.widget.show_all();
+            *last = row.widget.clone();
+            rows.push(row);
         }
-        for (project, items) in groups {
-            let heading = gtk::ListBoxRow::new();
-            heading.style_context().add_class("agent-catalog-section");
-            heading.set_activatable(false);
-            heading.set_selectable(false);
-            let name = std::path::Path::new(project)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(project);
-            let label = gtk::Label::new(Some(name));
-            label.set_xalign(0.0);
-            label.set_ellipsize(pango::EllipsizeMode::Start);
-            label.style_context().add_class("agent-catalog-project");
-            let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-            line.style_context().add_class("agent-catalog-project");
-            line.pack_start(&icons::widget(Icon::Folder, 14), false, false, 0);
-            line.pack_start(&label, true, true, 0);
-            heading.add(&line);
-            self.list.add(&heading);
-            for index in items {
-                let entry = &entries[index];
-                let row = gtk::ListBoxRow::new();
-                row.set_widget_name(&format!("thread-{index}"));
-                row.style_context().add_class("agent-catalog-session");
-                let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-                let title = gtk::Label::new(Some(&entry.title));
-                title.set_xalign(0.0);
-                title.set_ellipsize(pango::EllipsizeMode::End);
-                line.pack_start(&title, true, true, 0);
-                let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-                dot.set_valign(gtk::Align::Center);
-                dot.style_context().add_class("session-dot");
-                line.pack_end(&dot, false, false, 0);
-                row.add(&line);
-                self.list.add(&row);
-                let row = SessionRow { widget: row, dot };
-                row.update(entry, current.as_ref());
-                rows[index] = Some(row);
-            }
-        }
-        self.list.show_all();
+    }
+
+    fn append_project(&self, project: &str) -> gtk::ListBoxRow {
+        let heading = gtk::ListBoxRow::new();
+        heading.style_context().add_class("agent-catalog-section");
+        heading.set_activatable(false);
+        heading.set_selectable(false);
+        let name = std::path::Path::new(project)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(project);
+        let label = gtk::Label::new(Some(name));
+        label.set_xalign(0.0);
+        label.set_ellipsize(pango::EllipsizeMode::Start);
+        label.style_context().add_class("agent-catalog-project");
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        line.style_context().add_class("agent-catalog-project");
+        line.pack_start(&icons::widget(Icon::Folder, 14), false, false, 0);
+        line.pack_start(&label, true, true, 0);
+        heading.add(&line);
+        self.list.add(&heading);
+        heading.show_all();
+        heading
     }
 }
 
 impl SessionRow {
+    fn new(index: usize, entry: &Entry, current: Option<&(String, ThreadState)>) -> Self {
+        let widget = gtk::ListBoxRow::new();
+        widget.set_widget_name(&format!("thread-{index}"));
+        widget.style_context().add_class("agent-catalog-session");
+        let title = gtk::Label::new(Some(&entry.title));
+        title.set_xalign(0.0);
+        title.set_ellipsize(pango::EllipsizeMode::End);
+        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        dot.set_valign(gtk::Align::Center);
+        dot.style_context().add_class("session-dot");
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        line.pack_start(&title, true, true, 0);
+        line.pack_end(&dot, false, false, 0);
+        widget.add(&line);
+        let row = Self { widget, dot };
+        row.update(entry, current);
+        row
+    }
+
     fn update(&self, entry: &Entry, current: Option<&(String, ThreadState)>) {
         let active = current.filter(|(id, _)| id == &entry.id);
         let row = self.widget.style_context();
