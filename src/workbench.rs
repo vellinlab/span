@@ -968,7 +968,7 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
     let hosts = gtk::ToggleButton::builder()
         .tooltip_text("显示／隐藏侧栏 (Ctrl+Shift+B)")
         .build();
-    style_rail_button(hosts.upcast_ref(), Icon::RemoteHost, "显示／隐藏侧栏");
+    style_rail_button(hosts.upcast_ref(), Icon::HostSidebar, "显示／隐藏侧栏");
     sidebar
         .bind_property("visible", &hosts, "active")
         .bidirectional()
@@ -983,7 +983,7 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
             "win.local",
         ),
         (
-            Icon::Connect,
+            Icon::NewConnection,
             "工具栏 · 快速连接",
             "快速连接 (Ctrl+Shift+O)",
             "win.quick",

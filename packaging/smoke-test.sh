@@ -948,6 +948,7 @@ PY
         xdotool key --clearmodifiers Return
         wait_until "resuming the remote session" grep -qsx stored-deployment "$WORKBENCH_SSH_FIXTURE/agent-resumed"
         widget contains 'Latest deployment notes'
+        [[ $(widget count '打开会话') == 0 ]]
         widget contains 'Check the rollout from my other device.'
         widget contains 'The shared rollout is healthy.'
         widget mouse '工具栏 · 插件与连接器'
@@ -989,6 +990,15 @@ PY
         resumed_twice() { [[ $(wc -l < "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 2 ]]; }
         wait_until "automatic restoration on SSH reconnect" resumed_twice
         widget contains 'Latest deployment notes'
+        kill -TERM "$(cat "$WORKBENCH_SSH_FIXTURE/shared-proxy.pid")"
+        widget state '重连会话' sensitive
+        widget contains 'Latest deployment notes'
+        [[ $(widget count '打开会话') == 0 ]]
+        widget click '重连会话'
+        resumed_again() { [[ $(grep -cFx stored-deployment "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 3 ]]; }
+        wait_until "reopening the same transcript after App Server transport loss" resumed_again
+        widget state '复制会话 ID' sensitive
+        [[ $(widget count '打开会话') == 0 && $(widget count '重连会话') == 0 ]]
         widget description '会话权限' '只读'
         widget mouse '会话权限'
         widget mouse '工作区权限'

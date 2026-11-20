@@ -7,7 +7,8 @@ pub enum Icon {
     Conversation,
     TerminalDrawer,
     RemoteHost,
-    Connect,
+    NewConnection,
+    HostSidebar,
     Plus,
     Close,
     More,
@@ -123,16 +124,21 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, y: f64, color: &gdk::RGBA) {
             cr.line_to(20.0, 7.0);
         }
         Icon::Plugin => {
-            cr.move_to(4.0, 5.0);
-            cr.line_to(9.0, 5.0);
-            cr.curve_to(8.5, 1.1, 15.5, 1.1, 15.0, 5.0);
-            cr.line_to(20.0, 5.0);
-            cr.line_to(20.0, 10.0);
-            cr.curve_to(23.6, 9.8, 23.6, 15.6, 20.0, 15.5);
-            cr.line_to(20.0, 20.0);
-            cr.line_to(4.0, 20.0);
-            cr.line_to(4.0, 15.5);
-            cr.curve_to(7.7, 15.6, 7.7, 9.8, 4.0, 10.0);
+            cr.set_line_width(1.5);
+            cr.move_to(3.0, 4.5);
+            cr.line_to(11.0, 4.5);
+            cr.line_to(11.0, 12.5);
+            cr.line_to(19.0, 12.5);
+            cr.line_to(19.0, 20.5);
+            cr.line_to(3.0, 20.5);
+            cr.close_path();
+            cr.move_to(3.0, 12.5);
+            cr.line_to(11.0, 12.5);
+            cr.line_to(11.0, 20.5);
+            cr.move_to(12.3, 6.5);
+            cr.line_to(17.2, 1.6);
+            cr.line_to(22.1, 6.5);
+            cr.line_to(17.2, 11.4);
             cr.close_path();
         }
         Icon::Upload | Icon::Download => {
@@ -201,7 +207,7 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, y: f64, color: &gdk::RGBA) {
             cr.move_to(12.0, 18.0);
             cr.line_to(16.0, 18.0);
         }
-        Icon::RemoteHost => {
+        Icon::RemoteHost | Icon::HostSidebar => {
             cr.move_to(10.0, 16.0);
             cr.line_to(5.0, 16.0);
             cr.curve_to(3.7, 16.0, 3.0, 15.3, 3.0, 14.0);
@@ -215,34 +221,52 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, y: f64, color: &gdk::RGBA) {
             cr.move_to(5.5, 19.0);
             cr.line_to(10.2, 19.0);
             cr.new_sub_path();
-            cr.arc(17.0, 17.0, 4.8, 0.0, std::f64::consts::TAU);
-            cr.move_to(16.0, 15.6);
-            cr.line_to(14.6, 17.0);
-            cr.line_to(16.0, 18.4);
-            cr.move_to(18.0, 15.6);
-            cr.line_to(19.4, 17.0);
-            cr.line_to(18.0, 18.4);
+            if matches!(icon, Icon::HostSidebar) {
+                let _ = cr.stroke();
+                cr.arc(17.0, 17.0, 5.7, 0.0, std::f64::consts::TAU);
+                cr.set_fill_rule(cairo::FillRule::EvenOdd);
+                for (x, direction) in [(16.1, -1.0), (17.9, 1.0)] {
+                    cr.move_to(x, 14.3);
+                    cr.line_to(x + direction * 2.7, 17.0);
+                    cr.line_to(x, 19.7);
+                    cr.line_to(x - direction * 0.85, 18.8);
+                    cr.line_to(x + direction * 0.9, 17.0);
+                    cr.line_to(x - direction * 0.85, 15.2);
+                    cr.close_path();
+                }
+                let _ = cr.fill();
+            } else {
+                cr.arc(17.0, 17.0, 4.8, 0.0, std::f64::consts::TAU);
+                cr.move_to(16.0, 15.6);
+                cr.line_to(14.6, 17.0);
+                cr.line_to(16.0, 18.4);
+                cr.move_to(18.0, 15.6);
+                cr.line_to(19.4, 17.0);
+                cr.line_to(18.0, 18.4);
+            }
         }
-        Icon::Connect => {
-            cr.move_to(2.5, 12.0);
-            cr.line_to(6.0, 12.0);
-            cr.move_to(12.5, 7.0);
-            cr.line_to(10.0, 7.0);
-            cr.curve_to(7.8, 7.0, 6.0, 8.8, 6.0, 11.0);
-            cr.line_to(6.0, 13.0);
-            cr.curve_to(6.0, 15.2, 7.8, 17.0, 10.0, 17.0);
-            cr.line_to(12.5, 17.0);
+        Icon::NewConnection => {
+            cr.set_line_width(1.65);
+            cr.move_to(5.0, 4.0);
+            cr.line_to(18.0, 4.0);
+            cr.curve_to(19.2, 4.0, 20.0, 4.8, 20.0, 6.0);
+            cr.line_to(20.0, 10.5);
+            cr.line_to(3.0, 10.5);
+            cr.line_to(3.0, 6.0);
+            cr.curve_to(3.0, 4.8, 3.8, 4.0, 5.0, 4.0);
             cr.close_path();
-            cr.move_to(12.5, 10.0);
-            cr.line_to(16.0, 10.0);
-            cr.move_to(12.5, 14.0);
-            cr.line_to(16.0, 14.0);
-            cr.move_to(18.6, 6.0);
-            cr.line_to(19.0, 6.0);
-            cr.curve_to(20.4, 6.0, 21.5, 7.1, 21.5, 8.5);
-            cr.line_to(21.5, 15.5);
-            cr.curve_to(21.5, 16.9, 20.4, 18.0, 19.0, 18.0);
-            cr.line_to(18.6, 18.0);
+            cr.move_to(3.0, 10.5);
+            cr.line_to(3.0, 16.0);
+            cr.curve_to(3.0, 17.2, 3.8, 18.0, 5.0, 18.0);
+            cr.line_to(11.0, 18.0);
+            for y in [7.3, 14.2] {
+                cr.move_to(6.0, y);
+                cr.line_to(8.0, y);
+            }
+            cr.move_to(17.5, 13.5);
+            cr.line_to(17.5, 21.5);
+            cr.move_to(13.5, 17.5);
+            cr.line_to(21.5, 17.5);
         }
         Icon::ExternalLink => {
             cr.move_to(10.5, 5.0);

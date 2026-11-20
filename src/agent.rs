@@ -171,6 +171,7 @@ pub struct Agent {
     cwd: gtk::Entry,
     resume: gtk::Entry,
     connect: gtk::Button,
+    retry_session: gtk::Button,
     copy_id: gtk::Button,
     input: gtk::TextView,
     commands: Commands,
@@ -231,6 +232,9 @@ impl Agent {
         let copy_id = icons::button(Icon::Copy, "复制会话 ID", "复制会话 ID");
         copy_id.set_no_show_all(true);
         toolbar.pack_end(&copy_id, false, false, 0);
+        let retry_session = button("重连会话", false);
+        retry_session.set_no_show_all(true);
+        toolbar.pack_end(&retry_session, false, false, 0);
         let status = agent_render::text("等待打开会话");
         status.set_selectable(false);
         status.set_ellipsize(pango::EllipsizeMode::End);
@@ -262,6 +266,8 @@ impl Agent {
         settings.pack_start(&cwd, true, true, 0);
         settings.pack_start(&resume, true, true, 0);
         settings.pack_end(&connect, false, false, 0);
+        settings.show_all();
+        settings.set_no_show_all(true);
         panel.pack_start(&settings, false, false, 0);
 
         let history = crate::reading_column::new(18);
@@ -486,6 +492,7 @@ impl Agent {
             cwd,
             resume,
             connect,
+            retry_session,
             copy_id,
             input,
             commands,
@@ -566,6 +573,12 @@ impl Agent {
         self.connect.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
                 agent.open();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.retry_session.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                agent.reconnect();
             }
         });
         for entry in [&self.cwd, &self.resume] {
@@ -720,10 +733,10 @@ impl Agent {
     }
 
     pub fn focus(&self) {
-        if self.thread.borrow().is_some() {
-            self.input.grab_focus();
-        } else {
+        if self.settings.is_visible() {
             self.cwd.grab_focus();
+        } else {
+            self.input.grab_focus();
         }
     }
 
@@ -795,6 +808,7 @@ impl Agent {
                 (agent.reveal)();
                 agent.resume.set_text("");
                 agent.settings.show();
+                agent.update_controls();
                 agent.cwd.grab_focus();
             }
         });
@@ -1235,11 +1249,12 @@ impl Agent {
     }
 
     pub fn reconnect(self: &Rc<Self>) {
-        if self.rpc.borrow().is_none() {
-            if let Some(id) = self.last_thread.borrow().as_deref() {
-                self.resume.set_text(id);
-                self.open();
-            }
+        if self.thread.borrow().is_none()
+            && !self.settings.is_visible()
+            && let Some(id) = self.last_thread.borrow().as_deref()
+        {
+            self.resume.set_text(id);
+            self.open();
         }
     }
 
@@ -1996,7 +2011,6 @@ impl Agent {
         for (_, question) in self.questions.borrow_mut().drain() {
             self.history.remove(&question);
         }
-        self.settings.show();
         self.copy_id.hide();
         self.show_status(message);
         self.update_controls();
@@ -2665,6 +2679,9 @@ impl Agent {
             self.opening.get() || (self.rpc.borrow().is_some() && !self.initialized.get());
         let waiting =
             self.uploading.get() || self.pasting.get() || self.pending_user.borrow().is_some();
+        self.retry_session
+            .set_visible(!ready && self.has_resume() && !self.settings.is_visible());
+        self.retry_session.set_sensitive(!opening && !waiting);
         self.connect.set_sensitive(!opening && !running && !waiting);
         self.input.set_editable(!waiting);
         self.attachments

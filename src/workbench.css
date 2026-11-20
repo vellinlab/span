@@ -195,6 +195,7 @@ button.agent-send:disabled {
 .workbench button.rail-button:checked {
     background: @selection;
     border-color: #46567e;
+    box-shadow: inset 2px 0 @accent;
     color: @accent;
 }
 

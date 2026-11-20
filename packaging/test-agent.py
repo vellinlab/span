@@ -77,6 +77,7 @@ def stored_turn(identifier, text):
 def run_proxy():
     with socket.socket(socket.AF_UNIX) as peer:
         peer.connect(str(control_socket))
+        (home / "shared-proxy.pid").write_text(str(os.getpid()))
 
         def forward():
             while chunk := os.read(0, 65536):
