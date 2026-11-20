@@ -4,6 +4,9 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+const REPLY_EVICTION_DELAY: Duration = Duration::from_millis(900);
 
 // X11 can deliver many wheel packets before GTK presents the next frame.
 // Move immediately on an isolated tick, then accumulate the remaining motion
@@ -96,6 +99,8 @@ pub struct HistoryWindow {
     follow_tail: Rc<Cell<bool>>,
     scheduled: Cell<bool>,
     previous_top: Cell<f64>,
+    last_motion: Cell<Instant>,
+    cleanup_scheduled: Cell<bool>,
     anchor: RefCell<Option<(gtk::Widget, i32, f64)>>,
 }
 
@@ -113,15 +118,19 @@ impl HistoryWindow {
             follow_tail,
             scheduled: Cell::new(false),
             previous_top: Cell::new(f64::NEG_INFINITY),
+            last_motion: Cell::new(Instant::now()),
+            cleanup_scheduled: Cell::new(false),
             anchor: RefCell::new(None),
         });
         let weak = Rc::downgrade(&window);
         scroll.vadjustment().connect_value_changed(move |adj| {
-            if let Some(window) = weak.upgrade()
-                && (adj.value() - window.previous_top.get()).abs()
+            if let Some(window) = weak.upgrade() {
+                window.last_motion.set(Instant::now());
+                if (adj.value() - window.previous_top.get()).abs()
                     >= (adj.page_size() / 2.0).max(1.0)
-            {
-                window.schedule();
+                {
+                    window.schedule();
+                }
             }
         });
         let weak = Rc::downgrade(&window);
@@ -205,6 +214,24 @@ impl HistoryWindow {
         });
     }
 
+    fn schedule_cleanup(self: &Rc<Self>) {
+        if self.cleanup_scheduled.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local(REPLY_EVICTION_DELAY, move || {
+            let Some(window) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if window.last_motion.get().elapsed() < REPLY_EVICTION_DELAY {
+                return glib::ControlFlow::Continue;
+            }
+            window.cleanup_scheduled.set(false);
+            window.schedule();
+            glib::ControlFlow::Break
+        });
+    }
+
     fn update(self: &Rc<Self>) {
         let adj = self.scroll.vadjustment();
         if let Some((widget, old_y, old_top)) = self.anchor.take()
@@ -238,6 +265,8 @@ impl HistoryWindow {
         };
         let mut reply_anchor = None;
         let mut materialized = false;
+        let idle = self.last_motion.get().elapsed() >= REPLY_EVICTION_DELAY;
+        let mut evicted = false;
         for reply in self.replies.borrow().iter() {
             let slot = &reply.slot;
             let Some((_, y)) = slot.translate_coordinates(&self.history, 0, 0) else {
@@ -253,8 +282,13 @@ impl HistoryWindow {
                 if (end < visible_top - page * 1.5 || start > visible_top + page * 2.5)
                     && !protected(slot)
                 {
-                    slot.set_height_request(height);
-                    slot.remove(&child);
+                    if idle {
+                        slot.set_height_request(height);
+                        slot.remove(&child);
+                        evicted = true;
+                    } else {
+                        self.schedule_cleanup();
+                    }
                 }
             } else if end >= visible_top - page * 0.5 && start <= visible_top + page * 1.5 {
                 if start < visible_top && !self.follow_tail.get() && reply_anchor.is_none() {
@@ -275,11 +309,13 @@ impl HistoryWindow {
         if let Some(anchor) = reply_anchor {
             self.anchor.replace(Some(anchor));
         }
-        self.blocks
-            .borrow_mut()
-            .retain(|block| block.slot.upgrade().is_some());
-        // Keep additional screens ready in both directions. A wider eviction band avoids
-        // repeated map/unmap operations when scrolling back across a boundary.
+        if evicted {
+            self.blocks
+                .borrow_mut()
+                .retain(|block| block.slot.upgrade().is_some());
+        }
+        // Keep just over a screen ready in either direction, with hysteresis
+        // so nearby content stays mapped when the user changes direction.
         let mut anchor = None;
         let mut anchor_height = i32::MAX;
         let mut changed_above = false;
@@ -302,14 +338,14 @@ impl HistoryWindow {
                 anchor = Some((slot.clone().upcast(), y, top));
             }
             if content.is_visible() {
-                if (bottom < top - page * 3.0 || f64::from(y) > top + page * 4.0)
+                if (bottom < top - page * 1.75 || f64::from(y) > top + page * 2.75)
                     && !protected(&slot)
                 {
                     slot.set_height_request(height);
                     content.set_no_show_all(true);
                     content.hide();
                 }
-            } else if bottom >= top - page * 2.0 && f64::from(y) <= top + page * 3.0 {
+            } else if bottom >= top - page * 1.25 && f64::from(y) <= top + page * 2.25 {
                 content.set_no_show_all(false);
                 content.show();
                 slot.set_height_request(-1);
