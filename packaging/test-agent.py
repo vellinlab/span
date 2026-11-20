@@ -22,7 +22,7 @@ reply = """## Deployment checklist
 
 [Build documentation](https://example.invalid/span/docs?from=agent&view=build)
 
-要确认当前构建结果，请阅读[发布说明](https://example.invalid/span/notes?lang=zh&view=full)。
+要确认当前构建结果，请阅读[GitHub 发布说明](https://example.invalid/span/notes?lang=zh&view=full)。
 
 | Check | Result |
 | --- | --- |

@@ -2114,6 +2114,7 @@ impl Agent {
         }
         let actions = row(3);
         actions.style_context().add_class("agent-turn-actions");
+        actions.set_halign(gtk::Align::End);
         let text = Rc::new(paragraphs.join("\n\n"));
         for (icon, label, rich) in [
             (Icon::Copy, "复制本轮 Markdown", false),

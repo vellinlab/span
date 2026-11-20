@@ -439,6 +439,9 @@ SVG
     xdotool windowfocus --sync "$window"
     timeline_wheel 5 16
     widget contains 'Environment confirmed.'
+    read -r history_x _ history_width _ <<< "$(widget bounds '对话记录')"
+    read -r copy_x _ _ _ <<< "$(widget bounds '复制本轮 Markdown')"
+    ((copy_x > history_x + history_width / 2))
     widget click '复制本轮 Markdown'
     copied_turn="$(xclip -out -selection clipboard)"
     [[ $copied_turn == *'| Integration | 12 passed |'* && $copied_turn == *'Environment confirmed.'* ]]
@@ -462,7 +465,7 @@ SVG
     widget contains 'Deployment checklist'
     widget mouse 'Build documentation'
     wait_until "opening the clicked Markdown link" grep -qFx 'https://example.invalid/span/docs?from=agent&view=build' "$HOME/span-opened-link"
-    widget mouse-text '发布说明'
+    widget mouse-text 'GitHub 发布说明'
     wait_until "opening a Markdown link after Chinese text" grep -qFx 'https://example.invalid/span/notes?lang=zh&view=full' "$HOME/span-opened-link"
     widget mouse '消息输入框'
     xdotool type --clearmodifiers 'Draft before quotes'
@@ -733,6 +736,16 @@ SVG
     widget contains 'Workspace preview fixture'
     widget state '下载' sensitive
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/files-preview.png"
+    mkdir -p "$HOME/path-completion-fixture/widget-directory"
+    touch "$HOME/path-completion-fixture/widget-file.txt"
+    printf 'Directory completion opened this folder.\n' > "$HOME/path-completion-fixture/widget-directory/completed.txt"
+    widget mouse '目录路径'
+    xdotool key --clearmodifiers ctrl+a
+    xdotool type --clearmodifiers "$HOME/path-completion-fixture/wid"
+    widget contains 'widget-directory'
+    widget not-contains 'widget-file.txt'
+    xdotool key --clearmodifiers Down Return
+    widget contains 'completed.txt'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'Workspace preview fixture'
     widget click '关闭预览'
@@ -799,6 +812,14 @@ PY
         widget contains 'Are you sure you want to continue connecting'
         widget click '继续连接'
         wait_until "the authenticated SSH shell" test -s "$WORKBENCH_SSH_FIXTURE/remote-shells"
+        xdotool key --clearmodifiers ctrl+shift+f
+        widget state '目录路径' sensitive
+        widget mouse '目录路径'
+        xdotool key --clearmodifiers ctrl+a
+        xdotool type --clearmodifiers "$WORKBENCH_SSH_FIXTURE/files/fol"
+        widget contains 'folder'
+        xdotool key --clearmodifiers Down Return
+        widget contains "$WORKBENCH_SSH_FIXTURE/files/folder"
         xdotool key --clearmodifiers ctrl+shift+h
         wait_until "the remote session list" test -f "$WORKBENCH_SSH_FIXTURE/agent-catalog"
         xdotool type --clearmodifiers 'Deployment'

@@ -2,8 +2,9 @@ use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delt
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
 use crate::quote;
+use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
-use gtk::{gdk, gdk_pixbuf, gio, glib, pango};
+use gtk::{cairo, gdk, gdk_pixbuf, gio, glib, pango};
 use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
 use std::cell::RefCell;
 use std::fs::File;
@@ -208,8 +209,7 @@ pub(crate) const LINK_END: &str = "</span></a>";
 pub(crate) fn push_link(markup: &mut String, uri: &str) {
     markup.push_str("<a href=\"");
     markup.push_str(&escaped(uri));
-    // A low underline is placed below the glyph outline, including fallback fonts.
-    markup.push_str("\"><span underline=\"low\">");
+    markup.push_str("\"><span underline=\"none\">");
 }
 
 pub(crate) fn web_url(uri: &str) -> bool {
@@ -262,7 +262,73 @@ fn markdown_label_with(activate: impl Fn(&gtk::Label, &str) + 'static) -> gtk::L
         activate(label, uri);
         glib::Propagation::Stop
     });
+    label.connect_draw(|label, cr| {
+        draw_link_underlines(label, cr);
+        glib::Propagation::Proceed
+    });
     label
+}
+
+fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
+    if !label.label().contains("<a href=") {
+        return;
+    }
+    let Some(links) = label
+        .accessible()
+        .and_then(|object| object.dynamic_cast::<gtk::atk::Hypertext>().ok())
+    else {
+        return;
+    };
+    let ranges: Vec<_> = (0..links.n_links())
+        .filter_map(|index| links.link(index))
+        .map(|link| (link.start_index(), link.end_index()))
+        .collect();
+    let Some(layout) = label.layout().filter(|_| !ranges.is_empty()) else {
+        return;
+    };
+    let (x, y) = label.layout_offsets();
+    let allocation = label.allocation();
+    let (x, y) = (f64::from(x - allocation.x()), f64::from(y - allocation.y()));
+    let pixels = |units: i32| f64::from(units) / f64::from(pango::SCALE);
+    let context = label.style_context();
+    let color = context
+        .lookup_color("accent")
+        .unwrap_or_else(|| context.color(context.state()));
+    cr.set_source_rgba(
+        f64::from(color.red()),
+        f64::from(color.green()),
+        f64::from(color.blue()),
+        f64::from(color.alpha()),
+    );
+    let mut iter = layout.iter();
+    while let Some(line) = iter.line_readonly() {
+        let start = line.start_index();
+        let end = start + line.length();
+        let (ink, logical) = iter.line_extents();
+        // Use one position per visual line across all fallback fonts.
+        let below_ink = pixels(ink.y() + ink.height()).ceil() + 1.0;
+        let line_bottom = pixels(logical.y() + logical.height()).floor() - 1.0;
+        let underline = y + below_ink.min(line_bottom);
+        for &(link_start, link_end) in &ranges {
+            let seg_start = start.max(link_start);
+            let seg_end = end.min(link_end);
+            if seg_start < seg_end {
+                let spans = line.x_ranges(seg_start, seg_end);
+                for span in spans.chunks_exact(2) {
+                    cr.rectangle(
+                        x + pixels(span[0]),
+                        underline,
+                        pixels(span[1] - span[0]),
+                        1.0,
+                    );
+                }
+            }
+        }
+        if !iter.next_line() {
+            break;
+        }
+    }
+    let _ = cr.fill();
 }
 
 pub fn set_markdown(label: &gtk::Label, markdown: &str) {
