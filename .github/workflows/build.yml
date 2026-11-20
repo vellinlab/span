@@ -48,7 +48,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           bench_dir="$(mktemp -d)"
-          baseline_tag=v0.1.0-rc.24
+          baseline_tag=v0.1.0-rc.26
           if [[ "$GITHUB_REF" == refs/tags/v0.1.0-rc.22 ]]; then baseline_tag=v0.1.0-rc.21; fi
           gh release download "$baseline_tag" --pattern 'span_*_amd64.deb' --dir "$bench_dir"
           dpkg-deb -x "$bench_dir"/*.deb "$bench_dir/old"
@@ -139,7 +139,7 @@ jobs:
           fi
           compare=()
           if [[ "$GITHUB_REF" == refs/heads/perf/* || "$GITHUB_REF" == refs/tags/v0.1.0-rc.22 ]]; then
-            baseline_tag=v0.1.0-rc.24
+            baseline_tag=v0.1.0-rc.26
             if [[ "$GITHUB_REF" == refs/tags/v0.1.0-rc.22 ]]; then baseline_tag=v0.1.0-rc.21; fi
             previous="span-${baseline_tag#v}-1.el8.x86_64.rpm"
             gh release download "$baseline_tag" --pattern "$previous" --dir "$upgrade_dir"
