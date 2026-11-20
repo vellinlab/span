@@ -144,6 +144,8 @@ pub fn tile(name: &str, uri: Option<&str>) -> gtk::Stack {
     let colors = ["iris", "sea", "amber", "rose"];
     let color = if matches!(key.as_str(), "github" | "notion" | "google drive") {
         "paper"
+    } else if matches!(key.as_str(), "pets" | "work pets") {
+        "lilac"
     } else {
         colors[key.bytes().map(usize::from).sum::<usize>() % colors.len()]
     };

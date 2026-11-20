@@ -199,7 +199,7 @@ impl Extensions {
         switcher.style_context().add_class("sidebar-tabs");
         panel.add(&switcher);
         let search = gtk::SearchEntry::builder()
-            .placeholder_text("搜索已加载的项目")
+            .placeholder_text("搜索全部插件")
             .width_chars(10)
             .build();
         search.style_context().add_class("host-search");
@@ -275,6 +275,15 @@ impl Extensions {
         let weak = Rc::downgrade(self);
         self.stack.connect_visible_child_name_notify(move |_| {
             if let Some(panel) = weak.upgrade() {
+                panel
+                    .search
+                    .set_placeholder_text(Some(match panel.visible() {
+                        Section::Plugins => "搜索全部插件",
+                        Section::Apps => "搜索已加载的连接器",
+                    }));
+                if !panel.changing.get() {
+                    panel.set_feedback("");
+                }
                 if panel.page(panel.visible()).loaded.get() {
                     panel.render(panel.visible());
                 }

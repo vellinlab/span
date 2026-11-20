@@ -1098,6 +1098,7 @@ scrolledwindow.agent-table-scroll {
 .extension-inactive { border-radius: 6px; background-color: #797b89; }
 .workbench stack.extension-logo { border-radius: 10px; }
 .extension-logo label { font-weight: 600; font-size: 16px; }
+.workbench stack.extension-logo.lilac { background-color: #c3b6ed; color: #201c2b; }
 .workbench stack.extension-logo.paper { background-color: #f3f3f4; color: #202124; }
 .workbench stack.extension-logo.iris { background-color: #3a3451; color: #dfcbff; }
 .workbench stack.extension-logo.sea { background-color: #214647; color: #b1e7df; }
