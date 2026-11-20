@@ -383,6 +383,17 @@ for line in sys.stdin:
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
+        if os.environ.get("SPAN_BENCH_IMAGES") == "1":
+            assert message == "Show the three image previews" and params["threadId"] == thread
+            image_turn = "image-benchmark-turn"
+            event = {"threadId": thread, "turnId": image_turn}
+            send({"id": request_id, "result": {"turn": {"id": image_turn, "status": "inProgress"}}})
+            text = "\n\n".join(f"![Image {i}](bench-image-{i}.png)" for i in range(3))
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "image-benchmark", "type": "agentMessage", "text": text}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": image_turn, "status": "completed"}}})
+            continue
         if message in ("Plan this update", "Back to normal"):
             assert shared and params["threadId"] == saved_thread
             mode = "plan" if message == "Plan this update" else "default"

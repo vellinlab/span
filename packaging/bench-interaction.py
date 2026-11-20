@@ -6,10 +6,12 @@ from pathlib import Path
 import shlex
 import shutil
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 
 from Xlib import X, XK, display
 from Xlib.ext import xtest
@@ -35,6 +37,26 @@ def until(check):
     raise RuntimeError("X11 benchmark setup timed out")
 
 
+IMAGE_COLORS = [(243, 175, 19), (59, 206, 133), (200, 119, 218)]
+
+
+def write_image(path, color):
+    # PNG generated without desktop libraries. The accent stripe gives each
+    # fixture a distinct pixel signature at every fitted preview size.
+    width, height = 2400, 1800
+    red, green, blue = color
+    stripe = bytes((red, green, blue)) * 1640
+    row = b"\0" + stripe + bytes((61, 68, 82)) * (width - 1640)
+
+    def chunk(name, data):
+        crc = zlib.crc32(name + data)
+        return struct.pack(">I", len(data)) + name + data + struct.pack(">I", crc)
+
+    image = b"\x89PNG\r\n\x1a\n" + chunk(
+        b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    path.write_bytes(image + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b""))
+
+
 def benchmark(binary, workload):
     name = Path(binary).parent.name + ("" if workload == "history" else f" {workload}")
     with tempfile.TemporaryDirectory() as directory:
@@ -42,11 +64,15 @@ def benchmark(binary, workload):
         (home / "bin").mkdir()
         shutil.copy2("packaging/test-agent.py", home / "bin/codex")
         (home / "bin/codex").chmod(0o755)
+        if workload == "images":
+            for i, color in enumerate(IMAGE_COLORS):
+                write_image(home / f"bench-image-{i}.png", color)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"],
                    SPAN_BENCH_HISTORY=str(int(workload == "history")),
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
+                   SPAN_BENCH_IMAGES=str(int(workload == "images")),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         with subprocess.Popen(["taskset", "-c", str(cpu), binary], env=env) as app:
             try:
@@ -87,6 +113,34 @@ def benchmark(binary, workload):
                 for event in (X.KeyPress, X.KeyRelease):
                     xtest.fake_input(screen, event, enter)
                 screen.flush()
+                if workload == "images":
+                    until(lambda: (home / "agent-models").exists())
+                    time.sleep(0.25)
+                    footprint("before previews")
+                    xdo("type", "Show the three image previews")
+                    before_cpu = cpu_seconds()
+                    start = time.monotonic()
+                    for event in (X.KeyPress, X.KeyRelease):
+                        xtest.fake_input(screen, event, enter)
+                    screen.flush()
+
+                    # Xvfb's 24-bit screen exposes BGRX32 pixel storage. The
+                    # last thumbnail is at the bottom of the reply timeline.
+                    red, green, blue = IMAGE_COLORS[-1]
+                    markers = tuple(bytes((blue, green, red, unused)) * 8 for unused in (0, 255))
+
+                    def last_image_painted():
+                        data = win.get_image(285, 125, 450, 460, X.ZPixmap, 0xffffffff).data
+                        return any(marker in data for marker in markers)
+
+                    until(last_image_painted)
+                    first_visible = (time.monotonic() - start) * 1000
+                    time.sleep(max(0, start + 1.25 - time.monotonic()))
+                    cpu_ms = (cpu_seconds() - before_cpu) * 1000
+                    print(f"{name} last thumbnail paint: {first_visible:.1f} ms,"
+                          f" app CPU {cpu_ms:.0f} ms including settle", flush=True)
+                    footprint("three previews loaded")
+                    return
                 # Backdate the measurement to the first observation of the
                 # final frame. Loading chrome and intermediate height estimates
                 # can also produce non-blank frames before the reply is usable.
@@ -212,5 +266,5 @@ def benchmark(binary, workload):
 
 
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools"):
+    for workload in ("history", "table", "tools", "images"):
         benchmark(package, workload)

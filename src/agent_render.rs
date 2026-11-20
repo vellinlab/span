@@ -5,7 +5,7 @@ use crate::quote;
 use gtk::prelude::*;
 use gtk::{cairo, gdk, gdk_pixbuf, gio, glib, pango};
 use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -949,7 +949,7 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
     block.add(&actions);
 
     let socket = context.socket.clone();
-    let decoded = Rc::new(RefCell::new(None::<(gdk_pixbuf::Pixbuf, Rc<Vec<u8>>)>));
+    let decoded = Rc::new(RefCell::new(None::<Rc<Vec<u8>>>));
     let copy_source = decoded.clone();
     load.connect_clicked(glib::clone!(
         #[weak]
@@ -968,6 +968,7 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
             load.set_sensitive(false);
             let target = target.clone();
             let socket = socket.clone();
+            let width = preview.allocated_width().clamp(180, 620);
             let load = load.downgrade();
             let preview = preview.downgrade();
             let status = status.downgrade();
@@ -976,10 +977,13 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
             let save = save.downgrade();
             let decoded = decoded.clone();
             glib::MainContext::default().spawn_local(async move {
-                let result = gio::spawn_blocking(move || load_image(&target, socket.as_deref()))
-                    .await
-                    .unwrap_or_else(|_| Err("图片预览被中断。".into()))
-                    .and_then(|bytes| decode_image(&bytes).map(|image| (image, bytes)));
+                let result = gio::spawn_blocking(move || {
+                    let bytes = load_image(&target, socket.as_deref())?;
+                    let (thumbnail, dimensions) = image_thumbnail(&bytes, width)?;
+                    Ok::<_, String>((thumbnail, dimensions, bytes))
+                })
+                .await
+                .unwrap_or_else(|_| Err("图片预览被中断。".into()));
                 let (Some(load), Some(preview), Some(status), Some(copy), Some(expand), Some(save)) = (
                     load.upgrade(),
                     preview.upgrade(),
@@ -991,21 +995,12 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
                     return;
                 };
                 match result {
-                    Ok((image, bytes)) => {
+                    Ok((thumbnail, (width, height), bytes)) => {
+                        preview.set_from_pixbuf(Some(&thumbnail.pixbuf()));
+                        status.set_text(&format!("{width} × {height}"));
+                        decoded.replace(Some(Rc::new(bytes)));
                         for button in [&copy, &expand, &save] { button.set_sensitive(true); }
                         load.hide();
-                        let width = preview.allocated_width().clamp(180, 620);
-                        let scale = (f64::from(width) / f64::from(image.width()))
-                            .min(340.0 / f64::from(image.height()))
-                            .min(1.0);
-                        let thumbnail = image.scale_simple(
-                            (f64::from(image.width()) * scale).max(1.0) as i32,
-                            (f64::from(image.height()) * scale).max(1.0) as i32,
-                            gdk_pixbuf::InterpType::Bilinear,
-                        );
-                        preview.set_from_pixbuf(thumbnail.as_ref().or(Some(&image)));
-                        status.set_text(&format!("{} × {}", image.width(), image.height()));
-                        decoded.replace(Some((image, Rc::new(bytes))));
                     }
                     Err(error) => {
                         status.set_text(&error);
@@ -1015,19 +1010,33 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
             });
         }
     ));
-    copy.connect_clicked(move |_| {
-        if let Some((image, _)) = copy_source.borrow().as_ref() {
-            clipboard().set_image(image);
+    copy.connect_clicked(glib::clone!(
+        #[weak]
+        status,
+        move |_| {
+            if let Some(bytes) = copy_source.borrow().as_ref() {
+                match decode_image(bytes) {
+                    Ok(image) => clipboard().set_image(&image),
+                    Err(error) => status.set_text(&error),
+                }
+            }
         }
-    });
+    ));
     let expanded = decoded.clone();
-    expand.connect_clicked(move |button| {
-        if let Some((image, _)) = expanded.borrow().as_ref() {
-            asset_preview(button, image, "图片预览");
+    expand.connect_clicked(glib::clone!(
+        #[weak]
+        status,
+        move |button| {
+            if let Some(bytes) = expanded.borrow().as_ref() {
+                match decode_image(bytes) {
+                    Ok(image) => asset_preview(button, &image, "图片预览"),
+                    Err(error) => status.set_text(&error),
+                }
+            }
         }
-    });
+    ));
     save.connect_clicked(move |button| {
-        let Some((_, bytes)) = decoded.borrow().as_ref().cloned() else {
+        let Some(bytes) = decoded.borrow().as_ref().cloned() else {
             return;
         };
         let name = filename.as_deref().unwrap_or_else(|| {
@@ -1137,30 +1146,89 @@ fn load_image(path: &Path, socket: Option<&crate::ssh::Channel>) -> Result<Vec<u
     Ok(bytes)
 }
 
-pub(crate) fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
-    let kind = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "png"
+fn image_type(bytes: &[u8]) -> Result<&'static str, String> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Ok("png")
     } else if bytes.starts_with(b"\xff\xd8\xff") {
-        "jpeg"
+        Ok("jpeg")
     } else {
-        return Err("图片预览支持 PNG 和 JPEG。".into());
+        Err("图片预览支持 PNG 和 JPEG。".into())
+    }
+}
+
+struct ImagePixels {
+    data: glib::Bytes,
+    width: i32,
+    height: i32,
+    rowstride: i32,
+    has_alpha: bool,
+}
+
+impl ImagePixels {
+    fn pixbuf(self) -> gdk_pixbuf::Pixbuf {
+        gdk_pixbuf::Pixbuf::from_bytes(
+            &self.data,
+            gdk_pixbuf::Colorspace::Rgb,
+            self.has_alpha,
+            8,
+            self.width,
+            self.height,
+            self.rowstride,
+        )
+    }
+}
+
+fn image_thumbnail(bytes: &[u8], max_width: i32) -> Result<(ImagePixels, (i32, i32)), String> {
+    let dimensions = Rc::new(Cell::new((0, 0)));
+    let result_size = dimensions.clone();
+    let image = decode_sized_pixbuf(bytes, image_type(bytes)?, move |width, height| {
+        let size = fit_image(width, height, 1200, 900);
+        result_size.set(size);
+        fit_image(size.0, size.1, max_width, 340)
+    })?;
+    let thumbnail = ImagePixels {
+        data: image.read_pixel_bytes(),
+        width: image.width(),
+        height: image.height(),
+        rowstride: image.rowstride(),
+        has_alpha: image.has_alpha(),
     };
-    decode_pixbuf(bytes, kind)
+    Ok((thumbnail, dimensions.get()))
+}
+
+fn fit_image(width: i32, height: i32, max_width: i32, max_height: i32) -> (i32, i32) {
+    let scale = (f64::from(max_width) / f64::from(width.max(1)))
+        .min(f64::from(max_height) / f64::from(height.max(1)))
+        .min(1.0);
+    (
+        (f64::from(width) * scale).max(1.0) as i32,
+        (f64::from(height) * scale).max(1.0) as i32,
+    )
+}
+
+fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
+    decode_pixbuf(bytes, image_type(bytes)?)
 }
 
 pub(crate) fn decode_pixbuf(bytes: &[u8], kind: &str) -> Result<gdk_pixbuf::Pixbuf, String> {
+    decode_sized_pixbuf(bytes, kind, |width, height| {
+        fit_image(width, height, 1200, 900)
+    })
+}
+
+fn decode_sized_pixbuf(
+    bytes: &[u8],
+    kind: &str,
+    size: impl Fn(i32, i32) -> (i32, i32) + 'static,
+) -> Result<gdk_pixbuf::Pixbuf, String> {
     let loader = gdk_pixbuf::PixbufLoader::with_type(kind).map_err(|e| e.to_string())?;
-    loader.connect_size_prepared(|loader, w, h| {
-        let scale = (1200.0 / f64::from(w.max(1)))
-            .min(900.0 / f64::from(h.max(1)))
-            .min(1.0);
-        loader.set_size(
-            (f64::from(w) * scale).max(1.0) as i32,
-            (f64::from(h) * scale).max(1.0) as i32,
-        );
+    loader.connect_size_prepared(move |loader, w, h| {
+        let (width, height) = size(w, h);
+        loader.set_size(width, height);
     });
-    loader.write(bytes).map_err(|e| e.to_string())?;
-    loader.close().map_err(|e| e.to_string())?;
+    let written = loader.write(bytes);
+    let closed = loader.close();
+    written.and(closed).map_err(|e| e.to_string())?;
     loader.pixbuf().ok_or_else(|| "无法解码图片。".to_owned())
 }
 
