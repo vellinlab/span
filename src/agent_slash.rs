@@ -380,12 +380,9 @@ impl Agent {
     }
 
     fn slash_output(&self, title: &str, text: &str) {
-        self.append(&agent_render::code_card(
-            title,
-            text,
-            None,
-            &self.quote_action(),
-        ));
+        let card = agent_render::CodeCard::new(title, &format!("复制{title}"));
+        card.plain_text(text, &self.quote_action());
+        self.append(&card.panel);
     }
 
     pub(super) fn reset_slash_state(&self) {

@@ -293,7 +293,7 @@ for line in sys.stdin:
         send({"id": request_id, "result": {"data": [{"name": "Fixture MCP", "authStatus": "unsupported",
               "tools": {"fixture_search": {}}}], "nextCursor": None}})
     elif method == "command/exec":
-        assert shared and params["cwd"] == str(home) and params["timeoutMs"] == 10000
+        assert shared and params["cwd"] == str(home / "Projects/Operations") and params["timeoutMs"] == 10000
         if params["command"][2] == "diff":
             assert params["command"] == ["git", "--no-pager", "diff", "--no-color",
                                          "--no-ext-diff", "--no-textconv", "HEAD", "--"]

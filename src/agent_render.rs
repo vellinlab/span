@@ -675,6 +675,20 @@ impl CodeCard {
         let lines = text.lines().take(15).count().max(1) as i32;
         self.scroll.set_height_request(18 * lines + 20);
     }
+
+    pub fn plain_text(&self, text: &str, quote: &quote::Action) {
+        self.buffer.set_text(&text.replace('\0', "�"));
+        self.size_to(text);
+        let buffer = self.buffer.clone();
+        self.copy.connect_clicked(move |_| {
+            if let Some(text) = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true) {
+                clipboard().set_text(&text);
+            }
+        });
+        if let Some(view) = self.scroll.child().and_downcast::<gtk::TextView>() {
+            quote::bind_text(&view, quote);
+        }
+    }
 }
 
 pub fn code_card(
@@ -684,17 +698,7 @@ pub fn code_card(
     quote: &quote::Action,
 ) -> gtk::Box {
     let card = CodeCard::new(language, "复制代码");
-    card.buffer.set_text(&code.replace('\0', "�"));
-    card.size_to(code);
-    let buffer = card.buffer.clone();
-    card.copy.connect_clicked(move |_| {
-        if let Some(text) = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true) {
-            clipboard().set_text(&text);
-        }
-    });
-    if let Some(view) = card.scroll.child().and_downcast::<gtk::TextView>() {
-        quote::bind_text(&view, quote);
-    }
+    card.plain_text(code, quote);
     if let Some(status) = status {
         let footer = gtk::Label::new(Some(status));
         footer.set_xalign(1.0);

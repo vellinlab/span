@@ -62,6 +62,7 @@ impl Commands {
             .width_request(288)
             .build();
         scroll.add(&list);
+        list.set_adjustment(Some(&scroll.vadjustment()));
         scroll.show_all();
         popup.add(&scroll);
         Self {
@@ -102,7 +103,9 @@ impl Commands {
             self.matches.replace(matches);
             self.list.select_row(self.list.row_at_index(0).as_ref());
         }
-        self.popup.set_pointing_to(&gdk::Rectangle::new(0, 0, 1, 1));
+        let anchor_width = input.allocated_width().clamp(1, 288);
+        self.popup
+            .set_pointing_to(&gdk::Rectangle::new(0, 0, anchor_width, 1));
         self.popup.show();
     }
 
