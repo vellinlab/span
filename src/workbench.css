@@ -27,7 +27,7 @@ popover.agent-picker-menu {
 }
 
 .workbench .terminal-page {
-    background-color: @terminal;
+    background-color: #15191c;
     color: @foreground;
 }
 
@@ -708,22 +708,34 @@ popover.selection-quote button:hover {
 }
 
 .agent-drawer-header {
-    background: @sidebar;
+    background: linear-gradient(to bottom, #232b2c, #1c2224);
     color: @foreground;
-    border-top: 1px solid @line;
-    border-bottom: 1px solid @line;
-    padding: 2px 10px;
+    border-top: 1px solid #3c4c4e;
+    border-bottom: 1px solid #313b3c;
+    padding: 4px 11px;
+}
+
+.drawer-identity drawingarea {
+    color: @accent;
+}
+
+.drawer-target {
+    margin-left: 3px;
+    padding-left: 10px;
+    border-left: 1px solid #364142;
+    color: @muted;
+    font-size: 12px;
 }
 
 .workbench .drawer-picker button {
     min-height: 24px;
     padding: 0 7px;
-    background: transparent;
-    border-color: transparent;
+    background: #293334;
+    border-color: #404d4f;
 }
 
 .workbench .drawer-picker button:hover {
-    background: @hover;
+    background: #344244;
 }
 
 .agent-settings {

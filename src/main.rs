@@ -26,6 +26,7 @@ mod sftp;
 mod source_preview;
 mod ssh;
 mod svg;
+mod terminal_theme;
 #[cfg_attr(windows, path = "windows_terminal.rs")]
 mod vte;
 mod workbench;

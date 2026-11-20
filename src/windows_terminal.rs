@@ -1,3 +1,4 @@
+use crate::terminal_theme::{BACKGROUND, CURSOR, FONT, FOREGROUND, PALETTE, SELECTION};
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
 use alacritty_terminal::grid::{Dimensions, Scroll};
@@ -18,13 +19,6 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-const FONT: &str = "Cascadia Mono,Consolas,DejaVu Sans Mono,monospace 11";
-const PALETTE: [u32; 16] = [
-    0x222525, 0xf0838c, 0x83cb9b, 0xe8be79, 0x82aaff, 0xc6a0f6, 0x78cbd7, 0xc3cddb, 0x788789,
-    0xff9ca3, 0xa0e4b6, 0xf9d493, 0xa3c1ff, 0xddbcff, 0x9fe3e9, 0xf0f4fb,
-];
-const BACKGROUND: u32 = 0x151616;
 
 glib::wrapper! {
     pub struct Terminal(ObjectSubclass<imp::Terminal>)
@@ -504,7 +498,7 @@ impl Terminal {
         let (width, height) = (f64::from(size.0.cell_width), f64::from(size.0.cell_height));
         let grid = self.imp().grid.borrow();
         let Some(grid) = grid.as_ref() else {
-            paint_color(cr, rgb(0xd8e1ed));
+            paint_color(cr, rgb(FOREGROUND));
             layout.set_text(&self.imp().notice.borrow().replace('\r', ""));
             pangocairo::functions::show_layout(cr, &layout);
             return;
@@ -514,7 +508,7 @@ impl Terminal {
         let mut text = String::with_capacity(size.columns());
         let mut origin = (0.0, 0.0);
         let mut previous = None;
-        let mut foreground = rgb(0xd8e1ed);
+        let mut foreground = rgb(FOREGROUND);
         let flush = |text: &mut String, (x, y), color| {
             if !text.trim_end().is_empty() {
                 layout.set_text(text.trim_end());
@@ -539,7 +533,7 @@ impl Terminal {
                 .as_ref()
                 .is_some_and(|selection| selection.contains(cell.point))
             {
-                bg = rgb(0x304c78);
+                bg = rgb(SELECTION);
             }
             let point = cell.point;
             let marks = cell.zerowidth();
@@ -579,7 +573,7 @@ impl Terminal {
         flush(&mut text, origin, foreground);
         let cursor = content.cursor;
         if cursor.shape != CursorShape::Hidden && content.display_offset == 0 {
-            paint_color(cr, rgb(0x9bcac6));
+            paint_color(cr, rgb(CURSOR));
             cr.rectangle(
                 cursor.point.column.0 as f64 * width + 0.5,
                 cursor.point.line.0 as f64 * height + 0.5,
@@ -638,7 +632,7 @@ fn palette(index: usize) -> Rgb {
             }
         }
         index if index == NamedColor::Background as usize => rgb(BACKGROUND),
-        _ => rgb(0xd8e1ed),
+        _ => rgb(FOREGROUND),
     }
 }
 

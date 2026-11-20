@@ -66,7 +66,9 @@ SPEC
             printf '%s\n' 'The Span RPM unexpectedly owns font files.' >&2
             exit 1
         fi
-        test ! -e /usr/share/fonts/span-selawik
+        for font in selawk.ttf selawkb.ttf selawksb.ttf; do
+            test ! -e "/usr/share/fonts/span-selawik/$font"
+        done
         printf '%s\n' 'The Span RPM uses system fonts and removed any Selawik files owned by the old RPM.'
         ;;
     *) exit 2 ;;

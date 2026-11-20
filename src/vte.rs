@@ -1,3 +1,4 @@
+use crate::terminal_theme::{BACKGROUND, CURSOR, FONT, FOREGROUND, PALETTE, SELECTION};
 use gtk::prelude::*;
 use gtk::{
     gdk, gio,
@@ -85,39 +86,29 @@ impl Terminal {
     }
 
     pub fn apply_theme(&self) {
-        let color = |hex| gdk::RGBA::parse(hex).expect("valid theme color");
-        let foreground = color("#d8e1ed");
-        let background = color("#131820");
-        let cursor = color("#8cbafa");
-        let selection = color("#304c78");
-        let palette = [
-            "#1b2330", "#f0838c", "#83cb9b", "#e8be79", "#82aaff", "#c6a0f6", "#78cbd7", "#c3cddb",
-            "#64748b", "#ff9ca3", "#a0e4b6", "#f9d493", "#a3c1ff", "#ddbcff", "#9fe3e9", "#f0f4fb",
-        ]
-        .map(|hex| {
-            // GdkRGBA is a plain C struct. Copy it into a contiguous VTE palette.
-            let rgba = color(hex);
-            gdk::ffi::GdkRGBA {
-                red: rgba.red(),
-                green: rgba.green(),
-                blue: rgba.blue(),
-                alpha: rgba.alpha(),
-            }
-        });
-        let font = pango::FontDescription::from_string(
-            "Ubuntu Mono,Liberation Mono,DejaVu Sans Mono,Noto Sans Mono CJK SC,monospace 11",
-        );
+        let color = |rgb: u32| gdk::ffi::GdkRGBA {
+            red: f64::from((rgb >> 16) & 255) / 255.0,
+            green: f64::from((rgb >> 8) & 255) / 255.0,
+            blue: f64::from(rgb & 255) / 255.0,
+            alpha: 1.0,
+        };
+        let foreground = color(FOREGROUND);
+        let background = color(BACKGROUND);
+        let cursor = color(CURSOR);
+        let selection = color(SELECTION);
+        let palette = PALETTE.map(color);
+        let font = pango::FontDescription::from_string(FONT);
         unsafe {
             let terminal = self.to_glib_none().0;
             vte_terminal_set_colors(
                 terminal,
-                foreground.to_glib_none().0,
-                background.to_glib_none().0,
+                &foreground,
+                &background,
                 palette.as_ptr(),
                 palette.len(),
             );
-            vte_terminal_set_color_cursor(terminal, cursor.to_glib_none().0);
-            vte_terminal_set_color_highlight(terminal, selection.to_glib_none().0);
+            vte_terminal_set_color_cursor(terminal, &cursor);
+            vte_terminal_set_color_highlight(terminal, &selection);
             vte_terminal_set_font(terminal, font.to_glib_none().0);
         }
     }

@@ -194,7 +194,17 @@ impl Session {
             let drawer = gtk::Box::new(gtk::Orientation::Vertical, 0);
             let tools = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             tools.style_context().add_class("agent-drawer-header");
-            tools.pack_start(&gtk::Label::new(Some("终端")), false, false, 0);
+            let identity = gtk::Box::new(gtk::Orientation::Horizontal, 7);
+            identity.style_context().add_class("drawer-identity");
+            identity.pack_start(&icons::widget(self.launch.icon(), 17), false, false, 0);
+            identity.pack_start(&gtk::Label::new(Some("终端")), false, false, 0);
+            tools.pack_start(&identity, false, false, 0);
+            let target = gtk::Label::new(Some(self.launch.label()));
+            target.style_context().add_class("drawer-target");
+            target.set_xalign(0.0);
+            target.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            target.set_width_chars(0);
+            tools.pack_start(&target, true, true, 0);
             let add = gtk::Button::with_label("加入选区");
             add.style_context().add_class("quiet-button");
             let picker = gtk::ComboBoxText::new();
@@ -635,10 +645,10 @@ fn terminal_widget() -> (Terminal, gtk::ScrolledWindow) {
     let terminal = Terminal::new();
     terminal.set_scrollback_lines(10_000);
     terminal.apply_theme();
-    terminal.set_margin_start(9);
-    terminal.set_margin_end(8);
-    terminal.set_margin_top(6);
-    terminal.set_margin_bottom(4);
+    terminal.set_margin_start(13);
+    terminal.set_margin_end(10);
+    terminal.set_margin_top(9);
+    terminal.set_margin_bottom(6);
     terminal.connect_key_press_event(|terminal, event| {
         let shortcut = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
         let modifiers = event.state();

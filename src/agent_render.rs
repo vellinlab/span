@@ -2,7 +2,6 @@ use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delt
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
 use crate::quote;
-use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
 use gtk::{cairo, gdk, gdk_pixbuf, gio, glib, pango};
 use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
@@ -209,7 +208,8 @@ pub(crate) const LINK_END: &str = "</span></a>";
 pub(crate) fn push_link(markup: &mut String, uri: &str) {
     markup.push_str("<a href=\"");
     markup.push_str(&escaped(uri));
-    markup.push_str("\"><span underline=\"none\">");
+    // Mark the link's range in the layout while suppressing font-specific underlines.
+    markup.push_str("\"><span underline=\"none\" underline_color=\"#000000\">");
 }
 
 pub(crate) fn web_url(uri: &str) -> bool {
@@ -273,19 +273,28 @@ fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
     if !label.label().contains("<a href=") {
         return;
     }
-    let Some(links) = label
-        .accessible()
-        .and_then(|object| object.dynamic_cast::<gtk::atk::Hypertext>().ok())
-    else {
+    let Some(layout) = label.layout() else {
         return;
     };
-    let ranges: Vec<_> = (0..links.n_links())
-        .filter_map(|index| links.link(index))
-        .map(|link| (link.start_index(), link.end_index()))
-        .collect();
-    let Some(layout) = label.layout().filter(|_| !ranges.is_empty()) else {
+    let Some(attributes) = layout.attributes() else {
         return;
     };
+    let mut attributes = attributes.iterator();
+    let mut ranges = Vec::new();
+    loop {
+        if let Some(attribute) = attributes.get(pango::AttrType::UnderlineColor) {
+            let range = (attribute.start_index() as i32, attribute.end_index() as i32);
+            if ranges.last() != Some(&range) {
+                ranges.push(range);
+            }
+        }
+        if !attributes.next_style_change() {
+            break;
+        }
+    }
+    if ranges.is_empty() {
+        return;
+    }
     let (x, y) = label.layout_offsets();
     let allocation = label.allocation();
     let (x, y) = (f64::from(x - allocation.x()), f64::from(y - allocation.y()));
