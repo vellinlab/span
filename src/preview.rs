@@ -258,6 +258,20 @@ impl Panel {
         }
     }
 
+    pub fn forget(&self, session: &Rc<Session>) -> bool {
+        let owner = Rc::downgrade(session);
+        let mut tabs = self.history.borrow_mut();
+        let previous = tabs.len();
+        tabs.retain(|tab| !tab.owner.ptr_eq(&owner));
+        let removed = tabs.len() != previous;
+        drop(tabs);
+        if self.owner.borrow().ptr_eq(&owner) {
+            self.owner.replace(Weak::new());
+            self.hide();
+        }
+        removed
+    }
+
     pub fn offer(self: &Rc<Self>, owner: &Rc<Session>, item: Artifact, automatic: bool) {
         let owner = Rc::downgrade(owner);
         let mut tabs = self.history.borrow_mut();

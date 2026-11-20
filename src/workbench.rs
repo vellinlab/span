@@ -428,8 +428,8 @@ impl Workbench {
 
     fn close_session(&self, session: &Rc<Session>) {
         let catalog = session.existing_catalog();
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        if catalog.is_some() {
+        let removed_preview = self.preview.forget(session);
+        if catalog.is_some() || removed_preview {
             crate::heap::release_after_session_close();
         }
         session.cancel();

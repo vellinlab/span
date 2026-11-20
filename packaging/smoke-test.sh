@@ -923,8 +923,17 @@ SVG
     printf '%s\n' 'The path popup lists children before Enter with or without a trailing slash, dismisses with Esc, and opens a keyboard selection.'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'Workspace preview fixture'
+    xdotool key --clearmodifiers ctrl+Page_Down
+    widget not-contains 'Workspace preview fixture'
+    widget mouse '文件'
+    widget mouse '000-layout.txt'
+    widget click '预览'
+    widget contains 'Split workspace preview'
+    xdotool key --clearmodifiers ctrl+shift+w
+    widget not-contains 'Split workspace preview'
+    widget contains 'Workspace preview fixture'
     widget click '关闭预览'
-    xdotool key --clearmodifiers ctrl+Page_Down ctrl+shift+w
+    printf '%s\n' 'Closing a session dropped its preview and restored the remaining session’s preview.'
     printf '%s\n' 'Warm tab switches reused their catalogs and directory models. Explicit refresh read the new file.'
     xdotool key --clearmodifiers ctrl+shift+a
     printf '%s\n' 'The Codex session tested formatted table data, structured questions, diff, drawer, search and paginated history.'
@@ -987,7 +996,7 @@ PY
         widget contains 'Are you sure you want to continue connecting'
         widget click '继续连接'
         wait_until "the authenticated SSH shell" test -s "$WORKBENCH_SSH_FIXTURE/remote-shells"
-        xdotool key --clearmodifiers ctrl+shift+f
+        widget mouse '文件'
         widget state '目录路径' sensitive
         widget mouse '目录路径'
         xdotool key --clearmodifiers ctrl+a
