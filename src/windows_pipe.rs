@@ -98,19 +98,32 @@ impl AsyncWrite for Pipe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::io::{AsyncReadExt, AsyncWriteExt};
+    use futures_util::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use std::io::Write;
+
+    const MESSAGE: &[u8; 11] = b"span-stdio\n";
+
+    #[test]
+    #[ignore = "stdio fixture invoked by win32_subprocess_round_trips_stdio"]
+    fn win32_pipe_echo_fixture() {
+        let mut message = [0; MESSAGE.len()];
+        io::stdin().lock().read_exact(&mut message).unwrap();
+        let mut output = io::stdout().lock();
+        output.write_all(&message).unwrap();
+        output.flush().unwrap();
+    }
 
     #[test]
     fn win32_subprocess_round_trips_stdio() {
         let flags = gio::SubprocessFlags::STDIN_PIPE | gio::SubprocessFlags::STDOUT_PIPE;
+        let executable = std::env::current_exe().expect("native test executable");
         let process = gio::Subprocess::newv(
             &[
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                "[Console]::WriteLine([Console]::ReadLine())",
-            ]
-            .map(std::ffi::OsStr::new),
+                executable.as_os_str(),
+                std::ffi::OsStr::new("--ignored"),
+                std::ffi::OsStr::new("--nocapture"),
+                std::ffi::OsStr::new("win32_pipe_echo_fixture"),
+            ],
             flags,
         )
         .expect("native child process");
@@ -120,17 +133,24 @@ mod tests {
         );
         let result = glib::MainContext::new().block_on(async {
             super::super::with_timeout(8, async {
-                pipe.write_all(b"span-stdio\n").await?;
-                let mut echoed = [0; 10];
-                pipe.read_exact(&mut echoed).await?;
-                io::Result::Ok(echoed)
+                pipe.write_all(MESSAGE).await?;
+                let mut pipe = BufReader::new(pipe);
+                let mut line = Vec::new();
+                // The test harness prints its own header before invoking the fixture.
+                while pipe.read_until(b'\n', &mut line).await? > 0 {
+                    if line.ends_with(MESSAGE) {
+                        return Ok(());
+                    }
+                    line.clear();
+                }
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "missing subprocess echo",
+                ))
             })
             .await
         });
         process.force_exit();
-        assert_eq!(
-            result.expect("pipe timeout").expect("pipe read and write"),
-            *b"span-stdio"
-        );
+        result.expect("pipe timeout").expect("pipe read and write");
     }
 }
