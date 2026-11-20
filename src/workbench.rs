@@ -478,12 +478,19 @@ impl Workbench {
                 State::Failed => label.push_str("  ·  启动失败"),
             }
             can_restart = session.state.get().can_restart();
-            self.restart.set_label(match session.launch {
+            let restart = match session.launch {
                 Launch::Local => "重新启动",
                 Launch::Ssh(_) => "重新连接",
-            });
+            };
+            if self.restart.label().as_deref() != Some(restart) {
+                self.restart.set_label(restart);
+            }
         }
-        self.status.set_text(&label);
+        // GTK rebuilds the button child and clears the label layout even when
+        // the new text matches. These values often match across session tabs.
+        if self.status.text().as_str() != label.as_str() {
+            self.status.set_text(&label);
+        }
         self.restart.set_visible(can_restart);
     }
 
