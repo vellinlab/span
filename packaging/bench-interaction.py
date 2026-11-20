@@ -285,7 +285,19 @@ def benchmark(binary, workload):
                         image = win.get_image(285, 125, 775, 550, X.ZPixmap, 0xffffffff).data
                         return any(mark in image for mark in tail)
 
-                    if offscreen_prose:
+                    auto_followed = False
+                    if not offscreen_prose:
+                        # Candidate must show the last line without a wheel
+                        # gesture. Older releases can require a manual scroll.
+                        try:
+                            until(final_fragment_visible, interval=0.01, timeout=5)
+                            auto_followed = True
+                        except RuntimeError:
+                            if Path(binary).parent.name == "candidate":
+                                raise
+                        print(f"{name} automatically followed the buffered reply: {auto_followed}",
+                              flush=True)
+                    if not auto_followed:
                         time.sleep(0.22)
                         visible = reply_pixels()
                         for _ in range(28):
@@ -305,10 +317,7 @@ def benchmark(binary, workload):
                                                check=False)
                             raise RuntimeError("the buffered reply never reached its last viewport")
                     else:
-                        # Ensure the last line painted without wheel input.
-                        until(final_fragment_visible, interval=0.01, timeout=5)
                         visible = reply_pixels()
-                        print(f"{name} followed the buffered reply on return", flush=True)
                     assert len(set(visible)) > 32
                     digest = hashlib.sha256(visible).hexdigest()
                     print(f"{name} final reply viewport: {digest}", flush=True)
@@ -675,11 +684,17 @@ def benchmark(binary, workload):
                 app.wait(timeout=5)
 
 
-reply_frames = {"offscreen-prose": set(), "remap-prose": set(), "finish-prose": set()}
+workloads = ("hidden-prose", "remap-prose", "finish-prose", "offscreen-prose",
+             "history", "table", "tools", "images", "stream", "live-scroll",
+             "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog")
+if requested := os.environ.get("SPAN_BENCH_WORKLOADS"):
+    selected = tuple(requested.split(","))
+    assert set(selected) <= set(workloads), selected
+    workloads = selected
+reply_frames = {workload: set() for workload in ("offscreen-prose", "remap-prose", "finish-prose")
+                if workload in workloads}
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools", "images", "stream", "live-scroll",
-                     "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog", "hidden-prose",
-                     "offscreen-prose", "remap-prose", "finish-prose"):
+    for workload in workloads:
         final_frame = benchmark(package, workload)
         if workload in reply_frames:
             reply_frames[workload].add(final_frame)
