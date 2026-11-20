@@ -12,6 +12,8 @@ pub enum Icon {
     Close,
     More,
     Folder,
+    Eye,
+    EyeOff,
     File,
     Link,
     ExternalLink,
@@ -264,6 +266,26 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, y: f64, color: &gdk::RGBA) {
             cr.line_to(21.0, 8.5);
             cr.line_to(21.0, 19.0);
             cr.close_path();
+        }
+        Icon::Eye => {
+            cr.move_to(2.0, 12.0);
+            cr.curve_to(4.8, 8.0, 8.3, 5.8, 12.0, 5.8);
+            cr.curve_to(15.7, 5.8, 19.2, 8.0, 22.0, 12.0);
+            cr.curve_to(19.2, 16.0, 15.7, 18.2, 12.0, 18.2);
+            cr.curve_to(8.3, 18.2, 4.8, 16.0, 2.0, 12.0);
+            cr.close_path();
+            cr.new_sub_path();
+            cr.arc(12.0, 12.0, 2.7, 0.0, std::f64::consts::TAU);
+        }
+        Icon::EyeOff => {
+            cr.move_to(9.3, 6.2);
+            cr.curve_to(14.0, 4.7, 18.6, 7.1, 22.0, 12.0);
+            cr.curve_to(21.2, 13.2, 20.2, 14.3, 19.2, 15.2);
+            cr.move_to(5.0, 8.6);
+            cr.curve_to(3.9, 9.6, 2.9, 10.7, 2.0, 12.0);
+            cr.curve_to(5.4, 16.9, 10.0, 19.3, 14.7, 17.8);
+            cr.move_to(3.5, 3.5);
+            cr.line_to(20.5, 20.5);
         }
         Icon::File => {
             cr.move_to(6.0, 3.5);

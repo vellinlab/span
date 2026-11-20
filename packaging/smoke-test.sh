@@ -739,6 +739,7 @@ SVG
     mkdir -p "$HOME/path-completion-fixture/widget-directory"
     touch "$HOME/path-completion-fixture/widget-file.txt"
     printf 'Directory completion opened this folder.\n' > "$HOME/path-completion-fixture/widget-directory/completed.txt"
+    touch "$HOME/path-completion-fixture/widget-directory/.hidden-completion-fixture"
     widget mouse '目录路径'
     xdotool key --clearmodifiers ctrl+a
     xdotool type --clearmodifiers "$HOME/path-completion-fixture"
@@ -756,6 +757,13 @@ SVG
     import -window root "$(dirname "$WORKBENCH_PREVIEW")/files-completion.png"
     xdotool key --clearmodifiers Down Return
     widget contains 'completed.txt'
+    widget not-contains '.hidden-completion-fixture'
+    widget mouse '显示隐藏项'
+    widget state '显示隐藏项' checked
+    widget contains '.hidden-completion-fixture'
+    widget mouse '显示隐藏项'
+    widget not-state '显示隐藏项' checked
+    widget not-contains '.hidden-completion-fixture'
     printf '%s\n' 'The path popup lists children before Enter with or without a trailing slash, dismisses with Esc, and opens a keyboard selection.'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'Workspace preview fixture'

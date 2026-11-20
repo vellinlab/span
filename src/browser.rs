@@ -82,8 +82,29 @@ impl Browser {
         title.style_context().add_class("section-title");
         header.pack_start(&title, true, true, 0);
 
-        let hidden = gtk::ToggleButton::with_label("隐藏项");
+        let hidden = gtk::ToggleButton::new();
+        hidden.style_context().add_class("quiet-button");
         hidden.set_tooltip_text(Some("显示隐藏文件和目录"));
+        if let Some(accessible) = hidden.accessible() {
+            accessible.set_name("显示隐藏项");
+        }
+        let toggle = hidden.downgrade();
+        let eye = icons::changing_widget(18, move || {
+            if toggle.upgrade().is_some_and(|button| button.is_active()) {
+                Icon::Eye
+            } else {
+                Icon::EyeOff
+            }
+        });
+        hidden.add(&eye);
+        hidden.connect_toggled(move |button| {
+            button.set_tooltip_text(Some(if button.is_active() {
+                "隐藏文件和目录"
+            } else {
+                "显示隐藏文件和目录"
+            }));
+            eye.queue_draw();
+        });
         header.pack_start(&hidden, false, false, 0);
         panel.pack_start(&header, false, false, 0);
 

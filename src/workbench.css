@@ -469,8 +469,9 @@ button.agent-send:disabled {
 }
 
 .workbench .files-header button {
-    font-size: 11px;
-    padding: 1px 7px;
+    min-width: 29px;
+    min-height: 29px;
+    padding: 0;
 }
 
 .workbench .files-header button:checked {
