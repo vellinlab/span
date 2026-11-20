@@ -398,7 +398,9 @@ for line in sys.stdin:
                     "delta": "Review **build output** and `preview` rows. "}})
                 if index % 6 == 5:
                     time.sleep(0.008)
-            (home / "bench-stream-done").write_text(str(time.monotonic()))
+            marker = home / "bench-stream-pending"
+            marker.write_text(str(time.monotonic()))
+            marker.replace(home / "bench-stream-done")
             send({"method": "item/completed", "params": {**event, "item": {
                 "id": "stream-reply", "type": "agentMessage", "text": "Reasoning stream finished."}}})
             send({"method": "turn/completed", "params": {
