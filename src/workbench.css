@@ -1082,16 +1082,25 @@ scrolledwindow.agent-table-scroll {
     padding: 4px 9px;
 }
 
-.extension-card {
-    padding: 7px 8px;
-    background: @chrome;
-    border: 1px solid @line;
-    border-radius: 7px;
+.extension-card { background-color: transparent; border-bottom: 1px solid alpha(@muted, .12); }
+.workbench button.extension-item {
+    background: transparent; border: 0; box-shadow: none;
+    padding: 8px 6px; border-radius: 9px; color: @foreground;
 }
-
-.extension-card drawingarea {
-    color: @accent;
-}
+.workbench button.extension-item:hover, .workbench button.extension-item:checked { background: @chrome; }
+.extension-title { font-weight: 600; font-size: 14px; }
+.extension-subtitle, .extension-summary { color: @muted; font-size: 12px; }
+.extension-state { color: @accent; font-size: 12px; }
+.extension-detail { padding: 4px 9px 10px 12px; }
+.extension-active { border-radius: 6px; background-color: #80bca9; }
+.extension-inactive { border-radius: 6px; background-color: #797b89; }
+.workbench stack.extension-logo { border-radius: 10px; }
+.extension-logo label { font-weight: 600; font-size: 16px; }
+.workbench stack.extension-logo.paper { background-color: #f3f3f4; color: #202124; }
+.workbench stack.extension-logo.iris { background-color: #3a3451; color: #dfcbff; }
+.workbench stack.extension-logo.sea { background-color: #214647; color: #b1e7df; }
+.workbench stack.extension-logo.amber { background-color: #4d392d; color: #f8ce9a; }
+.workbench stack.extension-logo.rose { background-color: #513444; color: #f6cadf; }
 
 .agent-compose-placeholder {
     color: @muted;

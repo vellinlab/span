@@ -5,7 +5,10 @@ use gtk::prelude::*;
 use gtk::{gdk, pango};
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
+
+const PAGE_SIZE: usize = 18;
 
 const CHATGPT_PLUGINS: &str = "https://chatgpt.com/plugins";
 
@@ -30,6 +33,7 @@ pub struct Plugin {
     name: String,
     title: String,
     description: String,
+    logo: Option<String>,
     source: String,
     path: Option<String>,
     marketplace: String,
@@ -49,10 +53,12 @@ impl Plugin {
                 .as_str()
                 .unwrap_or(name)
                 .to_owned(),
-            description: item["interface"]["shortDescription"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned(),
+            description: synopsis(item["interface"]["shortDescription"].as_str()),
+            logo: crate::extension_art::reference(
+                &item["interface"],
+                &["logoUrlDark", "logoUrl", "composerIconUrl"],
+            )
+            .map(str::to_owned),
             source: source["interface"]["displayName"]
                 .as_str()
                 .or(source["name"].as_str())?
@@ -79,6 +85,7 @@ struct App {
     id: String,
     name: String,
     description: String,
+    logo: Option<String>,
     url: Option<String>,
     connected: bool,
     enabled: bool,
@@ -89,7 +96,14 @@ impl App {
         Some(Self {
             id: item["id"].as_str()?.to_owned(),
             name: item["name"].as_str()?.to_owned(),
-            description: item["description"].as_str().unwrap_or_default().to_owned(),
+            description: synopsis(
+                item["appMetadata"]["seoDescription"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .or(item["description"].as_str()),
+            ),
+            logo: crate::extension_art::reference(item, &["logoUrlDark", "logoUrl"])
+                .map(str::to_owned),
             url: install_url(item).map(str::to_owned),
             connected: item["isAccessible"] == true,
             enabled: item["isEnabled"] != false,
@@ -125,6 +139,10 @@ struct Page {
     cursor: RefCell<Option<String>>,
     loaded: Cell<bool>,
     loading: Cell<bool>,
+    limit: Cell<usize>,
+    has_local_more: Cell<bool>,
+    expanded: Rc<RefCell<HashSet<String>>>,
+    empty: gtk::Label,
 }
 
 impl Page {
@@ -141,6 +159,10 @@ impl Page {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
         content.add(&state);
         content.add(&rows);
+        let empty = label("没有匹配的项目", 1);
+        empty.style_context().add_class("preview-detail");
+        empty.set_no_show_all(true);
+        content.add(&empty);
         content.add(&more);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -157,6 +179,10 @@ impl Page {
             cursor: RefCell::new(None),
             loaded: Cell::new(false),
             loading: Cell::new(false),
+            limit: Cell::new(PAGE_SIZE),
+            has_local_more: Cell::new(false),
+            expanded: Default::default(),
+            empty,
         }
     }
 }
@@ -242,6 +268,9 @@ impl Extensions {
         let weak = Rc::downgrade(self);
         self.stack.connect_visible_child_name_notify(move |_| {
             if let Some(panel) = weak.upgrade() {
+                if panel.page(panel.visible()).loaded.get() {
+                    panel.render(panel.visible());
+                }
                 panel.load_visible();
             }
         });
@@ -254,19 +283,26 @@ impl Extensions {
         let weak = Rc::downgrade(self);
         self.search.connect_search_changed(move |_| {
             if let Some(panel) = weak.upgrade() {
-                panel.render(Section::Plugins);
-                panel.render(Section::Apps);
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.apps.more.connect_clicked(move |_| {
-            if let Some(panel) = weak.upgrade() {
-                let cursor = panel.apps.cursor.borrow().clone();
-                if cursor.is_some() {
-                    panel.emit(Action::Load(Section::Apps, false, cursor));
+                for section in [Section::Plugins, Section::Apps] {
+                    panel.page(section).limit.set(PAGE_SIZE);
                 }
+                panel.render(panel.visible());
             }
         });
+        for section in [Section::Plugins, Section::Apps] {
+            let weak = Rc::downgrade(self);
+            self.page(section).more.connect_clicked(move |_| {
+                if let Some(panel) = weak.upgrade() {
+                    let page = panel.page(section);
+                    page.limit.set(page.limit.get().saturating_add(PAGE_SIZE));
+                    if page.has_local_more.get() {
+                        panel.render(section);
+                    } else if let Some(cursor) = page.cursor.borrow().clone() {
+                        panel.emit(Action::Load(section, false, Some(cursor)));
+                    }
+                }
+            });
+        }
     }
 
     pub fn select(&self, section: Section) {
@@ -332,6 +368,8 @@ impl Extensions {
             let page = self.page(section);
             page.loaded.set(false);
             page.entries.borrow_mut().clear();
+            page.expanded.borrow_mut().clear();
+            page.limit.set(PAGE_SIZE);
             page.cursor.take();
             self.render(section);
             self.show_message(section, message);
@@ -506,8 +544,9 @@ impl Extensions {
         let Some(action) = self.action.borrow().clone() else {
             return;
         };
+        let mut matches = 0;
         for entry in page.entries.borrow().iter() {
-            let (title, description, detail, icon) = match entry {
+            let (id, title, description, detail, logo, active) = match entry {
                 Entry::Plugin(plugin) => {
                     let status = match (plugin.installed, plugin.enabled, plugin.available) {
                         (true, true, _) => "已安装",
@@ -516,10 +555,12 @@ impl Extensions {
                         _ => "可安装",
                     };
                     (
+                        &plugin.id,
                         &plugin.title,
                         &plugin.description,
                         format!("{} · {status}", plugin.source),
-                        Icon::Plugin,
+                        plugin.logo.as_deref(),
+                        plugin.installed && plugin.enabled,
                     )
                 }
                 Entry::App(app) => {
@@ -528,7 +569,14 @@ impl Extensions {
                         (true, false) => "账号可用 · 此主机已停用",
                         (false, _) => "账号尚不可用",
                     };
-                    (&app.name, &app.description, status.into(), Icon::Connect)
+                    (
+                        &app.id,
+                        &app.name,
+                        &app.description,
+                        status.into(),
+                        app.logo.as_deref(),
+                        app.connected && app.enabled,
+                    )
                 }
             };
             if !query.is_empty()
@@ -538,20 +586,65 @@ impl Extensions {
             {
                 continue;
             }
-            let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            matches += 1;
+            if matches > page.limit.get() {
+                break;
+            }
+            let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
             card.style_context().add_class("extension-card");
-            let heading = gtk::Box::new(gtk::Orientation::Horizontal, 7);
-            heading.add(&icons::widget(icon, 17));
-            let title = label(title, 1);
-            title.style_context().add_class("section-title");
-            heading.pack_start(&title, true, true, 0);
-            card.add(&heading);
-            for text in [detail.as_str(), description.as_str()] {
-                if !text.is_empty() {
-                    let label = label(text, 2);
-                    label.style_context().add_class("preview-detail");
-                    card.add(&label);
+            let toggle = gtk::ToggleButton::new();
+            toggle.style_context().add_class("extension-item");
+            toggle.set_tooltip_text(Some(&format!("查看{title}详情")));
+            if let Some(accessible) = toggle.accessible() {
+                accessible.set_name(&format!("管理 {title}"));
+            }
+            let heading = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+            heading.pack_start(&crate::extension_art::tile(title, logo), false, false, 0);
+            let labels = gtk::Box::new(gtk::Orientation::Vertical, 3);
+            labels.set_valign(gtk::Align::Center);
+            let title_line = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+            title_line.pack_start(&compact_text(title, "extension-title"), true, true, 0);
+            let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            dot.style_context().add_class(if active {
+                "extension-active"
+            } else {
+                "extension-inactive"
+            });
+            dot.set_valign(gtk::Align::Center);
+            dot.set_size_request(6, 6);
+            dot.set_tooltip_text(Some(&detail));
+            title_line.pack_end(&dot, false, false, 0);
+            labels.add(&title_line);
+            labels.add(&compact_text(
+                if description.is_empty() {
+                    &detail
+                } else {
+                    description
+                },
+                "extension-subtitle",
+            ));
+            heading.pack_start(&labels, true, true, 0);
+            let open = Rc::new(Cell::new(page.expanded.borrow().contains(id)));
+            let arrow_state = open.clone();
+            let arrow = icons::changing_widget(12, move || {
+                if arrow_state.get() {
+                    Icon::ChevronDown
+                } else {
+                    Icon::ChevronRight
                 }
+            });
+            heading.pack_end(&arrow, false, false, 0);
+            toggle.add(&heading);
+            card.add(&toggle);
+            let body = gtk::Box::new(gtk::Orientation::Vertical, 5);
+            body.style_context().add_class("extension-detail");
+            let status = label(&detail, 2);
+            status.style_context().add_class("extension-state");
+            body.add(&status);
+            if !description.is_empty() {
+                let summary = label(description, 3);
+                summary.style_context().add_class("extension-summary");
+                body.add(&summary);
             }
             let tools = gtk::Box::new(gtk::Orientation::Horizontal, 5);
             match entry {
@@ -598,12 +691,60 @@ impl Extensions {
                 }
                 _ => {}
             }
-            card.add(&tools);
+            body.add(&tools);
+            card.add(&body);
             page.rows.add(&card);
             card.show_all();
+            body.set_no_show_all(true);
+            body.set_visible(open.get());
+            toggle.set_active(open.get());
+            let expanded = page.expanded.clone();
+            let id = id.clone();
+            toggle.connect_toggled(move |toggle| {
+                let active = toggle.is_active();
+                body.set_visible(active);
+                open.set(active);
+                arrow.queue_draw();
+                if active {
+                    expanded.borrow_mut().insert(id.clone());
+                } else {
+                    expanded.borrow_mut().remove(&id);
+                }
+            });
         }
-        page.more.set_visible(page.cursor.borrow().is_some());
+        page.has_local_more.set(matches > page.limit.get());
+        page.empty
+            .set_visible(page.loaded.get() && matches == 0 && !query.is_empty());
+        page.more
+            .set_visible(page.has_local_more.get() || page.cursor.borrow().is_some());
     }
+}
+
+fn synopsis(text: Option<&str>) -> String {
+    let first = text
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .unwrap_or_default();
+    if first
+        .to_ascii_lowercase()
+        .starts_with("mcp server instructions")
+    {
+        return String::new();
+    }
+    limited(first, 320)
+}
+
+fn compact_text(text: &str, class: &str) -> gtk::Label {
+    let label = gtk::Label::builder()
+        .label(text)
+        .xalign(0.0)
+        .ellipsize(pango::EllipsizeMode::End)
+        .max_width_chars(1)
+        .build();
+    label.style_context().add_class(class);
+    label
 }
 
 fn clear(container: &gtk::Box) {

@@ -7,12 +7,12 @@ use futures_util::{
 use gtk::gio::{self, prelude::*};
 use gtk::glib;
 use serde_json::{Value, json};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::OsStr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_EVENT_BYTES: usize = 64 * 1024 * 1024;
 const SERVER_COMMAND: &str = r#"
 if [ -S "${CODEX_HOME:-$HOME/.codex}/app-server-control/app-server-control.sock" ]; then
     printf "span-codex-shared\n"
@@ -30,6 +30,7 @@ pub struct Rpc {
     process: gio::Subprocess,
     outgoing: mpsc::UnboundedSender<String>,
     next_id: Cell<u64>,
+    plugin_lists: RefCell<Vec<u64>>,
     receive: Box<dyn Fn(Result<Value, String>)>,
 }
 
@@ -103,17 +104,33 @@ impl Rpc {
             process,
             outgoing,
             next_id: Cell::new(0),
+            plugin_lists: RefCell::new(Vec::new()),
             receive: Box::new(receive),
         });
         let weak = Rc::downgrade(&rpc);
         glib::MainContext::default().spawn_local(async move {
-            let result = exchange(stream, requests, route_startup, |bytes| {
-                if bytes.len() <= MAX_EVENT_BYTES {
-                    if let (Some(rpc), Ok(message)) =
-                        (weak.upgrade(), serde_json::from_slice(bytes))
-                    {
-                        (rpc.receive)(Ok(message));
+            let result = exchange(stream, requests, route_startup, async |packet: Message| {
+                let lists = weak
+                    .upgrade()
+                    .map(|rpc| rpc.plugin_lists.borrow().clone())
+                    .unwrap_or_default();
+                let bytes = packet.into_data();
+                let decoded = if bytes.len() >= 256 * 1024 {
+                    gio::spawn_blocking(move || crate::plugin_catalog::decode(&bytes, &lists))
+                        .await
+                        .ok()
+                } else {
+                    Some(crate::plugin_catalog::decode(&bytes, &lists))
+                };
+                if let (Some(rpc), Some(Ok(message))) = (weak.upgrade(), decoded) {
+                    if message.get("result").is_some() || message.get("error").is_some() {
+                        if let Some(id) = message["id"].as_u64() {
+                            rpc.plugin_lists
+                                .borrow_mut()
+                                .retain(|pending| *pending != id);
+                        }
                     }
+                    (rpc.receive)(Ok(message));
                 }
             })
             .await;
@@ -130,6 +147,9 @@ impl Rpc {
     pub fn request(&self, method: &str, params: Value) -> u64 {
         let id = self.next_id.get() + 1;
         self.next_id.set(id);
+        if method == "plugin/list" {
+            self.plugin_lists.borrow_mut().push(id);
+        }
         self.enqueue(json!({"id": id, "method": method, "params": params}));
         id
     }
@@ -155,7 +175,7 @@ async fn exchange(
     stream: impl AsyncRead + AsyncWrite + Unpin,
     mut requests: mpsc::UnboundedReceiver<String>,
     route_startup: bool,
-    receive: impl Fn(&[u8]),
+    mut receive: impl AsyncFnMut(Message),
 ) -> Result<(), String> {
     let mut stream = BufReader::new(stream);
     let mut line = Vec::new();
@@ -198,8 +218,8 @@ async fn exchange(
         let read = async {
             let mut slice = Instant::now();
             while let Some(message) = reader.try_next().await? {
-                if let Message::Text(message) = message {
-                    receive(message.as_bytes());
+                if message.is_text() {
+                    receive(message).await;
                     yield_for_ui(&mut slice).await;
                 }
             }
@@ -221,13 +241,18 @@ async fn exchange(
             let mut slice = Instant::now();
             loop {
                 line.clear();
-                if reader.read_until(b'\n', &mut line).await? == 0 {
+                if (&mut reader)
+                    .take((MAX_EVENT_BYTES + 1) as u64)
+                    .read_until(b'\n', &mut line)
+                    .await?
+                    == 0
+                {
                     return Err::<(), _>(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
                 }
                 if line.len() > MAX_EVENT_BYTES {
                     return Err(std::io::Error::other("Codex 事件超过大小上限。"));
                 }
-                receive(&line);
+                receive(Message::Binary(std::mem::take(&mut line).into())).await;
                 yield_for_ui(&mut slice).await;
             }
         };

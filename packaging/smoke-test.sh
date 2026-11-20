@@ -360,19 +360,24 @@ SVG
     widget contains '已清除会话目标'
     slash '/plugins'
     widget contains 'Local Fixture Plugin'
+    widget click '管理 Local Fixture Plugin'
     widget click '安装'
     wait_until "plugin installed on the local fixture" test -f "$HOME/plugin-installed"
     widget click '卸载'
     wait_until "plugin removed on the local fixture" test -f "$HOME/plugin-uninstalled"
     slash '/apps'
     widget contains 'Fixture Connector'
+    widget not-contains 'fixture internal text'
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-extensions.png"
+    widget click '管理 Fixture Connector'
     widget click '停用'
     widget contains '此主机已停用'
+    widget click '管理 Fixture Connector'
     widget click '加载更多'
     widget contains 'Another Connector'
+    widget click '管理 Another Connector'
     widget click '连接'
     wait_until "connector authorization URL opened in the browser" grep -qFx 'https://example.invalid/connect' "$HOME/span-opened-link"
-    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-extensions.png"
     widget mouse '显示／隐藏侧栏'
     widget mouse '显示／隐藏侧栏'
     printf '%s\n' 'Slash commands opened the model picker, managed the thread goal, and routed plugin and app operations to Codex.'
@@ -938,6 +943,7 @@ PY
         widget mouse '工具栏 · 插件与连接器'
         widget contains 'Remote Fixture Plugin'
         widget not-contains 'Local Fixture Plugin'
+        widget click '管理 Remote Fixture Plugin'
         widget click '查看并安装'
         wait_until "the plugin installation review" dialog_open '安装插件'
         widget contains 'Fixture skill'

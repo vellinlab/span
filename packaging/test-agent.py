@@ -105,7 +105,7 @@ async def serve_shared():
     async def connection(websocket):
         process = await asyncio.create_subprocess_exec(
             sys.executable, __file__, "shared-stdio",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, limit=64 * 1024 * 1024,
         )
         requests = asyncio.create_task(forward_requests(websocket, process))
         events = asyncio.create_task(forward_events(websocket, process))
@@ -154,6 +154,9 @@ for line in sys.stdin:
                 "installed": plugin_installed, "enabled": plugin_installed,
                 "mustShowInstallationInterstitial": shared,
                 "installPolicy": "AVAILABLE", "authPolicy": "ON_USE"}
+        if not (home / "large-directory-sent").exists():
+            item["interface"]["screenshotUrls"] = ["data:image/png;base64," + "A" * 40_652_012]
+            (home / "large-directory-sent").touch()
         send({"id": request_id, "result": {"marketplaces": [
             {"name": "fixture-catalog", "path": None, "plugins": [item]}]}})
     elif method == "plugin/read":
@@ -175,6 +178,12 @@ for line in sys.stdin:
         if params["cursor"] is None:
             data = [{"id": "fixture_app", "name": "Fixture Connector",
                      "isAccessible": True, "isEnabled": connector_enabled}]
+            data.extend([
+                {"id": "github", "name": "GitHub", "description": "Inspect repositories and pull requests.", "isAccessible": True},
+                {"id": "google_drive", "name": "Google Drive", "description": "Search documents, sheets and slides.", "isAccessible": True},
+                {"id": "notion", "name": "Notion", "description": "Find pages and update databases.\n\nMCP server instructions: fixture internal text", "isAccessible": True},
+                {"id": "pets", "name": "Pets", "description": "Create animated companions.", "isAccessible": False},
+            ])
             next_cursor = "fixture-page-2"
         else:
             assert params["cursor"] == "fixture-page-2"
