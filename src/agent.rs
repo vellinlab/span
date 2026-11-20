@@ -938,8 +938,8 @@ impl Agent {
                 });
                 self.load_extensions(section, true, None);
                 if needs_auth && self.extensions.panel.is_mapped() {
-                    self.extensions.select(ExtensionSection::Apps);
                     self.load_extensions(ExtensionSection::Apps, true, None);
+                    self.extensions.select(ExtensionSection::Apps);
                 }
             }
         }

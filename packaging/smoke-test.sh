@@ -939,7 +939,7 @@ PY
         widget contains 'Remote Fixture Plugin'
         widget not-contains 'Local Fixture Plugin'
         widget click '查看并安装'
-        wait_until "the plugin installation review" dialog_open 'Remote Fixture Plugin'
+        wait_until "the plugin installation review" dialog_open '安装插件'
         widget contains 'Fixture skill'
         widget click '确认安装'
         wait_until "plugin installed through the SSH host app server" test -f "$WORKBENCH_SSH_FIXTURE/plugin-installed"

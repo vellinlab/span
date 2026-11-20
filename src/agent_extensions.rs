@@ -174,6 +174,7 @@ pub struct Extensions {
     action: RefCell<Option<Callback>>,
     changing: Cell<bool>,
     auth: gtk::Box,
+    pending_auth: RefCell<Vec<App>>,
 }
 
 impl Extensions {
@@ -232,6 +233,7 @@ impl Extensions {
             auth,
             action: RefCell::new(None),
             changing: Cell::new(false),
+            pending_auth: RefCell::new(Vec::new()),
         })
     }
 
@@ -307,6 +309,7 @@ impl Extensions {
         }
         page.state.set_text("正在读取当前主机的列表…");
         page.state.show();
+        page.rows.set_sensitive(false);
         page.more.set_sensitive(false);
         true
     }
@@ -314,6 +317,7 @@ impl Extensions {
     pub fn show_message(&self, section: Section, message: &str) {
         let page = self.page(section);
         page.loading.set(false);
+        page.rows.set_sensitive(true);
         page.more.set_sensitive(true);
         page.state.set_text(&limited(message, 400));
         page.state.show();
@@ -321,6 +325,7 @@ impl Extensions {
 
     pub fn disconnected(&self, message: &str) {
         self.finish_change("");
+        self.pending_auth.borrow_mut().clear();
         clear(&self.auth);
         self.auth.hide();
         for section in [Section::Plugins, Section::Apps] {
@@ -383,6 +388,9 @@ impl Extensions {
         self.show_message(section, &message);
         page.state.set_visible(!message.is_empty());
         self.render(section);
+        if section == Section::Apps {
+            self.render_auth();
+        }
     }
 
     pub fn begin_change(&self, notice: &str) -> bool {
@@ -391,12 +399,14 @@ impl Extensions {
         }
         self.set_feedback(notice);
         self.refresh.set_sensitive(false);
+        self.stack.set_sensitive(false);
         true
     }
 
     pub fn finish_change(&self, notice: &str) {
         self.changing.set(false);
         self.refresh.set_sensitive(true);
+        self.stack.set_sensitive(true);
         self.set_feedback(notice);
     }
 
@@ -438,6 +448,7 @@ impl Extensions {
         }
         let parent = self.panel.toplevel().and_downcast::<gtk::Window>();
         let dialog = gtk::MessageDialog::builder()
+            .title("安装插件")
             .modal(true)
             .destroy_with_parent(true)
             .message_type(gtk::MessageType::Question)
@@ -456,22 +467,36 @@ impl Extensions {
     pub fn show_auth(&self, result: &Value) -> bool {
         let needed = array(&result["appsNeedingAuth"])
             .take(12)
+            .filter_map(App::parse)
             .collect::<Vec<_>>();
         if needed.is_empty() {
             return false;
         }
+        self.pending_auth.replace(needed);
+        self.render_auth();
+        true
+    }
+
+    fn render_auth(&self) {
         clear(&self.auth);
+        let apps = self.apps.entries.borrow();
+        let mut pending = self.pending_auth.borrow_mut();
+        pending.retain(|app| !apps.iter().any(|entry| matches!(entry, Entry::App(current) if current.id == app.id && current.connected)));
+        if pending.is_empty() {
+            self.auth.hide();
+            return;
+        }
         self.auth.add(&label("此插件还有连接器需要授权。", 2));
-        for app in needed {
-            if let Some(uri) = install_url(app) {
-                let name = app["name"].as_str().unwrap_or("连接器");
-                self.auth
-                    .add(&link_button(&format!("授权 {}", limited(name, 50)), uri));
+        for app in pending.iter() {
+            if let Some(uri) = &app.url {
+                self.auth.add(&link_button(
+                    &format!("授权 {}", limited(&app.name, 50)),
+                    uri,
+                ));
             }
         }
         self.auth.show_all();
         self.auth.show();
-        true
     }
 
     fn render(&self, section: Section) {
