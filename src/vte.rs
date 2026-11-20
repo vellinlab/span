@@ -8,6 +8,9 @@ use gtk::{
 use std::ffi::{c_char, c_int, c_long, c_uint, c_void};
 use std::ptr::{NonNull, null_mut};
 
+// vte/vtepty.h. The RPM bundles a VTE version with this flag.
+const VTE_SPAWN_NO_PARENT_ENVV: c_uint = 1 << 25;
+
 #[repr(C)]
 pub struct VteTerminal {
     _private: [u8; 0],
@@ -194,15 +197,49 @@ impl Terminal {
             on_spawn(result);
         }
 
-        // VTE copies the arguments and merges the supplied entries into the environment.
+        // Keep the RPM's allocator setting in Span. VTE still adds its usual
+        // terminal variables to the filtered environment.
+        let environment;
+        let filtered;
+        let inherited;
+        let (envp, flags): (*mut *mut c_char, c_uint) = if crate::heap::has_private_allocator() {
+            fn key(var: &std::ffi::OsStr) -> &[u8] {
+                var.as_encoded_bytes()
+                    .split(|byte| *byte == b'=')
+                    .next()
+                    .unwrap_or_default()
+            }
+            let mut snapshot = glib::environ();
+            snapshot.retain(|var| {
+                // Copying the parent TERM as an override would bypass VTE's
+                // own default TERM. Any explicit override below still works.
+                let name = key(var);
+                name != b"TERM"
+                    && !crate::heap::PRIVATE_ENVIRONMENT
+                        .iter()
+                        .any(|private| name == private.as_bytes())
+            });
+            for entry in env {
+                let entry = std::ffi::OsStr::new(entry);
+                snapshot.retain(|var| key(var) != key(entry));
+                snapshot.push(entry.to_owned());
+            }
+            environment = snapshot;
+            filtered = environment.as_slice().to_glib_none();
+            (filtered.0, VTE_SPAWN_NO_PARENT_ENVV)
+        } else {
+            inherited = env.to_glib_none();
+            (inherited.0, 0)
+        };
+        // VTE copies these argument and environment arrays.
         unsafe {
             vte_terminal_spawn_async(
                 self.to_glib_none().0,
                 0,
                 cwd.to_glib_none().0,
                 argv.to_glib_none().0,
-                env.to_glib_none().0,
-                0,
+                envp,
+                flags,
                 None,
                 null_mut(),
                 None,

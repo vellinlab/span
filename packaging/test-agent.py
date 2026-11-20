@@ -10,6 +10,10 @@ import threading
 import time
 from pathlib import Path
 
+if os.environ.get("SPAN_TEST_RPM_ALLOCATOR") == "1":
+    assert "G_SLICE" not in os.environ
+    assert "SPAN_INTERNAL_G_SLICE" not in os.environ
+
 home = Path(os.environ.get("SPAN_BENCH_FIXTURE_HOME", os.environ["HOME"]))
 control_socket = Path(os.environ.get("CODEX_HOME", home / ".codex")) / "app-server-control/app-server-control.sock"
 thread = "preview-thread"

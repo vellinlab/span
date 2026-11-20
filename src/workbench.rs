@@ -428,6 +428,10 @@ impl Workbench {
 
     fn close_session(&self, session: &Rc<Session>) {
         let catalog = session.existing_catalog();
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        if catalog.is_some() {
+            crate::heap::release_after_session_close();
+        }
         session.cancel();
         if let Some(panel) = catalog
             && panel.parent().as_ref() == Some(self.sidebar_catalog.upcast_ref())

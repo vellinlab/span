@@ -329,7 +329,14 @@ pub(crate) fn open_link(widget: &impl IsA<gtk::Widget>, uri: &str) {
     if !web_url(uri) {
         return;
     }
-    let Err(error) = gio::AppInfo::launch_default_for_uri(uri, gio::AppLaunchContext::NONE) else {
+    let context = crate::heap::has_private_allocator().then(|| {
+        let context = gio::AppLaunchContext::new();
+        for variable in crate::heap::PRIVATE_ENVIRONMENT {
+            context.unsetenv(variable);
+        }
+        context
+    });
+    let Err(error) = gio::AppInfo::launch_default_for_uri(uri, context.as_ref()) else {
         return;
     };
     let parent = widget.toplevel().and_downcast::<gtk::Window>();

@@ -130,6 +130,29 @@ window_exists() {
 }
 wait_until "the GTK3 window" window_exists
 wait_until "the local Bash PTY" test -s "$HOME/bash-ready"
+if [[ ${SPAN_TEST_RPM_ALLOCATOR:-0} == 1 ]]; then
+    first_bash="$(head -n 1 "$HOME/bash-ready")"
+    span_env="$(tr '\0' '\n' < "/proc/$app_pid/environ")"
+    bash_env="$(tr '\0' '\n' < "/proc/$first_bash/environ")"
+    grep -qx 'TERM=xterm-256color' <<< "$bash_env"
+    grep -qx 'COLORTERM=truecolor' <<< "$bash_env"
+    if [[ -v G_SLICE ]]; then
+        grep -Fqx "G_SLICE=$G_SLICE" <<< "$span_env"
+        grep -Fqx "G_SLICE=$G_SLICE" <<< "$bash_env"
+    else
+        grep -qx 'SPAN_INTERNAL_G_SLICE=1' <<< "$span_env"
+        grep -qx 'G_SLICE=always-malloc' <<< "$span_env"
+        if grep -q '^G_SLICE=' <<< "$bash_env"; then
+            printf '%s\n' 'The private RPM allocator setting reached the terminal.' >&2
+            exit 1
+        fi
+    fi
+    if grep -q '^SPAN_INTERNAL_G_SLICE=' <<< "$bash_env"; then
+        printf '%s\n' 'The private RPM allocator marker reached the terminal.' >&2
+        exit 1
+    fi
+    printf '%s\n' 'The RPM preserves the terminal environment and scopes its allocator setting.'
+fi
 window="$(xwininfo -root -tree | awk '/"Span"/ && !found { print $1; found=1 }')"
 xprop -id "$window" _NET_WM_ICON | grep -F '_NET_WM_ICON(CARDINAL) =' >/dev/null
 if grep -q 'Failed to load Workbench theme' "$HOME/app.log"; then

@@ -17,6 +17,7 @@ mod agent_usage;
 mod browser;
 mod extension_art;
 mod files;
+mod heap;
 mod history_window;
 mod host_dialog;
 mod hosts;

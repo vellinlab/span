@@ -153,6 +153,11 @@ fn through_channel<T: Send>(
             .args(["-s", "--", socket, "sftp"]);
         command
     };
+    if crate::heap::has_private_allocator() {
+        for variable in crate::heap::PRIVATE_ENVIRONMENT {
+            command.env_remove(variable);
+        }
+    }
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

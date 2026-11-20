@@ -50,6 +50,11 @@ async fn logo(uri: String) -> Option<Pixbuf> {
 // an HTTPS transport. curl is optional; the tile already has an offline image.
 fn fetch(uri: &str) -> Option<Vec<u8>> {
     let mut command = Command::new("curl");
+    if crate::heap::has_private_allocator() {
+        for variable in crate::heap::PRIVATE_ENVIRONMENT {
+            command.env_remove(variable);
+        }
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
