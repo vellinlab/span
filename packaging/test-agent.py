@@ -204,6 +204,9 @@ for line in sys.stdin:
         goal = json.loads(goal_file.read_text()) if goal_file.exists() else None
         if method == "thread/goal/set":
             assert params["origin"] == "user"
+            if params.get("objective") == "Goal rejected by fixture":
+                send({"id": request_id, "error": {"code": -32602, "message": "Fixture goal rejected"}})
+                continue
             goal = {"objective": params.get("objective") or goal["objective"], "status": params["status"]}
             goal_file.write_text(json.dumps(goal))
         if method == "thread/goal/clear":

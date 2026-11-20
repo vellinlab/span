@@ -109,6 +109,7 @@ struct CatalogFetch {
 enum ComposerAction {
     Send,
     Steer,
+    Goal,
     Stop,
     Continue,
 }
@@ -122,6 +123,7 @@ impl ComposerAction {
                 "追加消息",
                 "Enter 追加到当前任务 · Shift+Enter 换行",
             ),
+            Self::Goal => ("goal", "发送目标", "Enter 发送目标 · Shift+Enter 换行"),
             Self::Stop => ("stop", "中断推理", "中断当前推理"),
             Self::Continue => ("continue", "继续推理", "Enter 继续 · Shift+Enter 换行"),
         }
@@ -181,6 +183,9 @@ pub struct Agent {
     plan_badge: gtk::Label,
     special_turn: Cell<bool>,
     goal: gtk::Label,
+    goal_mode: Cell<bool>,
+    goal_mode_bar: gtk::Box,
+    placeholder: gtk::Label,
     goal_pending: Cell<bool>,
     goal_revision: Cell<u64>,
     options: Rc<Options>,
@@ -338,6 +343,16 @@ impl Agent {
             .no_show_all(true)
             .build();
         goal.style_context().add_class("agent-goal");
+        let goal_mode_bar = row(6);
+        goal_mode_bar.style_context().add_class("agent-goal-mode");
+        goal_mode_bar.set_no_show_all(true);
+        let goal_mode_label = gtk::Label::new(Some("会话目标草稿"));
+        goal_mode_label.show();
+        goal_mode_bar.pack_start(&goal_mode_label, false, false, 0);
+        let cancel_goal = icons::button(Icon::Close, "取消目标草稿", "取消目标草稿（Esc）");
+        cancel_goal.set_focus_on_click(false);
+        cancel_goal.show();
+        goal_mode_bar.pack_start(&cancel_goal, false, false, 0);
         if let Some(accessible) = input.accessible() {
             accessible.set_name("消息输入框");
         }
@@ -389,6 +404,7 @@ impl Agent {
         for (action, icon) in [
             (ComposerAction::Send, Icon::Up),
             (ComposerAction::Steer, Icon::Up),
+            (ComposerAction::Goal, Icon::Up),
             (ComposerAction::Stop, Icon::Stop),
             (ComposerAction::Continue, Icon::Pause),
         ] {
@@ -417,6 +433,7 @@ impl Agent {
         card.pack_start(&task_status.widget, false, false, 0);
         card.pack_start(&goal, false, false, 0);
         card.pack_start(&quotes.widget, false, false, 0);
+        card.pack_start(&goal_mode_bar, false, false, 0);
         card.pack_start(&editor, false, false, 0);
         card.pack_start(&attachments.chips, false, false, 0);
         card.pack_end(&inputs, false, false, 0);
@@ -507,6 +524,9 @@ impl Agent {
             plan_badge,
             special_turn: Cell::new(false),
             goal,
+            goal_mode: Cell::new(false),
+            goal_mode_bar,
+            placeholder,
             goal_pending: Cell::new(false),
             goal_revision: Cell::new(0),
             options,
@@ -523,6 +543,14 @@ impl Agent {
             primary,
             primary_icons,
             stop_button,
+        });
+        let weak = Rc::downgrade(&agent);
+        cancel_goal.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade()
+                && agent.cancel_goal_draft()
+            {
+                agent.input.grab_focus();
+            }
         });
         agent.bind();
         agent.update_controls();
@@ -633,7 +661,7 @@ impl Agent {
         self.input.connect_key_press_event(move |input, event| {
             use gtk::gdk::{
                 ModifierType,
-                keys::constants::{ISO_Enter, KP_Enter, Return},
+                keys::constants::{Escape, ISO_Enter, KP_Enter, Return},
             };
             if weak
                 .upgrade()
@@ -642,6 +670,15 @@ impl Agent {
                 return glib::Propagation::Stop;
             }
             let modifiers = event.state() & gtk::accelerator_get_default_mod_mask();
+            if event.keyval() == Escape
+                && modifiers.is_empty()
+                && weak.upgrade().is_some_and(|agent| {
+                    agent.goal_mode.get()
+                        && (input.im_context_filter_keypress(event) || agent.cancel_goal_draft())
+                })
+            {
+                return glib::Propagation::Stop;
+            }
             if ![Return, KP_Enter, ISO_Enter].contains(&event.keyval())
                 || !(modifiers.is_empty() || modifiers == ModifierType::CONTROL_MASK)
             {
@@ -657,9 +694,11 @@ impl Agent {
         });
         let weak = Rc::downgrade(self);
         self.input.connect_paste_clipboard(move |input| {
-            input.stop_signal_emission_by_name("paste-clipboard");
-            if let Some(agent) = weak.upgrade().filter(|agent| agent.input.is_editable()) {
-                agent.paste();
+            if let Some(agent) = weak.upgrade().filter(|agent| !agent.goal_mode.get()) {
+                input.stop_signal_emission_by_name("paste-clipboard");
+                if input.is_editable() {
+                    agent.paste();
+                }
             }
         });
         let weak = Rc::downgrade(self);
@@ -680,7 +719,9 @@ impl Agent {
             buffer.connect_changed(move |_| {
                 if let Some(agent) = weak.upgrade() {
                     agent.update_primary();
-                    agent.commands.update(&agent.input, &agent.editor_text());
+                    if !agent.goal_mode.get() {
+                        agent.commands.update(&agent.input, &agent.editor_text());
+                    }
                 }
             });
         }
@@ -1429,12 +1470,12 @@ impl Agent {
                     return;
                 };
                 let previous = self.thread.replace(Some(id.to_owned()));
-                if self
+                let changed_thread = self
                     .last_thread
                     .borrow()
                     .as_deref()
-                    .is_some_and(|previous| previous != id)
-                {
+                    .is_some_and(|previous| previous != id);
+                if changed_thread {
                     self.quotes.finish_send(usize::MAX);
                 }
                 self.last_thread.replace(Some(id.to_owned()));
@@ -1451,6 +1492,9 @@ impl Agent {
                     self.cwd.set_text(&cwd.replace('\0', "�"));
                 }
                 self.clear_history();
+                if changed_thread {
+                    self.cancel_goal_draft();
+                }
                 if resume {
                     self.refresh_goal(id);
                 }
@@ -1773,6 +1817,10 @@ impl Agent {
 
     fn submit_prompt(self: &Rc<Self>) {
         let editor = self.editor_text();
+        if self.goal_mode.get() {
+            self.submit_goal_draft(&editor);
+            return;
+        }
         let selected = self.commands.selected();
         if self.execute_command(selected.unwrap_or(editor.trim_end()), &editor) {
             return;
@@ -1806,6 +1854,14 @@ impl Agent {
             .and_then(|buffer| buffer.text(&buffer.start_iter(), &buffer.end_iter(), false))
             .map(|text| text.to_string())
             .unwrap_or_default()
+    }
+
+    fn input_has_text(&self) -> bool {
+        self.input.buffer().is_some_and(|buffer| {
+            buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .is_some_and(|text| !text.trim().is_empty())
+        })
     }
 
     fn replace_command(&self, previous: &str, replacement: &str) {
@@ -2600,14 +2656,17 @@ impl Agent {
             .set_visible(!ready && self.has_resume() && !self.settings.is_visible());
         self.retry_session.set_sensitive(!opening && !waiting);
         self.connect.set_sensitive(!opening && !running && !waiting);
-        self.input.set_editable(!waiting);
+        let goal_mode = self.goal_mode.get();
+        self.goal_mode_bar.set_sensitive(!self.goal_pending.get());
+        self.input
+            .set_editable(!waiting && !(goal_mode && self.goal_pending.get()));
         self.attachments
             .button
-            .set_sensitive(ready && !opening && !waiting);
+            .set_sensitive(ready && !opening && !waiting && !goal_mode);
         self.attachments
             .chips
-            .set_sensitive(ready && !opening && !waiting);
-        self.quotes.widget.set_sensitive(!waiting);
+            .set_sensitive(ready && !opening && !waiting && !goal_mode);
+        self.quotes.widget.set_sensitive(!waiting && !goal_mode);
         self.options.update(ready && !opening && !waiting, running);
         self.usage.context.button.set_sensitive(ready);
         self.usage.plan.button.set_sensitive(self.initialized.get());
@@ -2655,15 +2714,14 @@ impl Agent {
     }
 
     fn update_primary(&self) {
+        let goal_mode = self.goal_mode.get();
         let has_draft = (self.active.get() || self.can_continue.get())
             && (self.attachments.chips.is_visible()
                 || self.quotes.widget.is_visible()
-                || self.input.buffer().is_some_and(|buffer| {
-                    buffer
-                        .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                        .is_some_and(|text| !text.trim().is_empty())
-                }));
-        let action = if self.active.get() {
+                || self.input_has_text());
+        let action = if goal_mode {
+            ComposerAction::Goal
+        } else if self.active.get() {
             if has_draft && !self.special_turn.get() {
                 ComposerAction::Steer
             } else {
@@ -2692,7 +2750,7 @@ impl Agent {
         }
         let can_stop = self.turn.borrow().is_some() && !self.interrupting.get();
         self.stop_button
-            .set_visible(action == ComposerAction::Steer);
+            .set_visible(action == ComposerAction::Steer || (goal_mode && self.active.get()));
         self.stop_button.set_sensitive(can_stop);
         let can_send = self.thread.borrow().is_some()
             && !self.opening.get()
@@ -2702,6 +2760,7 @@ impl Agent {
         let enabled = match action {
             ComposerAction::Stop => can_stop,
             ComposerAction::Steer => can_stop && can_send,
+            ComposerAction::Goal => can_send && !self.goal_pending.get() && self.input_has_text(),
             _ => can_send,
         };
         self.primary.set_sensitive(enabled);

@@ -1,5 +1,4 @@
 use super::{Agent, Request, limited};
-use gtk::glib;
 use gtk::prelude::*;
 use serde_json::{Value, json};
 use std::rc::Rc;
@@ -8,16 +7,8 @@ const MAX_OBJECTIVE: usize = 4000;
 
 pub(super) enum Action {
     Refresh(u64),
-    Command {
-        edit: bool,
-        draft: String,
-    },
-    Save {
-        draft: String,
-        dialog: glib::WeakRef<gtk::Dialog>,
-        error: glib::WeakRef<gtk::Label>,
-        scroll: glib::WeakRef<gtk::ScrolledWindow>,
-    },
+    Command { edit: bool, draft: String },
+    Save,
 }
 
 impl Agent {
@@ -26,11 +17,11 @@ impl Agent {
             self.show_status("请先打开 Codex 会话。");
             return;
         };
-        if arguments.is_empty() {
-            self.open_goal_editor(thread, draft.to_owned());
+        if self.goal_pending.get() {
             return;
         }
-        if self.goal_pending.get() {
+        if arguments.is_empty() {
+            self.begin_goal_draft(draft, "");
             return;
         }
         let (method, params) = match arguments {
@@ -63,128 +54,49 @@ impl Agent {
         );
     }
 
-    fn open_goal_editor(self: &Rc<Self>, thread: String, draft: String) {
-        let Some(parent) = self.panel.toplevel().and_downcast::<gtk::Window>() else {
+    fn begin_goal_draft(&self, command: &str, objective: &str) {
+        if self.editor_text() != command {
+            return;
+        }
+        self.set_goal_mode(true);
+        self.replace_command(command, objective);
+        if self.panel.is_mapped() {
+            self.input.grab_focus();
+        }
+    }
+
+    pub(super) fn set_goal_mode(&self, enabled: bool) {
+        self.goal_mode.set(enabled);
+        self.goal_mode_bar.set_visible(enabled);
+        self.placeholder.set_text(if enabled {
+            "描述你希望在此会话中达成的目标"
+        } else {
+            "输入消息，或添加附件"
+        });
+        self.update_controls();
+    }
+
+    pub(super) fn cancel_goal_draft(&self) -> bool {
+        if !self.goal_mode.get() || self.goal_pending.get() {
+            return false;
+        }
+        self.replace_command(&self.editor_text(), "");
+        self.set_goal_mode(false);
+        true
+    }
+
+    pub(super) fn submit_goal_draft(&self, draft: &str) {
+        if self.goal_pending.get() || self.opening.get() || !self.input.is_editable() {
+            return;
+        }
+        let Some(thread) = self.thread.borrow().clone() else {
+            self.show_status("请先重连 Codex 会话。");
             return;
         };
-        let dialog = gtk::Dialog::builder()
-            .transient_for(&parent)
-            .title("设置目标")
-            .use_header_bar(1)
-            .modal(true)
-            .destroy_with_parent(true)
-            .default_width(500)
-            .build();
-        dialog.style_context().add_class("workbench-dialog");
-        dialog.add_button("取消", gtk::ResponseType::Cancel);
-        let submit = dialog.add_button("发送目标", gtk::ResponseType::Accept);
-        submit.style_context().add_class("primary");
-        submit.set_tooltip_text(Some("Ctrl+Enter"));
-        submit.set_sensitive(false);
-
-        let input = gtk::TextView::builder()
-            .wrap_mode(gtk::WrapMode::WordChar)
-            .accepts_tab(false)
-            .top_margin(8)
-            .bottom_margin(8)
-            .left_margin(10)
-            .right_margin(10)
-            .build();
-        if let Some(accessible) = input.accessible() {
-            accessible.set_name("会话目标输入框");
+        match objective_params(&thread, draft.trim()) {
+            Ok(params) => self.request_goal(Action::Save, "thread/goal/set", params),
+            Err(message) => self.show_status(message),
         }
-        let scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .min_content_height(122)
-            .build();
-        scroll.style_context().add_class("goal-editor-input");
-        scroll.add(&input);
-        let hint = gtk::Label::builder()
-            .label("描述你希望在此会话中达成的目标")
-            .xalign(0.0)
-            .mnemonic_widget(&input)
-            .build();
-        let error = gtk::Label::builder()
-            .xalign(0.0)
-            .wrap(true)
-            .max_width_chars(52)
-            .no_show_all(true)
-            .build();
-        error.style_context().add_class("form-error");
-        let body = dialog.content_area();
-        body.style_context().add_class("dialog-body");
-        body.set_spacing(10);
-        body.pack_start(&hint, false, false, 0);
-        body.pack_start(&scroll, true, true, 0);
-        body.pack_start(&error, false, false, 0);
-
-        let Some(buffer) = input.buffer() else { return };
-        let weak_submit = submit.downgrade();
-        buffer.connect_changed(move |buffer| {
-            if let Some(submit) = weak_submit.upgrade() {
-                submit.set_sensitive(!buffer_text(buffer).trim().is_empty());
-            }
-        });
-        let weak_dialog = dialog.downgrade();
-        input.connect_key_press_event(move |input, event| {
-            use gtk::gdk::{
-                ModifierType,
-                keys::constants::{KP_Enter, Return},
-            };
-            if [Return, KP_Enter].contains(&event.keyval())
-                && event.state() & gtk::accelerator_get_default_mod_mask()
-                    == ModifierType::CONTROL_MASK
-                && !input.im_context_filter_keypress(event)
-                && let Some(dialog) = weak_dialog.upgrade()
-            {
-                dialog.response(gtk::ResponseType::Accept);
-                return glib::Propagation::Stop;
-            }
-            glib::Propagation::Proceed
-        });
-        let weak = Rc::downgrade(self);
-        let generation = self.history_generation.get();
-        dialog.connect_response(move |dialog, response| {
-            if response != gtk::ResponseType::Accept {
-                dialog.close();
-                return;
-            }
-            let Some(agent) = weak.upgrade() else { return };
-            if agent.thread.borrow().as_deref() != Some(thread.as_str())
-                || agent.history_generation.get() != generation
-                || agent.opening.get()
-            {
-                error.set_text("当前会话已断开或切换，请回到原会话后重新打开目标编辑器。");
-                error.show();
-                return;
-            }
-            if agent.goal_pending.get() {
-                return;
-            }
-            let params = match objective_params(&thread, buffer_text(&buffer).trim()) {
-                Ok(params) => params,
-                Err(message) => {
-                    error.set_text(message);
-                    error.show();
-                    return;
-                }
-            };
-            error.hide();
-            dialog.set_response_sensitive(gtk::ResponseType::Accept, false);
-            scroll.set_sensitive(false);
-            agent.request_goal(
-                Action::Save {
-                    draft: draft.clone(),
-                    dialog: dialog.downgrade(),
-                    error: error.downgrade(),
-                    scroll: scroll.downgrade(),
-                },
-                "thread/goal/set",
-                params,
-            );
-        });
-        dialog.show_all();
-        input.grab_focus();
     }
 
     pub(super) fn refresh_goal(&self, thread: &str) {
@@ -199,6 +111,7 @@ impl Agent {
     }
 
     fn request_goal(&self, action: Action, method: &str, params: Value) {
+        let saving_draft = matches!(action, Action::Save);
         self.goal_pending.set(true);
         self.goal_revision
             .set(self.goal_revision.get().wrapping_add(1));
@@ -210,6 +123,9 @@ impl Agent {
             method,
             params,
         );
+        if saving_draft {
+            self.update_controls();
+        }
     }
 
     pub(super) fn goal_failed(&self, action: &Action, message: &str) {
@@ -217,21 +133,9 @@ impl Agent {
             return;
         }
         self.goal_pending.set(false);
-        if let Action::Save {
-            dialog,
-            error,
-            scroll,
-            ..
-        } = action
-            && let (Some(dialog), Some(error), Some(scroll)) =
-                (dialog.upgrade(), error.upgrade(), scroll.upgrade())
-        {
-            dialog.set_response_sensitive(gtk::ResponseType::Accept, true);
-            scroll.set_sensitive(true);
-            error.set_text(&message.replace('\0', "�"));
-            error.show();
-        } else {
-            self.show_status(message);
+        self.show_status(message);
+        if matches!(action, Action::Save) {
+            self.update_controls();
         }
     }
 
@@ -253,24 +157,20 @@ impl Agent {
                         self.show_status("当前会话没有目标。");
                     }
                 }
-                let replacement = if edit {
-                    format!(
-                        "/goal {}",
-                        result["goal"]["objective"].as_str().unwrap_or_default()
-                    )
+                if edit {
+                    self.begin_goal_draft(
+                        &draft,
+                        result["goal"]["objective"].as_str().unwrap_or_default(),
+                    );
                 } else {
-                    String::new()
-                };
-                self.replace_command(&draft, &replacement);
+                    self.replace_command(&draft, "");
+                }
             }
-            Action::Save { draft, dialog, .. } => {
+            Action::Save => {
                 self.goal_pending.set(false);
                 self.render_goal(&result["goal"]);
-                self.replace_command(&draft, "");
-                if let Some(dialog) = dialog.upgrade() {
-                    dialog.close();
-                }
-                self.input.grab_focus();
+                self.replace_command(&self.editor_text(), "");
+                self.set_goal_mode(false);
             }
         }
     }
@@ -299,12 +199,6 @@ impl Agent {
         self.goal.set_text(&text);
         self.goal.show();
     }
-}
-
-fn buffer_text(buffer: &gtk::TextBuffer) -> glib::GString {
-    buffer
-        .text(&buffer.start_iter(), &buffer.end_iter(), false)
-        .unwrap_or_default()
 }
 
 fn objective_params(thread: &str, objective: &str) -> Result<Value, &'static str> {
