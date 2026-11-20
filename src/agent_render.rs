@@ -403,6 +403,24 @@ fn parser(markdown: &str) -> Parser<'_> {
     )
 }
 
+// Static blocks without a hyperlink can use GTK's native label drawing path.
+// In particular a table can contain hundreds of plain cells.
+fn static_label(markup: &str, linked: impl FnOnce() -> gtk::Label) -> gtk::Label {
+    if markup.contains("<a href=") {
+        let label = linked();
+        label.set_markup(markup);
+        return label;
+    }
+    let label = text("");
+    label.style_context().add_class("agent-markdown");
+    if markup.contains(['<', '&']) && pango::parse_markup(markup, '\0').is_ok() {
+        label.set_markup(markup);
+    } else {
+        label.set_text(markup);
+    }
+    label
+}
+
 fn flush_text(
     blocks: &gtk::Box,
     pending: &mut String,
@@ -410,14 +428,8 @@ fn flush_text(
     new_label: &impl Fn() -> gtk::Label,
 ) {
     if !pending.trim().is_empty() {
-        let label = new_label();
+        let label = static_label(pending.trim(), new_label);
         label.style_context().add_class("agent-prose");
-        let markup = pending.trim();
-        if markup.contains("<a href=") || pango::parse_markup(markup, '\0').is_ok() {
-            label.set_markup(markup);
-        } else {
-            label.set_text(markup);
-        }
         let part = Part::new(&label, "\n\n");
         blocks.add(&part.widget);
         selectable.push(part);
@@ -463,8 +475,7 @@ fn table(
             Event::End(TagEnd::TableCell) => {
                 in_cell = false;
                 if row < 100 && col < 20 {
-                    let label = markdown_label();
-                    label.set_markup(&cell_markup);
+                    let label = static_label(&cell_markup, markdown_label);
                     label.set_hexpand(true);
                     label.set_width_chars(9);
                     label.set_max_width_chars(48);
