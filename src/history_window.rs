@@ -390,6 +390,8 @@ impl HistoryWindow {
         };
         let mut anchor = None;
         let mut anchor_height = i32::MAX;
+        let mut next_anchor = None;
+        let mut next_anchor_top = top + page;
         let mut changed_above = false;
         let mut restored = false;
         let mut shaped = false;
@@ -422,9 +424,10 @@ impl HistoryWindow {
             let near =
                 bottom >= near_top - page * before && y_px <= near_top + page * (1.0 + after);
             let is_anchor = y_px <= top && top < bottom && height < anchor_height;
+            let is_next_anchor = y_px > top && y_px < next_anchor_top;
             let hide = far && block.visible.get();
             let restore = near && !block.visible.get();
-            if !hide && !restore && !is_anchor {
+            if !hide && !restore && !is_anchor && !is_next_anchor {
                 continue;
             }
             let (Some(slot), Some(content)) = (block.slot.upgrade(), block.content.upgrade())
@@ -437,6 +440,10 @@ impl HistoryWindow {
             if is_anchor {
                 anchor_height = height;
                 anchor = Some((slot.clone(), y, top));
+            }
+            if is_next_anchor {
+                next_anchor_top = y_px;
+                next_anchor = Some((slot.clone(), y, top));
             }
             if hide && !protected(&slot) {
                 if block.materialize.is_some() && !idle {
@@ -467,7 +474,8 @@ impl HistoryWindow {
             }
         }
         if changed_above && self.anchor.borrow().is_none() {
-            self.anchor.replace(anchor);
+            // Paragraph spacing may put the viewport top between two slots.
+            self.anchor.replace(anchor.or(next_anchor));
         }
         if shaped && self.follow_tail.get() {
             let adjustment = adj.downgrade();
