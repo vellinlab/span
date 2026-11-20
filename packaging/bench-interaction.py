@@ -37,6 +37,17 @@ def until(check, interval=0.02):
     raise RuntimeError("X11 benchmark setup timed out")
 
 
+def sidebar_handle(window):
+    # GTK3 Paned owns an input-only subwindow covering the divider. Match
+    # the vertical handle beside the visible sidebar in both builds.
+    for child in window.query_tree().children:
+        bounds = child.get_geometry()
+        if (140 <= bounds.x <= 420 and bounds.width <= 12 and bounds.height >= 400
+                and child.get_attributes().map_state == X.IsViewable):
+            return child, bounds
+    raise RuntimeError("the sidebar divider has no visible input window")
+
+
 IMAGE_COLORS = [(243, 175, 19), (59, 206, 133), (200, 119, 218)]
 
 
@@ -314,6 +325,35 @@ def benchmark(binary, workload):
                           f"app CPU {cost:.0f} ms / 160 events", flush=True)
 
                 drag("conversation")
+                if workload == "history":
+                    handle, bounds = sidebar_handle(win)
+                    origin = screen.screen().root.translate_coords(win, 0, 0)
+                    x = origin.x + bounds.x + bounds.width // 2
+                    y = origin.y + bounds.y + bounds.height // 2
+                    xtest.fake_input(screen, X.MotionNotify, x=x, y=y)
+                    xtest.fake_input(screen, X.ButtonPress, 1)
+                    screen.sync()
+                    time.sleep(0.04)
+                    begin = cpu_seconds()
+                    start = time.monotonic()
+                    for frame in range(160):
+                        phase = frame % 80
+                        offset = 3 * min(phase, 80 - phase)
+                        xtest.fake_input(screen, X.MotionNotify, x=x + offset, y=y)
+                        screen.flush()
+                        time.sleep(max(0, start + (frame + 1) / 60 - time.monotonic()))
+                        if frame == 40:
+                            until(lambda: handle.get_geometry().x >= bounds.x + 90, 0.002)
+                    xtest.fake_input(screen, X.MotionNotify, x=x, y=y)
+                    xtest.fake_input(screen, X.ButtonRelease, 1)
+                    screen.sync()
+                    until(lambda: handle.get_geometry().x == bounds.x)
+                    time.sleep(0.35)
+                    cost = (cpu_seconds() - begin) * 1000
+                    print(f"{name} sidebar divider drag: app CPU {cost:.0f} ms / 160 motions",
+                          flush=True)
+                    xdo("mousemove", "--window", wid, 715, 320)
+
                 # Simulate high-resolution input arriving in bursts within one frame.
                 # Move through the transcript, rather than pushing at an endpoint.
                 begin = cpu_seconds()
