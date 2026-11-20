@@ -153,10 +153,11 @@ impl Browser {
         rows.set_headers_visible(true);
         rows.set_enable_search(true);
         rows.set_search_column(0);
-        rows.set_tooltip_column(4);
+        rows.set_has_tooltip(true);
         for (index, (title, width)) in [("名称", 118), ("大小", 68)].into_iter().enumerate() {
             let renderer = gtk::CellRendererText::new();
             renderer.set_ellipsize(pango::EllipsizeMode::End);
+            renderer.set_single_paragraph_mode(true);
             let column = gtk::TreeViewColumn::new();
             column.set_title(title);
             column.set_resizable(true);
@@ -173,6 +174,8 @@ impl Browser {
             TreeViewColumnExt::add_attribute(&column, &renderer, "text", index as i32);
             rows.append_column(&column);
         }
+        // Both columns are fixed-sizing and filenames are escaped to a single line.
+        rows.set_fixed_height_mode(true);
 
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Automatic)
@@ -320,6 +323,41 @@ impl Browser {
     }
 
     fn connect(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.rows
+            .connect_query_tooltip(move |rows, mut x, mut y, keyboard, tooltip| {
+                let Some((Some(model), path, iter)) =
+                    rows.tooltip_context(&mut x, &mut y, keyboard)
+                else {
+                    return false;
+                };
+                let Some(browser) = weak.upgrade() else {
+                    return false;
+                };
+                let directory = browser.directory.borrow();
+                let Some(entry) = model
+                    .value(&iter, 2)
+                    .get::<u32>()
+                    .ok()
+                    .and_then(|i| directory.as_ref()?.entries.get(i as usize))
+                else {
+                    return false;
+                };
+                let modified = entry
+                    .modified
+                    .and_then(|timestamp| glib::DateTime::from_unix_local(timestamp).ok())
+                    .and_then(|date| date.format("%Y-%m-%d %H:%M").ok())
+                    .map_or_else(|| "—".into(), |s| s.to_string());
+                let mode = entry
+                    .mode
+                    .map_or_else(|| "—".into(), |mode| format!("{:04o}", mode & 0o7777));
+                tooltip.set_text(Some(&format!(
+                    "{}\n修改时间 {modified} · 权限 {mode}",
+                    files::display(&entry.name)
+                )));
+                rows.set_tooltip_row(tooltip, &path);
+                true
+            });
         let weak = Rc::downgrade(self);
         self.path.connect_changed(move |_| {
             if let Some(browser) = weak.upgrade() {
@@ -975,7 +1013,6 @@ impl Browser {
             String::static_type(),
             u32::static_type(),
             gdk_pixbuf::Pixbuf::static_type(),
-            String::static_type(),
         ]);
         for (index, entry) in directory.entries.iter().enumerate() {
             if !show_hidden && entry.hidden() {
@@ -991,29 +1028,9 @@ impl Browser {
                 (Kind::File, Some(size)) => glib::format_size(size).to_string(),
                 _ => "—".into(),
             };
-            let modified = entry
-                .modified
-                .and_then(|timestamp| glib::DateTime::from_unix_local(timestamp).ok())
-                .and_then(|date| date.format("%Y-%m-%d %H:%M").ok())
-                .map_or_else(|| "—".into(), |s| s.to_string());
-            let mode = entry
-                .mode
-                .map_or_else(|| "—".into(), |mode| format!("{:04o}", mode & 0o7777));
             list.insert_with_values(
                 None,
-                &[
-                    (0, &name),
-                    (1, &size),
-                    (2, &(index as u32)),
-                    (3, icon),
-                    (
-                        4,
-                        &format!(
-                            "{}\n修改时间 {modified} · 权限 {mode}",
-                            glib::markup_escape_text(&name)
-                        ),
-                    ),
-                ],
+                &[(0, &name), (1, &size), (2, &(index as u32)), (3, icon)],
             );
         }
         list
