@@ -44,14 +44,15 @@ jobs:
 
       - name: Compare software-rendered X11 interaction with the released baseline
         if: github.ref == 'refs/tags/v0.1.0-rc.22' || startsWith(github.ref, 'refs/heads/perf/')
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           bench_dir="$(mktemp -d)"
           baseline_tag=v0.1.0-rc.26
           if [[ "$GITHUB_REF" == refs/tags/v0.1.0-rc.22 ]]; then baseline_tag=v0.1.0-rc.21; fi
-          gh release download "$baseline_tag" --pattern 'span_*_amd64.deb' --dir "$bench_dir"
-          dpkg-deb -x "$bench_dir"/*.deb "$bench_dir/old"
+          previous="span_${baseline_tag#v}_amd64.deb"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$baseline_tag/$previous" \
+            --output "$bench_dir/$previous"
+          dpkg-deb -x "$bench_dir/$previous" "$bench_dir/old"
           mkdir "$bench_dir/$baseline_tag" "$bench_dir/candidate"
           ln -s "$bench_dir/old/usr/bin/span" "$bench_dir/$baseline_tag/span"
           ln -s "$PWD/target/release/span" "$bench_dir/candidate/span"
@@ -142,7 +143,9 @@ jobs:
             baseline_tag=v0.1.0-rc.26
             if [[ "$GITHUB_REF" == refs/tags/v0.1.0-rc.22 ]]; then baseline_tag=v0.1.0-rc.21; fi
             previous="span-${baseline_tag#v}-1.el8.x86_64.rpm"
-            gh release download "$baseline_tag" --pattern "$previous" --dir "$upgrade_dir"
+            curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+              "https://github.com/$GITHUB_REPOSITORY/releases/download/$baseline_tag/$previous" \
+              --output "$upgrade_dir/$previous"
             compare=(--env "SPAN_BENCH_RPM=/span-upgrade/$previous")
           fi
           docker run --rm "${compare[@]}" --volume "$PWD:/work" --workdir /work \
