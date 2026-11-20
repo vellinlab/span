@@ -1,4 +1,4 @@
-//! Keep distant transcript content out of GTK layout and release large saved replies.
+//! Keep distant transcript content and shaped prose out of GTK layout.
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -94,20 +94,43 @@ impl HistoryScroll {
 
 struct Block {
     slot: glib::WeakRef<gtk::Box>,
-    content: glib::WeakRef<gtk::Box>,
+    content: glib::WeakRef<gtk::Widget>,
+    text: Option<DeferredText>,
 }
 
-struct DeferredReply {
-    slot: gtk::Box,
-    markdown: String,
-    build: Box<dyn Fn(&str, &Rc<HistoryWindow>) -> gtk::Widget>,
+struct DeferredText {
+    label: glib::WeakRef<gtk::Label>,
+    source: Rc<str>,
+    uses_markup: bool,
+    loaded: Cell<bool>,
+}
+
+impl DeferredText {
+    fn prepare(&self) {
+        if !self.loaded.replace(true)
+            && let Some(label) = self.label.upgrade()
+        {
+            if self.uses_markup {
+                label.set_markup(&self.source);
+            } else {
+                label.set_text(&self.source);
+            }
+        }
+    }
+
+    fn release(&self) {
+        if self.loaded.replace(false)
+            && let Some(label) = self.label.upgrade()
+        {
+            label.set_text("");
+        }
+    }
 }
 
 pub struct HistoryWindow {
     history: gtk::Box,
     scroll: gtk::ScrolledWindow,
     blocks: RefCell<Vec<Block>>,
-    replies: RefCell<Vec<DeferredReply>>,
     follow_tail: Rc<Cell<bool>>,
     scheduled: Cell<bool>,
     previous_top: Cell<f64>,
@@ -126,7 +149,6 @@ impl HistoryWindow {
             history: history.clone(),
             scroll: scroll.clone(),
             blocks: RefCell::new(Vec::new()),
-            replies: RefCell::new(Vec::new()),
             follow_tail,
             scheduled: Cell::new(false),
             previous_top: Cell::new(f64::NEG_INFINITY),
@@ -139,7 +161,7 @@ impl HistoryWindow {
             if let Some(window) = weak.upgrade() {
                 window.last_motion.set(Instant::now());
                 if (adj.value() - window.previous_top.get()).abs()
-                    >= (adj.page_size() / 2.0).max(1.0)
+                    >= (adj.page_size() / 3.0).max(1.0)
                 {
                     window.schedule();
                 }
@@ -156,7 +178,6 @@ impl HistoryWindow {
 
     pub fn clear(&self) {
         self.blocks.borrow_mut().clear();
-        self.replies.borrow_mut().clear();
         self.anchor.take();
         self.previous_top.set(f64::NEG_INFINITY);
     }
@@ -178,22 +199,27 @@ impl HistoryWindow {
             blocks.add(&slot);
             self.blocks.borrow_mut().push(Block {
                 slot: slot.downgrade(),
-                content: content.downgrade(),
+                content: content.upcast_ref::<gtk::Widget>().downgrade(),
+                text: None,
             });
         }
         self.schedule();
     }
 
-    pub fn defer_reply(
+    pub fn defer_prose(
         self: &Rc<Self>,
-        slot: &gtk::Box,
-        markdown: String,
-        build: impl Fn(&str, &Rc<Self>) -> gtk::Widget + 'static,
+        parent: &gtk::Box,
+        region: &gtk::EventBox,
+        label: &gtk::Label,
+        source: Rc<str>,
+        plain: &str,
+        uses_markup: bool,
     ) {
-        // Measure the real height on the first visit. Until then, estimate wrapped
-        // lines without shaping the whole transcript or creating GTK children.
-        let columns = (self.history.allocated_width().clamp(360, 800) as usize / 8).max(1);
-        let lines: usize = markdown
+        // The estimate keeps an unvisited block in the scroll range. Once
+        // visited, its most recently allocated height takes over.
+        let width = self.history.allocated_width().clamp(360, 800) - 36;
+        let columns = (width / 8) as usize;
+        let lines: usize = plain
             .lines()
             .map(|line| {
                 let cells: usize = line
@@ -203,11 +229,21 @@ impl HistoryWindow {
                 cells.div_ceil(columns).max(1)
             })
             .sum();
-        slot.set_height_request(lines.saturating_mul(20).clamp(120, 48_000) as i32);
-        self.replies.borrow_mut().push(DeferredReply {
-            slot: slot.clone(),
-            markdown,
-            build: Box::new(build),
+        let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        slot.set_height_request(lines.saturating_mul(21).clamp(21, 48_000) as i32);
+        region.set_no_show_all(true);
+        label.show();
+        slot.add(region);
+        parent.add(&slot);
+        self.blocks.borrow_mut().push(Block {
+            slot: slot.downgrade(),
+            content: region.upcast_ref::<gtk::Widget>().downgrade(),
+            text: Some(DeferredText {
+                label: label.downgrade(),
+                source,
+                uses_markup,
+                loaded: Cell::new(false),
+            }),
         });
         self.schedule();
     }
@@ -275,63 +311,14 @@ impl HistoryWindow {
         } else {
             top
         };
-        let mut reply_anchor = None;
-        let mut materialized = false;
         let idle = self.last_motion.get().elapsed() >= REPLY_EVICTION_DELAY;
-        let mut evicted = false;
-        for reply in self.replies.borrow().iter() {
-            let slot = &reply.slot;
-            let Some((_, y)) = slot.translate_coordinates(&self.history, 0, 0) else {
-                continue;
-            };
-            let height = slot.allocated_height();
-            if height < 2 || !slot.is_mapped() {
-                continue;
-            }
-            let start = f64::from(y);
-            let end = start + f64::from(height);
-            if let Some(child) = slot.children().into_iter().next() {
-                if (end < visible_top - page * 1.5 || start > visible_top + page * 2.5)
-                    && !protected(slot)
-                {
-                    if idle {
-                        slot.set_height_request(height);
-                        slot.remove(&child);
-                        evicted = true;
-                    } else {
-                        self.schedule_cleanup();
-                    }
-                }
-            } else if end >= visible_top - page * 0.5 && start <= visible_top + page * 1.5 {
-                if start < visible_top && !self.follow_tail.get() && reply_anchor.is_none() {
-                    // Preserve the first on-screen row when an estimate above it
-                    // changes; the row itself may be an ordinary eager widget.
-                    reply_anchor = self.history.children().into_iter().find_map(|widget| {
-                        let (_, row) = widget.translate_coordinates(&self.history, 0, 0)?;
-                        (f64::from(row) >= top).then_some((widget, row, top))
-                    });
-                }
-                let child = (reply.build)(&reply.markdown, self);
-                slot.add(&child);
-                child.show_all();
-                slot.set_height_request(-1);
-                materialized = true;
-            }
-        }
-        if let Some(anchor) = reply_anchor {
-            self.anchor.replace(Some(anchor));
-        }
-        if evicted {
-            self.blocks
-                .borrow_mut()
-                .retain(|block| block.slot.upgrade().is_some());
-        }
         // Keep just over a screen ready in either direction, with hysteresis
         // so nearby content stays mapped when the user changes direction.
         let mut anchor = None;
         let mut anchor_height = i32::MAX;
         let mut changed_above = false;
         let mut restored = false;
+        let mut shaped = false;
         for block in self.blocks.borrow().iter() {
             let (Some(slot), Some(content)) = (block.slot.upgrade(), block.content.upgrade())
             else {
@@ -349,15 +336,33 @@ impl HistoryWindow {
                 anchor_height = height;
                 anchor = Some((slot.clone().upcast(), y, top));
             }
-            if content.is_visible() {
-                if (bottom < top - page * 1.75 || f64::from(y) > top + page * 2.75)
-                    && !protected(&slot)
-                {
+            let near_top = if block.text.is_some() {
+                visible_top
+            } else {
+                top
+            };
+            let far = bottom < near_top - page * 1.75 || f64::from(y) > near_top + page * 2.75;
+            let near = bottom >= near_top - page * 0.85 && f64::from(y) <= near_top + page * 1.85;
+            if far && !protected(&slot) {
+                if content.is_visible() {
                     slot.set_height_request(height);
                     content.set_no_show_all(true);
                     content.hide();
                 }
-            } else if bottom >= top - page * 1.25 && f64::from(y) <= top + page * 2.25 {
+                if let Some(text) = &block.text
+                    && text.loaded.get()
+                {
+                    if idle {
+                        text.release();
+                    } else {
+                        self.schedule_cleanup();
+                    }
+                }
+            } else if near && !content.is_visible() {
+                if let Some(text) = &block.text {
+                    shaped |= !text.loaded.get();
+                    text.prepare();
+                }
                 content.set_no_show_all(false);
                 content.show();
                 slot.set_height_request(-1);
@@ -368,7 +373,7 @@ impl HistoryWindow {
         if changed_above && self.anchor.borrow().is_none() {
             self.anchor.replace(anchor);
         }
-        if materialized && self.follow_tail.get() {
+        if shaped && self.follow_tail.get() {
             let adjustment = adj.downgrade();
             let follow_tail = self.follow_tail.clone();
             self.scroll.add_tick_callback(move |_, _| {
@@ -380,7 +385,7 @@ impl HistoryWindow {
                 glib::ControlFlow::Break
             });
         }
-        if restored || materialized {
+        if restored {
             // Newly mapped replies can contain windowed table rows.
             self.schedule();
         }

@@ -4,6 +4,7 @@ use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
 use std::cell::{Cell, OnceCell, RefCell};
+use std::rc::Rc;
 
 pub fn vertical_delta(event: &gdk::EventScroll) -> Option<f64> {
     if event.state().contains(gdk::ModifierType::SHIFT_MASK) {
@@ -48,6 +49,7 @@ pub fn scroll_vertical(scroll: &gtk::ScrolledWindow, delta: f64) -> f64 {
 pub struct Part {
     pub widget: gtk::EventBox,
     label: gtk::Label,
+    plain: Option<Rc<str>>,
     separator: &'static str,
 }
 
@@ -56,6 +58,12 @@ impl Part {
         let widget = Self::region();
         widget.add(label);
         Self::in_region(label, separator, &widget)
+    }
+
+    pub fn deferred(label: &gtk::Label, separator: &'static str, plain: Rc<str>) -> Self {
+        let mut part = Self::new(label, separator);
+        part.plain = Some(plain);
+        part
     }
 
     pub fn region() -> gtk::EventBox {
@@ -70,6 +78,7 @@ impl Part {
         Self {
             widget: widget.clone(),
             label: label.clone(),
+            plain: None,
             separator,
         }
     }
@@ -413,7 +422,12 @@ impl TextSelection {
         let mut text = String::new();
         for index in start.part..=end.part {
             let part = &self.parts()[index];
-            let value = part.label.text();
+            let label_text = part.label.text();
+            let value = if label_text.is_empty() {
+                part.plain.as_deref().unwrap_or_default()
+            } else {
+                label_text.as_str()
+            };
             let (from, to) = bounds(Some((start, end)), index)?;
             if index != start.part {
                 text.push_str(part.separator);

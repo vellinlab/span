@@ -21,7 +21,7 @@ pub struct Context {
 
 // Replies with stateful controls stay mounted so scrolling preserves the
 // user's image loads, code and table scroll positions, and diagram controls.
-pub fn can_defer(markdown: &str) -> bool {
+fn can_defer(markdown: &str) -> bool {
     markdown.len() >= 4 * 1024
         && !parser(markdown).any(|event| {
             matches!(
@@ -52,6 +52,7 @@ pub fn response(
             }
         })
     };
+    let deferred = window.filter(|_| !live && can_defer(markdown));
     let mut pending = String::new();
     let mut selectable = Vec::new();
     let mut list_depth: u32 = 0;
@@ -62,7 +63,13 @@ pub fn response(
     while let Some((event, range)) = events.next() {
         match event {
             Event::Start(Tag::Table(_)) => {
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &prose_label,
+                    deferred,
+                );
                 blocks.add(&table(
                     &mut events,
                     markdown,
@@ -72,7 +79,13 @@ pub fn response(
                 ));
             }
             Event::Start(Tag::CodeBlock(kind)) => {
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &prose_label,
+                    deferred,
+                );
                 let mut code = String::new();
                 for (event, _) in events.by_ref() {
                     match event {
@@ -112,7 +125,13 @@ pub fn response(
                     pending.push_str(&escaped(&alt));
                     continue;
                 }
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &prose_label,
+                    deferred,
+                );
                 let relative = Path::new(dest_url.as_ref()).components().all(|part| {
                     matches!(
                         part,
@@ -141,7 +160,13 @@ pub fn response(
                 }
                 // Group short adjacent paragraphs to reduce native input windows and layout work.
                 if pending.len() >= 2048 {
-                    flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                    flush_text(
+                        &blocks,
+                        &mut pending,
+                        &mut selectable,
+                        &prose_label,
+                        deferred,
+                    );
                 } else {
                     pending.push_str("\n\n");
                 }
@@ -150,7 +175,13 @@ pub fn response(
             Event::Start(Tag::List(_)) => list_depth = list_depth.saturating_add(1),
             Event::End(TagEnd::List(_)) => {
                 list_depth = list_depth.saturating_sub(1);
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &prose_label,
+                    deferred,
+                );
             }
             Event::Start(Tag::Item) => {
                 pending.push_str(&"   ".repeat(list_depth.saturating_sub(1).min(8) as usize));
@@ -158,13 +189,25 @@ pub fn response(
             }
             Event::End(TagEnd::Item) => pending.push('\n'),
             Event::Rule => {
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &prose_label,
+                    deferred,
+                );
                 blocks.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
             }
             event => inline(&mut pending, event, &mut link),
         }
     }
-    flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+    flush_text(
+        &blocks,
+        &mut pending,
+        &mut selectable,
+        &prose_label,
+        deferred,
+    );
     if !artifacts.is_empty() {
         let actions = gtk::Box::new(gtk::Orientation::Vertical, 2);
         actions.style_context().add_class("agent-preview-actions");
@@ -182,7 +225,7 @@ pub fn response(
         }
         blocks.add(&actions);
     }
-    if let Some(window) = window {
+    if let Some(window) = window.filter(|_| deferred.is_none()) {
         window.group(&blocks, 3);
     }
     TextSelection::new(&blocks, selectable, quote)
@@ -290,7 +333,13 @@ fn markdown_label_with(activate: impl Fn(&gtk::Label, &str) + 'static) -> gtk::L
         glib::Propagation::Stop
     });
     // Scrolling changes the paint origin, but usually leaves the shaped layout intact.
-    let underline_cache = RefCell::new(None::<(pango::Layout, u32, Vec<(f64, f64, f64)>)>);
+    let underline_cache = Rc::new(RefCell::new(
+        None::<(pango::Layout, u32, Vec<(f64, f64, f64)>)>,
+    ));
+    let cache = underline_cache.clone();
+    label.connect_unmap(move |_| {
+        cache.take();
+    });
     label.connect_draw(move |label, cr| {
         let Some(layout) = label.layout() else {
             return glib::Propagation::Proceed;
@@ -438,15 +487,55 @@ fn flush_text(
     pending: &mut String,
     selectable: &mut Vec<Part>,
     new_label: &impl Fn() -> gtk::Label,
+    deferred: Option<&Rc<crate::history_window::HistoryWindow>>,
 ) {
-    if !pending.trim().is_empty() {
-        let label = static_label(pending.trim(), new_label);
-        label.style_context().add_class("agent-prose");
-        let part = Part::new(&label, "\n\n");
-        blocks.add(&part.widget);
-        selectable.push(part);
+    let markup = pending.trim();
+    if !markup.is_empty() {
+        if let Some(window) = deferred {
+            let linked = markup.contains("<a href=");
+            let label = if linked { new_label() } else { text("") };
+            label.style_context().add_class("agent-markdown");
+            label.style_context().add_class("agent-prose");
+            let plain = unmarked_text(markup);
+            let uses_markup = linked || plain.is_some();
+            let plain: Rc<str> = Rc::from(plain.as_deref().unwrap_or(markup));
+            let part = Part::deferred(&label, "\n\n", plain.clone());
+            window.defer_prose(
+                blocks,
+                &part.widget,
+                &label,
+                Rc::from(markup),
+                &plain,
+                uses_markup,
+            );
+            selectable.push(part);
+        } else {
+            let label = static_label(markup, new_label);
+            label.style_context().add_class("agent-prose");
+            let part = Part::new(&label, "\n\n");
+            blocks.add(&part.widget);
+            selectable.push(part);
+        }
     }
     pending.clear();
+}
+
+// Pango understands the inline formatting but GtkLabel handles the <a> wrapper.
+fn unmarked_text(markup: &str) -> Option<glib::GString> {
+    if !markup.contains(['<', '&']) {
+        return None;
+    }
+    let mut without_links = String::with_capacity(markup.len());
+    let mut remaining = markup;
+    while let Some((text, destination)) = remaining.split_once("<a href=") {
+        without_links.push_str(text);
+        remaining = destination.split_once('>')?.1;
+    }
+    without_links.push_str(remaining);
+    let without_links = without_links.replace("</a>", "");
+    pango::parse_markup(&without_links, '\0')
+        .ok()
+        .map(|(_, text, _)| text)
 }
 
 fn table(
