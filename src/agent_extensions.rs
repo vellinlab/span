@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+const CHATGPT_PLUGINS: &str = "https://chatgpt.com/plugins";
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Plugins,
@@ -207,9 +209,8 @@ impl Extensions {
         let apps = Page::new();
         let manage = gtk::Button::with_label("在 ChatGPT 管理授权");
         manage.style_context().add_class("quiet-button");
-        manage.connect_clicked(|button| {
-            open_link(button, "https://chatgpt.com/#settings/Connectors")
-        });
+        manage.set_tooltip_text(Some("在 ChatGPT 的「设置 → 插件」中管理账号授权"));
+        manage.connect_clicked(|button| open_link(button, CHATGPT_PLUGINS));
         apps.root.pack_end(&manage, false, false, 0);
         let auth = gtk::Box::new(gtk::Orientation::Vertical, 4);
         auth.style_context().add_class("extensions-feedback");
@@ -366,7 +367,8 @@ impl Extensions {
                     }
                 }
                 let next = result["nextCursor"].as_str().filter(|cursor| {
-                    !cursor.is_empty() && page.cursor.borrow().as_deref() != Some(*cursor)
+                    !cursor.is_empty()
+                        && (!append || page.cursor.borrow().as_deref() != Some(*cursor))
                 });
                 page.cursor.replace(next.map(str::to_owned));
                 if entries.is_empty() {
@@ -562,10 +564,7 @@ impl Extensions {
                             move || Action::Configure(id.clone(), enable),
                         ));
                     }
-                    tools.add(&link_button(
-                        "管理授权",
-                        "https://chatgpt.com/#settings/Connectors",
-                    ));
+                    tools.add(&link_button("管理授权", CHATGPT_PLUGINS));
                 }
                 Entry::App(app) => {
                     if let Some(uri) = &app.url {
