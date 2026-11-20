@@ -199,7 +199,7 @@ for line in sys.stdin:
         send({"id": request_id, "result": {}})
     elif method in ("thread/goal/get", "thread/goal/set", "thread/goal/clear"):
         thread_id = params["threadId"]
-        assert thread_id in (thread, saved_thread, "new-slash-fixture")
+        assert thread_id in (thread, saved_thread, "fork-slash-fixture", "new-slash-fixture")
         goal_file = home / ("goal-" + thread_id + ".json")
         goal = json.loads(goal_file.read_text()) if goal_file.exists() else None
         if method == "thread/goal/set":
