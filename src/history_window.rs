@@ -5,10 +5,83 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+mod prose_slot {
+    use super::*;
+    use gtk::subclass::prelude::*;
+
+    // The reading column sets the width. Measuring an unwrapped label's
+    // preferred width would shape the same prose before measuring its height.
+    #[derive(Default)]
+    pub struct ProseSlot;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for ProseSlot {
+        const NAME: &'static str = "SpanProseSlot";
+        type Type = super::ProseSlot;
+        type ParentType = gtk::Bin;
+    }
+
+    impl ObjectImpl for ProseSlot {}
+    impl ContainerImpl for ProseSlot {}
+    impl BinImpl for ProseSlot {}
+
+    impl WidgetImpl for ProseSlot {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::HeightForWidth
+        }
+
+        fn preferred_width(&self) -> (i32, i32) {
+            (1, 1)
+        }
+
+        fn preferred_width_for_height(&self, _: i32) -> (i32, i32) {
+            self.preferred_width()
+        }
+
+        fn preferred_height(&self) -> (i32, i32) {
+            let height = self.obj().allocated_height();
+            (height, height)
+        }
+
+        fn preferred_height_for_width(&self, width: i32) -> (i32, i32) {
+            self.obj()
+                .child()
+                .filter(|child| child.is_visible())
+                .map_or((0, 0), |child| child.preferred_height_for_width(width))
+        }
+
+        fn preferred_height_and_baseline_for_width(&self, width: i32) -> (i32, i32, i32, i32) {
+            let (minimum, natural) = if width > 0 {
+                self.preferred_height_for_width(width)
+            } else {
+                self.preferred_height()
+            };
+            (minimum, natural, -1, -1)
+        }
+
+        fn size_allocate(&self, allocation: &gtk::Allocation) {
+            let slot = self.obj();
+            slot.set_allocation(allocation);
+            if let Some(child) = slot.child().filter(|child| child.is_visible()) {
+                child.size_allocate(allocation);
+                slot.set_clip(&child.clip());
+            } else {
+                slot.set_clip(allocation);
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct ProseSlot(ObjectSubclass<prose_slot::ProseSlot>)
+        @extends gtk::Bin, gtk::Container, gtk::Widget,
+        @implements gtk::Buildable;
+}
+
 const REPLY_EVICTION_DELAY: Duration = Duration::from_millis(900);
 
 struct Block {
-    slot: glib::WeakRef<gtk::Box>,
+    slot: glib::WeakRef<gtk::Widget>,
     content: glib::WeakRef<gtk::Widget>,
     texts: Vec<DeferredText>,
     visible: Cell<bool>,
@@ -148,7 +221,7 @@ impl HistoryWindow {
             slot.add(&content);
             blocks.add(&slot);
             self.blocks.borrow_mut().push(Block {
-                slot: slot.downgrade(),
+                slot: slot.upcast_ref::<gtk::Widget>().downgrade(),
                 content: content.upcast_ref::<gtk::Widget>().downgrade(),
                 texts: Vec::new(),
                 visible: Cell::new(true),
@@ -169,11 +242,12 @@ impl HistoryWindow {
         // visited, its most recently allocated height takes over.
         let lines = wrapped_lines(plain, (self.reading_width() / 8) as usize);
         let height = lines.saturating_mul(21).clamp(21, 48_000) as i32;
-        self.defer_content(
+        let slot = glib::Object::new::<ProseSlot>();
+        slot.set_height_request(height);
+        self.register_deferred(
             parent,
+            &slot,
             label,
-            -1,
-            height,
             vec![DeferredText::new(label, source, uses_markup)],
         );
     }
@@ -192,10 +266,21 @@ impl HistoryWindow {
     ) {
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         slot.set_size_request(min_width, height);
+        self.register_deferred(parent, &slot, content, texts);
+    }
+
+    fn register_deferred(
+        self: &Rc<Self>,
+        parent: &gtk::Box,
+        slot: &impl IsA<gtk::Container>,
+        content: &impl IsA<gtk::Widget>,
+        texts: Vec<DeferredText>,
+    ) {
         content.set_no_show_all(true);
         content.hide();
         slot.add(content);
-        parent.add(&slot);
+        let slot = slot.as_ref().upcast_ref::<gtk::Widget>();
+        parent.add(slot);
         self.blocks.borrow_mut().push(Block {
             slot: slot.downgrade(),
             content: content.upcast_ref::<gtk::Widget>().downgrade(),
@@ -251,7 +336,7 @@ impl HistoryWindow {
             adj.set_value(old_top + f64::from(y - old_y));
         }
         let top = adj.value();
-        self.previous_top.set(top);
+        let movement = top - self.previous_top.replace(top);
         let page = adj.page_size();
         if page < 2.0 {
             return;
@@ -262,7 +347,7 @@ impl HistoryWindow {
             .and_downcast::<gtk::Window>()
             .and_then(|w| w.focused_widget());
         let grab = gtk::grab_get_current();
-        let protected = |slot: &gtk::Box| {
+        let protected = |slot: &gtk::Widget| {
             focused
                 .iter()
                 .chain(grab.iter())
@@ -274,8 +359,14 @@ impl HistoryWindow {
             top
         };
         let idle = self.last_motion.get().elapsed() >= REPLY_EVICTION_DELAY;
-        // Keep just over a screen ready in either direction, with hysteresis
-        // so nearby content stays mapped when the user changes direction.
+        // Adjustment changes schedule work every third of a viewport. Leave
+        // enough content ahead of that trigger in either direction, with a
+        // little more ready in the direction of travel.
+        let (before, after) = match movement {
+            value if value.is_finite() && value < -1.0 => (0.60, 0.40),
+            value if value.is_finite() && value > 1.0 => (0.40, 0.60),
+            _ => (0.45, 0.45),
+        };
         let mut anchor = None;
         let mut anchor_height = i32::MAX;
         let mut changed_above = false;
@@ -300,8 +391,15 @@ impl HistoryWindow {
             } else {
                 visible_top
             };
-            let far = bottom < near_top - page * 1.75 || y_px > near_top + page * 2.75;
-            let near = bottom >= near_top - page * 0.85 && y_px <= near_top + page * 1.85;
+            let (before, after) = if block.texts.is_empty() {
+                (0.85, 0.85)
+            } else {
+                (before, after)
+            };
+            let far = bottom < near_top - page * (before + 0.90)
+                || y_px > near_top + page * (1.90 + after);
+            let near =
+                bottom >= near_top - page * before && y_px <= near_top + page * (1.0 + after);
             let is_anchor = y_px <= top && top < bottom && height < anchor_height;
             let hide = far && block.visible.get();
             let restore = near && !block.visible.get();
@@ -317,7 +415,7 @@ impl HistoryWindow {
             }
             if is_anchor {
                 anchor_height = height;
-                anchor = Some((slot.clone().upcast(), y, top));
+                anchor = Some((slot.clone(), y, top));
             }
             if hide && !protected(&slot) {
                 if !block.texts.is_empty() && !idle {
