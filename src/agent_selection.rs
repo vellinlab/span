@@ -2,7 +2,7 @@ use crate::agent_render::clipboard;
 use crate::quote;
 use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
-use gtk::{gdk, glib, pango};
+use gtk::{cairo, gdk, glib, pango};
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 
@@ -149,7 +149,15 @@ mod imp {
     }
 
     impl ObjectImpl for TextSelection {}
-    impl WidgetImpl for TextSelection {}
+    impl WidgetImpl for TextSelection {
+        fn draw(&self, cr: &cairo::Context) -> glib::Propagation {
+            let propagation = self.parent_draw(cr);
+            if let Some((start, end)) = self.range.get() {
+                self.obj().draw_selection(cr, start, end);
+            }
+            propagation
+        }
+    }
     impl ContainerImpl for TextSelection {}
     impl BinImpl for TextSelection {}
     impl EventBoxImpl for TextSelection {}
@@ -404,27 +412,76 @@ impl TextSelection {
     }
 
     fn change_range(&self, range: Option<Range>) {
-        let old = self.imp().range.replace(range);
-        if old == range {
-            return;
+        if self.imp().range.replace(range) != range {
+            // The text, line breaks, and link ranges stay the same. Redraw
+            // only the selection instead of telling GTK to reshape the labels.
+            self.queue_draw();
         }
-        for (index, part) in self.parts().iter().enumerate() {
-            let before = bounds(old, index);
-            let after = bounds(range, index);
-            if before == after {
+    }
+
+    fn draw_selection(&self, cr: &cairo::Context, start: Position, end: Position) {
+        let Ok((_, clip_top, _, clip_bottom)) = cr.clip_extents() else {
+            return;
+        };
+        let _ = cr.save();
+        cr.new_path();
+        let units = f64::from(pango::SCALE);
+        let pixels = |position| f64::from(position) / units;
+        for index in start.part..=end.part {
+            let label = &self.parts()[index].label;
+            if !label.is_mapped() {
                 continue;
             }
-            if let Some((start, end)) = after {
-                let attributes = pango::AttrList::new();
-                let mut highlight = pango::AttrColor::new_background(0x3232, 0x5858, 0x8484);
-                highlight.set_start_index(start as u32);
-                highlight.set_end_index(end as u32);
-                attributes.insert(highlight);
-                part.label.set_attributes(Some(&attributes));
+            let Some((x, y)) = label.translate_coordinates(self, 0, 0) else {
+                continue;
+            };
+            if f64::from(y) >= clip_bottom || f64::from(y + label.allocated_height()) <= clip_top {
+                continue;
+            }
+            let Some(layout) = label.layout() else {
+                continue;
+            };
+            let allocation = label.allocation();
+            let (offset_x, offset_y) = label.layout_offsets();
+            let left = f64::from(x + offset_x - allocation.x());
+            let top = f64::from(y + offset_y - allocation.y());
+            let from = if index == start.part {
+                start.byte as i32
             } else {
-                part.label.set_attributes(None);
+                0
+            };
+            let to = if index == end.part {
+                end.byte as i32
+            } else {
+                i32::MAX
+            };
+            let mut lines = layout.iter();
+            while let Some(line) = lines.line_readonly() {
+                let first = from.max(line.start_index());
+                let last = to.min(line.start_index() + line.length());
+                if first < last {
+                    let (_, logical) = lines.line_extents();
+                    let y = top + pixels(logical.y());
+                    let height = pixels(logical.height());
+                    if y + height > clip_top && y < clip_bottom {
+                        for span in line.x_ranges(first, last).chunks_exact(2) {
+                            cr.rectangle(
+                                left + pixels(span[0]),
+                                y,
+                                pixels(span[1] - span[0]),
+                                height,
+                            );
+                        }
+                    }
+                }
+                if line.start_index() >= to || !lines.next_line() {
+                    break;
+                }
             }
         }
+        cr.set_source_rgba(0.26, 0.51, 0.82, 0.38);
+        let _ = cr.fill();
+        let _ = cr.restore();
     }
 
     fn selected_text(&self) -> Option<String> {

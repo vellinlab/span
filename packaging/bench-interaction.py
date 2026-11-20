@@ -349,6 +349,24 @@ def benchmark(binary, workload):
                 footprint("after revisiting history")
                 if workload != "history":
                     return
+                xdo("mousemove", "--window", wid, 420, 171, "mousedown", 1)
+                time.sleep(0.08)
+                origin = screen.screen().root.translate_coords(win, 0, 0)
+                selection_times = []
+                begin = cpu_seconds()
+                for step in range(32):
+                    before = pixels()
+                    started = time.monotonic()
+                    xtest.fake_input(screen, X.MotionNotify,
+                                     x=origin.x + 575, y=origin.y + (313 if step % 2 else 242))
+                    screen.flush()
+                    until(lambda: pixels() != before, interval=0.001)
+                    selection_times.append((time.monotonic() - started) * 1000)
+                    time.sleep(0.035)
+                print(f"{name} selection drag: median {statistics.median(selection_times):.1f} ms,"
+                      f" p95 {sorted(selection_times)[30]:.1f} ms,"
+                      f" app CPU {(cpu_seconds() - begin) * 1000:.0f} ms / 32 events", flush=True)
+                xdo("mouseup", 1, "key", "Escape")
                 xdo("key", "ctrl+shift+a")
                 time.sleep(0.25)
                 xdo("type", """seq 1 3000 | awk '{printf "%06d %0160d\\n", $1, $1}'; touch """
