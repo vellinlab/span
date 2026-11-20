@@ -52,7 +52,12 @@ pub fn response(
             }
         })
     };
-    let deferred = window.filter(|_| !live && can_defer(markdown));
+    let prose_region = window
+        .filter(|_| !live && can_defer(markdown))
+        .map(|window| (window, Part::region()));
+    let deferred = prose_region
+        .as_ref()
+        .map(|(window, region)| (*window, region));
     let mut pending = String::new();
     let mut selectable = Vec::new();
     let mut list_depth: u32 = 0;
@@ -228,7 +233,14 @@ pub fn response(
     if let Some(window) = window.filter(|_| deferred.is_none()) {
         window.group(&blocks, 3);
     }
-    TextSelection::new(&blocks, selectable, quote)
+    if let Some((_, region)) = prose_region {
+        region.add(&blocks);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        body.add(&region);
+        TextSelection::new(&body, selectable, quote)
+    } else {
+        TextSelection::new(&blocks, selectable, quote)
+    }
 }
 
 pub fn artifact_button(artifact: Artifact, preview: Offer) -> gtk::Button {
@@ -487,28 +499,21 @@ fn flush_text(
     pending: &mut String,
     selectable: &mut Vec<Part>,
     new_label: &impl Fn() -> gtk::Label,
-    deferred: Option<&Rc<crate::history_window::HistoryWindow>>,
+    deferred: Option<(&Rc<crate::history_window::HistoryWindow>, &gtk::EventBox)>,
 ) {
     let markup = pending.trim();
     if !markup.is_empty() {
-        if let Some(window) = deferred {
+        if let Some((window, region)) = deferred {
             let linked = markup.contains("<a href=");
             let label = if linked { new_label() } else { text("") };
             label.style_context().add_class("agent-markdown");
             label.style_context().add_class("agent-prose");
             let plain = unmarked_text(markup);
             let uses_markup = linked || plain.is_some();
-            let plain: Rc<str> = Rc::from(plain.as_deref().unwrap_or(markup));
-            let part = Part::deferred(&label, "\n\n", plain.clone());
-            window.defer_prose(
-                blocks,
-                &part.widget,
-                &label,
-                Rc::from(markup),
-                &plain,
-                uses_markup,
-            );
-            selectable.push(part);
+            let source: Rc<str> = Rc::from(markup);
+            let plain = plain.map_or_else(|| source.clone(), |text| Rc::from(text.as_str()));
+            selectable.push(Part::deferred(&label, region, "\n\n", plain.clone()));
+            window.defer_prose(blocks, &label, source, &plain, uses_markup);
         } else {
             let label = static_label(markup, new_label);
             label.style_context().add_class("agent-prose");

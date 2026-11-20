@@ -209,7 +209,6 @@ impl HistoryWindow {
     pub fn defer_prose(
         self: &Rc<Self>,
         parent: &gtk::Box,
-        region: &gtk::EventBox,
         label: &gtk::Label,
         source: Rc<str>,
         plain: &str,
@@ -231,13 +230,12 @@ impl HistoryWindow {
             .sum();
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         slot.set_height_request(lines.saturating_mul(21).clamp(21, 48_000) as i32);
-        region.set_no_show_all(true);
-        label.show();
-        slot.add(region);
+        label.set_no_show_all(true);
+        slot.add(label);
         parent.add(&slot);
         self.blocks.borrow_mut().push(Block {
             slot: slot.downgrade(),
-            content: region.upcast_ref::<gtk::Widget>().downgrade(),
+            content: label.upcast_ref::<gtk::Widget>().downgrade(),
             text: Some(DeferredText {
                 label: label.downgrade(),
                 source,

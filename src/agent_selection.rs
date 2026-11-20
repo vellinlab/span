@@ -60,8 +60,13 @@ impl Part {
         Self::in_region(label, separator, &widget)
     }
 
-    pub fn deferred(label: &gtk::Label, separator: &'static str, plain: Rc<str>) -> Self {
-        let mut part = Self::new(label, separator);
+    pub fn deferred(
+        label: &gtk::Label,
+        widget: &gtk::EventBox,
+        separator: &'static str,
+        plain: Rc<str>,
+    ) -> Self {
+        let mut part = Self::in_region(label, separator, widget);
         part.plain = Some(plain);
         part
     }
