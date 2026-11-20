@@ -135,7 +135,13 @@ jobs:
             gh release download v0.1.0-rc.14 --pattern "$baseline_name" --dir "$upgrade_dir"
             baseline=("/span-upgrade/$baseline_name")
           fi
-          docker run --rm --volume "$PWD:/work" --workdir /work \
+          compare=()
+          if [[ "$GITHUB_REF" == refs/heads/perf/windowed-history || "$GITHUB_REF" == refs/tags/v0.1.0-rc.22 ]]; then
+            previous=span-0.1.0-rc.21-1.el8.x86_64.rpm
+            gh release download v0.1.0-rc.21 --pattern "$previous" --dir "$upgrade_dir"
+            compare=(--env "SPAN_BENCH_RPM=/span-upgrade/$previous")
+          fi
+          docker run --rm "${compare[@]}" --volume "$PWD:/work" --workdir /work \
             --volume "$upgrade_dir:/span-upgrade:ro" \
             almalinux:8 bash packaging/build-el8.sh "${baseline[@]}"
 
