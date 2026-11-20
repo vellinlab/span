@@ -347,24 +347,42 @@ SVG
         xdotool type --clearmodifiers "$1"
         xdotool key --clearmodifiers Return
     }
-    set_goal() {
+    goal_draft() {
         widget mouse '消息输入框'
         xdotool type --clearmodifiers '/goal'
         widget mouse '设置目标'
-        wait_until "the session goal editor" dialog_open '设置目标'
-        SPAN_TEST_DIALOG='设置目标' widget not-state '发送目标' sensitive
-        SPAN_TEST_DIALOG='设置目标' widget mouse '会话目标输入框'
-        xdotool type --clearmodifiers "$1"
-        SPAN_TEST_DIALOG='设置目标' widget click '发送目标'
-        wait_until "Codex accepted the session goal" bash -c '! xdotool search --onlyvisible --name "^设置目标$" >/dev/null'
-        widget contains "目标 · 进行中"$'\n'"$1"
+        widget contains '会话目标草稿'
+        widget state '消息输入框' focused
+        widget not-state '发送目标' sensitive
     }
+    set_goal() {
+        goal_draft
+        xdotool type --clearmodifiers "$1"
+        widget state '发送目标' sensitive
+        xdotool key --clearmodifiers Return
+        widget contains "目标 · 进行中"$'\n'"$1"
+        widget state '发送' sensitive
+    }
+    goal_draft
+    xdotool type --clearmodifiers 'Do not save this draft'
+    xdotool key --clearmodifiers Escape
+    widget state '发送' sensitive
+    test ! -e "$HOME/goal-preview-thread.json"
+    goal_draft
+    xdotool type --clearmodifiers 'Goal rejected by fixture'
+    xdotool key --clearmodifiers Return
+    widget contains 'Fixture goal rejected'
+    widget contains 'Goal rejected by fixture'
+    widget state '发送目标' sensitive
+    widget mouse '取消目标草稿'
     set_goal 'Finish the fixture'
     slash '/goal pause'
     widget contains '目标 · 已暂停'
     slash '/goal edit'
-    widget contains '/goal Finish the fixture'
-    xdotool key --clearmodifiers ctrl+a BackSpace
+    widget contains '会话目标草稿'
+    widget contains 'Finish the fixture'
+    widget state '发送目标' sensitive
+    xdotool key --clearmodifiers Escape
     slash '/goal resume'
     widget contains '目标 · 进行中'
     slash '/goal clear'
