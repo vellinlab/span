@@ -61,8 +61,11 @@ def benchmark(binary, workload):
                 time.sleep(0.4)
                 xdo("key", "ctrl+shift+a")
                 time.sleep(0.4)
-                def pixels():
-                    return win.get_image(390, 150, 540, 170, X.ZPixmap, 0xffffffff).data
+                def pixels(resize=False):
+                    # A tool-only part of the timeline may have left-aligned
+                    # rows. Include its right edge and message bubbles for resize.
+                    width, height = (635, 470) if resize and workload == "tools" else (540, 170)
+                    return win.get_image(390, 150, width, height, X.ZPixmap, 0xffffffff).data
 
                 process_clock = ctypes.c_int()
                 error = get_cpu_clock(app.pid, ctypes.byref(process_clock))
@@ -107,7 +110,8 @@ def benchmark(binary, workload):
                     for i in range(36):
                         if i == 4:
                             start_cpu = cpu_seconds()
-                        before = hashlib.blake2b(pixels(), digest_size=8).digest()
+                        resize = mode == "resize"
+                        before = hashlib.blake2b(pixels(resize), digest_size=8).digest()
                         start = time.monotonic()
                         if mode == "scroll":
                             button = 4 if i % 12 < 6 else 5
@@ -116,7 +120,7 @@ def benchmark(binary, workload):
                         else:
                             win.configure(width=1030 if i % 2 == 0 else 1100, height=800)
                         screen.flush()
-                        while hashlib.blake2b(pixels(), digest_size=8).digest() == before:
+                        while hashlib.blake2b(pixels(resize), digest_size=8).digest() == before:
                             if time.monotonic() - start > 2:
                                 raise RuntimeError(f"{mode} did not visibly update on event {i}")
                             time.sleep(0.0005)

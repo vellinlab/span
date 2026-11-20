@@ -234,7 +234,8 @@ for line in sys.stdin:
                 {"id": "table-reply", "type": "agentMessage", "text": "\n".join([header] + rows)}]}]
         if os.environ.get("SPAN_BENCH_TOOLS") == "1":
             for n in range(16):
-                items = []
+                items = [{"id": f"request-{n}", "type": "userMessage", "content": [
+                    {"type": "text", "text": f"任务 {n} · Check the workspace and report the results."}]}]
                 for tool in range(6):
                     items.append({"id": f"exec-{n}-{tool}", "type": "commandExecution",
                                   "command": f"check-task {n} {tool}", "status": "completed",
@@ -242,8 +243,8 @@ for line in sys.stdin:
                     items.append({"id": f"change-{n}-{tool}", "type": "fileChange", "changes": [
                         {"path": f"checks-{n}-{tool}.txt", "diff": diff}]})
                 items.append({"id": f"tool-reply-{n}", "type": "agentMessage",
-                              "text": f"## 工具执行记录 · Task {n}\n\n"
-                                      "已完成检查。 Review the command output and diff above. " * 5})
+                              "text": f"## 工具执行记录 · Task {n}\n\n" +
+                                      "已完成检查。 Review the command output and diff above. " * 9})
                 turns.append({"id": f"tool-turn-{n}", "status": "completed", "items": items})
         send({"id": request_id, "result": {"thread": {"id": started_thread, "turns": turns},
                                           "cwd": str(home), "model": "gpt-base-fixture",
