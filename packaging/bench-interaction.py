@@ -27,8 +27,8 @@ def xdo(*args):
     return subprocess.check_output(["xdotool", *map(str, args)], text=True).strip()
 
 
-def until(check, interval=0.02):
-    deadline = time.monotonic() + 12
+def until(check, interval=0.02, timeout=12):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = check()
         if result:
@@ -81,6 +81,7 @@ def benchmark(binary, workload):
     name = Path(binary).parent.name + ("" if workload == "history" else f" {workload}")
     same_directory = workload == "tabs-shared-directory"
     show_catalog = workload == "tabs-catalog"
+    offscreen_prose = workload == "offscreen-prose"
     warmup_events = 4
     switching_tabs = workload in ("tabs", "tabs-shared-directory", "tabs-catalog")
     live_scroll = workload == "live-scroll"
@@ -95,16 +96,20 @@ def benchmark(binary, workload):
                 write_image(home / ".bench-images" / f"preview-{i}.png", color)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"],
-                   SPAN_BENCH_HISTORY=str(int(workload == "history" or switching_tabs or live_scroll)),
+                   SPAN_BENCH_HISTORY=str(int(workload == "history" or switching_tabs
+                                             or live_scroll or offscreen_prose)),
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
-                   SPAN_BENCH_STREAM={"live-scroll": "scroll", "hidden-prose": "hidden-prose"}.get(
-                       workload, str(int(workload == "stream"))),
+                   SPAN_BENCH_STREAM={"live-scroll": "scroll", "hidden-prose": "hidden-prose",
+                                      "offscreen-prose": "hidden-prose"}.get(
+                                          workload, str(int(workload == "stream"))),
                    SPAN_BENCH_TASK_IDLE=str(int(workload == "task-wait")),
                    SPAN_BENCH_TABS=str(int(switching_tabs)),
                    SPAN_BENCH_CATALOG=str(int(show_catalog)),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
+        if offscreen_prose:
+            env["SPAN_BENCH_OFFSCREEN_PROSE"] = "1"
         if same_directory:
             # Keep App Server markers outside the folder open in every tab.
             workspace = home / "workspace"
@@ -144,6 +149,11 @@ def benchmark(binary, workload):
                     pss = next(line.split()[1] for line in memory if line.startswith("Pss:"))
                     print(f"{name} {stage}: PSS {pss} KiB", flush=True)
 
+                def wheel(button):
+                    for event in (X.ButtonPress, X.ButtonRelease):
+                        xtest.fake_input(screen, event, button)
+                    screen.flush()
+
                 setup_frame = pixels()
                 before_cpu = cpu_seconds()
                 start = time.monotonic()
@@ -165,26 +175,52 @@ def benchmark(binary, workload):
                           flush=True)
                     until(lambda: (home / "bench-tool-finished").exists())
                     return
-                if workload == "hidden-prose":
+                if workload == "hidden-prose" or offscreen_prose:
                     until(lambda: (home / "agent-models").exists())
-                    time.sleep(0.20)
+                    time.sleep(0.65 if offscreen_prose else 0.20)
                     empty_conversation = pixels()
                     xdo("type", "Stream a reply in the background")
                     xdo("key", "Return")
                     until((home / "bench-hidden-started").exists)
                     sent = pixels()
-                    xdo("key", "ctrl+shift+a")
+                    if offscreen_prose:
+                        xdo("mousemove", "--window", wid, 715, 320)
+                        for _ in range(12):
+                            wheel(4)
+                    else:
+                        xdo("key", "ctrl+shift+a")
                     until(lambda: pixels() != sent)
                     time.sleep(0.2)
                     hidden_frame = pixels()
                     start = cpu_seconds()
                     (home / "bench-hidden-unmapped").touch()
-                    until((home / "bench-hidden-buffered").exists)
+                    if offscreen_prose:
+                        samples = []
+                        schedule = time.monotonic()
+                        for index in range(100):
+                            before = pixels()
+                            input_at = time.monotonic()
+                            wheel(4 if index % 20 < 10 else 5)
+                            while pixels() == before:
+                                if time.monotonic() - input_at > 1:
+                                    raise RuntimeError(f"{name} wheel event {index} did not repaint")
+                                time.sleep(0.0005)
+                            samples.append((time.monotonic() - input_at) * 1000)
+                            time.sleep(max(0, schedule + (index + 1) * 0.035 - time.monotonic()))
+                        elapsed = time.monotonic() - schedule
+                        print(f"{name} scroll during streamed prose:"
+                              f" median {statistics.median(samples):.1f} ms,"
+                              f" p95 {sorted(samples)[94]:.1f} ms,"
+                              f" app CPU {(cpu_seconds() - start) * 1000:.0f} ms / 100 events in {elapsed:.3f} s",
+                              flush=True)
+                        assert not (home / "bench-hidden-buffered").exists(), elapsed
+                    until((home / "bench-hidden-buffered").exists, timeout=20)
                     cpu_ms = (cpu_seconds() - start) * 1000
                     footprint("after buffering inactive reply")
                     assert not (home / "bench-hidden-finished").exists()
-                    xdo("key", "ctrl+shift+a")
-                    until(lambda: pixels() != hidden_frame)
+                    if not offscreen_prose:
+                        xdo("key", "ctrl+shift+a")
+                        until(lambda: pixels() != hidden_frame)
                     xdo("mousemove", "--window", wid, 715, 320)
                     # Allow follow-tail to restore the latest output. Then
                     # scroll down until the pixels stop changing so both
@@ -192,29 +228,44 @@ def benchmark(binary, workload):
                     def reply_pixels():
                         return win.get_image(395, 420, 390, 180, X.ZPixmap, 0xffffffff).data
 
+                    # The final link is the only underline this long. A small
+                    # unchanged crop can also mean GTK has yet to lay out the
+                    # buffered reply, so require that last line before exiting.
+                    tail = tuple(bytes((255, 191, 160, a)) * 120 for a in (0, 255))
+
+                    def final_fragment_visible():
+                        image = win.get_image(285, 125, 775, 550, X.ZPixmap, 0xffffffff).data
+                        return any(mark in image for mark in tail)
+
                     time.sleep(0.22)
                     initial = visible = reply_pixels()
-                    for _ in range(16):
+                    for _ in range(28 if offscreen_prose else 16):
                         for _ in range(16):
                             xtest.fake_input(screen, X.ButtonPress, 5)
                             xtest.fake_input(screen, X.ButtonRelease, 5)
                         screen.flush()
-                        time.sleep(0.08)
+                        time.sleep(0.28 if offscreen_prose else 0.08)
                         final = reply_pixels()
-                        if final == visible:
+                        if final == visible and (not offscreen_prose or final_fragment_visible()):
                             break
                         visible = final
                     else:
+                        if shutil.which("import"):
+                            Path("dist").mkdir(exist_ok=True)
+                            subprocess.run(["import", "-window", str(wid), "dist/test-failure.png"],
+                                           check=False)
                         raise RuntimeError("the buffered reply never reached its last viewport")
-                    print(f"{name} followed the buffered reply on return: {initial == visible}",
-                          flush=True)
+                    if not offscreen_prose:
+                        print(f"{name} followed the buffered reply on return: {initial == visible}",
+                              flush=True)
                     assert pixels() != empty_conversation and len(set(visible)) > 32
-                    print(f"{name} buffered live reply painted before completion: "
-                          f"{hashlib.sha256(visible).hexdigest()}", flush=True)
-                    print(f"{name} inactive reply: app CPU {cpu_ms:.0f} ms for 576 deltas", flush=True)
+                    digest = hashlib.sha256(visible).hexdigest()
+                    print(f"{name} buffered live reply painted before completion: {digest}", flush=True)
+                    phase = "reply below the viewport" if offscreen_prose else "inactive reply"
+                    print(f"{name} {phase}: app CPU {cpu_ms:.0f} ms for 576 deltas", flush=True)
                     (home / "bench-hidden-verified").touch()
                     until((home / "bench-hidden-finished").exists)
-                    return
+                    return digest
                 if workload == "stream":
                     until(lambda: (home / "agent-models").exists())
                     time.sleep(0.2)
@@ -572,7 +623,12 @@ def benchmark(binary, workload):
                 app.wait(timeout=5)
 
 
+offscreen_reply_frames = set()
 for package in sys.argv[1:]:
     for workload in ("history", "table", "tools", "images", "stream", "live-scroll",
-                     "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog", "hidden-prose"):
-        benchmark(package, workload)
+                     "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog", "hidden-prose",
+                     "offscreen-prose"):
+        final_frame = benchmark(package, workload)
+        if workload == "offscreen-prose":
+            offscreen_reply_frames.add(final_frame)
+assert len(offscreen_reply_frames) == 1, "the final live reply differed after returning to the bottom"

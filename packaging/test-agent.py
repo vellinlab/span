@@ -434,16 +434,20 @@ for line in sys.stdin:
                 raise TimeoutError(name)
 
             wait_for_bench("bench-hidden-unmapped")
+            offscreen = os.environ.get("SPAN_BENCH_OFFSCREEN_PROSE") == "1"
+            interval = 0.170 if offscreen else 0.045
             paragraphs = []
             for index in range(576):
                 delta = f"Long reply fragment {index + 1}. **Build output** and `preview` rows. "
                 if index % 6 == 5:
                     delta += "\n\n"
+                if index == 575 and offscreen:
+                    delta += "[The final fragment of the streamed reply](https://example.invalid/end)\n"
                 paragraphs.append(delta)
                 send({"method": "item/agentMessage/delta", "params": {
                     **event, "itemId": "hidden-prose", "delta": delta}})
                 if index % 6 == 5:
-                    time.sleep(0.045)
+                    time.sleep(interval)
             (home / "bench-hidden-buffered").touch()
             wait_for_bench("bench-hidden-verified")
             send({"method": "item/completed", "params": {**event, "item": {

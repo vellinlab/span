@@ -69,6 +69,7 @@ struct LiveMessage {
     id: String,
     text: RefCell<String>,
     dirty: Cell<bool>,
+    paint_queued: Cell<bool>,
     label: gtk::Label,
 }
 
@@ -576,6 +577,14 @@ impl Agent {
                 && let Some(agent) = weak.upgrade()
             {
                 agent.load_older_history();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.scroll.vadjustment().connect_value_changed(move |_| {
+            if let Some(agent) = weak.upgrade()
+                && let Some(reply) = agent.live.borrow().as_ref()
+            {
+                agent.queue_live_paint(reply);
             }
         });
         let weak = Rc::downgrade(self);
@@ -2291,6 +2300,7 @@ impl Agent {
                 id: id.into(),
                 text: RefCell::new(String::new()),
                 dirty: Cell::new(false),
+                paint_queued: Cell::new(false),
                 label,
             });
             let pending = Rc::downgrade(&live);
@@ -2314,21 +2324,42 @@ impl Agent {
                 return;
             }
             text.push_str(&limited(delta, remaining));
-            // Keep receiving the reply in inactive tabs. Shape its latest
-            // text on map, or when a finished segment needs to be retained.
-            let needs_paint = !live.dirty.replace(true);
-            if live.label.is_mapped() {
-                if needs_paint {
-                    let live = Rc::downgrade(live);
-                    glib::timeout_add_local_once(Duration::from_millis(33), move || {
-                        if let Some(live) = live.upgrade().filter(|live| live.label.is_mapped()) {
-                            live.render();
-                        }
-                    });
-                }
-                self.scroll_to_end();
-            }
+            drop(text);
+            live.dirty.set(true);
+            self.queue_live_paint(live);
         }
+    }
+
+    fn can_paint_live(&self, reply: &LiveMessage) -> bool {
+        // Keep the incoming Markdown unshaped while the reader is browsing
+        // older messages above this reply. A scroll back schedules its paint.
+        reply.label.is_mapped()
+            && (self.follow_tail.get()
+                || reply
+                    .label
+                    .translate_coordinates(&self.history, 0, 0)
+                    .is_none_or(|(_, top)| {
+                        let adjustment = self.scroll.vadjustment();
+                        f64::from(top) <= adjustment.value() + adjustment.page_size()
+                    }))
+    }
+
+    fn queue_live_paint(self: &Rc<Self>, reply: &Rc<LiveMessage>) {
+        if !reply.dirty.get() || reply.paint_queued.get() || !self.can_paint_live(reply) {
+            return;
+        }
+        reply.paint_queued.set(true);
+        let weak_reply = Rc::downgrade(reply);
+        let agent = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_millis(33), move || {
+            if let (Some(agent), Some(reply)) = (agent.upgrade(), weak_reply.upgrade()) {
+                reply.paint_queued.set(false);
+                if reply.dirty.get() && agent.can_paint_live(&reply) {
+                    agent.scroll_to_end();
+                    reply.render();
+                }
+            }
+        });
     }
 
     fn remove_live(&self) {
