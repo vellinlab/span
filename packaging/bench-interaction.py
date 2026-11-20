@@ -27,13 +27,13 @@ def xdo(*args):
     return subprocess.check_output(["xdotool", *map(str, args)], text=True).strip()
 
 
-def until(check):
+def until(check, interval=0.02):
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
         result = check()
         if result:
             return result
-        time.sleep(0.02)
+        time.sleep(interval)
     raise RuntimeError("X11 benchmark setup timed out")
 
 
@@ -125,29 +125,37 @@ def benchmark(binary, workload):
                         xtest.fake_input(screen, event, enter)
                     screen.flush()
 
-                    # Xvfb's 24-bit screen exposes BGRX32 pixel storage. The
-                    # last thumbnail is at the bottom of the reply timeline.
-                    red, green, blue = IMAGE_COLORS[-1]
-                    markers = tuple(bytes((blue, green, red, unused)) * 8 for unused in (0, 255))
-
-                    def last_image_painted():
-                        data = win.get_image(265, 75, 785, 625, X.ZPixmap, 0xffffffff).data
+                    # GTK keeps the opening card in view while the images
+                    # expand asynchronously. Verify the other end separately
+                    # to avoid timing a fast draw that loaded only one image.
+                    def image_painted(color):
+                        red, green, blue = color
+                        markers = (bytes((blue, green, red, 0)) * 8,
+                                   bytes((blue, green, red, 255)) * 8)
+                        data = win.get_image(565, 140, 135, 555, X.ZPixmap, 0xffffffff).data
                         return any(marker in data for marker in markers)
 
                     try:
-                        until(last_image_painted)
+                        until(lambda: image_painted(IMAGE_COLORS[0]), interval=0.002)
                     except RuntimeError:
                         print("Image response sent by fixture:",
                               (home / "bench-images-dispatched").exists(), flush=True)
-                        Path("dist").mkdir(exist_ok=True)
-                        subprocess.run(["import", "-window", str(wid), "dist/test-failure.png"],
-                                       check=False)
+                        if shutil.which("import"):
+                            Path("dist").mkdir(exist_ok=True)
+                            subprocess.run(["import", "-window", str(wid), "dist/test-failure.png"],
+                                           check=False)
                         raise
                     first_visible = (time.monotonic() - start) * 1000
                     time.sleep(max(0, start + 1.25 - time.monotonic()))
                     cpu_ms = (cpu_seconds() - before_cpu) * 1000
-                    print(f"{name} last thumbnail paint: {first_visible:.1f} ms,"
+                    print(f"{name} first thumbnail paint: {first_visible:.1f} ms,"
                           f" app CPU {cpu_ms:.0f} ms including settle", flush=True)
+                    xdo("mousemove", "--window", wid, 715, 365)
+                    for _ in range(80):
+                        for event in (X.ButtonPress, X.ButtonRelease):
+                            xtest.fake_input(screen, event, 5)
+                    screen.flush()
+                    until(lambda: image_painted(IMAGE_COLORS[-1]))
                     footprint("three previews loaded")
                     return
                 # Backdate the measurement to the first observation of the
