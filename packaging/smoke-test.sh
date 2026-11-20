@@ -337,6 +337,7 @@ SVG
     widget contains 'GPT Vision'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-model-picker.png"
     widget mouse 'GPT Vision'
+    widget description '选择模型' 'GPT Vision'
     read -r _ _ effort_width _ <<< "$(widget bounds '思考强度')"
     [[ $effort_width -lt 112 ]]
     widget mouse '思考强度'
@@ -715,8 +716,10 @@ SVG
     widget description '会话权限' '只读。从下一轮起生效。'
     widget mouse '选择模型'
     widget mouse 'GPT Base'
+    widget description '选择模型' 'GPT Base'
     widget mouse '选择模型'
     widget mouse 'GPT Vision'
+    widget description '选择模型' 'GPT Vision'
     widget mouse '思考强度'
     widget mouse '中'
     widget mouse 'Fast 模式'
