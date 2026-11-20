@@ -2,6 +2,7 @@
 import hashlib
 import os
 from pathlib import Path
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -116,9 +117,42 @@ def benchmark(binary):
                           f"app CPU {cost:.0f} ms / 160 events", flush=True)
 
                 drag("conversation")
+                # Simulate high-resolution input arriving in bursts within one frame.
+                # Move through the transcript, rather than pushing at an endpoint.
+                begin = ticks()
+                start = time.monotonic()
+                for frame in range(120):
+                    button = 4 if frame % 24 < 12 else 5
+                    for _ in range(4):
+                        for event in (X.ButtonPress, X.ButtonRelease):
+                            xtest.fake_input(screen, event, button)
+                    screen.flush()
+                    time.sleep(max(0, start + (frame + 1) / 60 - time.monotonic()))
+                screen.sync()
+                time.sleep(0.25)
+                cost = (ticks() - begin) * 1000 / os.sysconf("SC_CLK_TCK")
+                print(f"{Path(binary).parent.name} wheel burst: app CPU {cost:.0f} ms / 480 events",
+                      flush=True)
+
+                # Drive well beyond each end and verify that a distant page is
+                # painted again after being evicted and brought back on screen.
+                def endpoint(button):
+                    for _ in range(640):
+                        for event in (X.ButtonPress, X.ButtonRelease):
+                            xtest.fake_input(screen, event, button)
+                    screen.sync()
+                    time.sleep(0.6)
+                    data = win.get_image(390, 150, 540, 170, X.ZPixmap, 0xffffffff).data
+                    assert len(set(data)) > 32, "blank transcript after scrolling"
+                    return hashlib.blake2b(data, digest_size=8).digest()
+
+                top = endpoint(4)
+                bottom = endpoint(5)
+                assert top != bottom and endpoint(4) == top, "history did not survive scrolling"
                 xdo("key", "ctrl+shift+a")
                 time.sleep(0.25)
-                xdo("type", """seq 1 3000 | awk '{printf "%06d %0160d\\n", $1, $1}'; touch ~/bench-terminal-ready""")
+                xdo("type", """seq 1 3000 | awk '{printf "%06d %0160d\\n", $1, $1}'; touch """
+                    + shlex.quote(str(home / "bench-terminal-ready")))
                 xdo("key", "Return")
                 until(lambda: (home / "bench-terminal-ready").exists())
                 time.sleep(0.4)

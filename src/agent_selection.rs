@@ -29,9 +29,15 @@ pub fn scroll_vertical(scroll: &gtk::ScrolledWindow, delta: f64) -> f64 {
     let lower = adjustment.lower();
     let upper = (adjustment.upper() - adjustment.page_size()).max(lower);
     let step = adjustment.page_size().powf(2.0 / 3.0).max(1.0);
-    let previous = adjustment.value();
+    let history = scroll.downcast_ref::<crate::history_window::HistoryScroll>();
+    let actual = adjustment.value();
+    let previous = history.map_or(actual, |view| view.wheel_position(actual));
     let next = (previous + step * delta).clamp(lower, upper);
-    adjustment.set_value(next);
+    if let Some(view) = history {
+        view.apply_wheel(&adjustment, next, next == lower || next == upper);
+    } else {
+        adjustment.set_value(next);
+    }
     let remaining = delta - (next - previous) / step;
     if delta < 0.0 && next == lower {
         scroll.emit_by_name::<()>("edge-overshot", &[&gtk::PositionType::Top]);

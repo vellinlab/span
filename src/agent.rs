@@ -266,12 +266,14 @@ impl Agent {
 
         let history = crate::reading_column::new(18);
         history.style_context().add_class("agent-history");
-        let scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .overlay_scrolling(false)
-            .kinetic_scrolling(false)
-            .build();
+        let scroll: gtk::ScrolledWindow =
+            glib::Object::builder::<crate::history_window::HistoryScroll>()
+                .property("hscrollbar-policy", gtk::PolicyType::Never)
+                .property("vscrollbar-policy", gtk::PolicyType::Automatic)
+                .property("overlay-scrolling", false)
+                .property("kinetic-scrolling", false)
+                .build()
+                .upcast();
         scroll.style_context().add_class("agent-scroll");
         scroll.connect_scroll_event(|scroll, event| {
             if let Some(delta) = crate::agent_selection::vertical_delta(event) {
