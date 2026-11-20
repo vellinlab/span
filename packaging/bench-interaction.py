@@ -1,4 +1,5 @@
 """Compare installed Linux builds on the same X11 display and pinned CPU."""
+import ctypes
 import hashlib
 import os
 from pathlib import Path
@@ -15,6 +16,9 @@ from Xlib.ext import xtest
 
 screen = display.Display()
 cpu = min(os.sched_getaffinity(0))
+get_cpu_clock = ctypes.CDLL(None).clock_getcpuclockid
+get_cpu_clock.argtypes = (ctypes.c_int, ctypes.POINTER(ctypes.c_int))
+get_cpu_clock.restype = ctypes.c_int
 
 
 def xdo(*args):
@@ -60,10 +64,13 @@ def benchmark(binary, workload):
                 def pixels():
                     return win.get_image(390, 150, 540, 170, X.ZPixmap, 0xffffffff).data
 
-                process_clock = time.clock_getcpuclockid(app.pid)
+                process_clock = ctypes.c_int()
+                error = get_cpu_clock(app.pid, ctypes.byref(process_clock))
+                if error:
+                    raise OSError(error, os.strerror(error))
 
                 def cpu_seconds():
-                    return time.clock_gettime_ns(process_clock) / 1e9
+                    return time.clock_gettime_ns(process_clock.value) / 1e9
 
                 def footprint(stage):
                     memory = Path(f"/proc/{app.pid}/smaps_rollup").read_text().splitlines()
