@@ -344,19 +344,21 @@ impl HistoryWindow {
             let far = bottom < near_top - page * 1.75 || f64::from(y) > near_top + page * 2.75;
             let near = bottom >= near_top - page * 0.85 && f64::from(y) <= near_top + page * 1.85;
             if far && !protected(&slot) {
+                if block.text.is_some() && !idle {
+                    // Reversing a wheel gesture must not remap the same GTK
+                    // input windows one frame after hiding them.
+                    if content.is_visible() {
+                        self.schedule_cleanup();
+                    }
+                    continue;
+                }
                 if content.is_visible() {
                     slot.set_height_request(height);
                     content.set_no_show_all(true);
                     content.hide();
                 }
-                if let Some(text) = &block.text
-                    && text.loaded.get()
-                {
-                    if idle {
-                        text.release();
-                    } else {
-                        self.schedule_cleanup();
-                    }
+                if let Some(text) = &block.text {
+                    text.release();
                 }
             } else if near && !content.is_visible() {
                 if let Some(text) = &block.text {

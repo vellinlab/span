@@ -80,20 +80,34 @@ def benchmark(binary, workload):
                     pss = next(line.split()[1] for line in memory if line.startswith("Pss:"))
                     print(f"{name} {stage}: PSS {pss} KiB", flush=True)
 
+                setup_frame = pixels()
                 before_cpu = cpu_seconds()
                 start = time.monotonic()
                 enter = screen.keysym_to_keycode(XK.string_to_keysym("Return"))
                 for event in (X.KeyPress, X.KeyRelease):
                     xtest.fake_input(screen, event, enter)
                 screen.flush()
+                # Backdate the measurement to the first observation of the
+                # final frame. Loading chrome and intermediate height estimates
+                # can also produce non-blank frames before the reply is usable.
+                frame = setup_frame
+                painted_at, painted_cpu = start, before_cpu
                 deadline = start + 12
-                while not (home / "agent-ready").exists() or len(set(pixels())) <= 32:
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError("first transcript paint timed out")
+                while time.monotonic() < deadline:
+                    candidate = pixels()
+                    now = time.monotonic()
+                    if frame != candidate:
+                        frame = candidate
+                        painted_at, painted_cpu = now, cpu_seconds()
+                    elif (now - painted_at >= 0.35 and frame != setup_frame
+                          and (home / "agent-models").exists() and len(set(frame)) > 32):
+                        break
                     time.sleep(0.001)
-                print(f"{name} first transcript paint: {(time.monotonic() - start) * 1000:.1f} ms,"
-                      f" app CPU {(cpu_seconds() - before_cpu) * 1000:.1f} ms", flush=True)
-                time.sleep(1)
+                else:
+                    raise RuntimeError("settled transcript paint timed out")
+                print(f"{name} settled transcript paint: {(painted_at - start) * 1000:.1f} ms,"
+                      f" app CPU {(painted_cpu - before_cpu) * 1000:.1f} ms", flush=True)
+                time.sleep(max(0, painted_at + 1 - time.monotonic()))
                 xdo("mousemove", "--window", wid, 715, 320)
                 footprint("loaded")
 
