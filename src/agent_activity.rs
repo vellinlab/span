@@ -1,5 +1,5 @@
 use crate::agent::{append_changes, limited};
-use crate::agent_diff::DiffCard;
+use crate::agent_diff::FoldedDiff;
 use crate::agent_render;
 use crate::icons::{self, Icon};
 use gtk::pango;
@@ -40,10 +40,13 @@ enum View {
         source: gtk::LinkButton,
         domain: gtk::Label,
     },
-    Command(gtk::Box),
+    Command {
+        body: gtk::Box,
+        detail: FoldedDetail,
+    },
     Patch {
         files: gtk::Label,
-        diff: Rc<DiffCard>,
+        diff: FoldedDiff,
     },
 }
 
@@ -209,14 +212,6 @@ impl Activity {
     }
 
     pub fn record(&mut self, record: Record<'_>) {
-        self.render_record(record, false);
-    }
-
-    pub fn record_history(&mut self, record: Record<'_>) {
-        self.render_record(record, true);
-    }
-
-    fn render_record(&mut self, record: Record<'_>, historical: bool) {
         let quote = self.quote.clone();
         let entry = self.entry(record.id, record.kind, record.icon);
         set_title(&entry.row, &entry.title, &record.title);
@@ -249,7 +244,7 @@ impl Activity {
                     }
                 }
             }
-            View::Command(body) => {
+            View::Command { body, detail } => {
                 let status = match record.status {
                     Some("completed") => "成功",
                     Some("failed") => "失败",
@@ -258,13 +253,13 @@ impl Activity {
                     _ => "",
                 };
                 let body = body.clone();
-                let detail = record.detail;
-                render_detail(&entry.row, historical, move || {
+                let output = record.detail;
+                detail.update(&entry.row, move || {
                     for child in body.children() {
                         body.remove(&child);
                     }
                     let card =
-                        agent_render::code_card("Shell", &detail, nonempty(Some(status)), &quote);
+                        agent_render::code_card("Shell", &output, nonempty(Some(status)), &quote);
                     body.add(&card);
                     card.show_all();
                 });
@@ -272,13 +267,7 @@ impl Activity {
             View::Patch { files, diff } => {
                 files.set_text(&record.detail);
                 if let Some(patch) = record.patch {
-                    let diff = diff.clone();
-                    let files = files.clone();
-                    render_detail(&entry.row, historical, move || {
-                        diff.update(&patch);
-                        diff.widget().show();
-                        files.hide();
-                    });
+                    diff.update(&entry.row, patch);
                 }
             }
         }
@@ -361,17 +350,16 @@ impl Activity {
             let view = if kind == "commandExecution" {
                 let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 item.add(&body);
-                View::Command(body)
+                View::Command {
+                    body,
+                    detail: FoldedDetail::new(&item),
+                }
             } else if kind == "fileChange" {
                 let body = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 let files = agent_render::text("");
                 files.style_context().add_class("agent-activity-detail");
                 body.add(&files);
-                let diff = Rc::new(DiffCard::new("文件补丁"));
-                body.add(diff.widget());
-                diff.widget().show_all();
-                diff.widget().set_no_show_all(true);
-                diff.widget().hide();
+                let diff = FoldedDiff::new(&item, &body, "文件补丁", Some(&files));
                 item.add(&body);
                 View::Patch { files, diff }
             } else if kind == "webSearch" {
@@ -452,19 +440,34 @@ fn summary_text(parts: &[String]) -> String {
         .join("\n\n")
 }
 
-pub fn render_detail(row: &gtk::Expander, deferred: bool, render: impl FnOnce() + 'static) {
-    if !deferred || row.is_expanded() {
-        render();
-        return;
+type PendingDetail = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+
+pub struct FoldedDetail(PendingDetail);
+
+impl FoldedDetail {
+    pub fn new(row: &gtk::Expander) -> Self {
+        let pending: PendingDetail = Rc::default();
+        let on_expand = pending.clone();
+        row.connect_expanded_notify(move |row| {
+            if row.is_expanded()
+                && let Some(render) = on_expand.take()
+            {
+                render();
+            }
+        });
+        Self(pending)
     }
-    let render = RefCell::new(Some(render));
-    row.connect_expanded_notify(move |row| {
-        if row.is_expanded()
-            && let Some(render) = render.take()
-        {
+
+    pub fn update(&self, row: &gtk::Expander, render: impl FnOnce() + 'static) {
+        if row.is_expanded() {
+            self.0.take();
             render();
+        } else {
+            // File changes and command output are snapshots. Only the most recent
+            // snapshot is needed when the user opens this row.
+            self.0.replace(Some(Box::new(render)));
         }
-    });
+    }
 }
 
 pub fn summary_delta(params: &Value) -> Option<(&str, usize, &str)> {

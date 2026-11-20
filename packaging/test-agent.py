@@ -232,6 +232,19 @@ for line in sys.stdin:
                     for i in range(1, 97)]
             turns = [{"id": "table-turn", "status": "completed", "items": [
                 {"id": "table-reply", "type": "agentMessage", "text": "\n".join([header] + rows)}]}]
+        if os.environ.get("SPAN_BENCH_TOOLS") == "1":
+            for n in range(16):
+                items = []
+                for tool in range(6):
+                    items.append({"id": f"exec-{n}-{tool}", "type": "commandExecution",
+                                  "command": f"check-task {n} {tool}", "status": "completed",
+                                  "exitCode": 0, "aggregatedOutput": "Task diagnostics and results\n" * 320})
+                    items.append({"id": f"change-{n}-{tool}", "type": "fileChange", "changes": [
+                        {"path": f"checks-{n}-{tool}.txt", "diff": diff}]})
+                items.append({"id": f"tool-reply-{n}", "type": "agentMessage",
+                              "text": f"## 工具执行记录 · Task {n}\n\n"
+                                      "已完成检查。 Review the command output and diff above. " * 5})
+                turns.append({"id": f"tool-turn-{n}", "status": "completed", "items": items})
         send({"id": request_id, "result": {"thread": {"id": started_thread, "turns": turns},
                                           "cwd": str(home), "model": "gpt-base-fixture",
                                           "sandbox": {"type": "workspaceWrite", "networkAccess": False},

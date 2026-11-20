@@ -1,9 +1,56 @@
 use crate::agent::limited;
+use crate::agent_activity::FoldedDetail;
 use crate::agent_render::{CodeCard, clipboard};
 use gtk::glib;
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+pub struct FoldedDiff {
+    detail: FoldedDetail,
+    body: gtk::Box,
+    title: &'static str,
+    files: Option<gtk::Label>,
+    card: Rc<RefCell<Option<DiffCard>>>,
+}
+
+impl FoldedDiff {
+    pub fn new(
+        row: &gtk::Expander,
+        body: &gtk::Box,
+        title: &'static str,
+        files: Option<&gtk::Label>,
+    ) -> Self {
+        Self {
+            detail: FoldedDetail::new(row),
+            body: body.clone(),
+            title,
+            files: files.cloned(),
+            card: Rc::default(),
+        }
+    }
+
+    pub fn update(&self, row: &gtk::Expander, patch: String) {
+        let body = self.body.clone();
+        let title = self.title;
+        let files = self.files.clone();
+        let card = self.card.clone();
+        self.detail.update(row, move || {
+            let mut card = card.borrow_mut();
+            let card = card.get_or_insert_with(|| {
+                let card = DiffCard::new(title);
+                body.add(card.widget());
+                card.widget().show_all();
+                if let Some(files) = files {
+                    files.set_no_show_all(true);
+                    files.hide();
+                }
+                card
+            });
+            card.update(&patch);
+        });
+    }
+}
 
 pub struct DiffCard {
     card: CodeCard,

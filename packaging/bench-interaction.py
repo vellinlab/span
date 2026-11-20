@@ -31,16 +31,18 @@ def until(check):
     raise RuntimeError("X11 benchmark setup timed out")
 
 
-def benchmark(binary, table=False):
-    name = Path(binary).parent.name + (" table" if table else "")
+def benchmark(binary, workload):
+    name = Path(binary).parent.name + ("" if workload == "history" else f" {workload}")
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
         (home / "bin").mkdir()
         shutil.copy2("packaging/test-agent.py", home / "bin/codex")
         (home / "bin/codex").chmod(0o755)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
-                   PATH=str(home / "bin") + ":" + os.environ["PATH"], SPAN_BENCH_HISTORY="0" if table else "1",
-                   SPAN_BENCH_TABLE="1" if table else "0",
+                   PATH=str(home / "bin") + ":" + os.environ["PATH"],
+                   SPAN_BENCH_HISTORY=str(int(workload == "history")),
+                   SPAN_BENCH_TABLE=str(int(workload == "table")),
+                   SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         with subprocess.Popen(["taskset", "-c", str(cpu), binary], env=env) as app:
             try:
@@ -169,7 +171,7 @@ def benchmark(binary, table=False):
                 bottom = endpoint(5)
                 assert top != bottom and endpoint(4) == top, "history did not survive scrolling"
                 footprint("after revisiting history")
-                if table:
+                if workload != "history":
                     return
                 xdo("key", "ctrl+shift+a")
                 time.sleep(0.25)
@@ -185,5 +187,5 @@ def benchmark(binary, table=False):
 
 
 for package in sys.argv[1:]:
-    benchmark(package)
-    benchmark(package, table=True)
+    for workload in ("history", "table", "tools"):
+        benchmark(package, workload)

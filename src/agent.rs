@@ -2,7 +2,7 @@ use crate::agent_activity::{self, Activity, Record};
 use crate::agent_attachments::{Attachments, Prepared};
 use crate::agent_catalog::{self, Catalog, ThreadState};
 use crate::agent_commands::Commands;
-use crate::agent_diff::DiffCard;
+use crate::agent_diff::{DiffCard, FoldedDiff};
 use crate::agent_extensions::{
     self, Action as ExtensionAction, Extensions, Request as ExtensionRequest,
     Section as ExtensionSection,
@@ -83,7 +83,7 @@ impl LiveMessage {
 struct TurnDiff {
     id: String,
     expander: gtk::Expander,
-    card: DiffCard,
+    card: FoldedDiff,
 }
 
 struct PendingMessage {
@@ -1180,11 +1180,7 @@ impl Agent {
             for item in array(&turn["items"]) {
                 if let Some(record) = Record::from_item(item) {
                     let activity = activity.get_or_insert_with(|| self.new_activity());
-                    if status == Some("inProgress") {
-                        activity.record(record);
-                    } else {
-                        activity.record_history(record);
-                    }
+                    activity.record(record);
                 } else {
                     if matches!(
                         item["type"].as_str(),
@@ -1213,7 +1209,7 @@ impl Agent {
                 append_file_changes(item, &mut changes);
             }
             if !changes.is_empty() {
-                self.add_history_diff(changes);
+                self.add_diff(&changes);
             }
             if status == Some("completed") {
                 self.add_copy_actions(assistant_text);
@@ -2032,7 +2028,7 @@ impl Agent {
                                 card,
                             });
                         } else if let Some(live) = live.as_ref() {
-                            live.card.update(diff);
+                            live.card.update(&live.expander, limited(diff, 256 * 1024));
                             live.expander.set_visible(!diff.is_empty());
                         }
                     }
@@ -2441,28 +2437,15 @@ impl Agent {
         self.update_task_status();
     }
 
-    fn add_diff(&self, diff: &str) -> (gtk::Expander, DiffCard) {
+    fn add_diff(&self, diff: &str) -> (gtk::Expander, FoldedDiff) {
         let expander = self.diff_expander();
-        let card = DiffCard::new("本轮改动");
-        card.update(diff);
-        expander.add(card.widget());
+        let body = column(0);
+        expander.add(&body);
+        let card = FoldedDiff::new(&expander, &body, "本轮改动", None);
+        card.update(&expander, limited(diff, 256 * 1024));
         self.append(&expander);
         expander.set_visible(!diff.is_empty());
         (expander, card)
-    }
-
-    fn add_history_diff(&self, diff: String) {
-        let expander = self.diff_expander();
-        let weak = expander.downgrade();
-        agent_activity::render_detail(&expander, true, move || {
-            if let Some(expander) = weak.upgrade() {
-                let card = DiffCard::new("本轮改动");
-                card.update(&diff);
-                expander.add(card.widget());
-                card.widget().show_all();
-            }
-        });
-        self.append(&expander);
     }
 
     fn diff_expander(&self) -> gtk::Expander {
