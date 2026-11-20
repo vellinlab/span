@@ -1,96 +1,11 @@
 //! Keep distant transcript content and shaped prose out of GTK layout.
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::subclass::prelude::ObjectSubclassIsExt;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 const REPLY_EVICTION_DELAY: Duration = Duration::from_millis(900);
-const WHEEL_GESTURE_GAP: Duration = Duration::from_millis(40);
-
-// X11 can deliver many wheel packets before GTK presents the next frame.
-// Move immediately on an isolated tick, then accumulate the remaining motion
-// in logical coordinates without moving all the native child windows per packet.
-glib::wrapper! {
-    pub struct HistoryScroll(ObjectSubclass<imp::HistoryScroll>)
-        @extends gtk::ScrolledWindow, gtk::Bin, gtk::Container, gtk::Widget,
-        @implements gtk::Buildable;
-}
-
-mod imp {
-    use super::*;
-    use gtk::subclass::prelude::*;
-
-    #[derive(Default)]
-    pub struct HistoryScroll {
-        pub(super) pending: Cell<Option<(f64, f64)>>,
-        pub(super) ticking: Cell<bool>,
-        pub(super) last_input: Cell<Option<Instant>>,
-    }
-
-    #[glib::object_subclass]
-    impl ObjectSubclass for HistoryScroll {
-        const NAME: &'static str = "SpanHistoryScroll";
-        type Type = super::HistoryScroll;
-        type ParentType = gtk::ScrolledWindow;
-    }
-
-    impl ObjectImpl for HistoryScroll {}
-    impl WidgetImpl for HistoryScroll {
-        fn unmap(&self) {
-            self.pending.set(None);
-            self.last_input.set(None);
-            self.parent_unmap();
-        }
-    }
-    impl ContainerImpl for HistoryScroll {}
-    impl BinImpl for HistoryScroll {}
-    impl ScrolledWindowImpl for HistoryScroll {}
-}
-
-impl HistoryScroll {
-    pub fn wheel_position(&self, actual: f64) -> f64 {
-        self.imp()
-            .pending
-            .get()
-            .filter(|(old, _)| *old == actual)
-            .map_or(actual, |(_, target)| target)
-    }
-
-    pub fn apply_wheel(&self, adjustment: &gtk::Adjustment, target: f64, edge: bool) {
-        let state = self.imp();
-        let now = Instant::now();
-        let first = state
-            .last_input
-            .replace(Some(now))
-            .is_none_or(|last| now.duration_since(last) >= WHEEL_GESTURE_GAP);
-        let actual = adjustment.value();
-        if actual == target || first || edge || gtk::grab_get_current().is_some() {
-            // Start immediately and keep text selection and history prefetch in sync.
-            state.pending.set(None);
-            if actual != target {
-                adjustment.set_value(target);
-            }
-            return;
-        }
-        state.pending.set(Some((actual, target)));
-        if state.ticking.replace(true) {
-            return;
-        }
-        self.add_tick_callback(|scroll, _| {
-            let state = scroll.imp();
-            state.ticking.set(false);
-            let adjustment = scroll.vadjustment();
-            if let Some((old, target)) = state.pending.take()
-                && old == adjustment.value()
-            {
-                adjustment.set_value(target);
-            }
-            glib::ControlFlow::Break
-        });
-    }
-}
 
 struct Block {
     slot: glib::WeakRef<gtk::Box>,
