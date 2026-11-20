@@ -70,11 +70,12 @@ def benchmark(binary, workload):
                 write_image(home / ".bench-images" / f"preview-{i}.png", color)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"],
-                   SPAN_BENCH_HISTORY=str(int(workload == "history")),
+                   SPAN_BENCH_HISTORY=str(int(workload in ("history", "tabs"))),
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
                    SPAN_BENCH_STREAM=str(int(workload == "stream")),
+                   SPAN_BENCH_TABS=str(int(workload == "tabs")),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         with subprocess.Popen(["taskset", "-c", str(cpu), binary], env=env) as app:
             try:
@@ -214,6 +215,50 @@ def benchmark(binary, workload):
                 print(f"{name} settled transcript paint: {(painted_at - start) * 1000:.1f} ms,"
                       f" app CPU {(painted_cpu - before_cpu) * 1000:.1f} ms", flush=True)
                 time.sleep(max(0, painted_at + 1 - time.monotonic()))
+                if workload == "tabs":
+                    xdo("mousemove", "--window", wid, 1040, 20)
+                    tab_frames = [pixels()]
+                    for number in (2, 3):
+                        (home / "agent-models").unlink()
+                        xdo("key", "ctrl+shift+t")
+                        time.sleep(0.2)
+                        xdo("key", "ctrl+shift+a")
+                        time.sleep(0.2)
+                        xdo("key", "Return")
+                        until(lambda: (home / f"bench-tab-{number}").exists()
+                              and (home / "agent-models").exists())
+                        time.sleep(0.65)
+                        frame = pixels()
+                        assert len(set(frame)) > 32 and frame not in tab_frames
+                        tab_frames.append(frame)
+                    footprint("three loaded sessions")
+                    samples = []
+                    for index in range(28):
+                        offset = index % 2
+                        button = "Page_Up" if offset == 0 else "Page_Down"
+                        key = screen.keysym_to_keycode(XK.string_to_keysym(button))
+                        ctrl = screen.keysym_to_keycode(XK.string_to_keysym("Control_L"))
+                        if index == 4:
+                            start_cpu = cpu_seconds()
+                        start = time.monotonic()
+                        xtest.fake_input(screen, X.KeyPress, ctrl)
+                        xtest.fake_input(screen, X.KeyPress, key)
+                        xtest.fake_input(screen, X.KeyRelease, key)
+                        xtest.fake_input(screen, X.KeyRelease, ctrl)
+                        screen.flush()
+                        while pixels() != tab_frames[1 + offset]:
+                            if time.monotonic() - start > 2:
+                                raise RuntimeError(f"switch {index} did not repaint the expected session")
+                            time.sleep(0.001)
+                        if index >= 4:
+                            samples.append((time.monotonic() - start) * 1000)
+                        time.sleep(0.05)
+                    cpu_ms = (cpu_seconds() - start_cpu) * 1000
+                    print(f"{name} session switch: median {statistics.median(samples):.1f} ms,"
+                          f" p95 {sorted(samples)[22]:.1f} ms, app CPU {cpu_ms:.0f} ms / 24 events",
+                          flush=True)
+                    footprint("after switching sessions")
+                    return
                 xdo("mousemove", "--window", wid, 715, 320)
                 footprint("loaded")
 
@@ -318,5 +363,5 @@ def benchmark(binary, workload):
 
 
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools", "images", "stream"):
+    for workload in ("history", "table", "tools", "images", "stream", "tabs"):
         benchmark(package, workload)

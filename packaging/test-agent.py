@@ -222,8 +222,20 @@ for line in sys.stdin:
         started_thread = "new-slash-fixture" if shared else thread
         turns = []
         if os.environ.get("SPAN_BENCH_HISTORY") == "1":
+            label = "会话性能测量"
+            if os.environ.get("SPAN_BENCH_TABS") == "1":
+                for number in range(1, 4):
+                    try:
+                        (home / f"bench-tab-{number}").touch(exist_ok=False)
+                    except FileExistsError:
+                        continue
+                    label = f"会话 {number} 性能测量"
+                    started_thread = f"benchmark-thread-{number}"
+                    break
+                else:
+                    raise AssertionError("The multitab benchmark opened an unexpected session")
             for n in range(4):
-                paragraphs = [f"{n+1}.{i+1} 会话性能测量 · 项目进展。 "
+                paragraphs = [f"{n+1}.{i+1} {label} · 项目进展。 "
                               f"Workspace status for task {i}. [参考资料](https://example.invalid/{i}) "
                               + "保留中英文换行与选择。 " * 4 for i in range(80)]
                 turns.append({"id": f"turn-{n}", "status": "completed", "items": [
