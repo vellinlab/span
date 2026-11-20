@@ -479,16 +479,13 @@ impl Panel {
                 view.set_margin_bottom(12);
                 scroll.add(&view);
             }
-            Content::Image(data, kind) => match agent_render::decode_pixbuf(&data, kind) {
-                Ok(image) => self.add_image(&scroll, (image.width(), image.height()), move |cr| {
+            Content::Image(pixels) => {
+                let image = pixels.pixbuf();
+                self.add_image(&scroll, (image.width(), image.height()), move |cr| {
                     cr.set_source_pixbuf(&image, 0.0, 0.0);
                     let _ = cr.paint();
-                }),
-                Err(error) => {
-                    self.notice(&error);
-                    return;
-                }
-            },
+                });
+            }
             Content::Svg(data) => match Svg::new(&data) {
                 Ok(svg) => self.add_image(&scroll, svg.dimensions(), move |cr| {
                     svg.draw(cr);
@@ -694,7 +691,7 @@ enum Content {
     Text(SourceText),
     Markdown(String),
     Markup(String),
-    Image(Vec<u8>, &'static str),
+    Image(agent_render::ImagePixels),
     Svg(Vec<u8>),
     Mermaid(String),
 }
@@ -708,10 +705,10 @@ fn read_file(source: &Source, path: &Path) -> Result<Content, String> {
     };
     let bytes = source.preview(path, limit)?;
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Ok(Content::Image(bytes, "png"));
+        return agent_render::preview_pixels(&bytes, "png").map(Content::Image);
     }
     if bytes.starts_with(b"\xff\xd8\xff") {
-        return Ok(Content::Image(bytes, "jpeg"));
+        return agent_render::preview_pixels(&bytes, "jpeg").map(Content::Image);
     }
     if ext == "svg" {
         return Ok(Content::Svg(bytes));

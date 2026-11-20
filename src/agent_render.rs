@@ -1272,7 +1272,7 @@ fn image_type(bytes: &[u8]) -> Result<&'static str, String> {
     }
 }
 
-struct ImagePixels {
+pub struct ImagePixels {
     data: glib::Bytes,
     width: i32,
     height: i32,
@@ -1281,7 +1281,17 @@ struct ImagePixels {
 }
 
 impl ImagePixels {
-    fn pixbuf(self) -> gdk_pixbuf::Pixbuf {
+    fn from_pixbuf(image: &gdk_pixbuf::Pixbuf) -> Self {
+        Self {
+            data: image.read_pixel_bytes(),
+            width: image.width(),
+            height: image.height(),
+            rowstride: image.rowstride(),
+            has_alpha: image.has_alpha(),
+        }
+    }
+
+    pub fn pixbuf(self) -> gdk_pixbuf::Pixbuf {
         gdk_pixbuf::Pixbuf::from_bytes(
             &self.data,
             gdk_pixbuf::Colorspace::Rgb,
@@ -1302,14 +1312,7 @@ fn image_thumbnail(bytes: &[u8], max_width: i32) -> Result<(ImagePixels, (i32, i
         result_size.set(size);
         fit_image(size.0, size.1, max_width, 340)
     })?;
-    let thumbnail = ImagePixels {
-        data: image.read_pixel_bytes(),
-        width: image.width(),
-        height: image.height(),
-        rowstride: image.rowstride(),
-        has_alpha: image.has_alpha(),
-    };
-    Ok((thumbnail, dimensions.get()))
+    Ok((ImagePixels::from_pixbuf(&image), dimensions.get()))
 }
 
 fn fit_image(width: i32, height: i32, max_width: i32, max_height: i32) -> (i32, i32) {
@@ -1326,7 +1329,11 @@ fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
     decode_pixbuf(bytes, image_type(bytes)?)
 }
 
-pub(crate) fn decode_pixbuf(bytes: &[u8], kind: &str) -> Result<gdk_pixbuf::Pixbuf, String> {
+pub fn preview_pixels(bytes: &[u8], kind: &str) -> Result<ImagePixels, String> {
+    decode_pixbuf(bytes, kind).map(|image| ImagePixels::from_pixbuf(&image))
+}
+
+fn decode_pixbuf(bytes: &[u8], kind: &str) -> Result<gdk_pixbuf::Pixbuf, String> {
     decode_sized_pixbuf(bytes, kind, |width, height| {
         fit_image(width, height, 1200, 900)
     })

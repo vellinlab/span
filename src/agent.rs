@@ -2816,15 +2816,35 @@ fn array(value: &Value) -> impl Iterator<Item = &Value> {
 }
 
 pub(crate) fn limited(text: &str, max: usize) -> String {
-    let cleaned = text.replace('\0', "�");
-    if cleaned.len() <= max {
-        return cleaned;
+    // Replacement only expands the input. Bytes beyond this prefix cannot
+    // affect the displayed text, even when an output contains NULs.
+    let end = text.floor_char_boundary(max);
+    let mut cleaned = text[..end].replace('\0', "�");
+    if end < text.len() || cleaned.len() > max {
+        cleaned.truncate(cleaned.floor_char_boundary(max));
+        cleaned.push_str("\n…");
     }
-    let mut end = max;
-    while !cleaned.is_char_boundary(end) {
-        end -= 1;
+    cleaned
+}
+
+#[cfg(test)]
+mod tests {
+    use super::limited;
+
+    #[test]
+    fn display_limit_preserves_utf8_and_counts_nul_replacements() {
+        for text in ["", "Span", "中\0文", "é\0\0🖥️", "\0a\0"] {
+            let full = text.replace('\0', "�");
+            for max in 0..=full.len() + 1 {
+                let expected = if full.len() <= max {
+                    full.clone()
+                } else {
+                    format!("{}\n…", &full[..full.floor_char_boundary(max)])
+                };
+                assert_eq!(limited(text, max), expected);
+            }
+        }
     }
-    format!("{}\n…", &cleaned[..end])
 }
 
 fn response_text(item: &Value) -> Option<&str> {
