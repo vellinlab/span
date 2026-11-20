@@ -96,6 +96,13 @@ struct Block {
     slot: glib::WeakRef<gtk::Box>,
     content: glib::WeakRef<gtk::Widget>,
     texts: Vec<DeferredText>,
+    visible: Cell<bool>,
+}
+
+struct BlockLayout {
+    index: usize,
+    top: i32,
+    height: i32,
 }
 
 pub struct DeferredText {
@@ -141,6 +148,8 @@ pub struct HistoryWindow {
     history: gtk::Box,
     scroll: gtk::ScrolledWindow,
     blocks: RefCell<Vec<Block>>,
+    layout: RefCell<Vec<BlockLayout>>,
+    layout_dirty: Cell<bool>,
     follow_tail: Rc<Cell<bool>>,
     scheduled: Cell<bool>,
     previous_top: Cell<f64>,
@@ -159,6 +168,8 @@ impl HistoryWindow {
             history: history.clone(),
             scroll: scroll.clone(),
             blocks: RefCell::new(Vec::new()),
+            layout: RefCell::new(Vec::new()),
+            layout_dirty: Cell::new(true),
             follow_tail,
             scheduled: Cell::new(false),
             previous_top: Cell::new(f64::NEG_INFINITY),
@@ -178,6 +189,18 @@ impl HistoryWindow {
             }
         });
         let weak = Rc::downgrade(&window);
+        history.connect_size_allocate(move |_, _| {
+            if let Some(window) = weak.upgrade() {
+                window.invalidate_layout();
+            }
+        });
+        let weak = Rc::downgrade(&window);
+        scroll.connect_map(move |_| {
+            if let Some(window) = weak.upgrade() {
+                window.invalidate_layout();
+            }
+        });
+        let weak = Rc::downgrade(&window);
         scroll.vadjustment().connect_changed(move |_| {
             if let Some(window) = weak.upgrade() {
                 window.schedule();
@@ -188,6 +211,8 @@ impl HistoryWindow {
 
     pub fn clear(&self) {
         self.blocks.borrow_mut().clear();
+        self.layout.borrow_mut().clear();
+        self.layout_dirty.set(true);
         self.anchor.take();
         self.previous_top.set(f64::NEG_INFINITY);
     }
@@ -211,15 +236,15 @@ impl HistoryWindow {
                 slot: slot.downgrade(),
                 content: content.upcast_ref::<gtk::Widget>().downgrade(),
                 texts: Vec::new(),
+                visible: Cell::new(true),
             });
         }
-        self.schedule();
+        self.invalidate_layout();
     }
 
     pub fn defer_prose(
         self: &Rc<Self>,
         parent: &gtk::Box,
-        region: &gtk::EventBox,
         label: &gtk::Label,
         source: Rc<str>,
         plain: &str,
@@ -231,7 +256,7 @@ impl HistoryWindow {
         let height = lines.saturating_mul(21).clamp(21, 48_000) as i32;
         self.defer_content(
             parent,
-            region,
+            label,
             -1,
             height,
             vec![DeferredText::new(label, source, uses_markup)],
@@ -245,7 +270,7 @@ impl HistoryWindow {
     pub fn defer_content(
         self: &Rc<Self>,
         parent: &gtk::Box,
-        content: &gtk::EventBox,
+        content: &impl IsA<gtk::Widget>,
         min_width: i32,
         height: i32,
         texts: Vec<DeferredText>,
@@ -253,13 +278,20 @@ impl HistoryWindow {
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         slot.set_size_request(min_width, height);
         content.set_no_show_all(true);
+        content.hide();
         slot.add(content);
         parent.add(&slot);
         self.blocks.borrow_mut().push(Block {
             slot: slot.downgrade(),
             content: content.upcast_ref::<gtk::Widget>().downgrade(),
             texts,
+            visible: Cell::new(false),
         });
+        self.invalidate_layout();
+    }
+
+    fn invalidate_layout(self: &Rc<Self>) {
+        self.layout_dirty.set(true);
         self.schedule();
     }
 
@@ -334,54 +366,67 @@ impl HistoryWindow {
         let mut changed_above = false;
         let mut restored = false;
         let mut shaped = false;
-        for block in self.blocks.borrow().iter() {
-            let (Some(slot), Some(content)) = (block.slot.upgrade(), block.content.upgrade())
-            else {
-                continue;
-            };
-            let height = slot.allocated_height();
-            if height < 2 || !slot.is_mapped() {
-                continue;
-            }
-            let Some((_, y)) = slot.translate_coordinates(&self.history, 0, 0) else {
-                continue;
-            };
-            let bottom = f64::from(y) + f64::from(height);
-            if f64::from(y) <= top && top < bottom && height < anchor_height {
-                anchor_height = height;
-                anchor = Some((slot.clone().upcast(), y, top));
-            }
+        let blocks = self.blocks.borrow();
+        if self.layout_dirty.replace(false) {
+            self.cache_layout(&blocks);
+        }
+        let mut hidden = false;
+        for &BlockLayout {
+            index,
+            top: y,
+            height,
+        } in self.layout.borrow().iter()
+        {
+            let block = &blocks[index];
+            let y_px = f64::from(y);
+            let bottom = y_px + f64::from(height);
             let near_top = if block.texts.is_empty() {
                 top
             } else {
                 visible_top
             };
-            let far = bottom < near_top - page * 1.75 || f64::from(y) > near_top + page * 2.75;
-            let near = bottom >= near_top - page * 0.85 && f64::from(y) <= near_top + page * 1.85;
-            if far && !protected(&slot) {
+            let far = bottom < near_top - page * 1.75 || y_px > near_top + page * 2.75;
+            let near = bottom >= near_top - page * 0.85 && y_px <= near_top + page * 1.85;
+            let is_anchor = y_px <= top && top < bottom && height < anchor_height;
+            let hide = far && block.visible.get();
+            let restore = near && !block.visible.get();
+            if !hide && !restore && !is_anchor {
+                continue;
+            }
+            let (Some(slot), Some(content)) = (block.slot.upgrade(), block.content.upgrade())
+            else {
+                continue;
+            };
+            if !slot.is_mapped() {
+                continue;
+            }
+            if is_anchor {
+                anchor_height = height;
+                anchor = Some((slot.clone().upcast(), y, top));
+            }
+            if hide && !protected(&slot) {
                 if !block.texts.is_empty() && !idle {
                     // Reversing a wheel gesture must not remap the same GTK
                     // input windows one frame after hiding them.
-                    if content.is_visible() {
-                        self.schedule_cleanup();
-                    }
+                    self.schedule_cleanup();
                     continue;
                 }
-                if content.is_visible() {
-                    slot.set_height_request(height);
-                    content.set_no_show_all(true);
-                    content.hide();
-                }
+                slot.set_height_request(height);
+                content.set_no_show_all(true);
+                content.hide();
+                block.visible.set(false);
+                hidden = true;
                 for text in &block.texts {
                     text.release();
                 }
-            } else if near && !content.is_visible() {
+            } else if restore {
                 for text in &block.texts {
                     shaped |= !text.loaded.get();
                     text.prepare();
                 }
                 content.set_no_show_all(false);
                 content.show();
+                block.visible.set(true);
                 slot.set_height_request(-1);
                 changed_above |= bottom <= top;
                 restored = true;
@@ -402,9 +447,26 @@ impl HistoryWindow {
                 glib::ControlFlow::Break
             });
         }
-        if restored {
-            // Newly mapped replies can contain windowed table rows.
-            self.schedule();
+        if restored || hidden {
+            // A restored parent may reveal nested table rows. Invalidate their
+            // geometry even when the adjustment's upper bound is unchanged.
+            self.invalidate_layout();
+        }
+    }
+
+    fn cache_layout(&self, blocks: &[Block]) {
+        let mut layout = self.layout.borrow_mut();
+        layout.clear();
+        for (index, block) in blocks.iter().enumerate() {
+            let Some(slot) = block.slot.upgrade().filter(|slot| slot.is_mapped()) else {
+                continue;
+            };
+            let height = slot.allocated_height();
+            if height >= 2
+                && let Some((_, top)) = slot.translate_coordinates(&self.history, 0, 0)
+            {
+                layout.push(BlockLayout { index, top, height });
+            }
         }
     }
 }
