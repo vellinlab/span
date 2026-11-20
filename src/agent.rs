@@ -2010,7 +2010,7 @@ impl Agent {
         self.update_controls();
     }
 
-    fn notification(&self, method: &str, params: &Value) {
+    fn notification(self: &Rc<Self>, method: &str, params: &Value) {
         if let Some(id) = params["threadId"].as_str() {
             if self.thread.borrow().as_deref() != Some(id) {
                 return;
@@ -2275,7 +2275,7 @@ impl Agent {
         self.past_activity.borrow_mut().clear();
     }
 
-    fn delta(&self, id: &str, delta: &str) {
+    fn delta(self: &Rc<Self>, id: &str, delta: &str) {
         let same = self
             .live
             .borrow()
@@ -2287,13 +2287,24 @@ impl Agent {
             let label = agent_render::markdown_label();
             label.style_context().add_class("agent-prose");
             crate::quote::bind_label(&label, &self.quote_action());
-            self.append(&label);
-            self.live.replace(Some(Rc::new(LiveMessage {
+            let live = Rc::new(LiveMessage {
                 id: id.into(),
                 text: RefCell::new(String::new()),
                 dirty: Cell::new(false),
                 label,
-            })));
+            });
+            let pending = Rc::downgrade(&live);
+            let agent = Rc::downgrade(self);
+            live.label.connect_map(move |_| {
+                if let Some(live) = pending.upgrade().filter(|live| live.dirty.get()) {
+                    live.render();
+                    if let Some(agent) = agent.upgrade() {
+                        agent.scroll_to_end();
+                    }
+                }
+            });
+            self.append(&live.label);
+            self.live.replace(Some(live));
             self.update_task_status();
         }
         if let Some(live) = self.live.borrow().as_ref() {
@@ -2303,15 +2314,20 @@ impl Agent {
                 return;
             }
             text.push_str(&limited(delta, remaining));
-            if !live.dirty.replace(true) {
-                let live = Rc::downgrade(live);
-                glib::timeout_add_local_once(Duration::from_millis(33), move || {
-                    if let Some(live) = live.upgrade() {
-                        live.render();
-                    }
-                });
+            // Keep receiving the reply in inactive tabs. Shape its latest
+            // text on map, or when a finished segment needs to be retained.
+            let needs_paint = !live.dirty.replace(true);
+            if live.label.is_mapped() {
+                if needs_paint {
+                    let live = Rc::downgrade(live);
+                    glib::timeout_add_local_once(Duration::from_millis(33), move || {
+                        if let Some(live) = live.upgrade().filter(|live| live.label.is_mapped()) {
+                            live.render();
+                        }
+                    });
+                }
+                self.scroll_to_end();
             }
-            self.scroll_to_end();
         }
     }
 

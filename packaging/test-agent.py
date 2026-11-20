@@ -419,6 +419,39 @@ for line in sys.stdin:
             (home / "bench-tool-finished").touch()
             continue
         stream = os.environ.get("SPAN_BENCH_STREAM")
+        if stream == "hidden-prose":
+            assert message == "Stream a reply in the background"
+            identifier = "hidden-prose-benchmark"
+            event = {"threadId": thread, "turnId": identifier}
+            send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
+            (home / "bench-hidden-started").touch()
+
+            def wait_for_bench(name):
+                for _ in range(750):
+                    if (home / name).exists():
+                        return
+                    time.sleep(0.02)
+                raise TimeoutError(name)
+
+            wait_for_bench("bench-hidden-unmapped")
+            paragraphs = []
+            for index in range(576):
+                delta = f"Long reply fragment {index + 1}. **Build output** and `preview` rows. "
+                if index % 6 == 5:
+                    delta += "\n\n"
+                paragraphs.append(delta)
+                send({"method": "item/agentMessage/delta", "params": {
+                    **event, "itemId": "hidden-prose", "delta": delta}})
+                if index % 6 == 5:
+                    time.sleep(0.045)
+            (home / "bench-hidden-buffered").touch()
+            wait_for_bench("bench-hidden-verified")
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "hidden-prose", "type": "agentMessage", "text": "".join(paragraphs)}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": identifier, "status": "completed"}}})
+            (home / "bench-hidden-finished").touch()
+            continue
         if stream in ("1", "scroll"):
             assert message == "Summarize the stream" and params["threadId"] == thread
             identifier = "reasoning-benchmark"

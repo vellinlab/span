@@ -99,7 +99,8 @@ def benchmark(binary, workload):
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
-                   SPAN_BENCH_STREAM="scroll" if live_scroll else str(int(workload == "stream")),
+                   SPAN_BENCH_STREAM={"live-scroll": "scroll", "hidden-prose": "hidden-prose"}.get(
+                       workload, str(int(workload == "stream"))),
                    SPAN_BENCH_TASK_IDLE=str(int(workload == "task-wait")),
                    SPAN_BENCH_TABS=str(int(switching_tabs)),
                    SPAN_BENCH_CATALOG=str(int(show_catalog)),
@@ -163,6 +164,56 @@ def benchmark(binary, workload):
                     print(f"{name} CPU waiting for a tool: {(cpu_seconds() - start) * 1000:.1f} ms / 4 s",
                           flush=True)
                     until(lambda: (home / "bench-tool-finished").exists())
+                    return
+                if workload == "hidden-prose":
+                    until(lambda: (home / "agent-models").exists())
+                    time.sleep(0.20)
+                    empty_conversation = pixels()
+                    xdo("type", "Stream a reply in the background")
+                    xdo("key", "Return")
+                    until((home / "bench-hidden-started").exists)
+                    sent = pixels()
+                    xdo("key", "ctrl+shift+a")
+                    until(lambda: pixels() != sent)
+                    time.sleep(0.2)
+                    hidden_frame = pixels()
+                    start = cpu_seconds()
+                    (home / "bench-hidden-unmapped").touch()
+                    until((home / "bench-hidden-buffered").exists)
+                    cpu_ms = (cpu_seconds() - start) * 1000
+                    footprint("after buffering inactive reply")
+                    assert not (home / "bench-hidden-finished").exists()
+                    xdo("key", "ctrl+shift+a")
+                    until(lambda: pixels() != hidden_frame)
+                    xdo("mousemove", "--window", wid, 715, 320)
+                    # Allow follow-tail to restore the latest output. Then
+                    # scroll down until the pixels stop changing so both
+                    # specimens are compared at the same end position.
+                    def reply_pixels():
+                        return win.get_image(395, 420, 390, 180, X.ZPixmap, 0xffffffff).data
+
+                    time.sleep(0.22)
+                    initial = visible = reply_pixels()
+                    for _ in range(16):
+                        for _ in range(16):
+                            xtest.fake_input(screen, X.ButtonPress, 5)
+                            xtest.fake_input(screen, X.ButtonRelease, 5)
+                        screen.flush()
+                        time.sleep(0.08)
+                        final = reply_pixels()
+                        if final == visible:
+                            break
+                        visible = final
+                    else:
+                        raise RuntimeError("the buffered reply never reached its last viewport")
+                    print(f"{name} followed the buffered reply on return: {initial == visible}",
+                          flush=True)
+                    assert pixels() != empty_conversation and len(set(visible)) > 32
+                    print(f"{name} buffered live reply painted before completion: "
+                          f"{hashlib.sha256(visible).hexdigest()}", flush=True)
+                    print(f"{name} inactive reply: app CPU {cpu_ms:.0f} ms for 576 deltas", flush=True)
+                    (home / "bench-hidden-verified").touch()
+                    until((home / "bench-hidden-finished").exists)
                     return
                 if workload == "stream":
                     until(lambda: (home / "agent-models").exists())
@@ -523,5 +574,5 @@ def benchmark(binary, workload):
 
 for package in sys.argv[1:]:
     for workload in ("history", "table", "tools", "images", "stream", "live-scroll",
-                     "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog"):
+                     "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog", "hidden-prose"):
         benchmark(package, workload)
