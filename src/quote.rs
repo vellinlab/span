@@ -146,14 +146,17 @@ impl DraftQuotes {
 }
 
 #[derive(Default)]
-pub struct Popup(glib::WeakRef<gtk::Popover>);
+pub struct Popup {
+    widget: glib::WeakRef<gtk::Popover>,
+    selection: Rc<RefCell<Option<(String, Action)>>>,
+}
 
 impl Popup {
     pub fn hide(&self) {
-        if let Some(popup) = self.0.upgrade() {
-            popup.popdown();
+        self.selection.take();
+        if let Some(popup) = self.widget.upgrade() {
+            popup.hide();
         }
-        self.0.set(None);
     }
 
     pub fn show(&self, widget: &gtk::Widget, root: (f64, f64), text: String, action: Action) {
@@ -168,31 +171,39 @@ impl Popup {
         else {
             return;
         };
+        let popup = self.widget.upgrade().unwrap_or_else(|| self.create(widget));
+        self.selection.replace(Some((text, action)));
+        popup.set_pointing_to(&gdk::Rectangle::new(x, y - 4, 1, 1));
+        popup.show();
+    }
+
+    fn create(&self, widget: &gtk::Widget) -> gtk::Popover {
         let popup = gtk::Popover::new(Some(widget));
         popup.style_context().add_class("selection-quote");
         popup.set_modal(false);
         popup.set_position(gtk::PositionType::Top);
-        popup.set_pointing_to(&gdk::Rectangle::new(x, y - 4, 1, 1));
         let button = gtk::Button::with_label("引用");
         button.set_focus_on_click(false);
         let displayed = popup.downgrade();
+        let selection = self.selection.clone();
         button.connect_clicked(move |_| {
+            let selected = selection.take();
             if let Some(popup) = displayed.upgrade() {
-                popup.popdown();
-            }
-            action(&text);
-        });
-        popup.connect_closed(|popup| {
-            let popup = popup.clone();
-            glib::idle_add_local_once(move || {
                 popup.hide();
-                popup.set_relative_to(gtk::Widget::NONE);
-            });
+            }
+            if let Some((text, action)) = selected {
+                action(&text);
+            }
+        });
+        let selection = self.selection.clone();
+        popup.connect_hide(move |_| {
+            selection.take();
         });
         popup.add(&button);
         button.show();
-        self.0.set(Some(&popup));
-        popup.popup();
+        // GTK owns the popover for as long as its anchor is alive.
+        self.widget.set(Some(&popup));
+        popup
     }
 }
 
