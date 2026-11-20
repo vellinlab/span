@@ -82,7 +82,8 @@ def benchmark(binary, workload):
     same_directory = workload == "tabs-shared-directory"
     show_catalog = workload == "tabs-catalog"
     remap_prose = workload == "remap-prose"
-    offscreen_prose = workload == "offscreen-prose" or remap_prose
+    finish_prose = workload == "finish-prose"
+    offscreen_prose = workload in ("offscreen-prose", "remap-prose", "finish-prose")
     warmup_events = 4
     switching_tabs = workload in ("tabs", "tabs-shared-directory", "tabs-catalog")
     live_scroll = workload == "live-scroll"
@@ -104,7 +105,8 @@ def benchmark(binary, workload):
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
                    SPAN_BENCH_STREAM={"live-scroll": "scroll", "hidden-prose": "hidden-prose",
                                       "offscreen-prose": "hidden-prose",
-                                      "remap-prose": "hidden-prose"}.get(
+                                      "remap-prose": "hidden-prose",
+                                      "finish-prose": "hidden-prose"}.get(
                                           workload, str(int(workload == "stream"))),
                    SPAN_BENCH_TASK_IDLE=str(int(workload == "task-wait")),
                    SPAN_BENCH_TABS=str(int(switching_tabs)),
@@ -114,6 +116,8 @@ def benchmark(binary, workload):
             env["SPAN_BENCH_OFFSCREEN_PROSE"] = "1"
         if remap_prose:
             env["SPAN_BENCH_REMAP_PROSE"] = "1"
+        if finish_prose:
+            env["SPAN_BENCH_FINISH_PROSE"] = "1"
         if same_directory:
             # Keep App Server markers outside the folder open in every tab.
             workspace = home / "workspace"
@@ -200,7 +204,7 @@ def benchmark(binary, workload):
                         until(lambda: pixels() != hidden_frame)
                     start = cpu_seconds()
                     (home / "bench-hidden-unmapped").touch()
-                    if offscreen_prose and not remap_prose:
+                    if workload == "offscreen-prose":
                         samples = []
                         schedule = time.monotonic()
                         for index in range(100):
@@ -245,6 +249,26 @@ def benchmark(binary, workload):
                         print(f"{name} return to older history while reply is buffered:"
                               f" {latency:.1f} ms, app CPU {(cpu_seconds() - before_remap) * 1000:.0f} ms",
                               flush=True)
+                    elif finish_prose:
+                        time.sleep(0.15)
+                        assert pixels() == hidden_frame, "the reply advanced the older viewport"
+                        cpu_before = cpu_seconds()
+                        (home / "bench-hidden-verified").touch()
+                        until((home / "bench-completion-dispatched").exists, interval=0.001)
+                        sequence_start = time.monotonic()
+                        samples = []
+                        for index in range(40):
+                            before = pixels()
+                            input_at = time.monotonic()
+                            wheel(4 if index % 10 < 5 else 5)
+                            until(lambda: pixels() != before, interval=0.001, timeout=2)
+                            samples.append((time.monotonic() - input_at) * 1000)
+                            time.sleep(max(0, sequence_start + (index + 1) * 0.023 - time.monotonic()))
+                        cost = (cpu_seconds() - cpu_before) * 1000
+                        print(f"{name} reply completion while scrolling older history:"
+                              f" p95 {sorted(samples)[37]:.1f} ms, max {max(samples):.1f} ms,"
+                              f" app CPU {cost:.0f} ms / 40 wheel events", flush=True)
+                        until((home / "bench-hidden-finished").exists)
                     xdo("mousemove", "--window", wid, 715, 320)
                     # Allow follow-tail to restore the latest output. Then
                     # scroll down until the pixels stop changing so both
@@ -287,11 +311,12 @@ def benchmark(binary, workload):
                         print(f"{name} followed the buffered reply on return", flush=True)
                     assert len(set(visible)) > 32
                     digest = hashlib.sha256(visible).hexdigest()
-                    print(f"{name} buffered live reply painted before completion: {digest}", flush=True)
+                    print(f"{name} final reply viewport: {digest}", flush=True)
                     phase = "reply below the viewport" if offscreen_prose else "inactive reply"
                     print(f"{name} {phase}: app CPU {cpu_ms:.0f} ms for 576 deltas", flush=True)
-                    (home / "bench-hidden-verified").touch()
-                    until((home / "bench-hidden-finished").exists)
+                    if not finish_prose:
+                        (home / "bench-hidden-verified").touch()
+                        until((home / "bench-hidden-finished").exists)
                     return digest
                 if workload == "stream":
                     until(lambda: (home / "agent-models").exists())
@@ -650,11 +675,11 @@ def benchmark(binary, workload):
                 app.wait(timeout=5)
 
 
-reply_frames = {"offscreen-prose": set(), "remap-prose": set()}
+reply_frames = {"offscreen-prose": set(), "remap-prose": set(), "finish-prose": set()}
 for package in sys.argv[1:]:
     for workload in ("history", "table", "tools", "images", "stream", "live-scroll",
                      "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog", "hidden-prose",
-                     "offscreen-prose", "remap-prose"):
+                     "offscreen-prose", "remap-prose", "finish-prose"):
         final_frame = benchmark(package, workload)
         if workload in reply_frames:
             reply_frames[workload].add(final_frame)

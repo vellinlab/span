@@ -448,7 +448,9 @@ for line in sys.stdin:
 
             wait_for_bench("bench-hidden-unmapped")
             offscreen = os.environ.get("SPAN_BENCH_OFFSCREEN_PROSE") == "1"
-            interval = 0.170 if offscreen and os.environ.get("SPAN_BENCH_REMAP_PROSE") != "1" else 0.045
+            remap = os.environ.get("SPAN_BENCH_REMAP_PROSE") == "1"
+            finishing = os.environ.get("SPAN_BENCH_FINISH_PROSE") == "1"
+            interval = 0.170 if offscreen and not (remap or finishing) else 0.045
             paragraphs = []
             for index in range(576):
                 delta = f"Long reply fragment {index + 1}. **Build output** and `preview` rows. "
@@ -463,6 +465,8 @@ for line in sys.stdin:
                     time.sleep(interval)
             (home / "bench-hidden-buffered").touch()
             wait_for_bench("bench-hidden-verified")
+            if finishing:
+                (home / "bench-completion-dispatched").touch()
             send({"method": "item/completed", "params": {**event, "item": {
                 "id": "hidden-prose", "type": "agentMessage", "text": "".join(paragraphs)}}})
             send({"method": "turn/completed", "params": {

@@ -32,14 +32,26 @@ fn can_defer(markdown: &str) -> bool {
         })
 }
 
+pub enum ResponseMode {
+    Preview,
+    History,
+    Completed { reading_earlier: bool },
+}
+
 pub fn response(
     markdown: &str,
     context: &Context,
-    live: bool,
+    mode: ResponseMode,
     window: Option<&Rc<crate::history_window::HistoryWindow>>,
     preview: &Offer,
     quote: &quote::Action,
 ) -> TextSelection {
+    let live = matches!(mode, ResponseMode::Completed { .. });
+    let defer_prose = match mode {
+        ResponseMode::Preview => false,
+        ResponseMode::History => true,
+        ResponseMode::Completed { reading_earlier } => reading_earlier,
+    };
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let context = Rc::new(context.clone());
     let linked_label = |deferred| {
@@ -55,7 +67,7 @@ pub fn response(
         })
     };
     let prose_region = window
-        .filter(|_| !live && can_defer(markdown))
+        .filter(|_| defer_prose && can_defer(markdown))
         .map(|window| (window, Part::region()));
     let deferred = prose_region
         .as_ref()

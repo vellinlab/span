@@ -2614,7 +2614,13 @@ impl Agent {
         message.add(&agent_render::response(
             &text,
             &self.context.borrow(),
-            !loading_history,
+            if loading_history {
+                agent_render::ResponseMode::History
+            } else {
+                agent_render::ResponseMode::Completed {
+                    reading_earlier: !self.follow_tail.get() || !self.scroll.is_mapped(),
+                }
+            },
             Some(&self.history_window),
             &self.preview,
             &self.quote_action(),
