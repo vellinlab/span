@@ -876,13 +876,8 @@ impl Agent {
         }
         let append = cursor.is_some();
         let (method, params) = match section {
-            ExtensionSection::Plugins => (
-                "plugin/list",
-                json!({
-                    "forceRefetch":refresh,
-                    "marketplaceKinds":["local","vertical","workspace-directory"],
-                }),
-            ),
+            // The server includes the public catalog when no marketplace filter is supplied.
+            ExtensionSection::Plugins => ("plugin/list", json!({"forceRefetch":refresh})),
             ExtensionSection::Apps => (
                 "app/list",
                 json!({"cursor":cursor,"limit":50,"forceRefetch":refresh}),

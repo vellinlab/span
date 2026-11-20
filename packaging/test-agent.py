@@ -147,14 +147,19 @@ for line in sys.stdin:
     elif method == "initialized":
         continue
     elif method == "plugin/list":
-        assert "vertical" in params["marketplaceKinds"]
+        assert "marketplaceKinds" not in params
         name = "Remote Fixture Plugin" if shared else "Local Fixture Plugin"
         item = {"id": "fixture@fixture-catalog", "name": "fixture",
                 "source": {"type": "remote"}, "interface": {"displayName": name},
                 "installed": plugin_installed, "enabled": plugin_installed,
+                "mustShowInstallationInterstitial": shared,
                 "installPolicy": "AVAILABLE", "authPolicy": "ON_USE"}
         send({"id": request_id, "result": {"marketplaces": [
             {"name": "fixture-catalog", "path": None, "plugins": [item]}]}})
+    elif method == "plugin/read":
+        assert shared and params == {"pluginName": "fixture", "remoteMarketplaceName": "fixture-catalog"}
+        send({"id": request_id, "result": {"plugin": {"description": "Remote plugin details",
+              "skills": [{"name": "Fixture skill"}]}}})
     elif method == "plugin/install":
         assert params == {"pluginName": "fixture", "remoteMarketplaceName": "fixture-catalog"}
         plugin_installed = True

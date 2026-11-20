@@ -327,6 +327,7 @@ SVG
     widget mouse '消息输入框'
     xdotool type --clearmodifiers '/mod'
     widget bounds '/model' >/dev/null
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-commands.png"
     xdotool key --clearmodifiers Return
     widget contains 'GPT Vision'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-model-picker.png"
@@ -369,6 +370,9 @@ SVG
     widget contains '此主机已停用'
     widget click '加载更多'
     widget contains 'Another Connector'
+    widget click '连接'
+    wait_until "connector authorization URL opened in the browser" grep -qFx 'https://example.invalid/connect' "$HOME/span-opened-link"
+    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-extensions.png"
     widget mouse '显示／隐藏侧栏'
     widget mouse '显示／隐藏侧栏'
     printf '%s\n' 'Slash commands opened the model picker, managed the thread goal, and routed plugin and app operations to Codex.'
@@ -934,7 +938,10 @@ PY
         widget mouse '工具栏 · 插件与连接器'
         widget contains 'Remote Fixture Plugin'
         widget not-contains 'Local Fixture Plugin'
-        widget click '安装'
+        widget click '查看并安装'
+        wait_until "the plugin installation review" dialog_open 'Remote Fixture Plugin'
+        widget contains 'Fixture skill'
+        widget click '确认安装'
         wait_until "plugin installed through the SSH host app server" test -f "$WORKBENCH_SSH_FIXTURE/plugin-installed"
         widget click '卸载'
         wait_until "plugin uninstalled through the SSH host app server" test -f "$WORKBENCH_SSH_FIXTURE/plugin-uninstalled"
