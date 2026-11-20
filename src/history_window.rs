@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 const REPLY_EVICTION_DELAY: Duration = Duration::from_millis(900);
+const WHEEL_GESTURE_GAP: Duration = Duration::from_millis(40);
 
 // X11 can deliver many wheel packets before GTK presents the next frame.
 // Move immediately on an isolated tick, then accumulate the remaining motion
@@ -25,6 +26,7 @@ mod imp {
     pub struct HistoryScroll {
         pub(super) pending: Cell<Option<(f64, f64)>>,
         pub(super) ticking: Cell<bool>,
+        pub(super) last_input: Cell<Option<Instant>>,
     }
 
     #[glib::object_subclass]
@@ -38,6 +40,7 @@ mod imp {
     impl WidgetImpl for HistoryScroll {
         fn unmap(&self) {
             self.pending.set(None);
+            self.last_input.set(None);
             self.parent_unmap();
         }
     }
@@ -57,26 +60,35 @@ impl HistoryScroll {
 
     pub fn apply_wheel(&self, adjustment: &gtk::Adjustment, target: f64, edge: bool) {
         let state = self.imp();
-        if !state.ticking.replace(true) {
-            adjustment.set_value(target);
-            self.add_tick_callback(|scroll, _| {
-                let state = scroll.imp();
-                state.ticking.set(false);
-                let adjustment = scroll.vadjustment();
-                if let Some((old, target)) = state.pending.take()
-                    && old == adjustment.value()
-                {
-                    adjustment.set_value(target);
-                }
-                glib::ControlFlow::Break
-            });
-        } else if edge || gtk::grab_get_current().is_some() {
-            // Selection hit testing and history prefetch need the new position now.
+        let now = Instant::now();
+        let first = state
+            .last_input
+            .replace(Some(now))
+            .is_none_or(|last| now.duration_since(last) >= WHEEL_GESTURE_GAP);
+        let actual = adjustment.value();
+        if actual == target || first || edge || gtk::grab_get_current().is_some() {
+            // Start immediately and keep text selection and history prefetch in sync.
             state.pending.set(None);
-            adjustment.set_value(target);
-        } else {
-            state.pending.set(Some((adjustment.value(), target)));
+            if actual != target {
+                adjustment.set_value(target);
+            }
+            return;
         }
+        state.pending.set(Some((actual, target)));
+        if state.ticking.replace(true) {
+            return;
+        }
+        self.add_tick_callback(|scroll, _| {
+            let state = scroll.imp();
+            state.ticking.set(false);
+            let adjustment = scroll.vadjustment();
+            if let Some((old, target)) = state.pending.take()
+                && old == adjustment.value()
+            {
+                adjustment.set_value(target);
+            }
+            glib::ControlFlow::Break
+        });
     }
 }
 
