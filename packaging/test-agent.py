@@ -131,6 +131,9 @@ if args == ["serve-shared"]:
     sys.exit()
 shared = args == ["shared-stdio"]
 assert shared or (args == ["app-server"] and not control_socket.exists())
+goal = None
+plugin_installed = False
+connector_enabled = True
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
@@ -143,6 +146,53 @@ for line in sys.stdin:
         send({"id": request_id, "result": {"userAgent": "span/0.169.1 (fixture)"}})
     elif method == "initialized":
         continue
+    elif method == "plugin/list":
+        assert "vertical" in params["marketplaceKinds"]
+        name = "Remote Fixture Plugin" if shared else "Local Fixture Plugin"
+        item = {"id": "fixture@fixture-catalog", "name": "fixture",
+                "source": {"type": "remote"}, "interface": {"displayName": name},
+                "installed": plugin_installed, "enabled": plugin_installed,
+                "installPolicy": "AVAILABLE", "authPolicy": "ON_USE"}
+        send({"id": request_id, "result": {"marketplaces": [
+            {"name": "fixture-catalog", "path": None, "plugins": [item]}]}})
+    elif method == "plugin/install":
+        assert params == {"pluginName": "fixture", "remoteMarketplaceName": "fixture-catalog"}
+        plugin_installed = True
+        (home / "plugin-installed").touch()
+        send({"id": request_id, "result": {"authPolicy": "ON_USE", "appsNeedingAuth": []}})
+    elif method == "plugin/uninstall":
+        assert plugin_installed and params == {"pluginId": "fixture@fixture-catalog"}
+        plugin_installed = False
+        (home / "plugin-uninstalled").touch()
+        send({"id": request_id, "result": {}})
+    elif method == "app/list":
+        assert params["limit"] == 50
+        if params["cursor"] is None:
+            data = [{"id": "fixture_app", "name": "Fixture Connector",
+                     "isAccessible": True, "isEnabled": connector_enabled}]
+            next_cursor = "fixture-page-2"
+        else:
+            assert params["cursor"] == "fixture-page-2"
+            data = [{"id": "fixture_new", "name": "Another Connector", "isAccessible": False,
+                     "installUrl": "https://example.invalid/connect"}]
+            next_cursor = None
+        send({"id": request_id, "result": {"data": data, "nextCursor": next_cursor}})
+    elif method == "config/batchWrite":
+        assert params == {"edits": [{"keyPath": "apps.fixture_app.enabled", "value": False,
+                                     "mergeStrategy": "upsert"}], "reloadUserConfig": True}
+        connector_enabled = False
+        send({"id": request_id, "result": {}})
+    elif method.startswith("thread/goal/"):
+        assert params["threadId"] == thread
+        if method == "thread/goal/set":
+            assert params["origin"] == "user"
+            goal = {"objective": params.get("objective") or goal["objective"], "status": params["status"]}
+        if method == "thread/goal/clear":
+            assert params["origin"] == "user" and goal
+            goal = None
+            send({"id": request_id, "result": {"cleared": True}})
+        else:
+            send({"id": request_id, "result": {"goal": goal}})
     elif method == "thread/start":
         assert params["sandbox"] == "workspace-write"
         assert params["approvalPolicy"] == "on-request"

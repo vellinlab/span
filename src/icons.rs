@@ -30,6 +30,8 @@ pub enum Icon {
     Download,
     Copy,
     CopyRich,
+    Check,
+    Plugin,
     Search,
     Activity,
     Book,
@@ -115,6 +117,24 @@ fn draw(cr: &cairo::Context, icon: Icon, size: i32, y: f64, color: &gdk::RGBA) {
     cr.set_line_join(gtk::cairo::LineJoin::Round);
 
     match icon {
+        Icon::Check => {
+            cr.move_to(4.5, 12.5);
+            cr.line_to(9.5, 17.5);
+            cr.line_to(20.0, 7.0);
+        }
+        Icon::Plugin => {
+            cr.move_to(4.0, 5.0);
+            cr.line_to(9.0, 5.0);
+            cr.curve_to(8.5, 1.1, 15.5, 1.1, 15.0, 5.0);
+            cr.line_to(20.0, 5.0);
+            cr.line_to(20.0, 10.0);
+            cr.curve_to(23.6, 9.8, 23.6, 15.6, 20.0, 15.5);
+            cr.line_to(20.0, 20.0);
+            cr.line_to(4.0, 20.0);
+            cr.line_to(4.0, 15.5);
+            cr.curve_to(7.7, 15.6, 7.7, 9.8, 4.0, 10.0);
+            cr.close_path();
+        }
         Icon::Upload | Icon::Download => {
             cr.move_to(4.0, 15.0);
             cr.line_to(4.0, 20.0);
@@ -436,5 +456,61 @@ pub fn button(icon: Icon, label: &str, tooltip: &str) -> gtk::Button {
     if let Some(accessible) = button.accessible() {
         accessible.set_name(label);
     }
+    button
+}
+
+pub fn copy_button(symbol: Icon, label: &str, copy: impl Fn() -> bool + 'static) -> gtk::Button {
+    let button = gtk::Button::builder().tooltip_text(label).build();
+    button.style_context().add_class("quiet-button");
+    if let Some(accessible) = button.accessible() {
+        accessible.set_name(label);
+    }
+    let confirmed = std::rc::Rc::new(std::cell::Cell::new(false));
+    let state = confirmed.clone();
+    let artwork = changing_widget(16, move || if state.get() { Icon::Check } else { symbol });
+    artwork.show();
+    button.add(&artwork);
+    let tooltip = label.to_owned();
+    let reset = std::cell::RefCell::<Option<glib::SourceId>>::new(None);
+    let reset = std::rc::Rc::new(reset);
+    button.connect_clicked(move |button| {
+        if !copy() {
+            return;
+        }
+        if let Some(source) = reset.take() {
+            source.remove();
+        }
+        confirmed.set(true);
+        button.style_context().add_class("copy-confirmed");
+        button.set_tooltip_text(Some("已复制"));
+        if let Some(accessible) = button.accessible() {
+            accessible.set_description("已复制");
+        }
+        artwork.queue_draw();
+        let button = button.downgrade();
+        let artwork = artwork.downgrade();
+        let confirmed = confirmed.clone();
+        let reset_state = std::rc::Rc::downgrade(&reset);
+        let tooltip = tooltip.clone();
+        reset.replace(Some(glib::timeout_add_local_once(
+            std::time::Duration::from_millis(1350),
+            move || {
+                if let Some(reset) = reset_state.upgrade() {
+                    reset.take();
+                }
+                confirmed.set(false);
+                if let Some(button) = button.upgrade() {
+                    button.style_context().remove_class("copy-confirmed");
+                    button.set_tooltip_text(Some(&tooltip));
+                    if let Some(accessible) = button.accessible() {
+                        accessible.set_description("");
+                    }
+                }
+                if let Some(artwork) = artwork.upgrade() {
+                    artwork.queue_draw();
+                }
+            },
+        )));
+    });
     button
 }

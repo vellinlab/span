@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/vellinlab/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.18-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-rc.19-1.el8.x86_64.rpm
 span
 ```
 
@@ -22,7 +22,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./span_0.1.0-rc.18_amd64.deb
+sudo apt install ./span_0.1.0-rc.19_amd64.deb
 span
 ```
 
@@ -68,6 +68,8 @@ Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会�
 - 输入区可以选择当前主机提供的模型和思考强度。点亮闪电使用 Fast，关闭恢复标准速度，设置从下一条消息起生效。Fast 需要支持该模式的模型及 Codex CLI 0.151 或更新版本。任务运行时，输入区上方显示进度和用时，按 `Esc` 可中断。悬停或点击输入区右侧的两个环，分别查看套餐剩余额度和上下文占用。
 - 输入框底部的盾牌按钮可切换「工作区权限」「只读」「完全访问」。新会话默认采用工作区权限，打开已有会话时沿用 Codex 返回的权限。完全访问需要确认，选择从下一轮起生效。
 - 在会话输入框按 `Enter` 发送，按 `Shift+Enter` 换行。`Ctrl+Enter` 也可发送。任务运行时输入新内容再按 `Enter`，可将消息追加到当前任务，同时可用方块按钮或 `Esc` 中断。
+- 在输入框开头输入 `/` 打开命令列表，可用方向键和 `Enter` 选择。`/model` 打开模型菜单，`/goal <目标>` 设置当前 Codex 会话的目标。`/goal` 查看，`/goal edit` 编辑，`/goal pause`、`/goal resume`、`/goal clear` 管理同一个目标。
+- 左侧「扩展」页和工具栏的拼图按钮用于管理当前终端标签所在主机的插件与连接器，也可用 `/plugins` 或 `/apps` 进入。插件目录和安装状态来自该主机的 Codex App Server，取决于主机上的 Codex 版本与其登录的账号。连接器在账号层面的授权和解绑通过浏览器中的 ChatGPT 完成，Span 内可启停该主机对已可用连接器的使用。
 - 推理摘要、生成中的回复和已完成的回复支持 Markdown 加粗与可点击的 HTTP／HTTPS 链接。每轮完成后，末尾的两个图标分别复制该轮的 Markdown 和富文本。
 - 鼠标选中回复、推理摘要或文件预览中的文字后，点击「引用」把选区加入输入框上方的引用卡片。每条可单独移除，发送时与正文一同交给 Codex。
 - 点击「附件」选择本机文件，或在输入框按 `Ctrl+V` 粘贴剪贴板图片。发送前可移除，每条消息最多 6 个、合计 16 MiB。SSH 会话通过当前连接的 SFTP 将附件放入远端私有临时目录。支持视觉输入的模型会直接收到 PNG、JPEG、GIF 和 WebP 图片，其余附件按文件路径交给 Agent 读取。

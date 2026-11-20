@@ -1,7 +1,12 @@
 use crate::agent_activity::{self, Activity, Record};
 use crate::agent_attachments::{Attachments, Prepared};
 use crate::agent_catalog::{self, Catalog, ThreadState};
+use crate::agent_commands::Commands;
 use crate::agent_diff::DiffCard;
+use crate::agent_extensions::{
+    self, Action as ExtensionAction, Extensions, Request as ExtensionRequest,
+    Section as ExtensionSection,
+};
 use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
@@ -24,18 +29,33 @@ const OLDER_TURNS: usize = 12;
 const HISTORY_PREFETCH_DISTANCE: f64 = 64.0;
 const CATALOG_FRESHNESS: Duration = Duration::from_secs(20);
 
-#[derive(Clone, Copy)]
 enum Request {
-    Initialize { browse: bool },
-    Open { resume: bool },
-    Catalog { serial: u64, replace: bool },
+    Initialize {
+        browse: bool,
+    },
+    Open {
+        resume: bool,
+    },
+    Catalog {
+        serial: u64,
+        replace: bool,
+    },
     Models(u64),
     Quota,
-    Turns { prepend: bool, generation: u64 },
+    Turns {
+        prepend: bool,
+        generation: u64,
+    },
     Unsubscribe,
     Send,
     Steer,
     Interrupt,
+    Goal {
+        generation: u64,
+        edit: bool,
+        draft: String,
+    },
+    Extensions(ExtensionRequest),
 }
 
 struct LiveMessage {
@@ -133,6 +153,7 @@ pub struct Agent {
     list_serial: Cell<u64>,
     catalog_fetch: RefCell<Option<CatalogFetch>>,
     catalog: Catalog,
+    extensions: Rc<Extensions>,
     questions: RefCell<HashMap<Value, gtk::Box>>,
     diff: RefCell<Option<TurnDiff>>,
     scroll: gtk::ScrolledWindow,
@@ -145,6 +166,9 @@ pub struct Agent {
     connect: gtk::Button,
     copy_id: gtk::Button,
     input: gtk::TextView,
+    commands: Commands,
+    goal: gtk::Label,
+    goal_pending: Cell<bool>,
     options: Rc<Options>,
     model_provider: RefCell<Option<String>>,
     usage: Usage,
@@ -193,6 +217,7 @@ impl Agent {
         terminal.connect_clicked(move |_| toggle_terminal());
         toolbar.pack_end(&terminal, false, false, 0);
         let catalog = Catalog::new(host);
+        let extensions = Extensions::new(host);
         let copy_id = icons::button(Icon::Copy, "复制会话 ID", "复制会话 ID");
         copy_id.set_no_show_all(true);
         toolbar.pack_end(&copy_id, false, false, 0);
@@ -278,6 +303,15 @@ impl Agent {
             .accepts_tab(false)
             .cursor_visible(true)
             .build();
+        let commands = Commands::new(&input);
+        let goal = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .lines(3)
+            .ellipsize(pango::EllipsizeMode::End)
+            .no_show_all(true)
+            .build();
+        goal.style_context().add_class("agent-goal");
         if let Some(accessible) = input.accessible() {
             accessible.set_name("消息输入框");
         }
@@ -355,6 +389,7 @@ impl Agent {
         inputs.pack_end(&stop_button, false, false, 0);
         inputs.pack_end(&usage.widget, false, false, 0);
         card.pack_start(&task_status.widget, false, false, 0);
+        card.pack_start(&goal, false, false, 0);
         card.pack_start(&quotes.widget, false, false, 0);
         card.pack_start(&editor, false, false, 0);
         card.pack_start(&attachments.chips, false, false, 0);
@@ -421,6 +456,7 @@ impl Agent {
             list_serial: Cell::new(0),
             catalog_fetch: RefCell::new(None),
             catalog,
+            extensions,
             questions: RefCell::new(HashMap::new()),
             diff: RefCell::new(None),
             scroll,
@@ -433,6 +469,9 @@ impl Agent {
             connect,
             copy_id,
             input,
+            commands,
+            goal,
+            goal_pending: Cell::new(false),
             options,
             model_provider: RefCell::new(None),
             usage,
@@ -456,6 +495,12 @@ impl Agent {
     fn bind(self: &Rc<Self>) {
         self.bind_catalog();
         self.bind_composer();
+        let weak = Rc::downgrade(self);
+        self.extensions.bind(move |action| {
+            if let Some(agent) = weak.upgrade() {
+                agent.extension_action(action);
+            }
+        });
         let weak = Rc::downgrade(self);
         self.older.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -547,6 +592,12 @@ impl Agent {
                 ModifierType,
                 keys::constants::{ISO_Enter, KP_Enter, Return},
             };
+            if weak
+                .upgrade()
+                .is_some_and(|agent| agent.commands.key(event))
+            {
+                return glib::Propagation::Stop;
+            }
             let modifiers = event.state() & gtk::accelerator_get_default_mod_mask();
             if ![Return, KP_Enter, ISO_Enter].contains(&event.keyval())
                 || !(modifiers.is_empty() || modifiers == ModifierType::CONTROL_MASK)
@@ -586,9 +637,26 @@ impl Agent {
             buffer.connect_changed(move |_| {
                 if let Some(agent) = weak.upgrade() {
                     agent.update_primary();
+                    agent.commands.update(&agent.input, &agent.editor_text());
                 }
             });
         }
+        let weak = Rc::downgrade(self);
+        self.input.connect_has_focus_notify(move |input| {
+            if !input.has_focus()
+                && let Some(agent) = weak.upgrade()
+            {
+                agent.commands.hide();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.commands.list.connect_row_activated(move |_, row| {
+            if let Some(agent) = weak.upgrade()
+                && let Some(command) = agent.commands.row_command(row)
+            {
+                agent.execute_command(command, &agent.editor_text());
+            }
+        });
         let weak = Rc::downgrade(self);
         self.attachments
             .chips
@@ -741,6 +809,147 @@ impl Agent {
         }
     }
 
+    pub fn extensions_panel(&self) -> &gtk::Box {
+        &self.extensions.panel
+    }
+
+    pub fn show_extensions(&self, section: Option<ExtensionSection>) {
+        if let Some(section) = section {
+            self.extensions.select(section);
+        }
+        self.extensions.load_visible();
+    }
+
+    fn extension_action(self: &Rc<Self>, action: ExtensionAction) {
+        if let ExtensionAction::Load(section, refresh, cursor) = action {
+            if self.initialized.get() {
+                self.load_extensions(section, refresh, cursor);
+            } else {
+                self.extensions
+                    .show_message(section, "正在连接当前主机的 Codex…");
+                self.start_rpc(true);
+            }
+            return;
+        }
+        if !self.initialized.get() {
+            return;
+        }
+        match action {
+            ExtensionAction::Review(plugin) => {
+                if self.extensions.begin_change("正在读取插件详情…") {
+                    let params = plugin.parameters();
+                    self.request(
+                        Request::Extensions(ExtensionRequest::Review(plugin)),
+                        "plugin/read",
+                        params,
+                    );
+                }
+            }
+            ExtensionAction::Install(plugin) => self.change_extension(
+                ExtensionSection::Plugins,
+                "plugin/install",
+                plugin.parameters(),
+                "正在安装插件…",
+            ),
+            ExtensionAction::Uninstall(id) => self.change_extension(
+                ExtensionSection::Plugins,
+                "plugin/uninstall",
+                json!({"pluginId":id}),
+                "正在卸载插件…",
+            ),
+            ExtensionAction::Configure(id, enabled) => {
+                if let Some(key) = agent_extensions::app_key(&id) {
+                    self.change_extension(
+                        ExtensionSection::Apps, "config/batchWrite",
+                        json!({"edits":[{"keyPath":key,"value":enabled,"mergeStrategy":"upsert"}],"reloadUserConfig":true}),
+                        "正在更新此主机的连接器设置…",
+                    );
+                }
+            }
+            ExtensionAction::Load(..) => unreachable!(),
+        }
+    }
+
+    fn load_extensions(&self, section: ExtensionSection, refresh: bool, cursor: Option<String>) {
+        if !self.extensions.begin_list(section) {
+            return;
+        }
+        let append = cursor.is_some();
+        let (method, params) = match section {
+            ExtensionSection::Plugins => (
+                "plugin/list",
+                json!({
+                    "forceRefetch":refresh,
+                    "marketplaceKinds":["local","vertical","workspace-directory"],
+                }),
+            ),
+            ExtensionSection::Apps => (
+                "app/list",
+                json!({"cursor":cursor,"limit":50,"forceRefetch":refresh}),
+            ),
+        };
+        self.request(
+            Request::Extensions(ExtensionRequest::List { section, append }),
+            method,
+            params,
+        );
+    }
+
+    fn change_extension(
+        &self,
+        section: ExtensionSection,
+        method: &str,
+        params: Value,
+        notice: &str,
+    ) {
+        if self.extensions.begin_change(notice) {
+            self.request(
+                Request::Extensions(ExtensionRequest::Change(section)),
+                method,
+                params,
+            );
+        }
+    }
+
+    fn extension_response(&self, request: ExtensionRequest, result: &Value) {
+        match request {
+            ExtensionRequest::List { section, append } => {
+                self.extensions.update(section, append, result)
+            }
+            ExtensionRequest::Review(plugin) => {
+                if !result["plugin"].is_object() {
+                    self.extensions.finish_change("主机未返回插件详情。");
+                    return;
+                }
+                self.extensions.finish_change("");
+                if self.extensions.panel.is_mapped()
+                    && self.extensions.review(&plugin, result)
+                    && self.initialized.get()
+                {
+                    self.change_extension(
+                        ExtensionSection::Plugins,
+                        "plugin/install",
+                        plugin.parameters(),
+                        "正在安装插件…",
+                    );
+                }
+            }
+            ExtensionRequest::Change(section) => {
+                let needs_auth = self.extensions.show_auth(result);
+                self.extensions.finish_change(if needs_auth {
+                    "插件已安装，部分连接器需要授权。"
+                } else {
+                    "已更新。"
+                });
+                self.load_extensions(section, true, None);
+                if needs_auth && self.extensions.panel.is_mapped() {
+                    self.extensions.select(ExtensionSection::Apps);
+                    self.load_extensions(ExtensionSection::Apps, true, None);
+                }
+            }
+        }
+    }
+
     fn load_catalog(&self, cursor: Option<String>) {
         if !self.initialized.get() || !self.catalog.panel.is_mapped() {
             return;
@@ -792,6 +1001,7 @@ impl Agent {
             Err(error) => {
                 self.show_status(&error);
                 self.catalog.show_status(&error);
+                self.extensions.disconnected(&error);
                 return;
             }
         };
@@ -805,6 +1015,7 @@ impl Agent {
             Err(error) => {
                 self.show_status(&error);
                 self.catalog.show_status(&error);
+                self.extensions.disconnected(&error);
                 return;
             }
         };
@@ -1075,6 +1286,16 @@ impl Agent {
                         self.update_controls();
                     }
                     Request::Quota => self.usage.unavailable(error),
+                    Request::Goal { generation, .. }
+                        if generation == self.history_generation.get() =>
+                    {
+                        self.goal_pending.set(false);
+                        self.show_status(error);
+                    }
+                    Request::Extensions(ExtensionRequest::List { section, .. }) => {
+                        self.extensions.show_message(section, error);
+                    }
+                    Request::Extensions(_) => self.extensions.finish_change(error),
                     Request::Turns {
                         prepend,
                         generation,
@@ -1124,6 +1345,7 @@ impl Agent {
                 self.update_controls();
                 self.read_quota();
                 self.load_catalog(None);
+                self.extensions.load_visible();
                 if browse {
                     self.show_status("选择会话或新建");
                 } else {
@@ -1213,6 +1435,31 @@ impl Agent {
                 }
             }
             Request::Quota => self.usage.quota(result, true),
+            Request::Extensions(request) => self.extension_response(request, result),
+            Request::Goal {
+                generation,
+                edit,
+                draft,
+            } => {
+                if generation == self.history_generation.get() {
+                    self.goal_pending.set(false);
+                    if result.get("cleared").is_some() {
+                        self.goal.hide();
+                        self.show_status("已清除会话目标");
+                    } else {
+                        self.render_goal(&result["goal"]);
+                    }
+                    let replacement = if edit {
+                        format!(
+                            "/goal {}",
+                            result["goal"]["objective"].as_str().unwrap_or_default()
+                        )
+                    } else {
+                        String::new()
+                    };
+                    self.replace_command(&draft, &replacement);
+                }
+            }
             Request::Turns {
                 prepend,
                 generation,
@@ -1464,6 +1711,11 @@ impl Agent {
     }
 
     fn submit_prompt(self: &Rc<Self>) {
+        let editor = self.editor_text();
+        let selected = self.commands.selected();
+        if self.execute_command(selected.unwrap_or(editor.trim_end()), &editor) {
+            return;
+        }
         if !self.primary.is_sensitive() || self.primary_action.get() == Some(ComposerAction::Stop) {
             return;
         }
@@ -1487,7 +1739,136 @@ impl Agent {
         }
     }
 
+    fn editor_text(&self) -> String {
+        self.input
+            .buffer()
+            .and_then(|buffer| buffer.text(&buffer.start_iter(), &buffer.end_iter(), false))
+            .map(|text| text.to_string())
+            .unwrap_or_default()
+    }
+
+    fn replace_command(&self, previous: &str, replacement: &str) {
+        self.commands.hide();
+        if self.editor_text() == previous
+            && let Some(buffer) = self.input.buffer()
+        {
+            buffer.set_text(replacement);
+            buffer.place_cursor(&buffer.end_iter());
+        }
+    }
+
+    fn execute_command(&self, command: &str, editor: &str) -> bool {
+        if !command.starts_with('/') {
+            return false;
+        }
+        let (name, arguments) = command
+            .split_once(char::is_whitespace)
+            .map_or((command, ""), |(name, args)| (name, args.trim()));
+        if name == "/goal" {
+            self.commands.hide();
+            self.goal_command(arguments, editor);
+            return true;
+        }
+        let result = match (name, arguments) {
+            ("/model", args) => self.options.model_command(args),
+            ("/permissions", "") => self.options.permission_command(),
+            ("/fast", "") => self.options.fast_command().map(|fast| {
+                self.show_status(if fast {
+                    "Fast 已启用 · 下一轮生效"
+                } else {
+                    "Fast 已关闭 · 下一轮生效"
+                });
+            }),
+            ("/plugins" | "/apps", "") => {
+                let action = if name == "/plugins" {
+                    "agent-plugins"
+                } else {
+                    "agent-apps"
+                };
+                if let Some(action) = self
+                    .panel
+                    .toplevel()
+                    .and_downcast::<gtk::ApplicationWindow>()
+                    .and_then(|window| window.lookup_action(action))
+                {
+                    action.activate(None);
+                }
+                Ok(())
+            }
+            ("/", "") => return true,
+            _ => return false,
+        };
+        self.commands.hide();
+        match result {
+            Ok(()) => self.replace_command(editor, ""),
+            Err(message) => self.show_status(message),
+        }
+        true
+    }
+
+    fn goal_command(&self, arguments: &str, draft: &str) {
+        let Some(thread) = self.thread.borrow().clone().filter(|_| !self.opening.get()) else {
+            self.show_status("请先打开 Codex 会话。");
+            return;
+        };
+        if self.goal_pending.get() {
+            return;
+        }
+        let (method, params) = match arguments {
+            "" | "edit" => ("thread/goal/get", json!({"threadId":thread})),
+            "clear" => (
+                "thread/goal/clear",
+                json!({"threadId":thread,"origin":"user"}),
+            ),
+            "pause" | "resume" => (
+                "thread/goal/set",
+                json!({
+                    "threadId":thread,"origin":"user","status": if arguments == "pause" {"paused"} else {"active"}
+                }),
+            ),
+            objective if objective.chars().count() <= 4000 => (
+                "thread/goal/set",
+                json!({"threadId":thread,"origin":"user","objective":objective,"status":"active"}),
+            ),
+            _ => {
+                self.show_status("会话目标最多 4,000 个字符。");
+                return;
+            }
+        };
+        self.goal_pending.set(true);
+        self.request(
+            Request::Goal {
+                generation: self.history_generation.get(),
+                edit: arguments == "edit",
+                draft: draft.to_owned(),
+            },
+            method,
+            params,
+        );
+    }
+
+    fn render_goal(&self, goal: &Value) {
+        let text = if let Some(objective) = goal["objective"].as_str() {
+            let status = match goal["status"].as_str() {
+                Some("active") => "进行中",
+                Some("paused") => "已暂停",
+                Some("blocked") => "受阻",
+                Some("complete") => "已完成",
+                Some("budgetLimited" | "usageLimited") => "达到用量上限",
+                _ => "会话目标",
+            };
+            format!("目标 · {status}\n{}", limited(objective, 4000))
+        } else {
+            "当前会话没有目标。".into()
+        };
+        self.goal.set_tooltip_text(Some(&text));
+        self.goal.set_text(&text);
+        self.goal.show();
+    }
+
     fn clear_history(&self) {
+        self.goal_pending.set(false);
+        self.goal.hide();
         self.follow_tail.set(true);
         self.turn_copy.borrow_mut().clear();
         self.past_activity.borrow_mut().clear();
@@ -1520,6 +1901,9 @@ impl Agent {
         self.pending.borrow_mut().clear();
         self.opening.set(false);
         self.initialized.set(false);
+        self.goal_pending.set(false);
+        self.goal.hide();
+        self.extensions.disconnected(message);
         self.catalog_fetch.take();
         self.uploading.set(false);
         self.pasting.set(false);
@@ -1558,6 +1942,8 @@ impl Agent {
             }
         }
         match method {
+            "thread/goal/updated" => self.render_goal(&params["goal"]),
+            "thread/goal/cleared" => self.goal.hide(),
             "thread/tokenUsage/updated" => self.usage.tokens(&params["tokenUsage"]),
             "account/rateLimits/updated" => self.usage.quota(params, false),
             "item/agentMessage/delta" => {
@@ -2120,19 +2506,13 @@ impl Agent {
             (Icon::Copy, "复制本轮 Markdown", false),
             (Icon::CopyRich, "复制本轮富文本", true),
         ] {
-            let button = gtk::Button::new();
-            button.style_context().add_class("quiet-button");
-            button.set_tooltip_text(Some(label));
-            if let Some(accessible) = button.accessible() {
-                accessible.set_name(label);
-            }
-            button.add(&icons::widget(icon, 16));
             let text = text.clone();
-            button.connect_clicked(move |_| {
+            let button = icons::copy_button(icon, label, move || {
                 if rich {
-                    agent_render::copy_rich(text.as_ref().clone());
+                    agent_render::copy_rich(text.as_ref().clone())
                 } else {
                     agent_render::clipboard().set_text(&text);
+                    true
                 }
             });
             actions.pack_start(&button, false, false, 0);

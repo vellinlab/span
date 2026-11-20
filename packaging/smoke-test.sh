@@ -147,7 +147,7 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
 
     widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
     previous_bottom=0
-    for action in '显示／隐藏侧栏' '工具栏 · 新建本地终端' '工具栏 · 快速连接'; do
+    for action in '显示／隐藏侧栏' '工具栏 · 新建本地终端' '工具栏 · 快速连接' '工具栏 · 插件与连接器'; do
         read -r _ rail_y rail_width rail_height <<< "$(widget bounds "$action")"
         ((rail_width >= 40 && rail_height >= 40 && rail_y - previous_bottom >= 7))
         previous_bottom=$((rail_y + rail_height))
@@ -324,7 +324,10 @@ SVG
     widget mouse '只读'
     widget description '会话权限' '只读'
     widget not-state 'Fast 模式' sensitive
-    widget mouse '选择模型'
+    widget mouse '消息输入框'
+    xdotool type --clearmodifiers '/mod'
+    widget bounds '/model' >/dev/null
+    xdotool key --clearmodifiers Return
     widget contains 'GPT Vision'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-model-picker.png"
     widget mouse 'GPT Vision'
@@ -338,6 +341,37 @@ SVG
     widget not-state 'Fast 模式' checked
     widget mouse 'Fast 模式'
     widget state 'Fast 模式' checked
+    slash() {
+        widget mouse '消息输入框'
+        xdotool type --clearmodifiers "$1"
+        xdotool key --clearmodifiers Return
+    }
+    slash '/goal Finish the fixture'
+    widget contains 'Finish the fixture'
+    slash '/goal pause'
+    widget contains '目标 · 已暂停'
+    slash '/goal edit'
+    widget contains '/goal Finish the fixture'
+    xdotool key --clearmodifiers ctrl+a BackSpace
+    slash '/goal resume'
+    widget contains '目标 · 进行中'
+    slash '/goal clear'
+    widget contains '已清除会话目标'
+    slash '/plugins'
+    widget contains 'Local Fixture Plugin'
+    widget click '安装'
+    wait_until "plugin installed on the local fixture" test -f "$HOME/plugin-installed"
+    widget click '卸载'
+    wait_until "plugin removed on the local fixture" test -f "$HOME/plugin-uninstalled"
+    slash '/apps'
+    widget contains 'Fixture Connector'
+    widget click '停用'
+    widget contains '此主机已停用'
+    widget click '加载更多'
+    widget contains 'Another Connector'
+    widget mouse '显示／隐藏侧栏'
+    widget mouse '显示／隐藏侧栏'
+    printf '%s\n' 'Slash commands opened the model picker, managed the thread goal, and routed plugin and app operations to Codex.'
     widget mouse '消息输入框'
     widget state '消息输入框' focused
     add_attachment "$HOME/test-output.png"
@@ -479,10 +513,12 @@ SVG
     read -r copy_x _ _ _ <<< "$(widget bounds '复制本轮 Markdown')"
     ((copy_x > history_x + history_width / 2))
     widget click '复制本轮 Markdown'
+    widget description '复制本轮 Markdown' '已复制'
     copied_turn="$(xclip -out -selection clipboard)"
     [[ $copied_turn == *'| Integration | 12 passed |'* && $copied_turn == *'Environment confirmed.'* ]]
     [[ $(widget count '复制本轮 Markdown') == 1 && $(widget count '复制本轮富文本') == 1 ]]
     widget click '复制本轮富文本'
+    widget description '复制本轮富文本' '已复制'
     xclip -out -selection clipboard -target text/html > "$HOME/turn.html"
     grep -q 'Environment confirmed.' "$HOME/turn.html"
     printf '%s\n' 'Only completed turns show the two copy icons, and both include all of the turn’s replies.'
@@ -895,6 +931,13 @@ PY
         widget contains 'Latest deployment notes'
         widget contains 'Check the rollout from my other device.'
         widget contains 'The shared rollout is healthy.'
+        widget mouse '工具栏 · 插件与连接器'
+        widget contains 'Remote Fixture Plugin'
+        widget not-contains 'Local Fixture Plugin'
+        widget click '安装'
+        wait_until "plugin installed through the SSH host app server" test -f "$WORKBENCH_SSH_FIXTURE/plugin-installed"
+        widget click '卸载'
+        wait_until "plugin uninstalled through the SSH host app server" test -f "$WORKBENCH_SSH_FIXTURE/plugin-uninstalled"
         widget click '会话页终端面板'
         xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-primary-connection"'
         xdotool key --clearmodifiers Return

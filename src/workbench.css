@@ -1055,6 +1055,44 @@ scrolledwindow.agent-table-scroll {
     border-color: #6478a5;
 }
 
+.agent-goal {
+    margin: 2px 5px 0;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background-color: @selection;
+    color: @foreground;
+    font-size: 13px;
+}
+
+.agent-command-option {
+    padding: 5px 9px;
+}
+
+.agent-command-option:selected {
+    background-color: @selection;
+    color: @foreground;
+}
+
+.workbench button.copy-confirmed,
+.workbench button.copy-confirmed drawingarea {
+    color: #82d5a9;
+}
+
+.extensions-page, .extensions-feedback {
+    padding: 4px 9px;
+}
+
+.extension-card {
+    padding: 7px 8px;
+    background: @chrome;
+    border: 1px solid @line;
+    border-radius: 7px;
+}
+
+.extension-card drawingarea {
+    color: @accent;
+}
+
 .agent-compose-placeholder {
     color: @muted;
     padding: 8px 8px;

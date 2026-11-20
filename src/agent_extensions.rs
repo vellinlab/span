@@ -1,0 +1,642 @@
+use crate::agent::limited;
+use crate::agent_render::{open_link, web_url};
+use crate::icons::{self, Icon};
+use gtk::prelude::*;
+use gtk::{gdk, pango};
+use serde_json::{Value, json};
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Plugins,
+    Apps,
+}
+
+impl Section {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Plugins => "plugins",
+            Self::Apps => "apps",
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Plugin {
+    id: String,
+    name: String,
+    title: String,
+    description: String,
+    source: String,
+    path: Option<String>,
+    marketplace: String,
+    installed: bool,
+    enabled: bool,
+    available: bool,
+    review: bool,
+}
+
+impl Plugin {
+    fn parse(source: &Value, item: &Value) -> Option<Self> {
+        let name = item["name"].as_str()?;
+        Some(Self {
+            id: item["id"].as_str()?.to_owned(),
+            name: name.to_owned(),
+            title: item["interface"]["displayName"]
+                .as_str()
+                .unwrap_or(name)
+                .to_owned(),
+            description: item["interface"]["shortDescription"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            source: source["interface"]["displayName"]
+                .as_str()
+                .or(source["name"].as_str())?
+                .to_owned(),
+            path: source["path"].as_str().map(str::to_owned),
+            marketplace: source["name"].as_str()?.to_owned(),
+            installed: item["installed"] == true,
+            enabled: item["enabled"] == true,
+            available: item["installPolicy"] != "NOT_AVAILABLE"
+                && (item["availability"].is_null() || item["availability"] == "AVAILABLE"),
+            review: item["mustShowInstallationInterstitial"] == true,
+        })
+    }
+
+    pub fn parameters(&self) -> Value {
+        match &self.path {
+            Some(path) => json!({"pluginName":self.name,"marketplacePath":path}),
+            None => json!({"pluginName":self.name,"remoteMarketplaceName":self.marketplace}),
+        }
+    }
+}
+
+struct App {
+    id: String,
+    name: String,
+    description: String,
+    url: Option<String>,
+    connected: bool,
+    enabled: bool,
+}
+
+impl App {
+    fn parse(item: &Value) -> Option<Self> {
+        Some(Self {
+            id: item["id"].as_str()?.to_owned(),
+            name: item["name"].as_str()?.to_owned(),
+            description: item["description"].as_str().unwrap_or_default().to_owned(),
+            url: install_url(item).map(str::to_owned),
+            connected: item["isAccessible"] == true,
+            enabled: item["isEnabled"] != false,
+        })
+    }
+}
+
+enum Entry {
+    Plugin(Plugin),
+    App(App),
+}
+
+pub enum Action {
+    Load(Section, bool, Option<String>),
+    Review(Plugin),
+    Install(Plugin),
+    Uninstall(String),
+    Configure(String, bool),
+}
+
+pub enum Request {
+    List { section: Section, append: bool },
+    Review(Plugin),
+    Change(Section),
+}
+
+struct Page {
+    root: gtk::Box,
+    entries: RefCell<Vec<Entry>>,
+    rows: gtk::Box,
+    state: gtk::Label,
+    more: gtk::Button,
+    cursor: RefCell<Option<String>>,
+    loaded: Cell<bool>,
+    loading: Cell<bool>,
+}
+
+impl Page {
+    fn new() -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.style_context().add_class("extensions-page");
+        let rows = gtk::Box::new(gtk::Orientation::Vertical, 5);
+        let state = label("", 3);
+        state.style_context().add_class("preview-detail");
+        state.set_no_show_all(true);
+        let more = gtk::Button::with_label("加载更多");
+        more.style_context().add_class("quiet-button");
+        more.set_no_show_all(true);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        content.add(&state);
+        content.add(&rows);
+        content.add(&more);
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .build();
+        scroll.add(&content);
+        root.pack_start(&scroll, true, true, 0);
+        Self {
+            root,
+            entries: RefCell::new(Vec::new()),
+            rows,
+            state,
+            more,
+            cursor: RefCell::new(None),
+            loaded: Cell::new(false),
+            loading: Cell::new(false),
+        }
+    }
+}
+
+type Callback = Rc<dyn Fn(Action)>;
+
+pub struct Extensions {
+    pub panel: gtk::Box,
+    stack: gtk::Stack,
+    search: gtk::SearchEntry,
+    refresh: gtk::Button,
+    feedback: gtk::Box,
+    plugins: Page,
+    apps: Page,
+    action: RefCell<Option<Callback>>,
+    changing: Cell<bool>,
+    auth: gtk::Box,
+}
+
+impl Extensions {
+    pub fn new(host: &str) -> Rc<Self> {
+        let panel = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        header.style_context().add_class("sidebar-heading");
+        let title = label(&format!("扩展 · {host}"), 1);
+        title.set_tooltip_text(Some(host));
+        title.style_context().add_class("section-title");
+        header.pack_start(&title, true, true, 0);
+        let refresh = icons::button(Icon::Refresh, "刷新扩展", "刷新当前主机上的列表");
+        header.pack_end(&refresh, false, false, 0);
+        panel.add(&header);
+        let stack = gtk::Stack::new();
+        let switcher = gtk::StackSwitcher::builder()
+            .stack(&stack)
+            .homogeneous(true)
+            .build();
+        switcher.style_context().add_class("sidebar-tabs");
+        panel.add(&switcher);
+        let search = gtk::SearchEntry::builder()
+            .placeholder_text("搜索已加载的项目")
+            .width_chars(10)
+            .build();
+        search.style_context().add_class("host-search");
+        panel.add(&search);
+        let feedback = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        feedback.style_context().add_class("extensions-feedback");
+        feedback.set_no_show_all(true);
+        panel.add(&feedback);
+        let plugins = Page::new();
+        let apps = Page::new();
+        let manage = gtk::Button::with_label("在 ChatGPT 管理授权");
+        manage.style_context().add_class("quiet-button");
+        manage.connect_clicked(|button| {
+            open_link(button, "https://chatgpt.com/#settings/Connectors")
+        });
+        apps.root.pack_end(&manage, false, false, 0);
+        let auth = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        auth.style_context().add_class("extensions-feedback");
+        auth.set_no_show_all(true);
+        apps.root.pack_end(&auth, false, false, 0);
+        stack.add_titled(&plugins.root, Section::Plugins.id(), "插件");
+        stack.add_titled(&apps.root, Section::Apps.id(), "连接器");
+        stack.show_all();
+        stack.set_visible_child_name(Section::Plugins.id());
+        panel.pack_start(&stack, true, true, 0);
+        Rc::new(Self {
+            panel,
+            stack,
+            search,
+            refresh,
+            feedback,
+            plugins,
+            apps,
+            auth,
+            action: RefCell::new(None),
+            changing: Cell::new(false),
+        })
+    }
+
+    pub fn bind(self: &Rc<Self>, action: impl Fn(Action) + 'static) {
+        self.action.replace(Some(Rc::new(action)));
+        let weak = Rc::downgrade(self);
+        self.stack.connect_visible_child_name_notify(move |_| {
+            if let Some(panel) = weak.upgrade() {
+                panel.load_visible();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.refresh.connect_clicked(move |_| {
+            if let Some(panel) = weak.upgrade() {
+                panel.emit(Action::Load(panel.visible(), true, None));
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.search.connect_search_changed(move |_| {
+            if let Some(panel) = weak.upgrade() {
+                panel.render(Section::Plugins);
+                panel.render(Section::Apps);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.apps.more.connect_clicked(move |_| {
+            if let Some(panel) = weak.upgrade() {
+                let cursor = panel.apps.cursor.borrow().clone();
+                if cursor.is_some() {
+                    panel.emit(Action::Load(Section::Apps, false, cursor));
+                }
+            }
+        });
+    }
+
+    pub fn select(&self, section: Section) {
+        self.stack.set_visible_child_name(section.id());
+    }
+
+    pub fn load_visible(&self) {
+        let section = self.visible();
+        if self.panel.is_mapped() && !self.page(section).loaded.get() {
+            self.emit(Action::Load(section, false, None));
+        }
+    }
+
+    pub fn visible(&self) -> Section {
+        if self.stack.visible_child_name().as_deref() == Some(Section::Apps.id()) {
+            Section::Apps
+        } else {
+            Section::Plugins
+        }
+    }
+
+    fn emit(&self, action: Action) {
+        let callback = self.action.borrow().clone();
+        if let Some(callback) = callback {
+            callback(action);
+        }
+    }
+
+    fn page(&self, section: Section) -> &Page {
+        match section {
+            Section::Plugins => &self.plugins,
+            Section::Apps => &self.apps,
+        }
+    }
+
+    pub fn begin_list(&self, section: Section) -> bool {
+        let page = self.page(section);
+        if page.loading.replace(true) {
+            return false;
+        }
+        page.state.set_text("正在读取当前主机的列表…");
+        page.state.show();
+        page.more.set_sensitive(false);
+        true
+    }
+
+    pub fn show_message(&self, section: Section, message: &str) {
+        let page = self.page(section);
+        page.loading.set(false);
+        page.more.set_sensitive(true);
+        page.state.set_text(&limited(message, 400));
+        page.state.show();
+    }
+
+    pub fn disconnected(&self, message: &str) {
+        self.finish_change("");
+        clear(&self.auth);
+        self.auth.hide();
+        for section in [Section::Plugins, Section::Apps] {
+            let page = self.page(section);
+            page.loaded.set(false);
+            page.entries.borrow_mut().clear();
+            page.cursor.take();
+            self.render(section);
+            self.show_message(section, message);
+        }
+    }
+
+    pub fn update(&self, section: Section, append: bool, result: &Value) {
+        let page = self.page(section);
+        let mut entries = page.entries.borrow_mut();
+        if !append {
+            entries.clear();
+        }
+        let message = match section {
+            Section::Plugins => {
+                for source in array(&result["marketplaces"]) {
+                    entries.extend(
+                        array(&source["plugins"])
+                            .filter_map(|item| Plugin::parse(source, item))
+                            .map(Entry::Plugin),
+                    );
+                }
+                let failures = array(&result["marketplaceLoadErrors"]).count();
+                match (entries.is_empty(), failures) {
+                    (true, 0) => "当前主机未返回插件。".into(),
+                    (_, 0) => String::new(),
+                    _ => format!("{failures} 个插件来源加载失败。"),
+                }
+            }
+            Section::Apps => {
+                for app in array(&result["data"]).filter_map(App::parse) {
+                    if let Some(existing) = entries
+                        .iter_mut()
+                        .find(|entry| matches!(entry, Entry::App(old) if old.id == app.id))
+                    {
+                        *existing = Entry::App(app);
+                    } else {
+                        entries.push(Entry::App(app));
+                    }
+                }
+                let next = result["nextCursor"].as_str().filter(|cursor| {
+                    !cursor.is_empty() && page.cursor.borrow().as_deref() != Some(*cursor)
+                });
+                page.cursor.replace(next.map(str::to_owned));
+                if entries.is_empty() {
+                    "当前账号未返回连接器。".into()
+                } else {
+                    String::new()
+                }
+            }
+        };
+        drop(entries);
+        page.loaded.set(true);
+        self.show_message(section, &message);
+        page.state.set_visible(!message.is_empty());
+        self.render(section);
+    }
+
+    pub fn begin_change(&self, notice: &str) -> bool {
+        if self.changing.replace(true) {
+            return false;
+        }
+        self.set_feedback(notice);
+        self.refresh.set_sensitive(false);
+        true
+    }
+
+    pub fn finish_change(&self, notice: &str) {
+        self.changing.set(false);
+        self.refresh.set_sensitive(true);
+        self.set_feedback(notice);
+    }
+
+    fn set_feedback(&self, notice: &str) {
+        clear(&self.feedback);
+        self.feedback.set_visible(!notice.is_empty());
+        if !notice.is_empty() {
+            let message = label(notice, 4);
+            self.feedback.add(&message);
+            message.show();
+        }
+    }
+
+    pub fn review(&self, plugin: &Plugin, result: &Value) -> bool {
+        let detail = &result["plugin"];
+        let mut lines = vec![format!("安装到当前主机 · {}", plugin.source)];
+        if let Some(description) = detail["description"].as_str() {
+            lines.push(limited(description, 300));
+        }
+        for (key, heading) in [
+            ("apps", "连接器"),
+            ("skills", "技能"),
+            ("mcpServers", "MCP 服务"),
+            ("hooks", "钩子"),
+            ("scheduledTasks", "计划任务"),
+            ("appTemplates", "连接器模板"),
+        ] {
+            let names = array(&detail[key])
+                .filter_map(|item| {
+                    item.as_str()
+                        .or_else(|| item["name"].as_str().or(item["eventName"].as_str()))
+                })
+                .take(8)
+                .map(|name| limited(name, 60))
+                .collect::<Vec<_>>();
+            if !names.is_empty() {
+                lines.push(format!("{heading} · {}", names.join("、")));
+            }
+        }
+        let parent = self.panel.toplevel().and_downcast::<gtk::Window>();
+        let dialog = gtk::MessageDialog::builder()
+            .modal(true)
+            .destroy_with_parent(true)
+            .message_type(gtk::MessageType::Question)
+            .text(limited(&plugin.title, 160))
+            .secondary_text(lines.join("\n"))
+            .build();
+        dialog.set_transient_for(parent.as_ref());
+        dialog.style_context().add_class("workbench-dialog");
+        dialog.add_button("取消", gtk::ResponseType::Cancel);
+        dialog.add_button("确认安装", gtk::ResponseType::Accept);
+        let confirmed = dialog.run() == gtk::ResponseType::Accept;
+        dialog.close();
+        confirmed
+    }
+
+    pub fn show_auth(&self, result: &Value) -> bool {
+        let needed = array(&result["appsNeedingAuth"])
+            .take(12)
+            .collect::<Vec<_>>();
+        if needed.is_empty() {
+            return false;
+        }
+        clear(&self.auth);
+        self.auth.add(&label("此插件还有连接器需要授权。", 2));
+        for app in needed {
+            if let Some(uri) = install_url(app) {
+                let name = app["name"].as_str().unwrap_or("连接器");
+                self.auth
+                    .add(&link_button(&format!("授权 {}", limited(name, 50)), uri));
+            }
+        }
+        self.auth.show_all();
+        self.auth.show();
+        true
+    }
+
+    fn render(&self, section: Section) {
+        let page = self.page(section);
+        clear(&page.rows);
+        let query = self.search.text().trim().to_lowercase();
+        let Some(action) = self.action.borrow().clone() else {
+            return;
+        };
+        for entry in page.entries.borrow().iter() {
+            let (title, description, detail, icon) = match entry {
+                Entry::Plugin(plugin) => {
+                    let status = match (plugin.installed, plugin.enabled, plugin.available) {
+                        (true, true, _) => "已安装",
+                        (true, false, _) => "已安装 · 已停用",
+                        (_, _, false) => "不可安装",
+                        _ => "可安装",
+                    };
+                    (
+                        &plugin.title,
+                        &plugin.description,
+                        format!("{} · {status}", plugin.source),
+                        Icon::Plugin,
+                    )
+                }
+                Entry::App(app) => {
+                    let status = match (app.connected, app.enabled) {
+                        (true, true) => "账号可用",
+                        (true, false) => "账号可用 · 此主机已停用",
+                        (false, _) => "账号尚不可用",
+                    };
+                    (&app.name, &app.description, status.into(), Icon::Connect)
+                }
+            };
+            if !query.is_empty()
+                && ![title, description, &detail]
+                    .iter()
+                    .any(|text| text.to_lowercase().contains(&query))
+            {
+                continue;
+            }
+            let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            card.style_context().add_class("extension-card");
+            let heading = gtk::Box::new(gtk::Orientation::Horizontal, 7);
+            heading.add(&icons::widget(icon, 17));
+            let title = label(title, 1);
+            title.style_context().add_class("section-title");
+            heading.pack_start(&title, true, true, 0);
+            card.add(&heading);
+            for text in [detail.as_str(), description.as_str()] {
+                if !text.is_empty() {
+                    let label = label(text, 2);
+                    label.style_context().add_class("preview-detail");
+                    card.add(&label);
+                }
+            }
+            let tools = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+            match entry {
+                Entry::Plugin(plugin) if plugin.installed => {
+                    let id = plugin.id.clone();
+                    tools.add(&action_button("卸载", &action, move || {
+                        Action::Uninstall(id.clone())
+                    }));
+                }
+                Entry::Plugin(plugin) if plugin.available => {
+                    let plugin = plugin.clone();
+                    tools.add(&action_button(
+                        if plugin.review {
+                            "查看并安装"
+                        } else {
+                            "安装"
+                        },
+                        &action,
+                        move || {
+                            if plugin.review {
+                                Action::Review(plugin.clone())
+                            } else {
+                                Action::Install(plugin.clone())
+                            }
+                        },
+                    ));
+                }
+                Entry::App(app) if app.connected => {
+                    if app_key(&app.id).is_some() {
+                        let id = app.id.clone();
+                        let enable = !app.enabled;
+                        tools.add(&action_button(
+                            if enable { "启用" } else { "停用" },
+                            &action,
+                            move || Action::Configure(id.clone(), enable),
+                        ));
+                    }
+                    tools.add(&link_button(
+                        "管理授权",
+                        "https://chatgpt.com/#settings/Connectors",
+                    ));
+                }
+                Entry::App(app) => {
+                    if let Some(uri) = &app.url {
+                        tools.add(&link_button("连接", uri));
+                    }
+                }
+                _ => {}
+            }
+            card.add(&tools);
+            page.rows.add(&card);
+            card.show_all();
+        }
+        page.more.set_visible(page.cursor.borrow().is_some());
+    }
+}
+
+fn clear(container: &gtk::Box) {
+    for child in container.children() {
+        container.remove(&child);
+    }
+}
+
+fn label(text: &str, lines: i32) -> gtk::Label {
+    let label = gtk::Label::builder()
+        .label(limited(text, 450))
+        .xalign(0.0)
+        .wrap(true)
+        .wrap_mode(pango::WrapMode::WordChar)
+        .ellipsize(pango::EllipsizeMode::End)
+        .lines(lines)
+        .max_width_chars(25)
+        .build();
+    label.set_tooltip_text((!text.is_empty()).then(|| label.text()).as_deref());
+    label
+}
+
+fn action_button(
+    title: &str,
+    action: &Callback,
+    build: impl Fn() -> Action + 'static,
+) -> gtk::Button {
+    let button = gtk::Button::with_label(title);
+    button.style_context().add_class("quiet-button");
+    let action = action.clone();
+    button.connect_clicked(move |_| action(build()));
+    button
+}
+
+fn link_button(title: &str, uri: &str) -> gtk::Button {
+    let button = gtk::Button::with_label(title);
+    button.style_context().add_class("quiet-button");
+    let uri = uri.to_owned();
+    button.connect_clicked(move |button| open_link(button, &uri));
+    button
+}
+
+fn install_url(item: &Value) -> Option<&str> {
+    item["installUrl"]
+        .as_str()
+        .filter(|uri| web_url(uri) && uri.starts_with("https://"))
+}
+
+fn array(value: &Value) -> impl Iterator<Item = &Value> {
+    value.as_array().into_iter().flatten()
+}
+
+pub fn app_key(id: &str) -> Option<String> {
+    (!id.is_empty()
+        && id != "_default"
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
+    .then(|| format!("apps.{id}.enabled"))
+}

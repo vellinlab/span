@@ -355,6 +355,94 @@ impl Options {
         self.model.button.set_tooltip_text(Some(text));
     }
 
+    pub fn model_command(&self, arguments: &str) -> Result<(), &'static str> {
+        if !self.model.button.is_sensitive() {
+            return Err("模型列表尚未就绪。");
+        }
+        if arguments.is_empty() {
+            self.model.button.set_active(true);
+            return Ok(());
+        }
+        let mut id = None;
+        let mut effort = None;
+        let mut fast = None;
+        for arg in arguments.split_whitespace() {
+            if let Some(value) = arg
+                .strip_prefix("--reasoning=")
+                .filter(|_| effort.is_none())
+            {
+                effort = Some(value);
+            } else if let Some(value) = arg.strip_prefix("--speed=").filter(|_| fast.is_none()) {
+                fast = Some(match value {
+                    "fast" | "priority" => true,
+                    "standard" | "default" => false,
+                    _ => return Err("速度可选 fast 或 standard。"),
+                });
+            } else if id.is_none() && !arg.starts_with('-') {
+                id = Some(arg);
+            } else {
+                return Err("用法：/model [模型 ID] [--reasoning=强度] [--speed=速度]");
+            }
+        }
+        let previous = self.model.active_id();
+        let id = id.or(previous.as_deref()).ok_or("当前没有可用模型。")?;
+        let catalog = self.catalog.borrow();
+        let model = catalog
+            .iter()
+            .find(|model| model.id == id)
+            .ok_or("模型列表中没有这个 ID。")?;
+        if effort.is_some_and(|effort| !model.efforts.iter().any(|id| id == effort)) {
+            return Err("此模型不支持指定的思考强度。");
+        }
+        if fast == Some(true) && !(model.fast && self.turn_speed_supported.get()) {
+            return Err("此模型或主机上的 Codex 不支持 Fast。");
+        }
+        drop(catalog);
+        if previous.as_deref() != Some(id) {
+            let index = self
+                .model
+                .choices
+                .borrow()
+                .iter()
+                .position(|choice| choice.id == id);
+            if let Some(index) = index {
+                self.model.select(index);
+                self.model_changed();
+            }
+        }
+        if let Some(effort) = effort {
+            let index = self
+                .effort
+                .choices
+                .borrow()
+                .iter()
+                .position(|choice| choice.id == effort);
+            if let Some(index) = index {
+                self.effort.select(index);
+            }
+        }
+        if let Some(fast) = fast {
+            self.fast.set_active(fast);
+        }
+        Ok(())
+    }
+
+    pub fn permission_command(&self) -> Result<(), &'static str> {
+        if !self.permission.button.is_sensitive() {
+            return Err("请先打开 Codex 会话。");
+        }
+        self.permission.button.set_active(true);
+        Ok(())
+    }
+
+    pub fn fast_command(&self) -> Result<bool, &'static str> {
+        if !self.fast.is_sensitive() {
+            return Err("此模型或主机上的 Codex 不支持 Fast。");
+        }
+        self.fast.set_active(!self.fast.is_active());
+        Ok(self.fast.is_active())
+    }
+
     pub fn server_ready(&self, result: &Value) {
         // Codex reports the server version in the first user-agent token.
         // 0.151 introduced per-turn speeds, which leave shared session defaults intact.

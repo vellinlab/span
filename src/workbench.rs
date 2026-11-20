@@ -1,3 +1,4 @@
+use crate::agent_extensions::Section as ExtensionSection;
 use crate::browser::Browser;
 use crate::host_dialog;
 use crate::hosts::{self, Host};
@@ -18,6 +19,7 @@ struct Workbench {
     sidebar: gtk::Box,
     sidebar_pages: gtk::Stack,
     sidebar_catalog: gtk::Box,
+    sidebar_extensions: gtk::Box,
     panels_pending: Cell<bool>,
     files_return: Cell<&'static str>,
     browser: Rc<Browser>,
@@ -56,11 +58,13 @@ pub fn open(app: &gtk::Application) {
     }
     let sidebar_pages = gtk::Stack::new();
     let sidebar_catalog = column(0);
+    let sidebar_extensions = column(0);
     let preview = Panel::new();
     let browser = Browser::new(preview.clone());
     sidebar_pages.add_titled(&hosts_view, "hosts", "主机");
     sidebar_pages.add_titled(&sidebar_catalog, "sessions", "会话");
     sidebar_pages.add_titled(&browser.panel, "files", "文件");
+    sidebar_pages.add_titled(&sidebar_extensions, "extensions", "扩展");
     let sidebar_tabs = gtk::StackSwitcher::new();
     sidebar_tabs.style_context().add_class("sidebar-tabs");
     sidebar_tabs.set_homogeneous(true);
@@ -128,6 +132,7 @@ pub fn open(app: &gtk::Application) {
         sidebar,
         sidebar_pages,
         sidebar_catalog,
+        sidebar_extensions,
         panels_pending: Cell::new(false),
         files_return: Cell::new("hosts"),
         browser,
@@ -173,6 +178,8 @@ pub fn open(app: &gtk::Application) {
             &["<Primary><Shift>h"][..],
             Workbench::agent_catalog,
         ),
+        ("agent-plugins", &[][..], Workbench::show_plugins),
+        ("agent-apps", &[][..], Workbench::show_apps),
         (
             "agent-drawer",
             &["<Primary><Shift>j"][..],
@@ -214,13 +221,14 @@ pub fn open(app: &gtk::Application) {
                 match workbench.sidebar_pages.visible_child_name().as_deref() {
                     Some("files") => workbench.browser.select(current.as_ref()),
                     other => {
-                        workbench.files_return.set(if other == Some("sessions") {
-                            "sessions"
-                        } else {
-                            "hosts"
+                        workbench.files_return.set(match other {
+                            Some("sessions") => "sessions",
+                            Some("extensions") => "extensions",
+                            _ => "hosts",
                         });
                         workbench.browser.reset();
                         workbench.sync_catalog(current.as_ref(), false);
+                        workbench.sync_extensions(current.as_ref());
                     }
                 }
             }
@@ -313,6 +321,7 @@ impl Workbench {
                     workbench.browser.select(session.as_ref());
                 }
                 workbench.sync_catalog(session.as_ref(), false);
+                workbench.sync_extensions(session.as_ref());
             }
         });
     }
@@ -417,6 +426,7 @@ impl Workbench {
             self.browser.select(None);
             self.preview.select(None);
             self.sync_catalog(None, false);
+            self.sync_extensions(None);
         }
         self.refresh_status();
     }
@@ -513,6 +523,49 @@ impl Workbench {
         self.sidebar.show();
         self.sidebar_pages.set_visible_child_name("sessions");
         self.sync_catalog(self.current_session().as_ref(), true);
+    }
+
+    fn show_plugins(self: &Rc<Self>) {
+        self.open_extensions(ExtensionSection::Plugins);
+    }
+
+    fn show_apps(self: &Rc<Self>) {
+        self.open_extensions(ExtensionSection::Apps);
+    }
+
+    fn open_extensions(&self, section: ExtensionSection) {
+        let session = self.current_session();
+        if let Some(session) = &session {
+            session.agent().show_extensions(Some(section));
+        }
+        self.sidebar.show();
+        self.sidebar_pages.set_visible_child_name("extensions");
+        self.sync_extensions(session.as_ref());
+    }
+
+    fn sync_extensions(&self, session: Option<&Rc<Session>>) {
+        if self.sidebar_pages.visible_child_name().as_deref() != Some("extensions") {
+            return;
+        }
+        let children = self.sidebar_extensions.children();
+        if let Some(agent) = session.map(Session::agent) {
+            let panel = agent.extensions_panel();
+            if children.first() != Some(panel.upcast_ref::<gtk::Widget>()) {
+                for child in children {
+                    self.sidebar_extensions.remove(&child);
+                }
+                self.sidebar_extensions.pack_start(panel, true, true, 0);
+                panel.show_all();
+                agent.show_extensions(None);
+            }
+        } else {
+            for child in children {
+                self.sidebar_extensions.remove(&child);
+            }
+            let hint = text_label("打开终端标签以管理插件和连接器", "host-empty");
+            self.sidebar_extensions.add(&hint);
+            hint.show();
+        }
     }
 
     fn sync_catalog(&self, session: Option<&Rc<Session>>, focus: bool) {
@@ -925,6 +978,12 @@ fn tool_rail(sidebar: &gtk::Box) -> gtk::Box {
             "工具栏 · 快速连接",
             "快速连接 (Ctrl+Shift+O)",
             "win.quick",
+        ),
+        (
+            Icon::Plugin,
+            "工具栏 · 插件与连接器",
+            "插件与连接器",
+            "win.agent-plugins",
         ),
     ] {
         let button = gtk::Button::builder().tooltip_text(tooltip).build();

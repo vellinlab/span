@@ -490,7 +490,9 @@ fn table(
     md.connect_clicked(move |_| clipboard().set_text(&markdown_source));
     let rich = gtk::Button::with_label("复制 HTML");
     rich.set_tooltip_text(Some("复制表格格式，可粘贴到支持富文本的应用"));
-    rich.connect_clicked(move |_| copy_rich(source.to_string()));
+    rich.connect_clicked(move |_| {
+        copy_rich(source.to_string());
+    });
     let csv = gtk::Button::with_label("复制 CSV");
     csv.connect_clicked(move |_| clipboard().set_text(&table_csv(&rows)));
     actions.pack_end(&md, false, false, 0);
@@ -1011,7 +1013,7 @@ pub fn clipboard() -> gtk::Clipboard {
     gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD)
 }
 
-pub fn copy_rich(markdown: String) {
+pub fn copy_rich(markdown: String) -> bool {
     let formatted = rich_html(&markdown);
     let targets = [
         gtk::TargetEntry::new("text/html", gtk::TargetFlags::empty(), 0),
@@ -1024,7 +1026,7 @@ pub fn copy_rich(markdown: String) {
         } else {
             selection.set_text(&markdown);
         }
-    });
+    })
 }
 
 fn rich_html(markdown: &str) -> String {
