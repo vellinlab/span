@@ -24,6 +24,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+#[path = "agent_goal.rs"]
+mod goal;
+
 #[path = "agent_slash.rs"]
 mod slash;
 
@@ -56,8 +59,7 @@ enum Request {
     Interrupt,
     Goal {
         generation: u64,
-        edit: bool,
-        draft: String,
+        action: goal::Action,
     },
     Extensions(ExtensionRequest),
     Slash(slash::Request),
@@ -180,6 +182,7 @@ pub struct Agent {
     special_turn: Cell<bool>,
     goal: gtk::Label,
     goal_pending: Cell<bool>,
+    goal_revision: Cell<u64>,
     options: Rc<Options>,
     model_provider: RefCell<Option<String>>,
     usage: Usage,
@@ -501,6 +504,7 @@ impl Agent {
             special_turn: Cell::new(false),
             goal,
             goal_pending: Cell::new(false),
+            goal_revision: Cell::new(0),
             options,
             model_provider: RefCell::new(None),
             usage,
@@ -1350,11 +1354,10 @@ impl Agent {
                         self.update_controls();
                     }
                     Request::Quota => self.usage.unavailable(error),
-                    Request::Goal { generation, .. }
+                    Request::Goal { generation, action }
                         if generation == self.history_generation.get() =>
                     {
-                        self.goal_pending.set(false);
-                        self.show_status(error);
+                        self.goal_failed(&action, error);
                     }
                     Request::Extensions(ExtensionRequest::List { section, .. }) => {
                         self.extensions.show_message(section, error);
@@ -1448,6 +1451,9 @@ impl Agent {
                     self.cwd.set_text(&cwd.replace('\0', "�"));
                 }
                 self.clear_history();
+                if resume {
+                    self.refresh_goal(id);
+                }
                 self.options.open(result);
                 self.options.model_tooltip("选择下一轮使用的模型");
                 self.usage.clear_tokens();
@@ -1505,28 +1511,9 @@ impl Agent {
             Request::Quota => self.usage.quota(result, true),
             Request::Extensions(request) => self.extension_response(request, result),
             Request::Slash(request) => self.slash_response(request, Ok(result)),
-            Request::Goal {
-                generation,
-                edit,
-                draft,
-            } => {
+            Request::Goal { generation, action } => {
                 if generation == self.history_generation.get() {
-                    self.goal_pending.set(false);
-                    if result.get("cleared").is_some() {
-                        self.goal.hide();
-                        self.show_status("已清除会话目标");
-                    } else {
-                        self.render_goal(&result["goal"]);
-                    }
-                    let replacement = if edit {
-                        format!(
-                            "/goal {}",
-                            result["goal"]["objective"].as_str().unwrap_or_default()
-                        )
-                    } else {
-                        String::new()
-                    };
-                    self.replace_command(&draft, &replacement);
+                    self.goal_response(action, result);
                 }
             }
             Request::Turns {
@@ -1885,66 +1872,6 @@ impl Agent {
         true
     }
 
-    fn goal_command(&self, arguments: &str, draft: &str) {
-        let Some(thread) = self.thread.borrow().clone().filter(|_| !self.opening.get()) else {
-            self.show_status("请先打开 Codex 会话。");
-            return;
-        };
-        if self.goal_pending.get() {
-            return;
-        }
-        let (method, params) = match arguments {
-            "" | "edit" => ("thread/goal/get", json!({"threadId":thread})),
-            "clear" => (
-                "thread/goal/clear",
-                json!({"threadId":thread,"origin":"user"}),
-            ),
-            "pause" | "resume" => (
-                "thread/goal/set",
-                json!({
-                    "threadId":thread,"origin":"user","status": if arguments == "pause" {"paused"} else {"active"}
-                }),
-            ),
-            objective if objective.chars().count() <= 4000 => (
-                "thread/goal/set",
-                json!({"threadId":thread,"origin":"user","objective":objective,"status":"active"}),
-            ),
-            _ => {
-                self.show_status("会话目标最多 4,000 个字符。");
-                return;
-            }
-        };
-        self.goal_pending.set(true);
-        self.request(
-            Request::Goal {
-                generation: self.history_generation.get(),
-                edit: arguments == "edit",
-                draft: draft.to_owned(),
-            },
-            method,
-            params,
-        );
-    }
-
-    fn render_goal(&self, goal: &Value) {
-        let text = if let Some(objective) = goal["objective"].as_str() {
-            let status = match goal["status"].as_str() {
-                Some("active") => "进行中",
-                Some("paused") => "已暂停",
-                Some("blocked") => "受阻",
-                Some("complete") => "已完成",
-                Some("budgetLimited" | "usageLimited") => "达到用量上限",
-                _ => "会话目标",
-            };
-            format!("目标 · {status}\n{}", limited(objective, 4000))
-        } else {
-            "当前会话没有目标。".into()
-        };
-        self.goal.set_tooltip_text(Some(&text));
-        self.goal.set_text(&text);
-        self.goal.show();
-    }
-
     fn clear_history(&self) {
         self.history_window.clear();
         self.reset_slash_state();
@@ -1980,7 +1907,11 @@ impl Agent {
         self.past_activity.borrow_mut().clear();
         self.past_replies.borrow_mut().clear();
         self.rpc.take();
-        self.pending.borrow_mut().clear();
+        for request in self.pending.take().into_values() {
+            if let Request::Goal { action, .. } = request {
+                self.goal_failed(&action, message);
+            }
+        }
         self.opening.set(false);
         self.initialized.set(false);
         self.goal_pending.set(false);
@@ -2023,8 +1954,7 @@ impl Agent {
             }
         }
         match method {
-            "thread/goal/updated" => self.render_goal(&params["goal"]),
-            "thread/goal/cleared" => self.goal.hide(),
+            "thread/goal/updated" | "thread/goal/cleared" => self.goal_updated(&params["goal"]),
             "thread/tokenUsage/updated" => self.usage.tokens(&params["tokenUsage"]),
             "account/rateLimits/updated" => self.usage.quota(params, false),
             "item/agentMessage/delta" => {

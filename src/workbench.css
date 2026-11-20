@@ -429,6 +429,18 @@ button.agent-send:disabled {
     padding: 18px 22px 20px;
 }
 
+.workbench-dialog .goal-editor-input {
+    border: 1px solid @line;
+    border-radius: 8px;
+    background: @editor;
+}
+
+.workbench-dialog .goal-editor-input textview,
+.workbench-dialog .goal-editor-input textview text {
+    background: transparent;
+    color: @foreground;
+}
+
 .workbench-dialog .dialog-body entry {
     min-height: 34px;
 }

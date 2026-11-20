@@ -347,8 +347,19 @@ SVG
         xdotool type --clearmodifiers "$1"
         xdotool key --clearmodifiers Return
     }
-    slash '/goal Finish the fixture'
-    widget contains 'Finish the fixture'
+    set_goal() {
+        widget mouse '消息输入框'
+        xdotool type --clearmodifiers '/goal'
+        widget mouse '设置目标'
+        wait_until "the session goal editor" dialog_open '设置目标'
+        SPAN_TEST_DIALOG='设置目标' widget not-state '发送目标' sensitive
+        SPAN_TEST_DIALOG='设置目标' widget mouse '会话目标输入框'
+        xdotool type --clearmodifiers "$1"
+        SPAN_TEST_DIALOG='设置目标' widget click '发送目标'
+        wait_until "Codex accepted the session goal" bash -c '! xdotool search --onlyvisible --name "^设置目标$" >/dev/null'
+        widget contains "目标 · 进行中"$'\n'"$1"
+    }
+    set_goal 'Finish the fixture'
     slash '/goal pause'
     widget contains '目标 · 已暂停'
     slash '/goal edit'
@@ -990,6 +1001,8 @@ PY
         resumed_twice() { [[ $(wc -l < "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 2 ]]; }
         wait_until "automatic restoration on SSH reconnect" resumed_twice
         widget contains 'Latest deployment notes'
+        set_goal 'pause'
+        test -s "$WORKBENCH_SSH_FIXTURE/goal-stored-deployment.json"
         kill -TERM "$(cat "$WORKBENCH_SSH_FIXTURE/shared-proxy.pid")"
         widget state '重连会话' sensitive
         widget contains 'Latest deployment notes'
@@ -998,6 +1011,7 @@ PY
         resumed_again() { [[ $(grep -cFx stored-deployment "$WORKBENCH_SSH_FIXTURE/agent-resumed") -eq 3 ]]; }
         wait_until "reopening the same transcript after App Server transport loss" resumed_again
         widget state '复制会话 ID' sensitive
+        widget contains $'目标 · 进行中\npause'
         [[ $(widget count '打开会话') == 0 && $(widget count '重连会话') == 0 ]]
         widget description '会话权限' '只读'
         widget mouse '会话权限'

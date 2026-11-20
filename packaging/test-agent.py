@@ -132,7 +132,6 @@ if args == ["serve-shared"]:
     sys.exit()
 shared = args == ["shared-stdio"]
 assert shared or (args == ["app-server"] and not control_socket.exists())
-goal = None
 plugin_installed = False
 connector_enabled = True
 for line in sys.stdin:
@@ -199,13 +198,17 @@ for line in sys.stdin:
         connector_enabled = False
         send({"id": request_id, "result": {}})
     elif method in ("thread/goal/get", "thread/goal/set", "thread/goal/clear"):
-        assert params["threadId"] == thread
+        thread_id = params["threadId"]
+        assert thread_id in (thread, saved_thread, "new-slash-fixture")
+        goal_file = home / ("goal-" + thread_id + ".json")
+        goal = json.loads(goal_file.read_text()) if goal_file.exists() else None
         if method == "thread/goal/set":
             assert params["origin"] == "user"
             goal = {"objective": params.get("objective") or goal["objective"], "status": params["status"]}
+            goal_file.write_text(json.dumps(goal))
         if method == "thread/goal/clear":
             assert params["origin"] == "user" and goal
-            goal = None
+            goal_file.unlink()
             send({"id": request_id, "result": {"cleared": True}})
         else:
             send({"id": request_id, "result": {"goal": goal}})
