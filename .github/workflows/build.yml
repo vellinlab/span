@@ -107,9 +107,20 @@ jobs:
           persist-credentials: false
 
       - name: Build and test RPM in AlmaLinux 8
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          upgrade_dir="$RUNNER_TEMP/span-upgrade"
+          mkdir -p "$upgrade_dir"
+          baseline=()
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            baseline_name=span-0.1.0-rc.14-1.el8.x86_64.rpm
+            gh release download v0.1.0-rc.14 --pattern "$baseline_name" --dir "$upgrade_dir"
+            baseline=("/span-upgrade/$baseline_name")
+          fi
           docker run --rm --volume "$PWD:/work" --workdir /work \
-            almalinux:8 bash packaging/build-el8.sh
+            --volume "$upgrade_dir:/span-upgrade:ro" \
+            almalinux:8 bash packaging/build-el8.sh "${baseline[@]}"
 
       - name: Upload RPM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

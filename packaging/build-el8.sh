@@ -45,7 +45,7 @@ mkdir -p dist
 cp "$topdir"/RPMS/x86_64/*.rpm dist/
 package=(dist/span-*.rpm)
 rpm -qp --requires "${package[0]}"
-bash packaging/test-package-upgrade.sh "${package[0]}"
+bash packaging/test-package-upgrade.sh "${package[0]}" "$@"
 linked_vte="$(ldd /usr/bin/span | awk '$1 == "libvte-2.91.so.0" { print $3 }')"
 test "$(realpath "$linked_vte")" = /usr/lib64/span/libvte-2.91.so.0
 dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/span target/verify-osc

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 package="$(realpath "$1")"
+baseline=${2:-}
 fixture="$(mktemp -d)"
 trap 'rm -rf -- "$fixture"' EXIT
 
@@ -44,7 +45,19 @@ touch %{buildroot}%{_bindir}/ssh-workbench
 SPEC
         rpmbuild -bb --define "_topdir $fixture" "$fixture/legacy.spec" >/dev/null
         rpm -i "$fixture/RPMS/noarch/ssh-workbench-0.6.3-1.el8.noarch.rpm"
-        dnf -y --disablerepo='*' install "$package"
+        if [[ -n "$baseline" ]]; then
+            rpm_version='%{VERSION}-%{RELEASE}\n'
+            previous="$(rpm -qp --qf "$rpm_version" "$baseline")"
+            expected="$(rpm -qp --qf "$rpm_version" "$package")"
+            dnf -y --disablerepo='*' install "$baseline"
+            test "$(rpm -q --qf "$rpm_version" span)" = "$previous"
+            test "$previous" != "$expected"
+            dnf -y --disablerepo='*' upgrade "$package"
+            test "$(rpm -q --qf "$rpm_version" span)" = "$expected"
+            printf 'Span upgraded through DNF from %s to %s.\n' "$previous" "$expected"
+        else
+            dnf -y --disablerepo='*' install "$package"
+        fi
         rpm -q span
         ! rpm -q ssh-workbench
         ;;
