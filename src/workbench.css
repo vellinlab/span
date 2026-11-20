@@ -481,6 +481,18 @@ button.agent-send:disabled {
     padding: 9px;
 }
 
+/* GTK3 entry completion opens a separate popup window. */
+window.background > frame > box > scrolledwindow,
+window.background > frame > box > scrolledwindow treeview.view {
+    background: @surface;
+    color: @foreground;
+}
+
+window.background > frame > box > scrolledwindow treeview.view:selected {
+    background: @selection;
+    color: @foreground;
+}
+
 .files-actions {
     padding: 0 9px 6px;
 }
@@ -796,10 +808,10 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 }
 
 .agent-activity-heading {
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 400;
 }
 
-.agent-activity-heading,
 .agent-activity-row {
     font-size: 13px;
 }
@@ -807,6 +819,10 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 .agent-activity-title {
     color: #a2a2a2;
     padding: 3px 0;
+}
+
+.agent-activity-title > label {
+    padding: 1px 0;
 }
 
 .agent-activity > title > arrow,

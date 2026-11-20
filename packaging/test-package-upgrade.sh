@@ -22,6 +22,8 @@ CONTROL
         sudo apt-get install -y --no-install-recommends "$package"
         test "$(dpkg-query -W -f='${Status}' span)" = 'install ok installed'
         ! dpkg-query -W -f='${Status}\n' ssh-workbench 2>/dev/null | grep -qx 'install ok installed'
+        selawik_font="$(fc-match --format '%{file}' 'Selawik:style=Regular')"
+        [[ "$selawik_font" == /usr/share/fonts/*/span-selawik/selawk.ttf ]]
         ;;
     *.rpm)
         cat > "$fixture/legacy.spec" <<'SPEC'
@@ -60,6 +62,12 @@ SPEC
         fi
         rpm -q span
         ! rpm -q ssh-workbench
+        if rpm -ql span | grep -F '/usr/share/fonts/'; then
+            printf '%s\n' 'The Span RPM unexpectedly owns font files.' >&2
+            exit 1
+        fi
+        test ! -e /usr/share/fonts/span-selawik
+        printf '%s\n' 'The Span RPM uses system fonts and removed any Selawik files owned by the old RPM.'
         ;;
     *) exit 2 ;;
 esac
@@ -67,7 +75,3 @@ esac
 test -x /usr/bin/span
 test "$(readlink /usr/bin/ssh-workbench)" = span
 printf '%s\n' 'Span replaced the legacy SSH Workbench package and retained the old launcher alias.'
-
-selawik_font="$(fc-match --format '%{file}' 'Selawik:style=Regular')"
-[[ "$selawik_font" == /usr/share/fonts/*/selawk.ttf && "$selawik_font" == */span-selawik/selawk.ttf ]]
-printf 'Fontconfig found the bundled Selawik font at %s.\n' "$selawik_font"

@@ -6,7 +6,7 @@ Name:           span
 Version:        %{span_version}
 Release:        1%{?dist}
 Summary:        Span SSH terminal and Codex workspace
-License:        Unspecified and LGPL-3.0-or-later and OFL-1.1
+License:        Unspecified and LGPL-3.0-or-later
 URL:            https://github.com/vellinlab/span
 Requires:       bash
 Requires:       coreutils
@@ -26,22 +26,17 @@ ln -s span %{buildroot}%{_bindir}/ssh-workbench
 install -Dpm 0644 %{_sourcedir}/packaging/io.github.zyw02.SshWorkbench.desktop %{buildroot}%{_datadir}/applications/io.github.zyw02.SshWorkbench.desktop
 install -dm 0755 %{buildroot}%{_datadir}/icons
 cp -a %{_sourcedir}/packaging/icons/hicolor %{buildroot}%{_datadir}/icons/
-install -dm 0755 %{buildroot}%{_datadir}/fonts/span-selawik
-install -pm 0644 %{_sourcedir}/packaging/fonts/selawik/*.ttf %{buildroot}%{_datadir}/fonts/span-selawik/
 
 install -Dpm 0755 %{_sourcedir}/target/bundled-vte/libvte-2.91.so.0 %{buildroot}%{_libdir}/span/libvte-2.91.so.0
 install -Dpm 0644 %{_sourcedir}/target/bundled-vte/SOURCE %{buildroot}%{_docdir}/span/VTE-SOURCE
 install -dm 0755 %{buildroot}%{_licensedir}/span
 install -pm 0644 %{_sourcedir}/target/bundled-vte/COPYING.* %{buildroot}%{_licensedir}/span/
-install -pm 0644 %{_sourcedir}/packaging/fonts/selawik/LICENSE.txt %{buildroot}%{_licensedir}/span/Selawik-LICENSE.txt
 
 %files
 %dir %{_libdir}/span
 %{_libdir}/span/libvte-2.91.so.0
 %doc %{_docdir}/span/VTE-SOURCE
 %license %{_licensedir}/span/COPYING.*
-%license %{_licensedir}/span/Selawik-LICENSE.txt
-%{_datadir}/fonts/span-selawik/
 %{_bindir}/span
 %{_bindir}/ssh-workbench
 %{_datadir}/applications/io.github.zyw02.SshWorkbench.desktop

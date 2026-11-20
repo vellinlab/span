@@ -36,7 +36,7 @@ span
 
 带 `-alpha.N`、`-beta.N` 或 `-rc.N` 后缀的版本会标记为预发布，供测试使用。
 
-界面英文字体优先使用本机的 Segoe UI，简体中文优先使用微软雅黑 UI 或微软雅黑。安装包附带微软的 [Selawik 1.01](https://github.com/microsoft/Selawik/releases/tag/1.01)，供缺少 Segoe UI 的系统使用。缺少微软雅黑时，优先使用系统已有的思源黑体或 Noto Sans CJK SC。
+界面英文字体优先使用本机的 Segoe UI，简体中文优先使用微软雅黑 UI 或微软雅黑。NewStartOS／EL8 的 RPM 使用系统已有字体。DEB 包附带微软的 [Selawik 1.01](https://github.com/microsoft/Selawik/releases/tag/1.01)，供缺少 Segoe UI 的系统使用。缺少微软雅黑时，优先使用系统已有的思源黑体或 Noto Sans CJK SC。
 
 ## 使用
 
