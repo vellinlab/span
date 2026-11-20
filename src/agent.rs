@@ -584,7 +584,7 @@ impl Agent {
             if let Some(agent) = weak.upgrade()
                 && let Some(reply) = agent.live.borrow().as_ref()
             {
-                agent.queue_live_paint(reply);
+                agent.queue_live_paint(reply, false);
             }
         });
         let weak = Rc::downgrade(self);
@@ -2306,11 +2306,10 @@ impl Agent {
             let pending = Rc::downgrade(&live);
             let agent = Rc::downgrade(self);
             live.label.connect_map(move |_| {
-                if let Some(live) = pending.upgrade().filter(|live| live.dirty.get()) {
-                    live.render();
-                    if let Some(agent) = agent.upgrade() {
-                        agent.scroll_to_end();
-                    }
+                if let (Some(live), Some(agent)) = (pending.upgrade(), agent.upgrade()) {
+                    // Mapping can precede allocation of a reply that arrived
+                    // while the tab was hidden. Check its position after layout.
+                    agent.queue_live_paint(&live, true);
                 }
             });
             self.append(&live.label);
@@ -2326,7 +2325,7 @@ impl Agent {
             text.push_str(&limited(delta, remaining));
             drop(text);
             live.dirty.set(true);
-            self.queue_live_paint(live);
+            self.queue_live_paint(live, false);
         }
     }
 
@@ -2344,8 +2343,11 @@ impl Agent {
                     }))
     }
 
-    fn queue_live_paint(self: &Rc<Self>, reply: &Rc<LiveMessage>) {
-        if !reply.dirty.get() || reply.paint_queued.get() || !self.can_paint_live(reply) {
+    fn queue_live_paint(self: &Rc<Self>, reply: &Rc<LiveMessage>, after_map: bool) {
+        if !reply.dirty.get()
+            || reply.paint_queued.get()
+            || (!after_map && !self.can_paint_live(reply))
+        {
             return;
         }
         reply.paint_queued.set(true);
