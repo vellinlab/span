@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/vellinlab/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.19-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-rc.20-1.el8.x86_64.rpm
 span
 ```
 
@@ -22,7 +22,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./span_0.1.0-rc.19_amd64.deb
+sudo apt install ./span_0.1.0-rc.20_amd64.deb
 span
 ```
 
@@ -69,6 +69,7 @@ Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会�
 - 输入框底部的盾牌按钮可切换「工作区权限」「只读」「完全访问」。新会话默认采用工作区权限，打开已有会话时沿用 Codex 返回的权限。完全访问需要确认，选择从下一轮起生效。
 - 在会话输入框按 `Enter` 发送，按 `Shift+Enter` 换行。`Ctrl+Enter` 也可发送。任务运行时输入新内容再按 `Enter`，可将消息追加到当前任务，同时可用方块按钮或 `Esc` 中断。
 - 在输入框开头输入 `/` 打开命令列表，可用方向键和 `Enter` 选择。`/model` 打开模型菜单，`/goal <目标>` 设置当前 Codex 会话的目标。`/goal` 查看，`/goal edit` 编辑，`/goal pause`、`/goal resume`、`/goal clear` 管理同一个目标。
+- 会话命令还包括 `/plan [任务]`、`/review [--base 分支 | --commit SHA | 审查重点]`、`/compact`、`/diff`、`/status`、`/usage`、`/mcp [verbose]`、`/reasoning [强度]`、`/new [名称]`、`/resume [会话 ID]`、`/fork`、`/rename <名称>`、`/pwd` 和 `/copy [rich]`。`/diff` 显示已跟踪文件的改动并列出未跟踪文件，Git 操作在当前会话的主机上执行。`/usage` 打开套餐额度。
 - 左侧「扩展」页和工具栏的拼图按钮用于管理当前终端标签所在主机的插件与连接器，也可用 `/plugins` 或 `/apps` 进入。插件目录和安装状态来自该主机的 Codex App Server，取决于主机上的 Codex 版本与其登录的账号。连接器在账号层面的授权和解绑通过浏览器中的 ChatGPT 完成，Span 内可启停该主机对已可用连接器的使用。
 - 推理摘要、生成中的回复和已完成的回复支持 Markdown 加粗与可点击的 HTTP／HTTPS 链接。每轮完成后，末尾的两个图标分别复制该轮的 Markdown 和富文本。
 - 鼠标选中回复、推理摘要或文件预览中的文字后，点击「引用」把选区加入输入框上方的引用卡片。每条可单独移除，发送时与正文一同交给 Codex。

@@ -435,6 +435,23 @@ impl Options {
         Ok(())
     }
 
+    pub fn reasoning_command(&self, effort: &str) -> Result<(), &'static str> {
+        if effort.is_empty() {
+            if !self.effort.button.is_sensitive() {
+                return Err("当前模型没有可选思考强度。");
+            }
+            self.effort.button.set_active(true);
+            return Ok(());
+        }
+        self.model_command(&format!("--reasoning={effort}"))
+    }
+
+    pub fn effective_model(&self) -> String {
+        self.selection()
+            .model
+            .unwrap_or_else(|| self.current.borrow().0.clone())
+    }
+
     pub fn fast_command(&self) -> Result<bool, &'static str> {
         if !self.fast.is_sensitive() {
             return Err("此模型或主机上的 Codex 不支持 Fast。");

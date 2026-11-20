@@ -201,7 +201,8 @@ for line in sys.stdin:
     elif method == "thread/start":
         assert params["sandbox"] == "workspace-write"
         assert params["approvalPolicy"] == "on-request"
-        send({"id": request_id, "result": {"thread": {"id": thread, "turns": []},
+        started_thread = "new-slash-fixture" if shared else thread
+        send({"id": request_id, "result": {"thread": {"id": started_thread, "turns": []},
                                           "cwd": str(home), "model": "gpt-base-fixture",
                                           "sandbox": {"type": "workspaceWrite", "networkAccess": False},
                                           "approvalPolicy": "on-request",
@@ -258,8 +259,49 @@ for line in sys.stdin:
             send({"method": "turn/completed", "params": {"threadId": saved_thread,
                   "turn": {**external_turn, "status": "completed"}}})
     elif method == "thread/unsubscribe":
-        assert params["threadId"] == thread
+        assert params["threadId"] in (thread, saved_thread, "fork-slash-fixture", "new-slash-fixture")
         send({"id": request_id, "result": {"status": "unsubscribed"}})
+    elif method == "thread/name/set":
+        assert shared
+        assert (params["threadId"], params["name"]) in (
+            ("fork-slash-fixture", "Reviewed fork"), ("new-slash-fixture", "Fresh checklist"))
+        (home / "slash-rename").write_text(params["name"])
+        send({"id": request_id, "result": {}})
+    elif method == "thread/fork":
+        assert shared and params == {"threadId": saved_thread, "excludeTurns": True}
+        send({"id": request_id, "result": {
+            "thread": {"id": "fork-slash-fixture", "turns": [stored_turn("forked-turn", "Forked chat history")]},
+            "cwd": str(home), "model": "gpt-base-fixture", "modelProvider": "fixture"}})
+    elif method in ("review/start", "thread/compact/start"):
+        assert shared and params["threadId"] == saved_thread
+        review = method == "review/start"
+        if review:
+            assert params["target"] == {"type": "baseBranch", "branch": "main"}
+        special = "slash-review" if review else "slash-compact"
+        run = {"id": special, "status": "inProgress"}
+        send({"id": request_id, "result": {"turn": run, "reviewThreadId": saved_thread} if review else {}})
+        send({"method": "turn/started", "params": {"threadId": saved_thread, "turn": run}})
+        item = ({"id": special, "type": "exitedReviewMode", "review": "Native review completed."}
+                if review else {"id": special, "type": "contextCompaction"})
+        send({"method": "item/completed", "params": {
+            "threadId": saved_thread, "turnId": special, "item": item}})
+        send({"method": "turn/completed", "params": {"threadId": saved_thread,
+              "turn": {"id": special, "status": "completed"}}})
+        (home / special).touch()
+    elif method == "mcpServerStatus/list":
+        assert shared and params["threadId"] == saved_thread and params["limit"] == 50
+        send({"id": request_id, "result": {"data": [{"name": "Fixture MCP", "authStatus": "unsupported",
+              "tools": {"fixture_search": {}}}], "nextCursor": None}})
+    elif method == "command/exec":
+        assert shared and params["cwd"] == str(home) and params["timeoutMs"] == 10000
+        if params["command"][2] == "diff":
+            assert params["command"] == ["git", "--no-pager", "diff", "--no-color",
+                                         "--no-ext-diff", "--no-textconv", "HEAD", "--"]
+            output = diff
+        else:
+            assert params["command"] == ["git", "ls-files", "--others", "--exclude-standard"]
+            output = "new-slash-file.txt\n"
+        send({"id": request_id, "result": {"exitCode": 0, "stdout": output, "stderr": ""}})
     elif method == "thread/turns/list":
         assert params["threadId"] == saved_thread and params["cursor"] == "older-cursor"
         assert params["limit"] == 12 and params["sortDirection"] == "desc"
@@ -297,6 +339,19 @@ for line in sys.stdin:
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
+        if message in ("Plan this update", "Back to normal"):
+            assert shared and params["threadId"] == saved_thread
+            mode = "plan" if message == "Plan this update" else "default"
+            assert params["collaborationMode"] == {"mode": mode, "settings": {
+                "model": "gpt-base-fixture", "reasoning_effort": "low", "developer_instructions": None}}
+            response = "Plan mode result." if mode == "plan" else "Default mode result."
+            plan_turn = f"{mode}-turn"
+            send({"id": request_id, "result": {"turn": {"id": plan_turn, "status": "inProgress"}}})
+            send({"method": "item/completed", "params": {"threadId": saved_thread, "turnId": plan_turn,
+                  "item": {"id": plan_turn, "type": "agentMessage", "text": response}}})
+            send({"method": "turn/completed", "params": {"threadId": saved_thread,
+                  "turn": {"id": plan_turn, "status": "completed"}}})
+            continue
         quoted_prompt = "> span_preview_marker\n\nDraft before quotes"
         continued_prompt = "请继续上一轮未完成的任务。"
         expected_speed = "priority" if message in ("Show the deployment check\n你", quoted_prompt, continued_prompt) else "default"

@@ -24,6 +24,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+#[path = "agent_slash.rs"]
+mod slash;
+
 const INITIAL_TURNS: usize = 4;
 const OLDER_TURNS: usize = 12;
 const HISTORY_PREFETCH_DISTANCE: f64 = 64.0;
@@ -35,6 +38,7 @@ enum Request {
     },
     Open {
         resume: bool,
+        name: Option<String>,
     },
     Catalog {
         serial: u64,
@@ -56,6 +60,7 @@ enum Request {
         draft: String,
     },
     Extensions(ExtensionRequest),
+    Slash(slash::Request),
 }
 
 struct LiveMessage {
@@ -138,6 +143,7 @@ pub struct Agent {
     approvals: RefCell<HashMap<Value, gtk::Box>>,
     live: RefCell<Option<Rc<LiveMessage>>>,
     turn_copy: RefCell<Vec<String>>,
+    last_copy: RefCell<Option<Rc<String>>>,
     activity: RefCell<Option<(String, Activity)>>,
     past_activity: RefCell<Vec<Activity>>,
     past_replies: RefCell<HashMap<String, Vec<Rc<LiveMessage>>>>,
@@ -167,6 +173,9 @@ pub struct Agent {
     copy_id: gtk::Button,
     input: gtk::TextView,
     commands: Commands,
+    plan_mode: Cell<Option<bool>>,
+    plan_badge: gtk::Label,
+    special_turn: Cell<bool>,
     goal: gtk::Label,
     goal_pending: Cell<bool>,
     options: Rc<Options>,
@@ -229,6 +238,11 @@ impl Agent {
         status.set_no_show_all(true);
         toolbar.pack_end(&status, false, false, 0);
         panel.pack_start(&toolbar, false, false, 0);
+        let plan_badge = gtk::Label::new(Some("规划模式"));
+        plan_badge.set_tooltip_text(Some("输入 /plan 退出规划模式"));
+        plan_badge.set_no_show_all(true);
+        plan_badge.style_context().add_class("agent-status");
+        toolbar.pack_end(&plan_badge, false, false, 0);
 
         let settings = row(7);
         settings.style_context().add_class("agent-settings");
@@ -441,6 +455,7 @@ impl Agent {
             approvals: RefCell::new(HashMap::new()),
             live: RefCell::new(None),
             turn_copy: RefCell::new(Vec::new()),
+            last_copy: RefCell::new(None),
             activity: RefCell::new(None),
             past_activity: RefCell::new(Vec::new()),
             past_replies: RefCell::new(HashMap::new()),
@@ -470,6 +485,9 @@ impl Agent {
             copy_id,
             input,
             commands,
+            plan_mode: Cell::new(None),
+            plan_badge,
+            special_turn: Cell::new(false),
             goal,
             goal_pending: Cell::new(false),
             options,
@@ -1025,6 +1043,10 @@ impl Agent {
     }
 
     fn open_thread(&self) {
+        self.open_named_thread(None);
+    }
+
+    fn open_named_thread(&self, name: Option<String>) {
         let resume = self.resume.text();
         let mut params = json!({});
         let resume_existing = !resume.trim().is_empty();
@@ -1052,6 +1074,7 @@ impl Agent {
         self.request(
             Request::Open {
                 resume: resume_existing,
+                name,
             },
             method,
             params,
@@ -1134,7 +1157,14 @@ impl Agent {
                 } else {
                     if matches!(
                         item["type"].as_str(),
-                        Some("userMessage" | "agentMessage" | "plan" | "imageGeneration")
+                        Some(
+                            "userMessage"
+                                | "agentMessage"
+                                | "plan"
+                                | "exitedReviewMode"
+                                | "contextCompaction"
+                                | "imageGeneration"
+                        )
                     ) && let Some(mut previous) = activity.take()
                     {
                         previous.finish((item["type"] == "userMessage").then_some("steered"));
@@ -1143,8 +1173,7 @@ impl Agent {
                         }
                     }
                     self.completed_item(item, true);
-                    if matches!(item["type"].as_str(), Some("agentMessage" | "plan"))
-                        && let Some(text) = item["text"].as_str()
+                    if let Some(text) = response_text(item)
                         && !text.trim().is_empty()
                     {
                         assistant_text.push(limited(text, 256 * 1024));
@@ -1291,6 +1320,7 @@ impl Agent {
                         self.extensions.show_message(section, error);
                     }
                     Request::Extensions(_) => self.extensions.finish_change(error),
+                    Request::Slash(request) => self.slash_response(request, Err(error)),
                     Request::Turns {
                         prepend,
                         generation,
@@ -1347,7 +1377,7 @@ impl Agent {
                     self.open_thread();
                 }
             }
-            Request::Open { resume } => {
+            Request::Open { resume, name } => {
                 self.opening.set(false);
                 let thread = &result["thread"];
                 let Some(id) = thread["id"].as_str() else {
@@ -1408,6 +1438,9 @@ impl Agent {
                     "就绪"
                 });
                 self.update_controls();
+                if let Some(name) = name {
+                    self.rename_thread(id, &name);
+                }
                 if self.panel.is_mapped() {
                     self.input.grab_focus();
                 }
@@ -1431,6 +1464,7 @@ impl Agent {
             }
             Request::Quota => self.usage.quota(result, true),
             Request::Extensions(request) => self.extension_response(request, result),
+            Request::Slash(request) => self.slash_response(request, Ok(result)),
             Request::Goal {
                 generation,
                 edit,
@@ -1539,7 +1573,7 @@ impl Agent {
         );
     }
 
-    fn send(self: &Rc<Self>) {
+    fn send(self: &Rc<Self>, command_prompt: Option<&str>) {
         if self.opening.get()
             || self.uploading.get()
             || self.pasting.get()
@@ -1551,6 +1585,10 @@ impl Agent {
             return;
         };
         let turn = if self.active.get() {
+            if self.special_turn.get() {
+                self.show_status("请等上下文压缩或审查结束。");
+                return;
+            }
             let Some(turn) = self
                 .turn
                 .borrow()
@@ -1570,7 +1608,7 @@ impl Agent {
             return;
         };
         let editor = text.trim().to_owned();
-        let (message, quotes) = self.quotes.message(&editor);
+        let (message, quotes) = self.quotes.message(command_prompt.unwrap_or(&editor));
         let draft = Draft {
             editor,
             message,
@@ -1653,6 +1691,7 @@ impl Agent {
         } else {
             params["summary"] = json!("auto");
             selection.apply(&mut params);
+            self.apply_plan_mode(&mut params, selection);
             self.active.set(true);
             (Request::Send, "turn/start")
         };
@@ -1730,7 +1769,7 @@ impl Agent {
                 );
             }
         } else {
-            self.send();
+            self.send(None);
         }
     }
 
@@ -1752,7 +1791,7 @@ impl Agent {
         }
     }
 
-    fn execute_command(&self, command: &str, editor: &str) -> bool {
+    fn execute_command(self: &Rc<Self>, command: &str, editor: &str) -> bool {
         if !command.starts_with('/') {
             return false;
         }
@@ -1791,6 +1830,11 @@ impl Agent {
                 Ok(())
             }
             ("/", "") => return true,
+            _ if crate::agent_commands::known(name) => {
+                self.commands.hide();
+                self.extended_command(name, arguments, editor);
+                return true;
+            }
             _ => return false,
         };
         self.commands.hide();
@@ -1862,6 +1906,7 @@ impl Agent {
     }
 
     fn clear_history(&self) {
+        self.reset_slash_state();
         self.goal_pending.set(false);
         self.goal.hide();
         self.follow_tail.set(true);
@@ -1889,6 +1934,7 @@ impl Agent {
     }
 
     pub fn disconnect(&self, message: &str) {
+        self.reset_slash_state();
         self.turn_copy.borrow_mut().clear();
         self.past_activity.borrow_mut().clear();
         self.past_replies.borrow_mut().clear();
@@ -2019,6 +2065,7 @@ impl Agent {
                 }
             }
             "turn/completed" => {
+                self.special_turn.set(false);
                 let turn = &params["turn"];
                 let status = turn["status"].as_str();
                 let interrupted = status == Some("interrupted");
@@ -2261,8 +2308,8 @@ impl Agent {
                     self.add_user(&items.join("\n"));
                 }
             }
-            Some("agentMessage" | "plan") => {
-                if let Some(text) = item["text"].as_str() {
+            Some("agentMessage" | "plan" | "exitedReviewMode") => {
+                if let Some(text) = response_text(item) {
                     if !loading_history && !text.trim().is_empty() {
                         self.turn_copy.borrow_mut().push(limited(text, 256 * 1024));
                     }
@@ -2274,6 +2321,15 @@ impl Agent {
                         self.complete_reply(item["id"].as_str(), text);
                     }
                 }
+            }
+            Some("contextCompaction") => {
+                if !loading_history {
+                    self.close_activity(None);
+                    self.close_reply();
+                }
+                let label = agent_render::text("上下文已压缩");
+                label.style_context().add_class("preview-detail");
+                self.append(&label);
             }
             Some("imageGeneration") => {
                 if let Some(path) = item["savedPath"].as_str() {
@@ -2497,6 +2553,9 @@ impl Agent {
         actions.style_context().add_class("agent-turn-actions");
         actions.set_halign(gtk::Align::End);
         let text = Rc::new(paragraphs.join("\n\n"));
+        if self.prepend_at.get().is_none() {
+            self.last_copy.replace(Some(text.clone()));
+        }
         for (icon, label, rich) in [
             (Icon::Copy, "复制本轮 Markdown", false),
             (Icon::CopyRich, "复制本轮富文本", true),
@@ -2644,7 +2703,7 @@ impl Agent {
                         .is_some_and(|text| !text.trim().is_empty())
                 }));
         let action = if self.active.get() {
-            if has_draft {
+            if has_draft && !self.special_turn.get() {
                 ComposerAction::Steer
             } else {
                 ComposerAction::Stop
@@ -2729,6 +2788,14 @@ pub(crate) fn limited(text: &str, max: usize) -> String {
         end -= 1;
     }
     format!("{}\n…", &cleaned[..end])
+}
+
+fn response_text(item: &Value) -> Option<&str> {
+    match item["type"].as_str() {
+        Some("agentMessage" | "plan") => item["text"].as_str(),
+        Some("exitedReviewMode") => item["review"].as_str(),
+        _ => None,
+    }
 }
 
 fn row(spacing: i32) -> gtk::Box {

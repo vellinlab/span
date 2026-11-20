@@ -202,6 +202,14 @@ impl Usage {
         self.context.show_reading(None, "上下文窗口 · 等待用量");
     }
 
+    pub fn context_summary(&self) -> glib::GString {
+        self.tokens.text()
+    }
+
+    pub fn quota_summary(&self) -> glib::GString {
+        self.quota.text()
+    }
+
     pub fn disconnect(&self) {
         self.clear_tokens();
         self.limits.borrow_mut().clear();

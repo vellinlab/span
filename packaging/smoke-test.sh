@@ -984,6 +984,41 @@ PY
         printf '%s\n' 'Composer controls share the same centerline, and permission changes reach the local and remote Codex servers.'
         printf '%s\n' 'Span used the remote shared Codex socket, received external turn events and reopened the same session after SSH reconnect.'
         printf '%s\n' 'Picker files, model and effort overrides, token and account usage, and remote attachment uploads passed.'
+        widget mouse '消息输入框'
+        xdotool type --clearmodifiers '/'
+        widget contains '/review'
+        widget contains '/compact'
+        import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-commands.png"
+        xdotool key --clearmodifiers Escape ctrl+a BackSpace
+        slash '/status'
+        widget contains '会话 ID  stored-deployment'
+        slash '/mcp verbose'
+        widget contains 'fixture_search'
+        slash '/diff'
+        widget contains '工作区 Git 改动'
+        widget contains 'new-slash-file.txt'
+        slash '/review --base main'
+        widget contains 'Native review completed.'
+        slash '/copy'
+        xclip -out -selection clipboard | grep -Fx 'Native review completed.'
+        slash '/compact'
+        wait_until "manual context compaction on the remote server" test -f "$WORKBENCH_SSH_FIXTURE/slash-compact"
+        widget contains '上下文已压缩'
+        slash '/plan Plan this update'
+        widget contains 'Plan mode result.'
+        slash '/plan'
+        widget contains '已退出规划模式。'
+        slash 'Back to normal'
+        widget contains 'Default mode result.'
+        slash '/fork'
+        widget contains 'Forked chat history'
+        slash '/rename Reviewed fork'
+        wait_until "renaming the fork" grep -qsx 'Reviewed fork' "$WORKBENCH_SSH_FIXTURE/slash-rename"
+        slash '/new Fresh checklist'
+        wait_until "creating and naming a fresh thread" grep -qsx 'Fresh checklist' "$WORKBENCH_SSH_FIXTURE/slash-rename"
+        slash '/resume stored-deployment'
+        widget contains 'Latest deployment notes'
+        printf '%s\n' 'The remote Codex command menu, status, MCP, Git diff, native review, copy, compaction, plan mode and session lifecycle passed.'
     fi
 
     read -r close_x close_y close_width close_height <<< "$(widget bounds 'Close')"
