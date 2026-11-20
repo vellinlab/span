@@ -187,7 +187,7 @@ for line in sys.stdin:
                                      "mergeStrategy": "upsert"}], "reloadUserConfig": True}
         connector_enabled = False
         send({"id": request_id, "result": {}})
-    elif method.startswith("thread/goal/"):
+    elif method in ("thread/goal/get", "thread/goal/set", "thread/goal/clear"):
         assert params["threadId"] == thread
         if method == "thread/goal/set":
             assert params["origin"] == "user"
