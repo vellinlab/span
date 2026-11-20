@@ -415,17 +415,20 @@ for line in sys.stdin:
                 **event, "turn": {"id": identifier, "status": "completed"}}})
             (home / "bench-tool-finished").touch()
             continue
-        if os.environ.get("SPAN_BENCH_STREAM") == "1":
+        stream = os.environ.get("SPAN_BENCH_STREAM")
+        if stream in ("1", "scroll"):
             assert message == "Summarize the stream" and params["threadId"] == thread
             identifier = "reasoning-benchmark"
             event = {"threadId": thread, "turnId": identifier}
             send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
+            if stream == "scroll":
+                (home / "bench-stream-started").touch()
             for index in range(576):
                 send({"method": "item/reasoning/summaryTextDelta", "params": {
                     **event, "itemId": "reasoning", "summaryIndex": index // 72,
                     "delta": "Review **build output** and `preview` rows. "}})
                 if index % 6 == 5:
-                    time.sleep(0.008)
+                    time.sleep(0.045 if stream == "scroll" else 0.008)
             marker = home / "bench-stream-pending"
             marker.write_text(str(time.monotonic()))
             marker.replace(home / "bench-stream-done")

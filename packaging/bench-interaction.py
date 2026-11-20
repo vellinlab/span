@@ -81,6 +81,7 @@ def benchmark(binary, workload):
     name = Path(binary).parent.name + ("" if workload == "history" else f" {workload}")
     same_directory = workload == "tabs-shared-directory"
     switching_tabs = workload == "tabs" or same_directory
+    live_scroll = workload == "live-scroll"
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
         (home / "bin").mkdir()
@@ -92,11 +93,11 @@ def benchmark(binary, workload):
                 write_image(home / ".bench-images" / f"preview-{i}.png", color)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"],
-                   SPAN_BENCH_HISTORY=str(int(workload == "history" or switching_tabs)),
+                   SPAN_BENCH_HISTORY=str(int(workload == "history" or switching_tabs or live_scroll)),
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
-                   SPAN_BENCH_STREAM=str(int(workload == "stream")),
+                   SPAN_BENCH_STREAM="scroll" if live_scroll else str(int(workload == "stream")),
                    SPAN_BENCH_TASK_IDLE=str(int(workload == "task-wait")),
                    SPAN_BENCH_TABS=str(int(switching_tabs)),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
@@ -315,6 +316,40 @@ def benchmark(binary, workload):
                 xdo("mousemove", "--window", wid, 715, 320)
                 footprint("loaded")
 
+                if live_scroll:
+                    xdo("type", "Summarize the stream")
+                    xdo("key", "Return")
+                    until((home / "bench-stream-started").exists)
+                    for _ in range(12):
+                        xtest.fake_input(screen, X.ButtonPress, 4)
+                        xtest.fake_input(screen, X.ButtonRelease, 4)
+                    screen.sync()
+                    time.sleep(0.2)
+                    samples = []
+                    begin = cpu_seconds()
+                    schedule = time.monotonic()
+                    for index in range(100):
+                        # Inspect old messages while the next turn is arriving.
+                        before = pixels()
+                        start = time.monotonic()
+                        button = 4 if index % 20 < 10 else 5
+                        xtest.fake_input(screen, X.ButtonPress, button)
+                        xtest.fake_input(screen, X.ButtonRelease, button)
+                        screen.flush()
+                        while pixels() == before:
+                            if time.monotonic() - start > 1:
+                                raise RuntimeError(f"scroll during reasoning did not update on event {index}")
+                            time.sleep(0.0005)
+                        samples.append((time.monotonic() - start) * 1000)
+                        time.sleep(max(0, schedule + (index + 1) * 0.025 - time.monotonic()))
+                    cpu_ms = (cpu_seconds() - begin) * 1000
+                    assert not (home / "bench-stream-done").exists()
+                    print(f"{name} scroll during reasoning: median {statistics.median(samples):.1f} ms,"
+                          f" p95 {sorted(samples)[94]:.1f} ms,"
+                          f" app CPU {cpu_ms:.0f} ms / 100 events", flush=True)
+                    until((home / "bench-stream-done").exists)
+                    return
+
                 # Keep repeated wheel gestures away from both ends of the conversation.
                 for button in [4] * 28 + [5] * 14:
                     for event in (X.ButtonPress, X.ButtonRelease):
@@ -468,5 +503,6 @@ def benchmark(binary, workload):
 
 
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools", "images", "stream", "task-wait", "tabs", "tabs-shared-directory"):
+    for workload in ("history", "table", "tools", "images", "stream", "live-scroll",
+                     "task-wait", "tabs", "tabs-shared-directory"):
         benchmark(package, workload)
