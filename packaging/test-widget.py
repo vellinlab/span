@@ -46,7 +46,11 @@ def visible(node):
 def contains(node, expected):
     if "Text" not in node.get_interfaces():
         return False
-    content = node.queryText().getText(0, -1)
+    try:
+        content = node.queryText().getText(0, -1)
+    except NotImplementedError:
+        # A disappearing widget can still advertise Text in the AT-SPI cache.
+        return False
     return bool(content and expected in content)
 
 
