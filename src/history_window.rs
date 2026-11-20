@@ -283,10 +283,11 @@ impl HistoryWindow {
         min_width: i32,
         height: i32,
         materialize: impl Fn(bool) + 'static,
-    ) {
+    ) -> gtk::Box {
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
         slot.set_size_request(min_width, height);
         self.register_deferred(parent, &slot, content, materialize);
+        slot
     }
 
     fn register_deferred(

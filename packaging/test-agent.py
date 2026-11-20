@@ -450,6 +450,7 @@ for line in sys.stdin:
             offscreen = os.environ.get("SPAN_BENCH_OFFSCREEN_PROSE") == "1"
             remap = os.environ.get("SPAN_BENCH_REMAP_PROSE") == "1"
             finishing = os.environ.get("SPAN_BENCH_FINISH_PROSE") == "1"
+            interleaved = os.environ.get("SPAN_BENCH_INTERLEAVED_PROSE") == "1"
             interval = 0.170 if offscreen and not (remap or finishing) else 0.045
             paragraphs = []
             for index in range(576):
@@ -457,7 +458,11 @@ for line in sys.stdin:
                 if index % 6 == 5:
                     delta += "\n\n"
                 if index == 575:
-                    delta += "[The final fragment of the streamed reply](https://example.invalid/end)\n"
+                    if interleaved:
+                        prefix = "This long reply fragment appears before the reasoning activity in the conversation"
+                        delta += f"[{prefix}](https://example.invalid/first)\n"
+                    else:
+                        delta += "[The final fragment of the streamed reply](https://example.invalid/end)\n"
                 paragraphs.append(delta)
                 send({"method": "item/agentMessage/delta", "params": {
                     **event, "itemId": "hidden-prose", "delta": delta}})
@@ -467,6 +472,14 @@ for line in sys.stdin:
             wait_for_bench("bench-hidden-verified")
             if finishing:
                 (home / "bench-completion-dispatched").touch()
+            if interleaved:
+                send({"method": "item/reasoning/summaryTextDelta", "params": {
+                    **event, "itemId": "interleaved-activity", "summaryIndex": 0,
+                    "delta": "Reviewing the next fragment"}})
+                suffix = "\n[The final fragment of the reply](https://example.invalid/end)\n"
+                paragraphs.append(suffix)
+                send({"method": "item/agentMessage/delta", "params": {
+                    **event, "itemId": "hidden-prose", "delta": suffix}})
             send({"method": "item/completed", "params": {**event, "item": {
                 "id": "hidden-prose", "type": "agentMessage", "text": "".join(paragraphs)}}})
             send({"method": "turn/completed", "params": {

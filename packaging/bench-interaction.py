@@ -2,6 +2,7 @@
 import ctypes
 import hashlib
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -82,8 +83,9 @@ def benchmark(binary, workload):
     same_directory = workload == "tabs-shared-directory"
     show_catalog = workload == "tabs-catalog"
     remap_prose = workload == "remap-prose"
-    finish_prose = workload == "finish-prose"
-    offscreen_prose = workload in ("offscreen-prose", "remap-prose", "finish-prose")
+    interleaved = workload == "interleaved-prose"
+    finish_prose = workload == "finish-prose" or interleaved
+    offscreen_prose = workload in ("offscreen-prose", "remap-prose") or finish_prose
     warmup_events = 4
     switching_tabs = workload in ("tabs", "tabs-shared-directory", "tabs-catalog")
     live_scroll = workload == "live-scroll"
@@ -106,7 +108,8 @@ def benchmark(binary, workload):
                    SPAN_BENCH_STREAM={"live-scroll": "scroll", "hidden-prose": "hidden-prose",
                                       "offscreen-prose": "hidden-prose",
                                       "remap-prose": "hidden-prose",
-                                      "finish-prose": "hidden-prose"}.get(
+                                      "finish-prose": "hidden-prose",
+                                      "interleaved-prose": "hidden-prose"}.get(
                                           workload, str(int(workload == "stream"))),
                    SPAN_BENCH_TASK_IDLE=str(int(workload == "task-wait")),
                    SPAN_BENCH_TABS=str(int(switching_tabs)),
@@ -118,6 +121,8 @@ def benchmark(binary, workload):
             env["SPAN_BENCH_REMAP_PROSE"] = "1"
         if finish_prose:
             env["SPAN_BENCH_FINISH_PROSE"] = "1"
+        if interleaved:
+            env["SPAN_BENCH_INTERLEAVED_PROSE"] = "1"
         if same_directory:
             # Keep App Server markers outside the folder open in every tab.
             workspace = home / "workspace"
@@ -265,7 +270,8 @@ def benchmark(binary, workload):
                             samples.append((time.monotonic() - input_at) * 1000)
                             time.sleep(max(0, sequence_start + (index + 1) * 0.023 - time.monotonic()))
                         cost = (cpu_seconds() - cpu_before) * 1000
-                        print(f"{name} reply completion while scrolling older history:"
+                        transition = "reply interrupted by activity" if interleaved else "reply completion"
+                        print(f"{name} {transition} while scrolling older history:"
                               f" p95 {sorted(samples)[37]:.1f} ms, max {max(samples):.1f} ms,"
                               f" app CPU {cost:.0f} ms / 40 wheel events", flush=True)
                         until((home / "bench-hidden-finished").exists)
@@ -279,10 +285,18 @@ def benchmark(binary, workload):
                     # The final link is the only underline this long. A small
                     # unchanged crop can also mean GTK has yet to lay out the
                     # buffered reply, so require that last line before exiting.
-                    tail = tuple(bytes((255, 191, 160, a)) * 120 for a in (0, 255))
+                    color = (bytes((255, 191, 160, a)) for a in (0, 255))
+                    tail = tuple(pixel * 120 for pixel in color)
+                    link = re.compile(rb"(?:\xff\xbf\xa0\x00){120,}|(?:\xff\xbf\xa0\xff){120,}")
 
                     def final_fragment_visible():
                         image = win.get_image(285, 125, 775, 550, X.ZPixmap, 0xffffffff).data
+                        if interleaved:
+                            visible_links = [(match.start() // (775 * 4), len(match[0]) // 4)
+                                             for match in link.finditer(image)]
+                            return any(prefix_row < final_row and prefix_width >= 350 > final_width
+                                       for prefix_row, prefix_width in visible_links
+                                       for final_row, final_width in visible_links)
                         return any(mark in image for mark in tail)
 
                     auto_followed = False
@@ -684,14 +698,14 @@ def benchmark(binary, workload):
                 app.wait(timeout=5)
 
 
-workloads = ("hidden-prose", "remap-prose", "finish-prose", "offscreen-prose",
+workloads = ("hidden-prose", "remap-prose", "finish-prose", "interleaved-prose", "offscreen-prose",
              "history", "table", "tools", "images", "stream", "live-scroll",
              "task-wait", "tabs", "tabs-shared-directory", "tabs-catalog")
 if requested := os.environ.get("SPAN_BENCH_WORKLOADS"):
     selected = tuple(requested.split(","))
     assert set(selected) <= set(workloads), selected
     workloads = selected
-reply_frames = {workload: set() for workload in ("offscreen-prose", "remap-prose", "finish-prose")
+reply_frames = {workload: set() for workload in ("offscreen-prose", "remap-prose", "finish-prose", "interleaved-prose")
                 if workload in workloads}
 for package in sys.argv[1:]:
     for workload in workloads:

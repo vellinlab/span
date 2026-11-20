@@ -81,6 +81,11 @@ impl LiveMessage {
     }
 }
 
+struct ReplyPart {
+    text: Rc<String>,
+    widget: gtk::Widget,
+}
+
 struct TurnDiff {
     id: String,
     expander: gtk::Expander,
@@ -151,7 +156,7 @@ pub struct Agent {
     last_copy: RefCell<Option<Rc<String>>>,
     activity: RefCell<Option<(String, Activity)>>,
     past_activity: RefCell<Vec<Activity>>,
-    past_replies: RefCell<HashMap<String, Vec<Rc<LiveMessage>>>>,
+    past_replies: RefCell<HashMap<String, Vec<ReplyPart>>>,
     history: gtk::Box,
     history_window: Rc<crate::history_window::HistoryWindow>,
     older: gtk::Button,
@@ -2245,12 +2250,52 @@ impl Agent {
 
     fn close_reply(&self) {
         if let Some(live) = self.live.take() {
-            live.render();
+            let part = self.settle_reply(&live);
             self.past_replies
                 .borrow_mut()
                 .entry(live.id.clone())
                 .or_default()
-                .push(live);
+                .push(part);
+        }
+    }
+
+    fn settle_reply(&self, live: &LiveMessage) -> ReplyPart {
+        let defer = live.dirty.get() && !self.can_paint_live(live);
+        if !defer {
+            live.render();
+            return ReplyPart {
+                text: Rc::new(live.text.take()),
+                widget: live.label.clone().upcast(),
+            };
+        }
+
+        let text = Rc::new(live.text.take());
+        let position = self.history.child_property::<i32>(&live.label, "position");
+        self.history.remove(&live.label);
+        let source = text.clone();
+        live.label
+            .connect_show(move |label| agent_render::set_markdown(label, &source));
+        let label = live.label.downgrade();
+        let columns = (self.history_window.reading_width() / 8) as usize;
+        let height = crate::history_window::wrapped_lines(&text, columns)
+            .saturating_mul(21)
+            .clamp(21, 48_000) as i32;
+        let slot = self.history_window.defer_content(
+            &self.history,
+            &live.label,
+            -1,
+            height,
+            move |visible| {
+                if !visible && let Some(label) = label.upgrade() {
+                    label.set_text("");
+                }
+            },
+        );
+        self.history.reorder_child(&slot, position);
+        slot.show();
+        ReplyPart {
+            text,
+            widget: slot.upcast(),
         }
     }
 
@@ -2452,26 +2497,31 @@ impl Agent {
         let mut parts = id
             .and_then(|id| self.past_replies.borrow_mut().remove(id))
             .unwrap_or_default();
-        if self
+        let current_matches = self
             .live
             .borrow()
             .as_ref()
-            .is_some_and(|live| Some(live.id.as_str()) == id)
-        {
-            parts.extend(self.live.take());
-        }
-        if let Some(last) = parts.pop() {
+            .is_some_and(|live| Some(live.id.as_str()) == id);
+        let live = if current_matches {
+            self.live.take()
+        } else {
+            None
+        };
+        let last = live
+            .as_ref()
+            .map(|live| live.label.clone().upcast())
+            .or_else(|| parts.pop().map(|part| part.widget));
+        if let Some(last) = last {
             let mut tail = text;
             for part in parts {
-                let prefix = part.text.borrow();
-                tail = tail.strip_prefix(prefix.as_str()).unwrap_or_default();
+                tail = tail.strip_prefix(part.text.as_str()).unwrap_or_default();
             }
             if !tail.trim().is_empty() {
-                let position = self.history.child_property::<i32>(&last.label, "position");
-                self.history.remove(&last.label);
+                let position = self.history.child_property::<i32>(&last, "position");
+                self.history.remove(&last);
                 self.add_agent(tail, false, Some(position));
-            } else {
-                last.render();
+            } else if let Some(live) = live {
+                self.settle_reply(&live);
             }
         } else if !text.trim().is_empty() {
             self.close_activity(None);
