@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/vellinlab/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.16-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-rc.17-1.el8.x86_64.rpm
 span
 ```
 
@@ -22,7 +22,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./span_0.1.0-rc.16_amd64.deb
+sudo apt install ./span_0.1.0-rc.17_amd64.deb
 span
 ```
 

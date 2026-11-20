@@ -1,6 +1,6 @@
 [package]
 name = "span"
-version = "0.1.0-rc.16"
+version = "0.1.0-rc.17"
 edition = "2024"
 description = "A desktop terminal for local shells and OpenSSH sessions"
 

@@ -741,13 +741,22 @@ SVG
     printf 'Directory completion opened this folder.\n' > "$HOME/path-completion-fixture/widget-directory/completed.txt"
     widget mouse '目录路径'
     xdotool key --clearmodifiers ctrl+a
-    xdotool type --clearmodifiers "$HOME/path-completion-fixture/wid"
+    xdotool type --clearmodifiers "$HOME/path-completion-fixture"
+    widget bounds '目录建议' >/dev/null
     widget contains 'widget-directory'
     widget not-contains 'widget-file.txt'
+    widget not-contains 'completed.txt'
+    xdotool key --clearmodifiers Escape
+    [[ $(widget count '目录建议') == 0 ]]
+    xdotool type --clearmodifiers '/'
+    widget contains 'widget-directory'
+    widget not-contains 'widget-file.txt'
+    xdotool type --clearmodifiers 'wid'
+    widget contains 'widget-directory'
     import -window root "$(dirname "$WORKBENCH_PREVIEW")/files-completion.png"
     xdotool key --clearmodifiers Down Return
     widget contains 'completed.txt'
-    printf '%s\n' 'The path popup lists local directories and opens the selected match.'
+    printf '%s\n' 'The path popup lists children before Enter with or without a trailing slash, dismisses with Esc, and opens a keyboard selection.'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'Workspace preview fixture'
     widget click '关闭预览'
@@ -818,11 +827,15 @@ PY
         widget state '目录路径' sensitive
         widget mouse '目录路径'
         xdotool key --clearmodifiers ctrl+a
-        xdotool type --clearmodifiers "$WORKBENCH_SSH_FIXTURE/files/fol"
-        widget contains 'folder'
-        xdotool key --clearmodifiers Down Return
+        xdotool type --clearmodifiers "$WORKBENCH_SSH_FIXTURE/files"
+        widget bounds '目录建议' >/dev/null
+        widget bounds 'folder' >/dev/null
+        widget not-contains 'a sample.txt'
+        xdotool type --clearmodifiers '/'
+        widget bounds 'folder' >/dev/null
+        widget mouse 'folder'
         widget contains "$WORKBENCH_SSH_FIXTURE/files/folder"
-        printf '%s\n' 'The path popup completes a remote directory over the current SSH connection.'
+        printf '%s\n' 'The popup appears when the delayed SFTP result arrives and opens the clicked child.'
         xdotool key --clearmodifiers ctrl+shift+h
         wait_until "the remote session list" test -f "$WORKBENCH_SSH_FIXTURE/agent-catalog"
         xdotool type --clearmodifiers 'Deployment'

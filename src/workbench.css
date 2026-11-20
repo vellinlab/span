@@ -20,7 +20,8 @@ window.workbench,
 
 .workbench,
 .workbench-dialog,
-popover.agent-picker-menu {
+popover.agent-picker-menu,
+popover.files-path-popup {
     font-family: "Segoe UI", "Selawik", "Liberation Sans", "Arial", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", "WenQuanYi Micro Hei", "DejaVu Sans", sans-serif;
     font-size: 14px;
     font-weight: 400;
@@ -481,16 +482,32 @@ button.agent-send:disabled {
     padding: 9px;
 }
 
-/* GTK3 entry completion opens a separate popup window. */
-window.background > frame > box > scrolledwindow,
-window.background > frame > box > scrolledwindow treeview.view {
+popover.files-path-popup {
     background: @surface;
+    color: @foreground;
+    border: 1px solid @line;
+    border-radius: 9px;
+    padding: 4px;
+}
+
+popover.files-path-popup list {
+    background: transparent;
+}
+
+popover.files-path-popup row {
+    min-height: 27px;
+    padding: 0 7px;
+    border-radius: 5px;
+}
+
+popover.files-path-popup row:hover,
+popover.files-path-popup row:selected {
+    background: @selection;
     color: @foreground;
 }
 
-window.background > frame > box > scrolledwindow treeview.view:selected {
-    background: @selection;
-    color: @foreground;
+popover.files-path-popup drawingarea {
+    color: @accent;
 }
 
 .files-actions {

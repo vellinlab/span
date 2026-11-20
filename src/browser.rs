@@ -14,13 +14,18 @@ const DIRECTORY_FRESHNESS: Duration = Duration::from_secs(15);
 const CACHED_DIRECTORIES: usize = 3;
 const PATH_COMPLETION_DELAY: Duration = Duration::from_millis(150);
 const MAX_PATH_MATCHES: usize = 12;
+const CACHED_COMPLETIONS: usize = 2;
 
 pub struct Browser {
     pub panel: gtk::Box,
     path: gtk::Entry,
-    path_matches: gtk::ListStore,
+    path_popup: gtk::Popover,
+    path_matches: gtk::ListBox,
+    path_targets: RefCell<Vec<PathBuf>>,
+    setting_path: Cell<bool>,
+    completion_requested: Cell<bool>,
     completion_timer: RefCell<Option<glib::SourceId>>,
-    completion_cache: RefCell<Option<CompletionCache>>,
+    completion_cache: RefCell<VecDeque<CompletionCache>>,
     completing: Cell<bool>,
     status: gtk::Label,
     parent: gtk::Button,
@@ -61,7 +66,7 @@ struct Request {
 
 struct CompletionCache {
     parent: Option<PathBuf>,
-    directory: Option<Directory>,
+    directory: Option<Rc<Directory>>,
     fetched_at: Instant,
 }
 
@@ -94,15 +99,20 @@ impl Browser {
         if let Some(accessible) = path.accessible() {
             accessible.set_name("目录路径");
         }
-        let path_matches =
-            gtk::ListStore::new(&[String::static_type(), glib::BoxedAnyObject::static_type()]);
-        let completion = gtk::EntryCompletion::new();
-        completion.set_model(Some(&path_matches));
-        completion.set_text_column(0);
-        completion.set_match_func(|_, _, _| true);
-        completion.set_popup_single_match(true);
-        path.set_completion(Some(&completion));
         location.pack_start(&path, true, true, 0);
+        let path_popup = gtk::Popover::new(Some(&path));
+        path_popup.set_position(gtk::PositionType::Bottom);
+        path_popup.set_modal(false);
+        path_popup.set_no_show_all(true);
+        path_popup.style_context().add_class("files-path-popup");
+        if let Some(accessible) = path_popup.accessible() {
+            accessible.set_name("目录建议");
+        }
+        let path_matches = gtk::ListBox::new();
+        path_matches.set_activate_on_single_click(true);
+        path_matches.set_can_focus(false);
+        path_matches.show();
+        path_popup.add(&path_matches);
         let refresh = tool(Icon::Refresh, "刷新目录");
         location.pack_start(&refresh, false, false, 0);
         panel.pack_start(&location, false, false, 0);
@@ -170,9 +180,13 @@ impl Browser {
         let browser = Rc::new(Self {
             panel,
             path,
+            path_popup,
             path_matches,
+            path_targets: RefCell::new(Vec::new()),
+            setting_path: Cell::new(false),
+            completion_requested: Cell::new(false),
             completion_timer: RefCell::new(None),
-            completion_cache: RefCell::new(None),
+            completion_cache: RefCell::new(VecDeque::new()),
             completing: Cell::new(false),
             status,
             parent,
@@ -215,8 +229,7 @@ impl Browser {
         if let Some(view) = current {
             let fresh = view.fetched_at.elapsed() < DIRECTORY_FRESHNESS;
             self.directory.replace(Some(view.directory.clone()));
-            self.path
-                .set_text(&files::display(view.directory.path.as_os_str()));
+            self.set_path(&files::display(view.directory.path.as_os_str()));
             if view.show_hidden == self.hidden.is_active() {
                 self.show_model(&view.model, &view.directory);
             } else {
@@ -250,7 +263,7 @@ impl Browser {
     fn clear_view(&self) {
         self.directory.take();
         self.rows.set_model(gtk::TreeModel::NONE);
-        self.path.set_text("");
+        self.set_path("");
     }
 
     fn take_cached(&self, session: &Weak<Session>, source: &Source) -> Option<DirectoryView> {
@@ -276,7 +289,7 @@ impl Browser {
 
     fn invalidate(&self) {
         self.clear_path_matches();
-        self.completion_cache.take();
+        self.completion_cache.borrow_mut().clear();
         self.request.set(self.request.get() + 1);
         self.pending.take();
         self.loading.set(false);
@@ -293,20 +306,40 @@ impl Browser {
             }
         });
         let weak = Rc::downgrade(self);
-        self.path
-            .completion()
-            .expect("path entry completion")
-            .connect_match_selected(move |_, model, iter| {
-                if let Some(browser) = weak.upgrade()
-                    && let Ok(path) = model.value(iter, 1).get::<glib::BoxedAnyObject>()
-                {
-                    browser.load(Some(path.borrow::<PathBuf>().clone()));
-                }
-                glib::Propagation::Stop
-            });
+        self.path_matches.connect_row_activated(move |_, row| {
+            if let Some(browser) = weak.upgrade() {
+                browser.open_path_match(row);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.path.connect_key_press_event(move |_, event| {
+            if let Some(browser) = weak.upgrade() {
+                return browser.path_key(event);
+            }
+            glib::Propagation::Proceed
+        });
+        let weak = Rc::downgrade(self);
+        self.path.connect_focus_out_event(move |_, _| {
+            if let Some(browser) = weak.upgrade() {
+                browser.clear_path_matches();
+            }
+            glib::Propagation::Proceed
+        });
+        let weak = Rc::downgrade(self);
+        self.path.connect_unmap(move |_| {
+            if let Some(browser) = weak.upgrade() {
+                browser.clear_path_matches();
+            }
+        });
         let weak = Rc::downgrade(self);
         self.path.connect_activate(move |entry| {
             if let Some(browser) = weak.upgrade() {
+                if browser.path_popup.is_visible()
+                    && let Some(row) = browser.path_matches.selected_row()
+                {
+                    browser.open_path_match(&row);
+                    return;
+                }
                 let text = entry.text();
                 let current = browser.current_path();
                 let path = match (text.as_str(), current) {
@@ -384,17 +417,66 @@ impl Browser {
     }
 
     fn clear_path_matches(&self) {
+        self.completion_requested.set(false);
         if let Some(timer) = self.completion_timer.take() {
             timer.remove();
         }
-        self.path_matches.clear();
+        self.path_popup.hide();
+    }
+
+    fn set_path(&self, text: &str) {
+        self.setting_path.set(true);
+        self.path.set_text(text);
+        self.setting_path.set(false);
+    }
+
+    fn open_path_match(self: &Rc<Self>, row: &gtk::ListBoxRow) {
+        let path = self
+            .path_targets
+            .borrow()
+            .get(row.index() as usize)
+            .cloned();
+        if let Some(path) = path {
+            self.load(Some(path));
+        }
+    }
+
+    fn path_key(&self, event: &gdk::EventKey) -> glib::Propagation {
+        if event.keyval() == gdk::keys::constants::Escape && self.completion_requested.get() {
+            self.clear_path_matches();
+            return glib::Propagation::Stop;
+        }
+        if !self.path_popup.is_visible()
+            || event.state().intersects(
+                gdk::ModifierType::SHIFT_MASK
+                    | gdk::ModifierType::CONTROL_MASK
+                    | gdk::ModifierType::MOD1_MASK,
+            )
+        {
+            return glib::Propagation::Proceed;
+        }
+        let count = self.path_targets.borrow().len() as i32;
+        let current = self.path_matches.selected_row().map(|row| row.index());
+        let index = match event.keyval() {
+            gdk::keys::constants::Down => (current.unwrap_or(-1) + 1).min(count - 1),
+            gdk::keys::constants::Up => (current.unwrap_or(count) - 1).max(0),
+            _ => return glib::Propagation::Proceed,
+        };
+        self.path_matches
+            .select_row(self.path_matches.row_at_index(index).as_ref());
+        glib::Propagation::Stop
     }
 
     fn queue_path_completion(self: &Rc<Self>) {
         self.clear_path_matches();
-        if !self.path.has_focus() || !self.path.is_sensitive() || self.path.text().is_empty() {
+        if self.setting_path.get()
+            || !self.path.has_focus()
+            || !self.path.is_sensitive()
+            || self.path.text().is_empty()
+        {
             return;
         }
+        self.completion_requested.set(true);
         let weak = Rc::downgrade(self);
         self.completion_timer
             .replace(Some(glib::timeout_add_local_once(
@@ -409,50 +491,93 @@ impl Browser {
     }
 
     fn complete_path(self: &Rc<Self>) {
-        if !self.path.has_focus() || !self.path.is_mapped() || !self.path.is_sensitive() {
+        if !self.completion_requested.get()
+            || !self.path.has_focus()
+            || !self.path.is_mapped()
+            || !self.path.is_sensitive()
+        {
             return;
         }
         let text = self.path.text();
         let current = self.current_path();
-        if text.is_empty()
-            || current
-                .as_deref()
-                .is_some_and(|path| text == files::display(path.as_os_str()))
-        {
-            return;
-        }
         let Some(session) = self.session.borrow().upgrade() else {
             return;
         };
         let source = session.file_source();
-        let split = text.rfind(std::path::is_separator).map_or(0, |i| i + 1);
-        let (prefix, name) = text.split_at(split);
-        let parent = if prefix.is_empty() {
-            current
-        } else {
-            Some(current.unwrap_or_default().join(prefix))
-        };
         let case_insensitive = cfg!(windows) && source == Source::Local;
-        if let Some(directory) = self.directory.borrow().as_deref()
+        if let Some(current) = current.as_ref()
+            && text == files::display(current.as_os_str())
+            && let Some(directory) = self.directory.borrow().as_ref()
+        {
+            self.show_path_matches(directory, "", case_insensitive);
+            return;
+        }
+        let split = text
+            .rfind(|c| c == '/' || (case_insensitive && c == '\\'))
+            .map_or(0, |i| i + 1);
+        let (prefix, name) = text.split_at(split);
+        let parent = match (prefix, current) {
+            ("", current) => current,
+            (prefix, current) => Some(current.unwrap_or_default().join(prefix)),
+        };
+        let Some(Some(directory)) = self.completion_directory(&source, parent) else {
+            return;
+        };
+        if name.is_empty() {
+            self.show_path_matches(&directory, "", case_insensitive);
+            return;
+        }
+        let exact_name = if case_insensitive {
+            name.to_lowercase()
+        } else {
+            name.to_owned()
+        };
+        let exact = directory.entries.iter().find(|entry| {
+            if !matches!(entry.kind, Kind::Directory | Kind::Symlink) {
+                return false;
+            }
+            let label = files::display(&entry.name);
+            if case_insensitive {
+                label.to_lowercase() == exact_name
+            } else {
+                label == exact_name
+            }
+        });
+        if let Some(entry) = exact {
+            match self.completion_directory(&source, Some(directory.path.join(&entry.name))) {
+                Some(Some(children)) => {
+                    self.show_path_matches(&children, "", case_insensitive);
+                }
+                Some(None) => self.show_path_matches(&directory, name, case_insensitive),
+                None => {}
+            }
+        } else {
+            self.show_path_matches(&directory, name, case_insensitive);
+        }
+    }
+
+    // The outer option distinguishes an in-flight lookup from an unreadable directory.
+    fn completion_directory(
+        self: &Rc<Self>,
+        source: &Source,
+        parent: Option<PathBuf>,
+    ) -> Option<Option<Rc<Directory>>> {
+        if let Some(directory) = self.directory.borrow().as_ref()
             && Some(directory.path.as_path()) == parent.as_deref()
         {
-            self.show_path_matches(directory, name, case_insensitive);
-            return;
+            return Some(Some(directory.clone()));
         }
-        if let Some(cache) = self.completion_cache.borrow().as_ref()
-            && cache.parent == parent
-            && cache.fetched_at.elapsed() < DIRECTORY_FRESHNESS
-        {
-            if let Some(directory) = &cache.directory {
-                self.show_path_matches(directory, name, case_insensitive);
-            }
-            return;
+        if let Some(cache) = self.completion_cache.borrow().iter().find(|cache| {
+            cache.parent == parent && cache.fetched_at.elapsed() < DIRECTORY_FRESHNESS
+        }) {
+            return Some(cache.directory.clone());
         }
         if self.completing.replace(true) {
-            return;
+            return None;
         }
         let weak = Rc::downgrade(self);
         let request = self.request.get();
+        let source = source.clone();
         glib::MainContext::default().spawn_local(async move {
             let lookup = parent.clone();
             let directory = gio::spawn_blocking(move || source.list(lookup.as_deref()).ok())
@@ -462,21 +587,29 @@ impl Browser {
             if let Some(browser) = weak.upgrade() {
                 browser.completing.set(false);
                 if browser.request.get() == request {
-                    browser.completion_cache.replace(Some(CompletionCache {
+                    let mut cache = browser.completion_cache.borrow_mut();
+                    cache.retain(|result| result.parent != parent);
+                    cache.push_front(CompletionCache {
                         parent,
-                        directory,
+                        directory: directory.map(Rc::new),
                         fetched_at: Instant::now(),
-                    }));
+                    });
+                    cache.truncate(CACHED_COMPLETIONS);
                 }
                 if browser.completion_timer.borrow().is_none() {
                     browser.complete_path();
                 }
             }
         });
+        None
     }
 
     fn show_path_matches(&self, directory: &Directory, prefix: &str, case_insensitive: bool) {
-        self.path_matches.clear();
+        for row in self.path_matches.children() {
+            self.path_matches.remove(&row);
+        }
+        let mut targets = self.path_targets.borrow_mut();
+        targets.clear();
         let show_hidden = self.hidden.is_active() || prefix.starts_with('.');
         let prefix = if case_insensitive {
             prefix.to_lowercase()
@@ -496,12 +629,26 @@ impl Browser {
             matches.then_some((name, &entry.name))
         });
         for (label, name) in matches.take(MAX_PATH_MATCHES) {
-            let path = glib::BoxedAnyObject::new(directory.path.join(name));
-            self.path_matches
-                .insert_with_values(None, &[(0, &label), (1, &path)]);
+            let row = gtk::ListBoxRow::new();
+            row.set_can_focus(false);
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            content.add(&icons::widget(Icon::Folder, 15));
+            let title = gtk::Label::builder()
+                .label(&label)
+                .xalign(0.0)
+                .ellipsize(pango::EllipsizeMode::End)
+                .build();
+            content.pack_start(&title, true, true, 0);
+            row.add(&content);
+            self.path_matches.add(&row);
+            row.show_all();
+            targets.push(directory.path.join(name));
         }
-        if let Some(completion) = self.path.completion() {
-            completion.complete();
+        self.path_matches.unselect_all();
+        if !targets.is_empty() {
+            self.path_matches
+                .set_width_request(self.path.allocated_width().max(150));
+            self.path_popup.show();
         }
     }
 
@@ -743,8 +890,7 @@ impl Browser {
                 if let Some(session) = self.session.borrow().upgrade() {
                     session.directory.replace(Some(directory.path.clone()));
                 }
-                self.path
-                    .set_text(&files::display(directory.path.as_os_str()));
+                self.set_path(&files::display(directory.path.as_os_str()));
                 let directory = Rc::new(directory);
                 self.directory.replace(Some(directory.clone()));
                 let show_hidden = self.hidden.is_active();

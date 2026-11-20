@@ -76,6 +76,7 @@ case \${SSH_ORIGINAL_COMMAND:-} in
         exec /bin/bash -c "\${SSH_ORIGINAL_COMMAND:10:-1}"
         ;;
     '/usr/lib/openssh/sftp-server'|'/usr/lib/openssh/sftp-server ')
+        sleep 0.3
         exec /usr/lib/openssh/sftp-server
         ;;
     *)
