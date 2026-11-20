@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-home = Path(os.environ["HOME"])
+home = Path(os.environ.get("SPAN_BENCH_FIXTURE_HOME", os.environ["HOME"]))
 control_socket = Path(os.environ.get("CODEX_HOME", home / ".codex")) / "app-server-control/app-server-control.sock"
 thread = "preview-thread"
 saved_thread = "stored-deployment"

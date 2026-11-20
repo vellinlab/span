@@ -978,10 +978,20 @@ impl Browser {
                     session.directory.replace(Some(directory.path.clone()));
                 }
                 self.set_path(&files::display(directory.path.as_os_str()));
-                let directory = Rc::new(directory);
-                self.directory.replace(Some(directory.clone()));
                 let show_hidden = self.hidden.is_active();
-                let model = self.build_model(&directory, show_hidden);
+                // Sessions can share an immutable view after a fresh read
+                // confirms that both the source and the directory match.
+                let shared = self.cached.borrow().iter().find_map(|view| {
+                    (view.source == source
+                        && view.show_hidden == show_hidden
+                        && *view.directory == directory)
+                        .then(|| (view.directory.clone(), view.model.clone()))
+                });
+                let (directory, model) = shared.unwrap_or_else(|| {
+                    let model = self.build_model(&directory, show_hidden);
+                    (Rc::new(directory), model)
+                });
+                self.directory.replace(Some(directory.clone()));
                 self.show_model(&model, &directory);
                 self.cache_view(DirectoryView {
                     session: self.session.borrow().clone(),
@@ -1037,7 +1047,16 @@ impl Browser {
     }
 
     fn show_model(&self, model: &gtk::ListStore, directory: &Directory) {
-        self.rows.set_model(Some(model));
+        if self.rows.model().as_ref() == Some(model.upcast_ref::<gtk::TreeModel>()) {
+            // Reset the view state as a model change would, without rebuilding
+            // the row tree or invalidating the cached file icons and text.
+            self.rows.selection().unselect_all();
+            if let Some(adjustment) = ScrollableExt::vadjustment(&self.rows) {
+                adjustment.set_value(adjustment.lower());
+            }
+        } else {
+            self.rows.set_model(Some(model));
+        }
         if !self.loading.get() {
             self.status.set_tooltip_text(None);
             let suffix = if directory.truncated {
@@ -1045,8 +1064,10 @@ impl Browser {
             } else {
                 ""
             };
-            self.status
-                .set_text(&format!("{} 项{suffix}", model.iter_n_children(None)));
+            let status = format!("{} 项{suffix}", model.iter_n_children(None));
+            if self.status.text().as_str() != status.as_str() {
+                self.status.set_text(&status);
+            }
         }
     }
 

@@ -79,6 +79,8 @@ def write_image(path, color):
 
 def benchmark(binary, workload):
     name = Path(binary).parent.name + ("" if workload == "history" else f" {workload}")
+    same_directory = workload == "tabs-shared-directory"
+    switching_tabs = workload == "tabs" or same_directory
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
         (home / "bin").mkdir()
@@ -90,13 +92,20 @@ def benchmark(binary, workload):
                 write_image(home / ".bench-images" / f"preview-{i}.png", color)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"],
-                   SPAN_BENCH_HISTORY=str(int(workload in ("history", "tabs"))),
+                   SPAN_BENCH_HISTORY=str(int(workload == "history" or switching_tabs)),
                    SPAN_BENCH_TABLE=str(int(workload == "table")),
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
                    SPAN_BENCH_STREAM=str(int(workload == "stream")),
-                   SPAN_BENCH_TABS=str(int(workload == "tabs")),
+                   SPAN_BENCH_TABS=str(int(switching_tabs)),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
+        if same_directory:
+            # Keep App Server markers outside the folder open in every tab.
+            workspace = home / "workspace"
+            workspace.mkdir()
+            for index in range(384):
+                (workspace / f"project-file-{index:03d}.txt").touch()
+            env.update(HOME=str(workspace), SPAN_BENCH_FIXTURE_HOME=directory)
         with subprocess.Popen(["taskset", "-c", str(cpu), binary], env=env) as app:
             try:
                 def window_id():
@@ -235,8 +244,14 @@ def benchmark(binary, workload):
                 print(f"{name} settled transcript paint: {(painted_at - start) * 1000:.1f} ms,"
                       f" app CPU {(painted_cpu - before_cpu) * 1000:.1f} ms", flush=True)
                 time.sleep(max(0, painted_at + 1 - time.monotonic()))
-                if workload == "tabs":
+                if switching_tabs:
                     xdo("mousemove", "--window", wid, 1040, 20)
+                    def directory_pixels():
+                        return win.get_image(60, 225, 170, 280, X.ZPixmap, 0xffffffff).data
+
+                    directory_frame = directory_pixels() if same_directory else b""
+                    if same_directory:
+                        assert len(set(directory_frame)) > 32, "the shared file directory is empty"
                     tab_frames = [pixels()]
                     for number in (2, 3):
                         (home / "agent-models").unlink()
@@ -253,7 +268,7 @@ def benchmark(binary, workload):
                         tab_frames.append(frame)
                     footprint("three loaded sessions")
                     samples = []
-                    for index in range(28):
+                    for index in range(124 if same_directory else 28):
                         offset = index % 2
                         button = "Page_Up" if offset == 0 else "Page_Down"
                         key = screen.keysym_to_keycode(XK.string_to_keysym(button))
@@ -274,9 +289,12 @@ def benchmark(binary, workload):
                             samples.append((time.monotonic() - start) * 1000)
                         time.sleep(0.05)
                     cpu_ms = (cpu_seconds() - start_cpu) * 1000
+                    p95 = sorted(samples)[(95 * len(samples) + 99) // 100 - 1]
                     print(f"{name} session switch: median {statistics.median(samples):.1f} ms,"
-                          f" p95 {sorted(samples)[22]:.1f} ms, app CPU {cpu_ms:.0f} ms / 24 events",
+                          f" p95 {p95:.1f} ms, app CPU {cpu_ms:.0f} ms / {len(samples)} events",
                           flush=True)
+                    if same_directory:
+                        assert directory_pixels() == directory_frame, "file listing changed across tabs"
                     footprint("after switching sessions")
                     return
                 xdo("mousemove", "--window", wid, 715, 320)
@@ -435,5 +453,5 @@ def benchmark(binary, workload):
 
 
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools", "images", "stream", "tabs"):
+    for workload in ("history", "table", "tools", "images", "stream", "tabs", "tabs-shared-directory"):
         benchmark(package, workload)
