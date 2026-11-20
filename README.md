@@ -8,7 +8,7 @@
 
 ### NewStartOS／EL8 x86_64
 
-从 [GitHub Releases](https://github.com/zyw02/span/releases) 直接下载 `.rpm` 文件并安装。
+从 [GitHub Releases](https://github.com/vellinlab/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
 sudo dnf install ./span-0.1.0-rc.15-1.el8.x86_64.rpm
@@ -30,7 +30,7 @@ span
 
 ### Windows x86_64
 
-下载 `span-*-windows-x86_64.zip`。版本包随 GitHub Release 发布，测试包可在通过的 [Build Windows](https://github.com/zyw02/span/actions/workflows/windows.yml) 中下载。解压后打开 `Span.exe`，使用 Windows 自带的 ConPTY 运行 PowerShell。GTK3 运行库随便携包提供。
+下载 `span-*-windows-x86_64.zip`。版本包随 GitHub Release 发布，测试包可在通过的 [Build Windows](https://github.com/vellinlab/span/actions/workflows/windows.yml) 中下载。解压后打开 `Span.exe`，使用 Windows 自带的 ConPTY 运行 PowerShell。GTK3 运行库随便携包提供。
 
 远程终端使用系统 OpenSSH 客户端，密码和验证码在终端中输入。Windows 的 SFTP 和远程 Codex 会为同一主机建立后台 SSH 连接，需要可直接使用的密钥或 SSH Agent。先在终端确认主机公钥，后台连接会验证已保存的主机身份。使用本地 Codex 会话需要将已登录的 `codex.exe` 放在 `PATH` 中。本地 Windows Codex 目前使用独立的 App Server。
 
