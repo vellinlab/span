@@ -97,6 +97,7 @@ def benchmark(binary, workload):
                    SPAN_BENCH_TOOLS=str(int(workload == "tools")),
                    SPAN_BENCH_IMAGES=str(int(workload == "images")),
                    SPAN_BENCH_STREAM=str(int(workload == "stream")),
+                   SPAN_BENCH_TASK_IDLE=str(int(workload == "task-wait")),
                    SPAN_BENCH_TABS=str(int(switching_tabs)),
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         if same_directory:
@@ -145,6 +146,20 @@ def benchmark(binary, workload):
                 for event in (X.KeyPress, X.KeyRelease):
                     xtest.fake_input(screen, event, enter)
                 screen.flush()
+                if workload == "task-wait":
+                    until(lambda: (home / "agent-models").exists())
+                    time.sleep(0.15)
+                    xdo("type", "Wait for the test tool")
+                    xdo("key", "Return")
+                    until(lambda: (home / "bench-tool-started").exists())
+                    time.sleep(0.45)
+                    start = cpu_seconds()
+                    time.sleep(4)
+                    assert not (home / "bench-tool-finished").exists()
+                    print(f"{name} CPU waiting for a tool: {(cpu_seconds() - start) * 1000:.1f} ms / 4 s",
+                          flush=True)
+                    until(lambda: (home / "bench-tool-finished").exists())
+                    return
                 if workload == "stream":
                     until(lambda: (home / "agent-models").exists())
                     time.sleep(0.2)
@@ -453,5 +468,5 @@ def benchmark(binary, workload):
 
 
 for package in sys.argv[1:]:
-    for workload in ("history", "table", "tools", "images", "stream", "tabs", "tabs-shared-directory"):
+    for workload in ("history", "table", "tools", "images", "stream", "task-wait", "tabs", "tabs-shared-directory"):
         benchmark(package, workload)

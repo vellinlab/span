@@ -796,7 +796,7 @@ SVG
     widget click '复制会话 ID'
     xclip -out -selection clipboard | grep -qx 'preview-thread'
     widget click '会话页终端面板'
-    sleep 0.25
+    widget state 'Terminal' focused
     xdotool type --clearmodifiers 'printf "%s\n" "$BASHPID" > "$HOME/drawer-bash"'
     xdotool key --clearmodifiers Return
     wait_until "the original Bash in the Agent drawer" grep -qsx "$first_bash" "$HOME/drawer-bash"
@@ -1000,11 +1000,13 @@ PY
         widget click '卸载'
         wait_until "plugin uninstalled through the SSH host app server" test -f "$WORKBENCH_SSH_FIXTURE/plugin-uninstalled"
         widget click '会话页终端面板'
+        widget state 'Terminal' focused
         xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-primary-connection"'
         xdotool key --clearmodifiers Return
         wait_until "the original connection in the remote terminal drawer" test -s "$WORKBENCH_SSH_FIXTURE/drawer-primary-connection"
         widget click '在面板中新建终端'
         widget state '关闭底部终端' sensitive
+        widget state 'Terminal' focused
         xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-extra-connection"; seq 1 160'
         xdotool key --clearmodifiers Return
         wait_until "a second remote terminal in the drawer" test -s "$WORKBENCH_SSH_FIXTURE/drawer-extra-connection"
@@ -1014,6 +1016,7 @@ PY
         import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/remote-terminal-drawer.png"
         widget click '关闭底部终端'
         widget not-state '关闭底部终端' sensitive
+        widget state 'Terminal' focused
         xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-returned-connection"'
         xdotool key --clearmodifiers Return
         wait_until "input returned to the original remote terminal" test -s "$WORKBENCH_SSH_FIXTURE/drawer-returned-connection"

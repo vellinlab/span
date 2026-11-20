@@ -399,6 +399,22 @@ for line in sys.stdin:
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
+        if os.environ.get("SPAN_BENCH_TASK_IDLE") == "1":
+            assert message == "Wait for the test tool" and params["threadId"] == thread
+            identifier = "waiting-benchmark"
+            event = {"threadId": thread, "turnId": identifier}
+            send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
+            command = {"id": "test-tool", "type": "commandExecution", "command": "check build results"}
+            send({"method": "item/started", "params": {**event, "item": {
+                **command, "status": "inProgress"}}})
+            (home / "bench-tool-started").touch()
+            time.sleep(5)
+            send({"method": "item/completed", "params": {**event, "item": {
+                **command, "status": "completed", "exitCode": 0, "aggregatedOutput": "Build ready"}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": identifier, "status": "completed"}}})
+            (home / "bench-tool-finished").touch()
+            continue
         if os.environ.get("SPAN_BENCH_STREAM") == "1":
             assert message == "Summarize the stream" and params["threadId"] == thread
             identifier = "reasoning-benchmark"
