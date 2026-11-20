@@ -158,7 +158,7 @@ for line in sys.stdin:
         if not (home / "large-directory-sent").exists():
             item["interface"]["screenshotUrls"] = ["data:image/png;base64," + "A" * 40_652_012]
             (home / "large-directory-sent").touch()
-        send({"id": request_id, "result": {"marketplaces": [
+        send({"id": request_id, "result": {"featuredPluginIds": [item["id"]], "marketplaces": [
             {"name": "fixture-catalog", "path": None, "plugins": [item] + others}]}})
     elif method == "plugin/read":
         assert shared and params == {"pluginName": "fixture", "remoteMarketplaceName": "fixture-catalog"}

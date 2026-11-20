@@ -52,6 +52,8 @@ struct Marketplace {
 struct Directory {
     marketplaces: Vec<Marketplace>,
     #[serde(default)]
+    featured_plugin_ids: Vec<String>,
+    #[serde(default)]
     marketplace_load_errors: Vec<serde::de::IgnoredAny>,
 }
 
@@ -81,6 +83,13 @@ pub fn decode(bytes: &[u8], pending_lists: &[u64]) -> serde_json::Result<Incomin
     {
         if let Ok(reply) = serde_json::from_slice::<Reply>(bytes) {
             let mut items = Vec::new();
+            let featured: std::collections::HashMap<_, _> = reply
+                .result
+                .featured_plugin_ids
+                .into_iter()
+                .enumerate()
+                .map(|(index, id)| (id, index))
+                .collect();
             for market in reply.result.marketplaces {
                 let Some(name) = market.name else { continue };
                 let source = market
@@ -93,6 +102,7 @@ pub fn decode(bytes: &[u8], pending_lists: &[u64]) -> serde_json::Result<Incomin
                     };
                     let ui = item.interface.unwrap_or_default();
                     items.push(agent_extensions::Plugin {
+                        featured: featured.get(&id).copied(),
                         id,
                         title: ui.display_name.unwrap_or_else(|| plugin_name.clone()),
                         name: plugin_name,
@@ -112,7 +122,7 @@ pub fn decode(bytes: &[u8], pending_lists: &[u64]) -> serde_json::Result<Incomin
                     });
                 }
             }
-            items.sort_by_key(|p| !p.installed);
+            items.sort_by_key(|p| (p.featured.unwrap_or(usize::MAX), !p.installed));
             return Ok(Incoming::Plugins {
                 id: reply.id,
                 items,

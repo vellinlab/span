@@ -1088,6 +1088,8 @@ scrolledwindow.agent-table-scroll {
     padding: 8px 6px; border-radius: 9px; color: @foreground;
 }
 .workbench button.extension-item:hover, .workbench button.extension-item:checked { background: @chrome; }
+.workbench .directory-filter { min-height: 22px; min-width: 0; padding: 1px 7px; border-radius: 11px; background: transparent; border: none; box-shadow: none; color: @muted; font-size: 12px; }
+.workbench .directory-filter:checked { background: @surface; color: @foreground; }
 .extension-title { font-weight: 600; font-size: 14px; }
 .extension-subtitle, .extension-summary { color: @muted; font-size: 12px; }
 .extension-state { color: @accent; font-size: 12px; }

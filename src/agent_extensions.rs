@@ -41,6 +41,7 @@ pub struct Plugin {
     pub(crate) enabled: bool,
     pub(crate) available: bool,
     pub(crate) review: bool,
+    pub(crate) featured: Option<usize>,
 }
 
 impl Plugin {
@@ -167,6 +168,10 @@ pub struct Extensions {
     refresh: gtk::Button,
     feedback: gtk::Box,
     plugins: Page,
+    scopes: gtk::Box,
+    featured: gtk::RadioButton,
+    installed: gtk::RadioButton,
+    all: gtk::RadioButton,
     apps: Page,
     action: RefCell<Option<Callback>>,
     changing: Cell<bool>,
@@ -207,6 +212,19 @@ impl Extensions {
         feedback.set_no_show_all(true);
         panel.add(&feedback);
         let plugins = Page::new();
+        let scopes = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        scopes.set_no_show_all(true);
+        let featured = gtk::RadioButton::with_label("精选");
+        let installed = gtk::RadioButton::with_label_from_widget(&featured, "已安装");
+        let all = gtk::RadioButton::with_label_from_widget(&featured, "全部");
+        for button in [&featured, &installed, &all] {
+            button.set_mode(false);
+            button.style_context().add_class("directory-filter");
+            scopes.pack_start(button, false, false, 0);
+            button.show();
+        }
+        plugins.root.pack_start(&scopes, false, false, 0);
+        plugins.root.reorder_child(&scopes, 0);
         let apps = Page::new();
         let manage = gtk::Button::with_label("在 ChatGPT 管理授权");
         manage.style_context().add_class("quiet-button");
@@ -229,6 +247,10 @@ impl Extensions {
             refresh,
             feedback,
             plugins,
+            scopes,
+            featured,
+            installed,
+            all,
             apps,
             auth,
             action: RefCell::new(None),
@@ -239,6 +261,17 @@ impl Extensions {
 
     pub fn bind(self: &Rc<Self>, action: impl Fn(Action) + 'static) {
         self.action.replace(Some(Rc::new(action)));
+        for button in [&self.featured, &self.installed, &self.all] {
+            let weak = Rc::downgrade(self);
+            button.connect_toggled(move |button| {
+                if button.is_active()
+                    && let Some(panel) = weak.upgrade()
+                {
+                    panel.plugins.limit.set(PAGE_SIZE);
+                    panel.render(Section::Plugins);
+                }
+            });
+        }
         let weak = Rc::downgrade(self);
         self.stack.connect_visible_child_name_notify(move |_| {
             if let Some(panel) = weak.upgrade() {
@@ -352,6 +385,15 @@ impl Extensions {
 
     pub fn update_plugins(&self, plugins: Vec<Plugin>, failures: usize) {
         let empty = plugins.is_empty();
+        let featured = plugins.iter().any(|p| p.featured.is_some());
+        self.featured.set_sensitive(featured);
+        if !self.plugins.loaded.get() || self.featured.is_active() && !featured {
+            if featured {
+                self.featured.set_active(true);
+            } else {
+                self.all.set_active(true);
+            }
+        }
         self.plugins
             .entries
             .replace(plugins.into_iter().map(Entry::Plugin).collect());
@@ -514,10 +556,20 @@ impl Extensions {
         let Some(action) = self.action.borrow().clone() else {
             return;
         };
+        if section == Section::Plugins {
+            self.scopes
+                .set_visible(query.is_empty() && page.loaded.get());
+        }
         let mut matches = 0;
         for entry in page.entries.borrow().iter() {
             let (id, title, description, detail, logo, active) = match entry {
                 Entry::Plugin(plugin) => {
+                    if query.is_empty()
+                        && ((self.featured.is_active() && plugin.featured.is_none())
+                            || (self.installed.is_active() && !plugin.installed))
+                    {
+                        continue;
+                    }
                     let status = match (plugin.installed, plugin.enabled, plugin.available) {
                         (true, true, _) => "已安装",
                         (true, false, _) => "已安装 · 已停用",
@@ -684,8 +736,16 @@ impl Extensions {
             });
         }
         page.has_local_more.set(matches > page.limit.get());
-        page.empty
-            .set_visible(page.loaded.get() && matches == 0 && !query.is_empty());
+        let installed_empty =
+            section == Section::Plugins && self.installed.is_active() && query.is_empty();
+        page.empty.set_text(if installed_empty {
+            "此主机还没有已安装的插件"
+        } else {
+            "没有匹配的项目"
+        });
+        page.empty.set_visible(
+            page.loaded.get() && matches == 0 && (!query.is_empty() || installed_empty),
+        );
         page.more
             .set_visible(page.has_local_more.get() || page.cursor.borrow().is_some());
     }

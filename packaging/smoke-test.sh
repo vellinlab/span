@@ -360,7 +360,12 @@ SVG
     widget contains '已清除会话目标'
     slash '/plugins'
     widget state '管理 Local Fixture Plugin' sensitive
-    widget mouse '搜索扩展'
+    widget state '精选' checked
+    widget click '已安装'
+    widget contains '此主机还没有已安装的插件'
+    widget click '精选'
+    read -r search_x search_y search_w search_h <<< "$(widget bounds '搜索扩展')"
+    xdotool mousemove "$((search_x + search_w / 2))" "$((search_y + search_h / 2))" click 1
     xdotool type --clearmodifiers 'sample 59'
     widget state '管理 Directory sample 59' sensitive
     xdotool key --clearmodifiers ctrl+a BackSpace
