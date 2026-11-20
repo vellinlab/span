@@ -120,7 +120,12 @@ pub fn response(
                 if matches!(event, Event::End(TagEnd::Heading(_))) {
                     pending.push_str("</b>");
                 }
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                // Group short adjacent paragraphs to reduce native input windows and layout work.
+                if pending.len() >= 2048 {
+                    flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                } else {
+                    pending.push_str("\n\n");
+                }
             }
             Event::Start(Tag::Heading { .. }) => pending.push_str("<b>"),
             Event::Start(Tag::List(_)) => list_depth = list_depth.saturating_add(1),
@@ -262,22 +267,47 @@ fn markdown_label_with(activate: impl Fn(&gtk::Label, &str) + 'static) -> gtk::L
         activate(label, uri);
         glib::Propagation::Stop
     });
-    label.connect_draw(|label, cr| {
-        draw_link_underlines(label, cr);
+    // Scrolling changes the paint origin, but usually leaves the shaped layout intact.
+    let underline_cache = RefCell::new(None::<(pango::Layout, u32, Vec<(f64, f64, f64)>)>);
+    label.connect_draw(move |label, cr| {
+        let Some(layout) = label.layout() else {
+            return glib::Propagation::Proceed;
+        };
+        let serial = layout.serial();
+        let mut cache = underline_cache.borrow_mut();
+        if cache
+            .as_ref()
+            .is_none_or(|(previous, key, _)| *key != serial || previous != &layout)
+        {
+            *cache = Some((layout.clone(), serial, underline_segments(&layout)));
+        }
+        if let Some((_, _, segments)) = cache.as_ref().filter(|(_, _, v)| !v.is_empty()) {
+            let (x, y) = label.layout_offsets();
+            let allocation = label.allocation();
+            let style = label.style_context();
+            let color = style
+                .lookup_color("accent")
+                .unwrap_or_else(|| style.color(style.state()));
+            cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
+            for &(left, top, width) in segments {
+                cr.rectangle(
+                    f64::from(x - allocation.x()) + left,
+                    f64::from(y - allocation.y()) + top,
+                    width,
+                    1.0,
+                );
+            }
+            let _ = cr.fill();
+        }
         glib::Propagation::Proceed
     });
     label
 }
 
-fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
-    if !label.label().contains("<a href=") {
-        return;
-    }
-    let Some(layout) = label.layout() else {
-        return;
-    };
+fn underline_segments(layout: &pango::Layout) -> Vec<(f64, f64, f64)> {
+    let mut segments = Vec::new();
     let Some(attributes) = layout.attributes() else {
-        return;
+        return segments;
     };
     let mut attributes = attributes.iterator();
     let mut ranges = Vec::new();
@@ -293,22 +323,9 @@ fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
         }
     }
     if ranges.is_empty() {
-        return;
+        return segments;
     }
-    let (x, y) = label.layout_offsets();
-    let allocation = label.allocation();
-    let (x, y) = (f64::from(x - allocation.x()), f64::from(y - allocation.y()));
     let pixels = |units: i32| f64::from(units) / f64::from(pango::SCALE);
-    let context = label.style_context();
-    let color = context
-        .lookup_color("accent")
-        .unwrap_or_else(|| context.color(context.state()));
-    cr.set_source_rgba(
-        f64::from(color.red()),
-        f64::from(color.green()),
-        f64::from(color.blue()),
-        f64::from(color.alpha()),
-    );
     let mut iter = layout.iter();
     let mut ranges = ranges.as_slice();
     while let Some(line) = iter.line_readonly() {
@@ -327,7 +344,7 @@ fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
         // Use one position per visual line across all fallback fonts.
         let below_ink = pixels(ink.y() + ink.height()).ceil() + 1.0;
         let line_bottom = pixels(logical.y() + logical.height()).floor() - 1.0;
-        let underline = y + below_ink.min(line_bottom);
+        let underline = below_ink.min(line_bottom);
         for &(link_start, link_end) in ranges
             .iter()
             .take_while(|&&(link_start, _)| link_start < end)
@@ -337,12 +354,7 @@ fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
             if seg_start < seg_end {
                 let spans = line.x_ranges(seg_start, seg_end);
                 for span in spans.chunks_exact(2) {
-                    cr.rectangle(
-                        x + pixels(span[0]),
-                        underline,
-                        pixels(span[1] - span[0]),
-                        1.0,
-                    );
+                    segments.push((pixels(span[0]), underline, pixels(span[1] - span[0])));
                 }
             }
         }
@@ -350,7 +362,7 @@ fn draw_link_underlines(label: &gtk::Label, cr: &cairo::Context) {
             break;
         }
     }
-    let _ = cr.fill();
+    segments
 }
 
 pub fn set_markdown(label: &gtk::Label, markdown: &str) {

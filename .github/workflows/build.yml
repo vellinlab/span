@@ -33,7 +33,7 @@ jobs:
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             build-essential pkg-config dpkg-dev libgtk-3-dev libvte-2.91-dev librsvg2-dev librsvg2-common \
             dbus-daemon desktop-file-utils xvfb x11-utils xdotool imagemagick fontconfig fonts-wqy-microhei openssh-server \
-            at-spi2-core python3-pyatspi python3-websockets xclip
+            at-spi2-core python3-pyatspi python3-xlib python3-websockets xclip
 
       - name: Check formatting and build
         run: |
@@ -52,6 +52,20 @@ jobs:
           WORKBENCH_PREVIEW="$PWD/dist/workbench.png" WORKBENCH_TEST_AGENT_SSH=1 \
             bash packaging/test-sftp.sh dbus-run-session -- \
             bash packaging/smoke-test.sh /usr/bin/span
+
+      - name: Compare software-rendered X11 interaction with rc.20
+        if: startsWith(github.ref, 'refs/tags/v0.1.0-rc.21')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bench_dir="$(mktemp -d)"
+          gh release download v0.1.0-rc.20 --pattern 'span_*_amd64.deb' --dir "$bench_dir"
+          dpkg-deb -x "$bench_dir"/*.deb "$bench_dir/old"
+          mkdir "$bench_dir/rc20" "$bench_dir/rc21"
+          ln -s "$bench_dir/old/usr/bin/span" "$bench_dir/rc20/span"
+          ln -s /usr/bin/span "$bench_dir/rc21/span"
+          xvfb-run -a -s '-screen 0 1600x980x24' dbus-run-session -- /usr/bin/python3 packaging/bench-interaction.py \
+            "$bench_dir/rc20/span" "$bench_dir/rc21/span" "$bench_dir/rc21/span" "$bench_dir/rc20/span"
 
       - name: Upload Debian package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

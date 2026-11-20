@@ -57,6 +57,7 @@ pub fn open(app: &gtk::Application) {
         accessible.set_name("工作区侧栏");
     }
     let sidebar_pages = gtk::Stack::new();
+    sidebar_pages.set_homogeneous(false);
     let sidebar_catalog = column(0);
     let sidebar_extensions = column(0);
     let preview = Panel::new();
@@ -90,6 +91,7 @@ pub fn open(app: &gtk::Application) {
     header.pack_end(&agent);
 
     let views = gtk::Stack::new();
+    views.set_homogeneous(false);
     views.add_named(&tabs, "terminal");
     views.add_named(&empty_workspace(), "empty");
     layout.pack_start(&tool_rail(&sidebar), false, false, 0);

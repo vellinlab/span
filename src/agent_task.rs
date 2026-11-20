@@ -65,8 +65,10 @@ impl TaskStatus {
             self.stop_timer();
             return;
         };
-        self.message.set_text(message);
-        self.message.set_tooltip_text(Some(message));
+        if self.message.text().as_str() != message {
+            self.message.set_text(message);
+            self.message.set_tooltip_text(Some(message));
+        }
         self.interrupt.set_visible(can_interrupt);
         if self.ticker.borrow().is_none() {
             if self.clock.get().is_none() {

@@ -36,6 +36,10 @@ mod imp {
     impl BoxImpl for ReadingColumn {}
 
     impl WidgetImpl for ReadingColumn {
+        fn preferred_height_for_width(&self, width: i32) -> (i32, i32) {
+            self.parent_preferred_height_for_width(width.min(MAX_WIDTH))
+        }
+
         fn adjust_size_allocation(
             &self,
             orientation: gtk::Orientation,

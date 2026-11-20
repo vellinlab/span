@@ -1334,3 +1334,12 @@ tooltip label {
 .agent-composer textview {
     font-size: 14px;
 }
+
+
+/* Pointer motion can cross many rows during a single wheel gesture on X11. */
+.workbench button,
+.workbench row,
+.workbench tab,
+.workbench scrollbar slider {
+    transition: none;
+}

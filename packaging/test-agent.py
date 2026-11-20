@@ -202,7 +202,15 @@ for line in sys.stdin:
         assert params["sandbox"] == "workspace-write"
         assert params["approvalPolicy"] == "on-request"
         started_thread = "new-slash-fixture" if shared else thread
-        send({"id": request_id, "result": {"thread": {"id": started_thread, "turns": []},
+        turns = []
+        if os.environ.get("SPAN_BENCH_HISTORY") == "1":
+            for n in range(4):
+                paragraphs = [f"{n+1}.{i+1} 会话性能测量 · 项目进展。 "
+                              f"Workspace status for task {i}. [参考资料](https://example.invalid/{i}) "
+                              + "保留中英文换行与选择。 " * 4 for i in range(80)]
+                turns.append({"id": f"turn-{n}", "status": "completed", "items": [
+                    {"id": f"reply-{n}", "type": "agentMessage", "text": "\n\n".join(paragraphs)}]})
+        send({"id": request_id, "result": {"thread": {"id": started_thread, "turns": turns},
                                           "cwd": str(home), "model": "gpt-base-fixture",
                                           "sandbox": {"type": "workspaceWrite", "networkAccess": False},
                                           "approvalPolicy": "on-request",
