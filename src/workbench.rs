@@ -239,6 +239,13 @@ pub fn open(app: &gtk::Application) {
     workbench.tabs.connect_switch_page(move |_, page, _| {
         if let Some(workbench) = weak.upgrade() {
             let active = workbench.session_for(page);
+            // GtkNotebook measures visible pages even when another tab is selected.
+            // Keep the notebook child visible for the tab and skip its inactive content.
+            for session in workbench.sessions.borrow().iter() {
+                session
+                    .page
+                    .set_visible(session.notebook_page.upcast_ref::<gtk::Widget>() == page);
+            }
             workbench.update_status(active.as_deref());
             workbench.schedule_panels();
             if let Some(active) = active {
@@ -369,7 +376,7 @@ impl Workbench {
         close.style_context().add_class("tab-close");
         tab.pack_end(&close, false, false, 0);
         tab.show_all();
-        session.page.show_all();
+        session.notebook_page.show_all();
 
         let weak = Rc::downgrade(self);
         let active = Rc::downgrade(&session);
@@ -395,10 +402,10 @@ impl Workbench {
         });
 
         self.sessions.borrow_mut().push(session.clone());
-        let position = self.tabs.append_page(&session.page, Some(&tab));
+        let position = self.tabs.append_page(&session.notebook_page, Some(&tab));
         self.tabs
-            .set_menu_label_text(&session.page, session.launch.label());
-        self.tabs.set_tab_reorderable(&session.page, true);
+            .set_menu_label_text(&session.notebook_page, session.launch.label());
+        self.tabs.set_tab_reorderable(&session.notebook_page, true);
         self.views.set_visible_child_name("terminal");
         self.tabs.set_current_page(Some(position));
         self.start(&session);
@@ -420,7 +427,7 @@ impl Workbench {
         self.sessions
             .borrow_mut()
             .retain(|active| !Rc::ptr_eq(active, session));
-        if let Some(position) = self.tabs.page_num(&session.page) {
+        if let Some(position) = self.tabs.page_num(&session.notebook_page) {
             self.tabs.remove_page(Some(position));
         }
         if self.sessions.borrow().is_empty() {
@@ -443,7 +450,7 @@ impl Workbench {
         self.sessions
             .borrow()
             .iter()
-            .find(|session| session.page.upcast_ref::<gtk::Widget>() == page)
+            .find(|session| session.notebook_page.upcast_ref::<gtk::Widget>() == page)
             .cloned()
     }
 

@@ -68,6 +68,7 @@ impl State {
 pub struct Session {
     pub launch: Launch,
     pub page: gtk::Stack,
+    pub notebook_page: gtk::Box,
     pub terminal: Terminal,
     pub indicator: gtk::Box,
     pub state: Cell<State>,
@@ -103,6 +104,8 @@ impl Session {
         let page = gtk::Stack::new();
         page.set_homogeneous(false);
         page.add_named(&scroll, "terminal");
+        let notebook_page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        notebook_page.pack_start(&page, true, true, 0);
 
         let indicator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         indicator.set_size_request(8, 8);
@@ -116,6 +119,7 @@ impl Session {
         Rc::new(Self {
             launch,
             page,
+            notebook_page,
             terminal,
             indicator,
             state: Cell::new(State::Starting),

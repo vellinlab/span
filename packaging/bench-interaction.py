@@ -35,6 +35,7 @@ def benchmark(binary):
         home = Path(directory)
         (home / "bin").mkdir()
         shutil.copy2("packaging/test-agent.py", home / "bin/codex")
+        (home / "bin/codex").chmod(0o755)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"], SPAN_BENCH_HISTORY="1",
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
@@ -55,6 +56,14 @@ def benchmark(binary):
                 until(lambda: (home / "agent-ready").exists())
                 time.sleep(1)
                 xdo("mousemove", "--window", wid, 715, 320)
+
+                # Keep repeated wheel gestures away from both ends of the conversation.
+                for button in [4] * 28 + [5] * 14:
+                    for event in (X.ButtonPress, X.ButtonRelease):
+                        xtest.fake_input(screen, event, button)
+                    screen.flush()
+                    time.sleep(0.012)
+                time.sleep(0.2)
 
                 def pixels():
                     data = win.get_image(390, 150, 540, 170, X.ZPixmap, 0xffffffff).data
