@@ -126,12 +126,12 @@ impl HistoryWindow {
     }
 
     // Register before the response is shown, so moving children does not remap them.
-    pub fn group(self: &Rc<Self>, blocks: &gtk::Box) {
+    pub fn group(self: &Rc<Self>, blocks: &gtk::Box, chunk_size: usize) {
         let children = blocks.children();
         if children.is_empty() {
             return;
         }
-        for chunk in children.chunks(3) {
+        for chunk in children.chunks(chunk_size) {
             let content = gtk::Box::new(gtk::Orientation::Vertical, blocks.spacing());
             for child in chunk {
                 blocks.remove(child);
@@ -182,17 +182,20 @@ impl HistoryWindow {
         // Keep additional screens ready in both directions. A wider eviction band avoids
         // repeated map/unmap operations when scrolling back across a boundary.
         let mut anchor = None;
+        let mut anchor_height = i32::MAX;
         let mut changed_above = false;
+        let mut restored = false;
         for block in self.blocks.borrow().iter() {
             let height = block.slot.allocated_height();
-            if height < 2 {
+            if height < 2 || !block.slot.is_mapped() {
                 continue;
             }
             let Some((_, y)) = block.slot.translate_coordinates(&self.history, 0, 0) else {
                 continue;
             };
             let bottom = f64::from(y) + f64::from(height);
-            if f64::from(y) <= top && top < bottom {
+            if f64::from(y) <= top && top < bottom && height < anchor_height {
+                anchor_height = height;
                 anchor = Some((block.slot.clone().upcast(), y, top));
             }
             if block.content.is_visible() {
@@ -211,10 +214,14 @@ impl HistoryWindow {
                 block.content.show();
                 block.slot.set_height_request(-1);
                 changed_above |= bottom <= top;
+                restored = true;
             }
         }
-        if changed_above && anchor.is_some() {
+        if changed_above {
             self.anchor.replace(anchor);
+        }
+        if restored {
+            // Newly mapped replies can contain windowed table rows.
             self.schedule();
         }
     }

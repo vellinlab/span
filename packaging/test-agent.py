@@ -210,6 +210,14 @@ for line in sys.stdin:
                               + "保留中英文换行与选择。 " * 4 for i in range(80)]
                 turns.append({"id": f"turn-{n}", "status": "completed", "items": [
                     {"id": f"reply-{n}", "type": "agentMessage", "text": "\n\n".join(paragraphs)}]})
+        if os.environ.get("SPAN_BENCH_TABLE") == "1":
+            header = ("| 任务 | Workspace | 进展 | 参考资料 | 说明 |\n"
+                      "| --- | --- | --- | --- | --- |")
+            rows = [f"| 任务 {i} | Workspace {i} | 已验证第 {i} 项 | "
+                    f"[资料 {i}](https://example.invalid/{i}) | 中英文混排并随窗口换行。 |"
+                    for i in range(1, 97)]
+            turns = [{"id": "table-turn", "status": "completed", "items": [
+                {"id": "table-reply", "type": "agentMessage", "text": "\n".join([header] + rows)}]}]
         send({"id": request_id, "result": {"thread": {"id": started_thread, "turns": turns},
                                           "cwd": str(home), "model": "gpt-base-fixture",
                                           "sandbox": {"type": "workspaceWrite", "networkAccess": False},

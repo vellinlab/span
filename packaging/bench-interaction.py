@@ -31,14 +31,16 @@ def until(check):
     raise RuntimeError("X11 benchmark setup timed out")
 
 
-def benchmark(binary):
+def benchmark(binary, table=False):
+    name = Path(binary).parent.name + (" table" if table else "")
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
         (home / "bin").mkdir()
         shutil.copy2("packaging/test-agent.py", home / "bin/codex")
         (home / "bin/codex").chmod(0o755)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
-                   PATH=str(home / "bin") + ":" + os.environ["PATH"], SPAN_BENCH_HISTORY="1",
+                   PATH=str(home / "bin") + ":" + os.environ["PATH"], SPAN_BENCH_HISTORY="0" if table else "1",
+                   SPAN_BENCH_TABLE="1" if table else "0",
                    GTK_THEME="Adwaita:dark", NO_AT_BRIDGE="1", GDK_BACKEND="x11")
         with subprocess.Popen(["taskset", "-c", str(cpu), binary], env=env) as app:
             try:
@@ -57,6 +59,10 @@ def benchmark(binary):
                 until(lambda: (home / "agent-ready").exists())
                 time.sleep(1)
                 xdo("mousemove", "--window", wid, 715, 320)
+
+                footprint = Path(f"/proc/{app.pid}/smaps_rollup").read_text().splitlines()
+                pss = next(line.split()[1] for line in footprint if line.startswith("Pss:"))
+                print(f"{name} loaded: PSS {pss} KiB", flush=True)
 
                 # Keep repeated wheel gestures away from both ends of the conversation.
                 for button in [4] * 28 + [5] * 14:
@@ -96,7 +102,7 @@ def benchmark(binary):
                             samples.append(1000 * (time.monotonic() - start))
                         time.sleep(0.045)
                     cpu_ms = (ticks() - start_cpu) * 1000 / os.sysconf("SC_CLK_TCK")
-                    print(f"{Path(binary).parent.name} {mode}: median {statistics.median(samples):.1f} ms,"
+                    print(f"{name} {mode}: median {statistics.median(samples):.1f} ms,"
                           f" p95 {sorted(samples)[30]:.1f} ms, app CPU {cpu_ms:.0f} ms / 32 events", flush=True)
                 def drag(surface):
                     # Continuous width changes cross text wrapping and PTY column boundaries.
@@ -113,7 +119,7 @@ def benchmark(binary):
                     time.sleep(0.35)
                     assert win.get_geometry().width == width
                     cost = (ticks() - begin) * 1000 / os.sysconf("SC_CLK_TCK")
-                    print(f"{Path(binary).parent.name} {surface} continuous resize: "
+                    print(f"{name} {surface} continuous resize: "
                           f"app CPU {cost:.0f} ms / 160 events", flush=True)
 
                 drag("conversation")
@@ -131,7 +137,7 @@ def benchmark(binary):
                 screen.sync()
                 time.sleep(0.25)
                 cost = (ticks() - begin) * 1000 / os.sysconf("SC_CLK_TCK")
-                print(f"{Path(binary).parent.name} wheel burst: app CPU {cost:.0f} ms / 480 events",
+                print(f"{name} wheel burst: app CPU {cost:.0f} ms / 480 events",
                       flush=True)
 
                 # Drive well beyond each end and verify that a distant page is
@@ -149,6 +155,8 @@ def benchmark(binary):
                 top = endpoint(4)
                 bottom = endpoint(5)
                 assert top != bottom and endpoint(4) == top, "history did not survive scrolling"
+                if table:
+                    return
                 xdo("key", "ctrl+shift+a")
                 time.sleep(0.25)
                 xdo("type", """seq 1 3000 | awk '{printf "%06d %0160d\\n", $1, $1}'; touch """
@@ -164,3 +172,4 @@ def benchmark(binary):
 
 for package in sys.argv[1:]:
     benchmark(package)
+    benchmark(package, table=True)

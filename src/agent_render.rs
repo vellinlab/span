@@ -51,7 +51,13 @@ pub fn response(
         match event {
             Event::Start(Tag::Table(_)) => {
                 flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
-                blocks.add(&table(&mut events, markdown, range.start, &mut selectable));
+                blocks.add(&table(
+                    &mut events,
+                    markdown,
+                    range.start,
+                    &mut selectable,
+                    window,
+                ));
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
@@ -165,7 +171,7 @@ pub fn response(
         blocks.add(&actions);
     }
     if let Some(window) = window {
-        window.group(&blocks);
+        window.group(&blocks, 3);
     }
     TextSelection::new(&blocks, selectable, quote)
 }
@@ -424,9 +430,19 @@ fn table(
     markdown: &str,
     start: usize,
     selectable: &mut Vec<Part>,
+    window: Option<&Rc<crate::history_window::HistoryWindow>>,
 ) -> gtk::Box {
-    let grid = gtk::Grid::builder().column_homogeneous(true).build();
-    grid.style_context().add_class("agent-table");
+    let bands = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    bands.style_context().add_class("agent-table");
+    let band = || {
+        let grid = gtk::Grid::builder().column_homogeneous(true).build();
+        let region = Part::region();
+        region.add(&grid);
+        bands.add(&region);
+        (grid, region)
+    };
+    let (mut grid, mut region) = band();
+    const BAND_ROWS: i32 = 8;
 
     let mut row = 0;
     let mut col = 0;
@@ -460,9 +476,11 @@ fn table(
                         (_, 0) => "\n",
                         _ => "\t",
                     };
-                    let part = Part::new(&label, separator);
-                    grid.attach(&part.widget, col, row, 1, 1);
-                    selectable.push(part);
+                    if col == 0 && row > 0 && row % BAND_ROWS == 0 {
+                        (grid, region) = band();
+                    }
+                    grid.attach(&label, col, row % BAND_ROWS, 1, 1);
+                    selectable.push(Part::in_region(&label, separator, &region));
                 }
                 cells.push(std::mem::take(&mut cell));
                 col += 1;
@@ -488,7 +506,7 @@ fn table(
         }
     }
     if row > 100 {
-        grid.attach(&text("此处显示前 100 行，可复制完整表格。"), 0, 100, 1, 1);
+        bands.add(&text("此处显示前 100 行，可复制完整表格。"));
     }
     let scroll = glib::Object::builder::<table_scroll::TableScroll>()
         .property("hscrollbar-policy", gtk::PolicyType::Automatic)
@@ -496,7 +514,12 @@ fn table(
         .property("overlay-scrolling", false)
         .build();
     scroll.style_context().add_class("agent-table-scroll");
-    scroll.add(&grid);
+    if row > BAND_ROWS
+        && let Some(window) = window
+    {
+        window.group(&bands, 1);
+    }
+    scroll.add(&bands);
     scroll_conversation_at_edges(scroll.upcast_ref());
     let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);

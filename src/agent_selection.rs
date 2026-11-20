@@ -53,13 +53,22 @@ pub struct Part {
 
 impl Part {
     pub fn new(label: &gtk::Label, separator: &'static str) -> Self {
-        label.set_selectable(false);
-        let widget = gtk::EventBox::new();
-        widget.set_visible_window(false);
-        widget.set_above_child(true);
+        let widget = Self::region();
         widget.add(label);
+        Self::in_region(label, separator, &widget)
+    }
+
+    pub fn region() -> gtk::EventBox {
+        let region = gtk::EventBox::new();
+        region.set_visible_window(false);
+        region.set_above_child(true);
+        region
+    }
+
+    pub fn in_region(label: &gtk::Label, separator: &'static str, widget: &gtk::EventBox) -> Self {
+        label.set_selectable(false);
         Self {
-            widget,
+            widget: widget.clone(),
             label: label.clone(),
             separator,
         }
@@ -137,8 +146,13 @@ impl TextSelection {
         view.set_visible_window(false);
         view.set_can_focus(!view.parts().is_empty());
         view.add(child);
+        // Cells in the same table band share a native input window.
+        let mut previous = None;
         for part in view.parts() {
-            view.bind_pointer(&part.widget);
+            if previous != Some(&part.widget) {
+                view.bind_pointer(&part.widget);
+                previous = Some(&part.widget);
+            }
         }
         view.connect_key_press_event(|view, event| {
             if event.state().contains(gdk::ModifierType::CONTROL_MASK)
