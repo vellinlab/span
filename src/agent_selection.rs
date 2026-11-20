@@ -66,6 +66,17 @@ impl Part {
         part
     }
 
+    pub fn deferred_in_region(
+        label: &gtk::Label,
+        separator: &'static str,
+        widget: &gtk::EventBox,
+        plain: Rc<str>,
+    ) -> Self {
+        let mut part = Self::in_region(label, separator, widget);
+        part.plain = Some(plain);
+        part
+    }
+
     pub fn region() -> gtk::EventBox {
         let region = gtk::EventBox::new();
         region.set_visible_window(false);

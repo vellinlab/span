@@ -1,4 +1,5 @@
 use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delta};
+use crate::history_window::{DeferredText, wrapped_lines};
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
 use crate::quote;
@@ -549,6 +550,7 @@ fn table(
     bands.style_context().add_class("agent-table");
     let band = || {
         let grid = gtk::Grid::builder().column_homogeneous(true).build();
+        grid.show();
         let region = Part::region();
         region.add(&grid);
         bands.add(&region);
@@ -556,6 +558,15 @@ fn table(
     };
     let (mut grid, mut region) = band();
     const BAND_ROWS: i32 = 8;
+    let defer = window.is_some()
+        && markdown.get(start..).is_some_and(|text| {
+            text.lines()
+                .take(20)
+                .filter(|line| line.contains('|'))
+                .count()
+                >= 18
+        });
+    let mut deferred_bands = vec![(region.clone(), Vec::new())];
 
     let mut row = 0;
     let mut col = 0;
@@ -576,7 +587,17 @@ fn table(
             Event::End(TagEnd::TableCell) => {
                 in_cell = false;
                 if row < 100 && col < 20 {
-                    let label = static_label(&cell_markup, markdown_label);
+                    let label = if defer {
+                        if cell_markup.contains("<a href=") {
+                            markdown_label()
+                        } else {
+                            let label = text("");
+                            label.style_context().add_class("agent-markdown");
+                            label
+                        }
+                    } else {
+                        static_label(&cell_markup, markdown_label)
+                    };
                     label.set_hexpand(true);
                     label.set_width_chars(9);
                     label.set_max_width_chars(48);
@@ -590,9 +611,25 @@ fn table(
                     };
                     if col == 0 && row > 0 && row % BAND_ROWS == 0 {
                         (grid, region) = band();
+                        if defer {
+                            deferred_bands.push((region.clone(), Vec::new()));
+                        }
                     }
                     grid.attach(&label, col, row % BAND_ROWS, 1, 1);
-                    selectable.push(Part::in_region(&label, separator, &region));
+                    if defer {
+                        let source: Rc<str> = Rc::from(cell_markup.as_str());
+                        let plain = unmarked_text(&source);
+                        let uses_markup = cell_markup.contains("<a href=") || plain.is_some();
+                        let plain =
+                            plain.map_or_else(|| source.clone(), |value| Rc::from(value.as_str()));
+                        if let Some((_, texts)) = deferred_bands.last_mut() {
+                            texts.push(DeferredText::new(&label, source, uses_markup));
+                        }
+                        selectable
+                            .push(Part::deferred_in_region(&label, separator, &region, plain));
+                    } else {
+                        selectable.push(Part::in_region(&label, separator, &region));
+                    }
                 }
                 cells.push(std::mem::take(&mut cell));
                 col += 1;
@@ -617,6 +654,34 @@ fn table(
             _ => {}
         }
     }
+    if let Some(window) = window.filter(|_| defer) {
+        let columns = rows
+            .first()
+            .map_or(1, |row: &Vec<String>| row.len().clamp(1, 20));
+        let minimum_width = 85 * columns as i32;
+        let cell_width = window.reading_width().max(minimum_width) as usize / columns;
+        let cell_columns = ((cell_width - 21) / 8).max(1);
+        let row_heights = rows
+            .iter()
+            .take(100)
+            .map(|row| {
+                let lines = row
+                    .iter()
+                    .take(columns)
+                    .map(|cell| wrapped_lines(cell, cell_columns))
+                    .max()
+                    .unwrap_or(1);
+                (lines.clamp(1, 250) * 17 + 13) as i32
+            })
+            .collect::<Vec<_>>();
+        for ((region, texts), heights) in deferred_bands
+            .into_iter()
+            .zip(row_heights.chunks(BAND_ROWS as usize))
+        {
+            bands.remove(&region);
+            window.defer_content(&bands, &region, minimum_width, heights.iter().sum(), texts);
+        }
+    }
     if row > 100 {
         bands.add(&text("此处显示前 100 行，可复制完整表格。"));
     }
@@ -627,6 +692,7 @@ fn table(
         .build();
     scroll.style_context().add_class("agent-table-scroll");
     if row > BAND_ROWS
+        && !defer
         && let Some(window) = window
     {
         window.group(&bands, 1);

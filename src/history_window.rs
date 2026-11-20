@@ -95,10 +95,10 @@ impl HistoryScroll {
 struct Block {
     slot: glib::WeakRef<gtk::Box>,
     content: glib::WeakRef<gtk::Widget>,
-    text: Option<DeferredText>,
+    texts: Vec<DeferredText>,
 }
 
-struct DeferredText {
+pub struct DeferredText {
     label: glib::WeakRef<gtk::Label>,
     source: Rc<str>,
     uses_markup: bool,
@@ -106,7 +106,17 @@ struct DeferredText {
 }
 
 impl DeferredText {
-    fn prepare(&self) {
+    pub fn new(label: &gtk::Label, source: Rc<str>, uses_markup: bool) -> Self {
+        label.show();
+        Self {
+            label: label.downgrade(),
+            source,
+            uses_markup,
+            loaded: Cell::new(false),
+        }
+    }
+
+    pub fn prepare(&self) {
         if !self.loaded.replace(true)
             && let Some(label) = self.label.upgrade()
         {
@@ -200,7 +210,7 @@ impl HistoryWindow {
             self.blocks.borrow_mut().push(Block {
                 slot: slot.downgrade(),
                 content: content.upcast_ref::<gtk::Widget>().downgrade(),
-                text: None,
+                texts: Vec::new(),
             });
         }
         self.schedule();
@@ -217,33 +227,38 @@ impl HistoryWindow {
     ) {
         // The estimate keeps an unvisited block in the scroll range. Once
         // visited, its most recently allocated height takes over.
-        let width = self.history.allocated_width().clamp(360, 800) - 36;
-        let columns = (width / 8) as usize;
-        let lines: usize = plain
-            .lines()
-            .map(|line| {
-                let cells: usize = line
-                    .chars()
-                    .map(|ch| if ch.is_ascii() { 1 } else { 2 })
-                    .sum();
-                cells.div_ceil(columns).max(1)
-            })
-            .sum();
+        let lines = wrapped_lines(plain, (self.reading_width() / 8) as usize);
+        let height = lines.saturating_mul(21).clamp(21, 48_000) as i32;
+        self.defer_content(
+            parent,
+            region,
+            -1,
+            height,
+            vec![DeferredText::new(label, source, uses_markup)],
+        );
+    }
+
+    pub fn reading_width(&self) -> i32 {
+        self.history.allocated_width().clamp(360, 800) - 36
+    }
+
+    pub fn defer_content(
+        self: &Rc<Self>,
+        parent: &gtk::Box,
+        content: &gtk::EventBox,
+        min_width: i32,
+        height: i32,
+        texts: Vec<DeferredText>,
+    ) {
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        slot.set_height_request(lines.saturating_mul(21).clamp(21, 48_000) as i32);
-        region.set_no_show_all(true);
-        label.show();
-        slot.add(region);
+        slot.set_size_request(min_width, height);
+        content.set_no_show_all(true);
+        slot.add(content);
         parent.add(&slot);
         self.blocks.borrow_mut().push(Block {
             slot: slot.downgrade(),
-            content: region.upcast_ref::<gtk::Widget>().downgrade(),
-            text: Some(DeferredText {
-                label: label.downgrade(),
-                source,
-                uses_markup,
-                loaded: Cell::new(false),
-            }),
+            content: content.upcast_ref::<gtk::Widget>().downgrade(),
+            texts,
         });
         self.schedule();
     }
@@ -336,15 +351,15 @@ impl HistoryWindow {
                 anchor_height = height;
                 anchor = Some((slot.clone().upcast(), y, top));
             }
-            let near_top = if block.text.is_some() {
-                visible_top
-            } else {
+            let near_top = if block.texts.is_empty() {
                 top
+            } else {
+                visible_top
             };
             let far = bottom < near_top - page * 1.75 || f64::from(y) > near_top + page * 2.75;
             let near = bottom >= near_top - page * 0.85 && f64::from(y) <= near_top + page * 1.85;
             if far && !protected(&slot) {
-                if block.text.is_some() && !idle {
+                if !block.texts.is_empty() && !idle {
                     // Reversing a wheel gesture must not remap the same GTK
                     // input windows one frame after hiding them.
                     if content.is_visible() {
@@ -357,11 +372,11 @@ impl HistoryWindow {
                     content.set_no_show_all(true);
                     content.hide();
                 }
-                if let Some(text) = &block.text {
+                for text in &block.texts {
                     text.release();
                 }
             } else if near && !content.is_visible() {
-                if let Some(text) = &block.text {
+                for text in &block.texts {
                     shaped |= !text.loaded.get();
                     text.prepare();
                 }
@@ -392,4 +407,17 @@ impl HistoryWindow {
             self.schedule();
         }
     }
+}
+
+pub fn wrapped_lines(text: &str, columns: usize) -> usize {
+    text.lines()
+        .map(|line| {
+            let cells: usize = line
+                .chars()
+                .map(|ch| if ch.is_ascii() { 1 } else { 2 })
+                .sum();
+            cells.div_ceil(columns).max(1)
+        })
+        .sum::<usize>()
+        .max(1)
 }
