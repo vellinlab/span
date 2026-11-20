@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 
-from Xlib import X, display
+from Xlib import X, XK, display
 from Xlib.ext import xtest
 
 screen = display.Display()
@@ -55,14 +55,35 @@ def benchmark(binary, table=False):
                 time.sleep(0.4)
                 xdo("key", "ctrl+shift+a")
                 time.sleep(0.4)
-                xdo("key", "Return")
-                until(lambda: (home / "agent-ready").exists())
+                def pixels():
+                    return win.get_image(390, 150, 540, 170, X.ZPixmap, 0xffffffff).data
+
+                process_clock = time.clock_getcpuclockid(app.pid)
+
+                def cpu_seconds():
+                    return time.clock_gettime_ns(process_clock) / 1e9
+
+                def footprint(stage):
+                    memory = Path(f"/proc/{app.pid}/smaps_rollup").read_text().splitlines()
+                    pss = next(line.split()[1] for line in memory if line.startswith("Pss:"))
+                    print(f"{name} {stage}: PSS {pss} KiB", flush=True)
+
+                before_cpu = cpu_seconds()
+                start = time.monotonic()
+                enter = screen.keysym_to_keycode(XK.string_to_keysym("Return"))
+                for event in (X.KeyPress, X.KeyRelease):
+                    xtest.fake_input(screen, event, enter)
+                screen.flush()
+                deadline = start + 12
+                while not (home / "agent-ready").exists() or len(set(pixels())) <= 32:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("first transcript paint timed out")
+                    time.sleep(0.001)
+                print(f"{name} first transcript paint: {(time.monotonic() - start) * 1000:.1f} ms,"
+                      f" app CPU {(cpu_seconds() - before_cpu) * 1000:.1f} ms", flush=True)
                 time.sleep(1)
                 xdo("mousemove", "--window", wid, 715, 320)
-
-                footprint = Path(f"/proc/{app.pid}/smaps_rollup").read_text().splitlines()
-                pss = next(line.split()[1] for line in footprint if line.startswith("Pss:"))
-                print(f"{name} loaded: PSS {pss} KiB", flush=True)
+                footprint("loaded")
 
                 # Keep repeated wheel gestures away from both ends of the conversation.
                 for button in [4] * 28 + [5] * 14:
@@ -72,20 +93,12 @@ def benchmark(binary, table=False):
                     time.sleep(0.012)
                 time.sleep(0.2)
 
-                def pixels():
-                    data = win.get_image(390, 150, 540, 170, X.ZPixmap, 0xffffffff).data
-                    return hashlib.blake2b(data, digest_size=8).digest()
-
-                def ticks():
-                    fields = Path(f"/proc/{app.pid}/stat").read_text().split()
-                    return int(fields[13]) + int(fields[14])
-
                 for mode in ("scroll", "resize"):
                     samples = []
                     for i in range(36):
                         if i == 4:
-                            start_cpu = ticks()
-                        before = pixels()
+                            start_cpu = cpu_seconds()
+                        before = hashlib.blake2b(pixels(), digest_size=8).digest()
                         start = time.monotonic()
                         if mode == "scroll":
                             button = 4 if i % 12 < 6 else 5
@@ -94,20 +107,20 @@ def benchmark(binary, table=False):
                         else:
                             win.configure(width=1030 if i % 2 == 0 else 1100, height=800)
                         screen.flush()
-                        while pixels() == before:
+                        while hashlib.blake2b(pixels(), digest_size=8).digest() == before:
                             if time.monotonic() - start > 2:
                                 raise RuntimeError(f"{mode} did not visibly update on event {i}")
-                            time.sleep(0.002)
+                            time.sleep(0.0005)
                         if i >= 4:
                             samples.append(1000 * (time.monotonic() - start))
                         time.sleep(0.045)
-                    cpu_ms = (ticks() - start_cpu) * 1000 / os.sysconf("SC_CLK_TCK")
+                    cpu_ms = (cpu_seconds() - start_cpu) * 1000
                     print(f"{name} {mode}: median {statistics.median(samples):.1f} ms,"
                           f" p95 {sorted(samples)[30]:.1f} ms, app CPU {cpu_ms:.0f} ms / 32 events", flush=True)
                 def drag(surface):
                     # Continuous width changes cross text wrapping and PTY column boundaries.
                     # Include the final settle period in CPU accounting.
-                    begin = ticks()
+                    begin = cpu_seconds()
                     start = time.monotonic()
                     for frame in range(160):
                         phase = frame % 80
@@ -118,14 +131,14 @@ def benchmark(binary, table=False):
                     screen.sync()
                     time.sleep(0.35)
                     assert win.get_geometry().width == width
-                    cost = (ticks() - begin) * 1000 / os.sysconf("SC_CLK_TCK")
+                    cost = (cpu_seconds() - begin) * 1000
                     print(f"{name} {surface} continuous resize: "
                           f"app CPU {cost:.0f} ms / 160 events", flush=True)
 
                 drag("conversation")
                 # Simulate high-resolution input arriving in bursts within one frame.
                 # Move through the transcript, rather than pushing at an endpoint.
-                begin = ticks()
+                begin = cpu_seconds()
                 start = time.monotonic()
                 for frame in range(120):
                     button = 4 if frame % 24 < 12 else 5
@@ -136,7 +149,7 @@ def benchmark(binary, table=False):
                     time.sleep(max(0, start + (frame + 1) / 60 - time.monotonic()))
                 screen.sync()
                 time.sleep(0.25)
-                cost = (ticks() - begin) * 1000 / os.sysconf("SC_CLK_TCK")
+                cost = (cpu_seconds() - begin) * 1000
                 print(f"{name} wheel burst: app CPU {cost:.0f} ms / 480 events",
                       flush=True)
 
@@ -155,6 +168,7 @@ def benchmark(binary, table=False):
                 top = endpoint(4)
                 bottom = endpoint(5)
                 assert top != bottom and endpoint(4) == top, "history did not survive scrolling"
+                footprint("after revisiting history")
                 if table:
                     return
                 xdo("key", "ctrl+shift+a")
