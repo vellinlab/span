@@ -5,6 +5,7 @@ use crate::icons::{self, Icon};
 use gtk::pango;
 use gtk::prelude::*;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -51,15 +52,15 @@ enum View {
 }
 
 pub struct Record<'a> {
-    id: &'a str,
+    id: Cow<'a, str>,
     title: String,
     detail: String,
-    kind: &'a str,
+    kind: Cow<'a, str>,
     icon: Icon,
-    status: Option<&'a str>,
+    status: Option<Cow<'a, str>>,
     patch: Option<String>,
     summary: Vec<String>,
-    web_url: Option<&'a str>,
+    web_url: Option<Cow<'a, str>>,
 }
 
 impl<'a> Record<'a> {
@@ -141,20 +142,34 @@ impl<'a> Record<'a> {
             _ => return None,
         };
         Some(Self {
-            id,
+            id: id.into(),
             title: with_status(title, status),
             detail,
-            kind,
+            kind: kind.into(),
             icon,
-            status,
+            status: status.map(Cow::Borrowed),
             patch: None,
             summary,
-            web_url,
+            web_url: web_url.map(Cow::Borrowed),
         })
     }
 
     pub fn id(&self) -> &str {
-        self.id
+        &self.id
+    }
+
+    fn into_owned(self) -> Record<'static> {
+        Record {
+            id: Cow::Owned(self.id.into_owned()),
+            title: self.title,
+            detail: self.detail,
+            kind: Cow::Owned(self.kind.into_owned()),
+            icon: self.icon,
+            status: self.status.map(|status| Cow::Owned(status.into_owned())),
+            patch: self.patch,
+            summary: self.summary,
+            web_url: self.web_url.map(|url| Cow::Owned(url.into_owned())),
+        }
     }
 
     pub fn patch(id: &'a str, changes: &Value, status: Option<&'a str>) -> Self {
@@ -176,12 +191,12 @@ impl<'a> Record<'a> {
         let mut patch = String::new();
         append_changes(changes, &mut patch);
         Self {
-            id,
+            id: id.into(),
             title: with_status(title, status),
             detail,
-            kind: "fileChange",
+            kind: Cow::Borrowed("fileChange"),
             icon: Icon::Edit,
-            status,
+            status: status.map(Cow::Borrowed),
             patch: (!patch.is_empty()).then_some(patch),
             summary: Vec::new(),
             web_url: None,
@@ -211,9 +226,54 @@ impl Activity {
         }
     }
 
+    pub fn archived(
+        quote: crate::quote::Action,
+        records: Vec<Record<'_>>,
+        status: Option<&str>,
+    ) -> gtk::Expander {
+        let activity = Self::new(quote.clone());
+        let count = records
+            .iter()
+            .map(Record::id)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        activity.set_finished_heading(status, count);
+        let records = RefCell::new(Some(
+            records
+                .into_iter()
+                .map(Record::into_owned)
+                .collect::<Vec<_>>(),
+        ));
+        let heading = activity.heading.downgrade();
+        let rows = activity.rows.downgrade();
+        activity.widget.connect_expanded_notify(move |widget| {
+            if !widget.is_expanded() {
+                return;
+            }
+            let (Some(heading), Some(rows), Some(records)) =
+                (heading.upgrade(), rows.upgrade(), records.take())
+            else {
+                return;
+            };
+            let mut activity = Self {
+                widget: widget.clone(),
+                heading,
+                rows,
+                entries: HashMap::new(),
+                progress: String::new(),
+                finished: true,
+                quote: quote.clone(),
+            };
+            for record in records {
+                activity.record(record);
+            }
+        });
+        activity.widget
+    }
+
     pub fn record(&mut self, record: Record<'_>) {
         let quote = self.quote.clone();
-        let entry = self.entry(record.id, record.kind, record.icon);
+        let entry = self.entry(&record.id, &record.kind, record.icon);
         set_title(&entry.row, &entry.title, &record.title);
         match &entry.view {
             View::Text(label) if record.kind == "reasoning" => {
@@ -229,7 +289,7 @@ impl Activity {
                 detail.set_text(&record.detail);
                 detail.set_visible(!record.detail.is_empty());
                 source.set_visible(record.web_url.is_some());
-                if let Some(url) = record.web_url {
+                if let Some(url) = record.web_url.as_deref() {
                     let host = url
                         .split_once("://")
                         .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
@@ -245,7 +305,7 @@ impl Activity {
                 }
             }
             View::Command { body, detail } => {
-                let status = match record.status {
+                let status = match record.status.as_deref() {
                     Some("completed") => "成功",
                     Some("failed") => "失败",
                     Some("declined") => "已拒绝",
@@ -308,6 +368,10 @@ impl Activity {
 
     pub fn finish(&mut self, status: Option<&str>) {
         self.finished = true;
+        self.set_finished_heading(status, self.entries.len());
+    }
+
+    fn set_finished_heading(&self, status: Option<&str>, count: usize) {
         let title = match status {
             Some("inProgress") => "进行中",
             Some("interrupted") => "已停止",
@@ -316,7 +380,7 @@ impl Activity {
             Some("steered") => "追加前的活动",
             _ => "已完成",
         };
-        self.set_heading(&format!("{title} · {} 项活动", self.entries.len()));
+        self.set_heading(&format!("{title} · {count} 项活动"));
     }
 
     pub fn extend_summary(&self, id: &str, parts: &mut Vec<String>) {

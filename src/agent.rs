@@ -1216,12 +1216,19 @@ impl Agent {
         for turn in turns {
             let mut changes = String::new();
             let mut activity: Option<Activity> = None;
+            let mut archived = Vec::new();
             let mut assistant_text = Vec::new();
             let status = turn["status"].as_str();
+            let live = status == Some("inProgress") && !prepend;
             for item in array(&turn["items"]) {
                 if let Some(record) = Record::from_item(item) {
-                    let activity = activity.get_or_insert_with(|| self.new_activity());
-                    activity.record(record);
+                    if live {
+                        activity
+                            .get_or_insert_with(|| self.new_activity())
+                            .record(record);
+                    } else {
+                        archived.push(record);
+                    }
                 } else {
                     if matches!(
                         item["type"].as_str(),
@@ -1233,12 +1240,13 @@ impl Agent {
                                 | "contextCompaction"
                                 | "imageGeneration"
                         )
-                    ) && let Some(mut previous) = activity.take()
-                    {
-                        previous.finish((item["type"] == "userMessage").then_some("steered"));
-                        if status == Some("inProgress") && !prepend {
+                    ) {
+                        let previous_status = (item["type"] == "userMessage").then_some("steered");
+                        if let Some(mut previous) = activity.take() {
+                            previous.finish(previous_status);
                             self.past_activity.borrow_mut().push(previous);
                         }
+                        self.append_archived_activity(&mut archived, previous_status);
                     }
                     self.completed_item(item, true);
                     if let Some(text) = response_text(item)
@@ -1249,6 +1257,7 @@ impl Agent {
                 }
                 append_file_changes(item, &mut changes);
             }
+            self.append_archived_activity(&mut archived, status);
             if !changes.is_empty() {
                 self.add_diff(&changes);
             }
@@ -2151,6 +2160,16 @@ impl Agent {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn append_archived_activity(&self, records: &mut Vec<Record<'_>>, status: Option<&str>) {
+        if !records.is_empty() {
+            self.append(&Activity::archived(
+                self.quote_action(),
+                std::mem::take(records),
+                status,
+            ));
         }
     }
 
