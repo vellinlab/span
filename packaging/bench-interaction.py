@@ -364,20 +364,26 @@ def benchmark(binary, workload):
 
                 # Simulate high-resolution input arriving in bursts within one frame.
                 # Move through the transcript, rather than pushing at an endpoint.
-                begin = cpu_seconds()
-                start = time.monotonic()
-                for frame in range(120):
-                    button = 4 if frame % 24 < 12 else 5
-                    for _ in range(4):
-                        for event in (X.ButtonPress, X.ButtonRelease):
-                            xtest.fake_input(screen, event, button)
-                    screen.flush()
-                    time.sleep(max(0, start + (frame + 1) / 60 - time.monotonic()))
-                screen.sync()
-                time.sleep(0.25)
-                cost = (cpu_seconds() - begin) * 1000
-                print(f"{name} wheel burst: app CPU {cost:.0f} ms / 480 events",
-                      flush=True)
+                def wheel_burst(stage):
+                    begin = cpu_seconds()
+                    start = time.monotonic()
+                    for frame in range(120):
+                        button = 4 if frame % 24 < 12 else 5
+                        for _ in range(4):
+                            for event in (X.ButtonPress, X.ButtonRelease):
+                                xtest.fake_input(screen, event, button)
+                        screen.flush()
+                        time.sleep(max(0, start + (frame + 1) / 60 - time.monotonic()))
+                    screen.sync()
+                    time.sleep(0.25)
+                    cost = (cpu_seconds() - begin) * 1000
+                    print(f"{name} {stage}: app CPU {cost:.0f} ms / 480 events", flush=True)
+
+                wheel_burst("wheel burst")
+                if workload == "history":
+                    # Repeat from the settled position while the blocks used by
+                    # the previous gesture still have their text layouts.
+                    wheel_burst("repeated wheel burst")
 
                 # Drive well beyond each end and verify that a distant page is
                 # painted again after being evicted and brought back on screen.
