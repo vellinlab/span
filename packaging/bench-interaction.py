@@ -80,6 +80,7 @@ def write_image(path, color):
 def benchmark(binary, workload):
     name = Path(binary).parent.name + ("" if workload == "history" else f" {workload}")
     same_directory = workload == "tabs-shared-directory"
+    warmup_events = 4
     switching_tabs = workload == "tabs" or same_directory
     live_scroll = workload == "live-scroll"
     with tempfile.TemporaryDirectory() as directory:
@@ -284,12 +285,13 @@ def benchmark(binary, workload):
                         tab_frames.append(frame)
                     footprint("three loaded sessions")
                     samples = []
-                    for index in range(124 if same_directory else 28):
+                    event_count = 120 if same_directory else 128
+                    for index in range(warmup_events + event_count):
                         offset = index % 2
                         button = "Page_Up" if offset == 0 else "Page_Down"
                         key = screen.keysym_to_keycode(XK.string_to_keysym(button))
                         ctrl = screen.keysym_to_keycode(XK.string_to_keysym("Control_L"))
-                        if index == 4:
+                        if index == warmup_events:
                             start_cpu = cpu_seconds()
                         start = time.monotonic()
                         xtest.fake_input(screen, X.KeyPress, ctrl)
@@ -301,7 +303,7 @@ def benchmark(binary, workload):
                             if time.monotonic() - start > 2:
                                 raise RuntimeError(f"switch {index} did not repaint the expected session")
                             time.sleep(0.001)
-                        if index >= 4:
+                        if index >= warmup_events:
                             samples.append((time.monotonic() - start) * 1000)
                         time.sleep(0.05)
                     cpu_ms = (cpu_seconds() - start_cpu) * 1000
@@ -360,11 +362,12 @@ def benchmark(binary, workload):
 
                 for mode in ("scroll", "resize"):
                     samples = []
-                    for i in range(36):
-                        if i == 4:
+                    event_count = 128 if mode == "scroll" and workload == "history" else 32
+                    for i in range(warmup_events + event_count):
+                        if i == warmup_events:
                             start_cpu = cpu_seconds()
                         resize = mode == "resize"
-                        before = hashlib.blake2b(pixels(resize), digest_size=8).digest()
+                        before = pixels(resize)
                         start = time.monotonic()
                         if mode == "scroll":
                             button = 4 if i % 12 < 6 else 5
@@ -373,16 +376,18 @@ def benchmark(binary, workload):
                         else:
                             win.configure(width=1030 if i % 2 == 0 else 1100, height=800)
                         screen.flush()
-                        while hashlib.blake2b(pixels(resize), digest_size=8).digest() == before:
+                        while pixels(resize) == before:
                             if time.monotonic() - start > 2:
                                 raise RuntimeError(f"{mode} did not visibly update on event {i}")
                             time.sleep(0.0005)
-                        if i >= 4:
+                        if i >= warmup_events:
                             samples.append(1000 * (time.monotonic() - start))
                         time.sleep(0.045)
                     cpu_ms = (cpu_seconds() - start_cpu) * 1000
+                    p95 = sorted(samples)[(95 * len(samples) + 99) // 100 - 1]
                     print(f"{name} {mode}: median {statistics.median(samples):.1f} ms,"
-                          f" p95 {sorted(samples)[30]:.1f} ms, app CPU {cpu_ms:.0f} ms / 32 events", flush=True)
+                          f" p95 {p95:.1f} ms, app CPU {cpu_ms:.0f} ms / {len(samples)} events",
+                          flush=True)
                 def drag(surface):
                     # Continuous width changes cross text wrapping and PTY column boundaries.
                     # Include the final settle period in CPU accounting.
