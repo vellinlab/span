@@ -541,7 +541,17 @@ impl Browser {
             ("", current) => current,
             (prefix, current) => Some(current.unwrap_or_default().join(prefix)),
         };
-        let Some(Some(directory)) = self.completion_directory(&source, parent) else {
+        let Some(directory) = self.completion_directory(&source, parent.clone()) else {
+            return;
+        };
+        let Some(directory) = directory else {
+            if !name.is_empty() {
+                self.complete_children(
+                    &source,
+                    parent.unwrap_or_default().join(name),
+                    case_insensitive,
+                );
+            }
             return;
         };
         if name.is_empty() {
@@ -569,11 +579,20 @@ impl Browser {
                 Some(Some(children)) => {
                     self.show_path_matches(&children, "", case_insensitive);
                 }
-                Some(None) => self.show_path_matches(&directory, name, case_insensitive),
+                Some(None) => {
+                    self.show_path_matches(&directory, name, case_insensitive);
+                }
                 None => {}
             }
-        } else {
-            self.show_path_matches(&directory, name, case_insensitive);
+        } else if !self.show_path_matches(&directory, name, case_insensitive) {
+            // The displayed directory may have changed since it was opened.
+            self.complete_children(&source, directory.path.join(name), case_insensitive);
+        }
+    }
+
+    fn complete_children(self: &Rc<Self>, source: &Source, path: PathBuf, case_insensitive: bool) {
+        if let Some(Some(children)) = self.completion_directory(source, Some(path)) {
+            self.show_path_matches(&children, "", case_insensitive);
         }
     }
 
@@ -625,7 +644,12 @@ impl Browser {
         None
     }
 
-    fn show_path_matches(&self, directory: &Directory, prefix: &str, case_insensitive: bool) {
+    fn show_path_matches(
+        &self,
+        directory: &Directory,
+        prefix: &str,
+        case_insensitive: bool,
+    ) -> bool {
         for row in self.path_matches.children() {
             self.path_matches.remove(&row);
         }
@@ -666,11 +690,13 @@ impl Browser {
             targets.push(directory.path.join(name));
         }
         self.path_matches.unselect_all();
-        if !targets.is_empty() {
-            self.path_matches
-                .set_width_request(self.path.allocated_width().max(150));
-            self.path_popup.show();
+        if targets.is_empty() {
+            return false;
         }
+        self.path_matches
+            .set_width_request(self.path.allocated_width().max(150));
+        self.path_popup.show();
+        true
     }
 
     fn current_path(&self) -> Option<PathBuf> {
