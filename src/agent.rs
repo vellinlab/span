@@ -32,6 +32,7 @@ mod slash;
 
 const INITIAL_TURNS: usize = 4;
 const OLDER_TURNS: usize = 12;
+const OLDER_RENDER_TURNS: usize = 3;
 const HISTORY_PREFETCH_DISTANCE: f64 = 64.0;
 const CATALOG_FRESHNESS: Duration = Duration::from_secs(20);
 
@@ -79,6 +80,11 @@ impl LiveMessage {
             agent_render::set_markdown(&self.label, &self.text.borrow());
         }
     }
+}
+
+struct ArchivePage {
+    turns: std::vec::IntoIter<Value>,
+    result: Value,
 }
 
 struct ReplyPart {
@@ -162,6 +168,7 @@ pub struct Agent {
     older: gtk::Button,
     history_cursor: RefCell<Option<String>>,
     history_loading: Cell<bool>,
+    archive_page: RefCell<Option<ArchivePage>>,
     history_anchor: RefCell<Option<(gtk::Widget, i32)>>,
     history_generation: Cell<u64>,
     prepend_at: Cell<Option<i32>>,
@@ -501,6 +508,7 @@ impl Agent {
             older,
             history_cursor: RefCell::new(None),
             history_loading: Cell::new(false),
+            archive_page: RefCell::new(None),
             history_anchor: RefCell::new(None),
             history_generation: Cell::new(0),
             prepend_at: Cell::new(None),
@@ -1166,7 +1174,16 @@ impl Agent {
     }
 
     fn load_older_history(&self) {
-        if self.opening.get() || self.history_loading.get() || self.rpc.borrow().is_none() {
+        if self.opening.get()
+            || self.history_loading.get()
+            || self.history_anchor.borrow().is_some()
+            || self.rpc.borrow().is_none()
+        {
+            return;
+        }
+        let cached = self.archive_page.take();
+        if let Some(page) = cached {
+            self.prepend_history_slice(page);
             return;
         }
         if let Some(cursor) = self.history_cursor.borrow().clone() {
@@ -1208,7 +1225,38 @@ impl Agent {
     }
 
     fn load_turns(&self, data: &Value, newest_first: bool, prepend: bool) {
-        let Some(turns) = data.as_array() else { return };
+        if let Some(turns) = data.as_array() {
+            self.load_turn_slice(turns, newest_first, prepend);
+        }
+    }
+
+    fn prepend_history_page(&self, mut result: Value) {
+        let turns = match result.get_mut("data").map(Value::take) {
+            Some(Value::Array(turns)) => turns,
+            _ => Vec::new(),
+        };
+        self.prepend_history_slice(ArchivePage {
+            turns: turns.into_iter(),
+            result,
+        });
+    }
+
+    fn prepend_history_slice(&self, mut page: ArchivePage) {
+        // The server sends newest first. Keep the rest of the response until
+        // the user reaches this slice's top, without another SSH round trip.
+        let turns: Vec<_> = page.turns.by_ref().take(OLDER_RENDER_TURNS).collect();
+        self.load_turn_slice(&turns, true, true);
+        if page.turns.len() == 0 {
+            self.update_history_cursor(&page.result);
+        } else {
+            self.archive_page.replace(Some(page));
+            self.history_loading.set(false);
+            self.older.hide();
+        }
+        self.update_controls();
+    }
+
+    fn load_turn_slice(&self, turns: &[Value], newest_first: bool, prepend: bool) {
         let anchor = if prepend {
             self.prepend_at.set(Some(0));
             self.history.children().into_iter().next().map(|widget| {
@@ -1360,7 +1408,7 @@ impl Agent {
     }
 
     fn receive(self: &Rc<Self>, event: Result<crate::plugin_catalog::Incoming, String>) {
-        let event = match event {
+        let mut event = match event {
             Ok(crate::plugin_catalog::Incoming::Json(event)) => event,
             Ok(crate::plugin_catalog::Incoming::Plugins {
                 id,
@@ -1459,12 +1507,12 @@ impl Agent {
                     _ => {}
                 }
             } else {
-                self.response(request, &event["result"]);
+                self.response(request, &mut event["result"]);
             }
         }
     }
 
-    fn response(&self, request: Request, result: &Value) {
+    fn response(&self, request: Request, result: &mut Value) {
         match request {
             Request::Initialize { browse } => {
                 if let Some(rpc) = self.rpc.borrow().as_ref() {
@@ -1586,9 +1634,13 @@ impl Agent {
                 generation,
             } => {
                 if generation == self.history_generation.get() {
-                    self.load_turns(&result["data"], true, prepend || self.active.get());
-                    self.update_history_cursor(result);
-                    self.update_controls();
+                    if prepend {
+                        self.prepend_history_page(result.take());
+                    } else {
+                        self.load_turns(&result["data"], true, self.active.get());
+                        self.update_history_cursor(result);
+                        self.update_controls();
+                    }
                 }
             }
             Request::Unsubscribe => {}
@@ -1967,6 +2019,7 @@ impl Agent {
         self.questions.borrow_mut().clear();
         self.history_cursor.take();
         self.history_anchor.take();
+        self.archive_page.take();
         self.history_loading.set(false);
         self.client_messages.borrow_mut().clear();
         self.pasting.set(false);
@@ -2004,6 +2057,7 @@ impl Agent {
         self.older.hide();
         self.history_cursor.take();
         self.history_anchor.take();
+        self.archive_page.take();
         self.history_loading.set(false);
         self.thread.take();
         self.turn.take();
