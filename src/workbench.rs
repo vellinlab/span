@@ -427,8 +427,9 @@ impl Workbench {
     }
 
     fn close_session(&self, session: &Rc<Session>) {
+        let catalog = session.existing_catalog();
         session.cancel();
-        if let Some(panel) = session.existing_catalog()
+        if let Some(panel) = catalog
             && panel.parent().as_ref() == Some(self.sidebar_catalog.upcast_ref())
         {
             self.sidebar_catalog.remove(&panel);
