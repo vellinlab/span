@@ -19,6 +19,18 @@ pub struct Context {
     pub socket: Option<crate::ssh::ChannelBuf>,
 }
 
+// Replies with stateful controls stay mounted so scrolling preserves the
+// user's image loads, code and table scroll positions, and diagram controls.
+pub fn can_defer(markdown: &str) -> bool {
+    markdown.len() >= 4 * 1024
+        && !parser(markdown).any(|event| {
+            matches!(
+                event,
+                Event::Start(Tag::Table(_) | Tag::CodeBlock(_) | Tag::Image { .. })
+            )
+        })
+}
+
 pub fn response(
     markdown: &str,
     context: &Context,

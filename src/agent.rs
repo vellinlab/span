@@ -471,7 +471,11 @@ impl Agent {
             activity: RefCell::new(None),
             past_activity: RefCell::new(Vec::new()),
             past_replies: RefCell::new(HashMap::new()),
-            history_window: crate::history_window::HistoryWindow::new(&history, &scroll),
+            history_window: crate::history_window::HistoryWindow::new(
+                &history,
+                &scroll,
+                follow_tail.clone(),
+            ),
             history,
             older,
             history_cursor: RefCell::new(None),
@@ -2502,14 +2506,25 @@ impl Agent {
         let text = limited(text, 256 * 1024);
         let message = column(6);
         message.style_context().add_class("agent-response");
-        message.add(&agent_render::response(
-            &text,
-            &self.context.borrow(),
-            !loading_history,
-            Some(&self.history_window),
-            &self.preview,
-            &self.quote_action(),
-        ));
+        let context = self.context.borrow().clone();
+        let preview = self.preview.clone();
+        let quote = self.quote_action();
+        if loading_history && agent_render::can_defer(&text) {
+            self.history_window
+                .defer_reply(&message, text, move |text, window| {
+                    agent_render::response(text, &context, false, Some(window), &preview, &quote)
+                        .upcast()
+                });
+        } else {
+            message.add(&agent_render::response(
+                &text,
+                &context,
+                !loading_history,
+                Some(&self.history_window),
+                &preview,
+                &quote,
+            ));
+        }
         self.append(&message);
         if let Some(position) = position {
             self.history.reorder_child(&message, position);
