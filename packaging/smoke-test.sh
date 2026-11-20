@@ -6,6 +6,7 @@ app_pid=
 xvfb_pid=
 probe_pid=
 askpass_pid=
+widget_pid=
 cleanup() {
     if [[ $1 != 0 && -f "$test_home/app.log" ]]; then
         cat "$test_home/app.log" >&2
@@ -17,7 +18,7 @@ cleanup() {
             import -window root "$(dirname "$WORKBENCH_PREVIEW")/test-failure.png" || true
         fi
     fi
-    for pid in "$askpass_pid" "$probe_pid" "$app_pid" "$xvfb_pid"; do
+    for pid in "$widget_pid" "$askpass_pid" "$probe_pid" "$app_pid" "$xvfb_pid"; do
         if [[ -n "$pid" ]]; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -145,7 +146,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowfocus --sync "$window"
     first_bash="$(head -n1 "$HOME/bash-ready")"
 
-    widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    widget_socket="$test_home/widgets.sock"
+    /usr/bin/python3 packaging/test-widget.py --serve "$widget_socket" &
+    widget_pid=$!
+    wait_until "the persistent accessibility test client" test -S "$widget_socket"
+    widget() { /usr/bin/python3 packaging/test-widget.py --request "$widget_socket" "$@"; }
     previous_bottom=0
     for action in '显示／隐藏侧栏' '工具栏 · 新建本地终端' '工具栏 · 快速连接' '工具栏 · 插件与连接器'; do
         read -r _ rail_y rail_width rail_height <<< "$(widget bounds "$action")"
