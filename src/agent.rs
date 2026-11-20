@@ -148,6 +148,7 @@ pub struct Agent {
     past_activity: RefCell<Vec<Activity>>,
     past_replies: RefCell<HashMap<String, Vec<Rc<LiveMessage>>>>,
     history: gtk::Box,
+    history_window: Rc<crate::history_window::HistoryWindow>,
     older: gtk::Button,
     history_cursor: RefCell<Option<String>>,
     history_loading: Cell<bool>,
@@ -459,6 +460,7 @@ impl Agent {
             activity: RefCell::new(None),
             past_activity: RefCell::new(Vec::new()),
             past_replies: RefCell::new(HashMap::new()),
+            history_window: crate::history_window::HistoryWindow::new(&history, &scroll),
             history,
             older,
             history_cursor: RefCell::new(None),
@@ -1906,6 +1908,7 @@ impl Agent {
     }
 
     fn clear_history(&self) {
+        self.history_window.clear();
         self.reset_slash_state();
         self.goal_pending.set(false);
         self.goal.hide();
@@ -2536,6 +2539,7 @@ impl Agent {
             &text,
             &self.context.borrow(),
             !loading_history,
+            Some(&self.history_window),
             &self.preview,
             &self.quote_action(),
         ));

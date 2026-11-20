@@ -309,6 +309,9 @@ impl TextSelection {
         let mut closest = None;
         let mut distance = i32::MAX;
         for (index, part) in self.parts().iter().enumerate() {
+            if !part.label.is_mapped() {
+                continue;
+            }
             let Some((left, top)) = part.label.translate_coordinates(self, 0, 0) else {
                 continue;
             };

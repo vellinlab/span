@@ -23,6 +23,7 @@ pub fn response(
     markdown: &str,
     context: &Context,
     live: bool,
+    window: Option<&Rc<crate::history_window::HistoryWindow>>,
     preview: &Offer,
     quote: &quote::Action,
 ) -> TextSelection {
@@ -162,6 +163,9 @@ pub fn response(
             actions.add(&artifact_button(artifact, preview.clone()));
         }
         blocks.add(&actions);
+    }
+    if let Some(window) = window {
+        window.group(&blocks);
     }
     TextSelection::new(&blocks, selectable, quote)
 }

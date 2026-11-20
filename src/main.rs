@@ -16,6 +16,7 @@ mod agent_task;
 mod agent_usage;
 mod browser;
 mod files;
+mod history_window;
 mod host_dialog;
 mod hosts;
 mod icons;

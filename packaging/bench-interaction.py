@@ -97,6 +97,32 @@ def benchmark(binary):
                     cpu_ms = (ticks() - start_cpu) * 1000 / os.sysconf("SC_CLK_TCK")
                     print(f"{Path(binary).parent.name} {mode}: median {statistics.median(samples):.1f} ms,"
                           f" p95 {sorted(samples)[30]:.1f} ms, app CPU {cpu_ms:.0f} ms / 32 events", flush=True)
+                def drag(surface):
+                    # Continuous width changes cross text wrapping and PTY column boundaries.
+                    # Include the final settle period in CPU accounting.
+                    begin = ticks()
+                    start = time.monotonic()
+                    for frame in range(160):
+                        phase = frame % 80
+                        width = 1050 + 3 * min(phase, 80 - phase)
+                        win.configure(width=width, height=800)
+                        screen.flush()
+                        time.sleep(max(0, start + (frame + 1) / 60 - time.monotonic()))
+                    screen.sync()
+                    time.sleep(0.35)
+                    assert win.get_geometry().width == width
+                    cost = (ticks() - begin) * 1000 / os.sysconf("SC_CLK_TCK")
+                    print(f"{Path(binary).parent.name} {surface} continuous resize: "
+                          f"app CPU {cost:.0f} ms / 160 events", flush=True)
+
+                drag("conversation")
+                xdo("key", "ctrl+shift+a")
+                time.sleep(0.25)
+                xdo("type", """seq 1 3000 | awk '{printf "%06d %0160d\\n", $1, $1}'; touch ~/bench-terminal-ready""")
+                xdo("key", "Return")
+                until(lambda: (home / "bench-terminal-ready").exists())
+                time.sleep(0.4)
+                drag("terminal")
             finally:
                 app.terminate()
                 app.wait(timeout=5)

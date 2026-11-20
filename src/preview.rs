@@ -470,7 +470,7 @@ impl Panel {
                         panel.offer(&session, artifact, automatic);
                     }
                 });
-                let view = agent_render::response(&text, &context, false, &offer, &quote);
+                let view = agent_render::response(&text, &context, false, None, &offer, &quote);
                 view.style_context().add_class("agent-response");
                 view.set_valign(gtk::Align::Start);
                 view.set_margin_start(12);
