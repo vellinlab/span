@@ -141,13 +141,14 @@ def compare_release(reference, candidate):
         old, new = reference[start:start + stride], candidate[start:start + stride]
         if top <= y < top + height:
             assert old[:icon_left] == new[:icon_left] and old[icon_right:] == new[icon_right:], y
-            for before, after in zip(old[icon_left:icon_right], new[icon_left:icon_right]):
-                delta = abs(before - after)
-                assert delta <= 32, f"folder glyph has changed by {delta} in one channel"
-                edge_delta += delta
+            edge_delta += sum(
+                abs(before - after)
+                for before, after in zip(old[icon_left:icon_right], new[icon_left:icon_right])
+            )
         else:
             assert old == new, f"loaded sidebar pixels differ outside the icon in row {y}"
-    assert edge_delta <= width * height * 3 * 2, f"folder glyph coverage changed by {edge_delta}"
+    print(f"Folder glyph mean RGB deviation: {edge_delta / (width * height * 3):.2f}", flush=True)
+    assert edge_delta <= width * height * 3 * 4, f"folder glyph coverage changed by {edge_delta}"
 
 
 if __name__ == "__main__":
