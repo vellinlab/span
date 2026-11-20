@@ -544,6 +544,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
 name = "gobject-sys"
 version = "0.22.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1098,12 +1104,13 @@ checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
 
 [[package]]
 name = "span"
-version = "0.1.0-rc.17"
+version = "0.1.0-rc.18"
 dependencies = [
  "alacritty_terminal",
  "async-tungstenite",
  "futures-channel",
  "futures-util",
+ "glob",
  "gtk",
  "pangocairo",
  "pulldown-cmark",

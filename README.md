@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/vellinlab/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.17-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-rc.18-1.el8.x86_64.rpm
 span
 ```
 
@@ -22,7 +22,7 @@ CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下
 从同一个 Release 下载 `.deb` 文件。
 
 ```sh
-sudo apt install ./span_0.1.0-rc.17_amd64.deb
+sudo apt install ./span_0.1.0-rc.18_amd64.deb
 span
 ```
 
@@ -42,6 +42,7 @@ span
 
 - 启动后进入本地终端。Linux 默认使用 Bash，Windows 默认使用 PowerShell。标签栏的「+」打开另一个本地终端，标签可拖动排序。
 - 主机栏的「+」添加配置，点击主机打开 SSH 标签，「…」菜单提供编辑和删除。配置保存在 `$XDG_CONFIG_HOME/ssh-workbench/hosts.ini`，通常是 `~/.config/ssh-workbench/hosts.ini`。
+- 全新安装的主机列表为空。可以用「主机 → 导入 SSH 配置」勾选本机 `~/.ssh/config` 和它引用的配置文件中的主机别名。仅保存选中的别名，已有条目的名称和 X11 设置会保留。
 - 「会话 → 快速连接」适合临时连接。SSH 目标可填 OpenSSH 别名或 `user@host`。系统 OpenSSH 读取现有配置、代理和认证设置。
 - Linux 下，为可信主机开启「信任 X11 转发」后，应用使用 `ssh -Y` 和当前标签的专用控制套接字。连接后在远端 Codex 中按 `Ctrl+V` 附上本机截图。
 - 文字复制和粘贴使用 `Ctrl+Shift+C` 和 `Ctrl+Shift+V`。用 `Ctrl+Shift+T` 新建本地标签，`Ctrl+Shift+W` 关闭当前标签。

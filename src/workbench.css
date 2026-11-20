@@ -1,16 +1,16 @@
-@define-color canvas #191a1a;
-@define-color terminal #151616;
-@define-color sidebar #202222;
-@define-color chrome #262828;
-@define-color line #303333;
-@define-color surface #2b2d2d;
-@define-color hover #343737;
-@define-color selection #293b3b;
-@define-color foreground #ebedeb;
-@define-color muted #a9b0ad;
-@define-color accent #9bcac6;
-@define-color editor #171919;
-@define-color composer #272a2a;
+@define-color canvas #1b1b22;
+@define-color terminal #171820;
+@define-color sidebar #202129;
+@define-color chrome #252631;
+@define-color line #333541;
+@define-color surface #2b2d39;
+@define-color hover #343747;
+@define-color selection #303b59;
+@define-color foreground #ebeef6;
+@define-color muted #adb2c3;
+@define-color accent #a0bfff;
+@define-color editor #191a21;
+@define-color composer #272a36;
 
 window.workbench,
 .workbench stack {
@@ -28,7 +28,7 @@ popover.files-path-popup {
 }
 
 .workbench .terminal-page {
-    background-color: #15191c;
+    background-color: @terminal;
     color: @foreground;
 }
 
@@ -52,8 +52,8 @@ popover.files-path-popup {
 
 .workbench-header {
     min-height: 37px;
-    background: linear-gradient(to bottom, #232929, #1e2223);
-    border-bottom-color: #313737;
+    background: linear-gradient(to bottom, #272837, #20212c);
+    border-bottom-color: @line;
     box-shadow: inset 0 1px alpha(@foreground, 0.04);
 }
 
@@ -172,8 +172,8 @@ button.agent-send:disabled {
 
 .tool-rail {
     padding: 11px 7px;
-    background: linear-gradient(to bottom, #212627, #1b1e1e 54%, #231f21);
-    border-right: 1px solid #2d3231;
+    background: linear-gradient(to bottom, #222433, #1c1d27 54%, #22212c);
+    border-right: 1px solid @line;
     box-shadow: inset 1px 0 alpha(@foreground, 0.035);
 }
 
@@ -184,22 +184,22 @@ button.agent-send:disabled {
     border-color: transparent;
     border-radius: 10px;
     background: transparent;
-    color: #b1b9b6;
+    color: @muted;
 }
 
 .workbench button.rail-button:hover {
-    background: #292f2e;
+    background: @surface;
     color: @foreground;
 }
 
 .workbench button.rail-button:checked {
-    background: #293b39;
-    border-color: #39534e;
+    background: @selection;
+    border-color: #46567e;
     color: @accent;
 }
 
 .workbench button.rail-button:checked:hover {
-    background: #334744;
+    background: #384665;
 }
 
 .workbench button.rail-button:focus {
@@ -233,8 +233,8 @@ button.agent-send:disabled {
 }
 
 .workbench .sidebar-tabs button:checked {
-    background: #2b302f;
-    border-color: #373d3b;
+    background: @surface;
+    border-color: @line;
     color: @foreground;
     font-weight: 500;
 }
@@ -309,7 +309,7 @@ button.agent-send:disabled {
     padding: 6px;
     border-radius: 8px;
     color: @accent;
-    background: #2a312f;
+    background: @selection;
 }
 
 .host-name {
@@ -349,7 +349,7 @@ button.agent-send:disabled {
 .terminal-tabs > header > tabs > tab {
     margin: 0 2px;
     padding: 0 8px;
-    min-height: 29px;
+    min-height: 33px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 7px;
@@ -368,19 +368,23 @@ button.agent-send:disabled {
 }
 
 .tab-title {
-    font-size: 12px;
+    font-size: 14px;
 }
 
-.session-dot {
-    font-size: 8px;
-    color: #7f8da3;
+.tab-status-dot {
+    border-radius: 4px;
+    background-color: #747b91;
 }
 
-.session-running {
-    color: #83cb9b;
+.tab-status-dot.session-running {
+    background-color: #82d5a9;
 }
 
-.session-failed, .form-error {
+.tab-status-dot.session-failed {
+    background-color: #ff9ca3;
+}
+
+.form-error {
     color: #ff9ca3;
 }
 
@@ -725,10 +729,10 @@ popover.selection-quote button:hover {
 }
 
 .agent-drawer-header {
-    background: linear-gradient(to bottom, #232b2c, #1c2224);
+    background: linear-gradient(to bottom, #272939, #20222d);
     color: @foreground;
-    border-top: 1px solid #3c4c4e;
-    border-bottom: 1px solid #313b3c;
+    border-top: 1px solid #3a4058;
+    border-bottom: 1px solid @line;
     padding: 4px 11px;
 }
 
@@ -739,7 +743,7 @@ popover.selection-quote button:hover {
 .drawer-target {
     margin-left: 3px;
     padding-left: 10px;
-    border-left: 1px solid #364142;
+    border-left: 1px solid @line;
     color: @muted;
     font-size: 12px;
 }
@@ -747,12 +751,12 @@ popover.selection-quote button:hover {
 .workbench .drawer-picker button {
     min-height: 24px;
     padding: 0 7px;
-    background: #293334;
-    border-color: #404d4f;
+    background: @surface;
+    border-color: @line;
 }
 
 .workbench .drawer-picker button:hover {
-    background: #344244;
+    background: @hover;
 }
 
 .agent-settings {
@@ -949,7 +953,7 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 
 .workbench .agent-code-view text selection,
 .workbench .source-preview textview text selection {
-    background: #34514f;
+    background: #384c76;
     color: #fff;
 }
 
@@ -988,16 +992,16 @@ scrolledwindow.agent-scroll > scrollbar.vertical slider,
 .workbench .agent-response button.agent-source-link {
     min-height: 24px;
     padding: 1px 8px;
-    border: 1px solid #383d3b;
+    border: 1px solid @line;
     border-radius: 6px;
-    background: #242827;
-    color: #cbd2cf;
+    background: @chrome;
+    color: @muted;
     font-size: 13px;
     outline-width: 0;
 }
 
 .workbench .agent-response button.agent-source-link:hover {
-    background: #303735;
+    background: @hover;
     color: @foreground;
 }
 
@@ -1042,13 +1046,13 @@ scrolledwindow.agent-table-scroll {
 
 .agent-compose-card {
     background: @composer;
-    border: 1px solid #383d3c;
+    border: 1px solid @line;
     border-radius: 16px;
     padding: 7px 10px 9px;
 }
 
 .agent-compose-card.composer-focused {
-    border-color: #5a7873;
+    border-color: #6478a5;
 }
 
 .agent-compose-placeholder {
@@ -1067,8 +1071,8 @@ scrolledwindow.agent-table-scroll {
 }
 
 .draft-quote {
-    background: #303636;
-    border: 1px solid #414a49;
+    background: @surface;
+    border: 1px solid #3d435a;
     border-left: 2px solid @accent;
     border-radius: 7px;
     padding: 3px 6px 3px 9px;
@@ -1223,7 +1227,7 @@ label.agent-markdown link:visited {
 }
 
 label.agent-markdown link:hover {
-    color: #c1e4de;
+    color: #d4e0ff;
 }
 
 .workbench stack.agent-primary-icons {
@@ -1244,12 +1248,12 @@ label.agent-markdown link:hover {
     border-radius: 8px;
     border-color: transparent;
     background: transparent;
-    color: #b2beb9;
+    color: @muted;
 }
 
 .agent-controls button.usage-meter:hover {
-    background: #373c3a;
-    color: #e1ece6;
+    background: @hover;
+    color: @foreground;
 }
 
 .agent-controls button.usage-meter:focus {
@@ -1257,13 +1261,13 @@ label.agent-markdown link:hover {
 }
 
 .agent-controls button.usage-meter:disabled {
-    color: #737a77;
+    color: #777d91;
 }
 
 .agent-usage-popover {
-    background: #262a29;
+    background: @chrome;
     color: @foreground;
-    border: 1px solid #3b4240;
+    border: 1px solid @line;
     border-radius: 12px;
 }
 
@@ -1272,8 +1276,8 @@ label.agent-markdown link:hover {
 }
 
 tooltip.background {
-    background: #262a29;
-    border: 1px solid #3b4240;
+    background: @chrome;
+    border: 1px solid @line;
     border-radius: 8px;
     color: @foreground;
 }

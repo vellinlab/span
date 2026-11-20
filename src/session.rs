@@ -69,7 +69,7 @@ pub struct Session {
     pub launch: Launch,
     pub page: gtk::Stack,
     pub terminal: Terminal,
-    pub indicator: gtk::Label,
+    pub indicator: gtk::Box,
     pub state: Cell<State>,
     pub directory: RefCell<Option<PathBuf>>,
     cancellable: gio::Cancellable,
@@ -104,8 +104,14 @@ impl Session {
         page.set_homogeneous(false);
         page.add_named(&scroll, "terminal");
 
-        let indicator = gtk::Label::new(Some("●"));
-        indicator.style_context().add_class("session-dot");
+        let indicator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        indicator.set_size_request(8, 8);
+        indicator.set_valign(gtk::Align::Center);
+        indicator.style_context().add_class("tab-status-dot");
+        if let Some(accessible) = indicator.accessible() {
+            accessible.set_name("终端状态");
+            accessible.set_description("正在启动");
+        }
         let control = new_control_socket(&launch);
         Rc::new(Self {
             launch,
@@ -550,7 +556,6 @@ impl Session {
         if let Some(view) = self.agent_view.borrow().as_ref() {
             for shell in view.extra_shells.take() {
                 shell.cancellable.cancel();
-                view.tabs.remove(&shell.page);
             }
         }
         self.stop_watching();
@@ -601,11 +606,18 @@ impl Session {
         let style = self.indicator.style_context();
         style.remove_class("session-running");
         style.remove_class("session-failed");
-        match state {
-            State::Running => style.add_class("session-running"),
-            State::Failed => style.add_class("session-failed"),
-            State::Exited(status) if status != 0 => style.add_class("session-failed"),
-            _ => {}
+        let (class, description) = match state {
+            State::Running => ("session-running", "运行中"),
+            State::Failed => ("session-failed", "启动失败"),
+            State::Exited(code) if code != 0 => ("session-failed", "异常退出"),
+            State::Exited(_) => ("", "已退出"),
+            State::Starting => ("", "正在启动"),
+        };
+        if !class.is_empty() {
+            style.add_class(class);
+        }
+        if let Some(accessible) = self.indicator.accessible() {
+            accessible.set_description(description);
         }
         if state.can_restart() {
             self.terminal.set_input_enabled(false);

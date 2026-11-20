@@ -1,6 +1,6 @@
 [package]
 name = "span"
-version = "0.1.0-rc.17"
+version = "0.1.0-rc.18"
 edition = "2024"
 description = "A desktop terminal for local shells and OpenSSH sessions"
 
@@ -8,6 +8,7 @@ description = "A desktop terminal for local shells and OpenSSH sessions"
 async-tungstenite = "0.35"
 futures-channel = "0.3"
 futures-util = { version = "0.3", features = ["io", "sink"] }
+glob = "0.3"
 gtk = "0.19"
 pangocairo = "0.22"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

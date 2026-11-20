@@ -29,6 +29,7 @@ struct Workbench {
     sessions: RefCell<Vec<Rc<Session>>>,
     profile_path: PathBuf,
     hosts: RefCell<Vec<Host>>,
+    import_pending: Cell<bool>,
     load_error: Option<String>,
 }
 
@@ -138,6 +139,7 @@ pub fn open(app: &gtk::Application) {
         sessions: RefCell::new(Vec::new()),
         profile_path,
         hosts: RefCell::new(hosts),
+        import_pending: Cell::new(false),
         load_error,
     });
 
@@ -153,6 +155,7 @@ pub fn open(app: &gtk::Application) {
             Workbench::quick_connect,
         ),
         ("add-host", &["<Primary><Shift>n"][..], Workbench::add_host),
+        ("import-hosts", &[][..], Workbench::import_hosts),
         (
             "close",
             &["<Primary><Shift>w"][..],
@@ -233,9 +236,15 @@ pub fn open(app: &gtk::Application) {
             }
         }
     });
+    window.connect_delete_event(|window, _| {
+        // Unmap the window before destroying terminal widgets and their child processes.
+        window.hide();
+        window.display().flush();
+        glib::Propagation::Proceed
+    });
     let shutdown = workbench.clone();
     window.connect_destroy(move |_| {
-        for session in shutdown.sessions.borrow().iter() {
+        for session in shutdown.sessions.take() {
             session.cancel();
         }
     });
@@ -322,11 +331,11 @@ impl Workbench {
             .create_pango_layout(Some(session.launch.label()))
             .pixel_size()
             .0;
-        label.set_width_request(title_width.clamp(64, 160));
+        label.set_width_request(title_width.clamp(68, 176));
         tab.set_tooltip_text(Some(&session.launch.description()));
         let page = session.page.downgrade();
         let terminal_icon = session.launch.icon();
-        let mode_icon = icons::changing_widget(14, move || {
+        let mode_icon = icons::changing_widget(16, move || {
             if page
                 .upgrade()
                 .is_some_and(|page| page.visible_child_name().as_deref() == Some("agent"))
@@ -593,6 +602,68 @@ impl Workbench {
         self.edit_host(None);
     }
 
+    fn import_hosts(self: &Rc<Self>) {
+        if let Some(error) = &self.load_error {
+            self.report_error("无法导入主机", error);
+            return;
+        }
+        if self.import_pending.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::MainContext::default().spawn_local(async move {
+            let result = gio::spawn_blocking(|| hosts::ssh_aliases(&glib::home_dir())).await;
+            let Some(workbench) = weak.upgrade() else {
+                return;
+            };
+            if !workbench
+                .window
+                .upgrade()
+                .is_some_and(|window| window.is_visible())
+            {
+                return;
+            }
+            match result {
+                Ok(Ok(aliases)) => workbench.choose_hosts_to_import(aliases),
+                Ok(Err(error)) => workbench.report_error("无法读取 SSH 配置", &error),
+                Err(_) => workbench.report_error("无法读取 SSH 配置", "读取操作意外终止。"),
+            }
+            workbench.import_pending.set(false);
+        });
+    }
+
+    fn choose_hosts_to_import(self: &Rc<Self>, mut candidates: Vec<Host>) {
+        let Some(parent) = self.window.upgrade() else {
+            return;
+        };
+        let found_aliases = !candidates.is_empty();
+        let already_saved = |host: &Host| {
+            self.hosts
+                .borrow()
+                .iter()
+                .any(|saved| saved.target.eq_ignore_ascii_case(&host.target))
+        };
+        candidates.retain(|host| !already_saved(host));
+        let hint = if !found_aliases {
+            "在 ~/.ssh/config 中没有找到可导入的主机别名。"
+        } else if candidates.is_empty() {
+            "可导入的 SSH 主机已在 Span 主机列表中。"
+        } else {
+            "勾选要添加到 Span 的主机。连接时由 OpenSSH 读取本机配置和认证设置。"
+        };
+        if host_dialog::import(&parent, &candidates, hint, |mut selected| {
+            selected.retain(|host| !already_saved(host));
+            let mut next = self.hosts.borrow().clone();
+            next.extend(selected);
+            hosts::save(&self.profile_path, &next).map_err(|error| format!("保存失败：{error}"))?;
+            self.hosts.replace(next);
+            Ok(())
+        }) {
+            self.search.set_text("");
+            self.rebuild_hosts();
+        }
+    }
+
     fn edit_host(self: &Rc<Self>, index: Option<usize>) {
         if let Some(error) = &self.load_error {
             self.report_error("主机列表无法编辑", error);
@@ -785,7 +856,13 @@ fn titlebar(window: &gtk::ApplicationWindow) -> gtk::HeaderBar {
                 ("关闭标签", "close"),
             ][..],
         ),
-        ("主机", &[("添加主机…", "add-host")][..]),
+        (
+            "主机",
+            &[
+                ("添加主机…", "add-host"),
+                ("导入 SSH 配置…", "import-hosts"),
+            ][..],
+        ),
         ("编辑", &[("复制", "copy"), ("粘贴", "paste")][..]),
         (
             "视图",
@@ -874,6 +951,9 @@ fn host_sidebar() -> (gtk::Box, gtk::SearchEntry, gtk::Box) {
     let add = icon_button(Icon::Plus, "添加主机 (Ctrl+Shift+N)");
     add.set_action_name(Some("win.add-host"));
     heading.pack_end(&add, false, false, 0);
+    let import = icon_button(Icon::Download, "导入 SSH 配置");
+    import.set_action_name(Some("win.import-hosts"));
+    heading.pack_end(&import, false, false, 0);
     sidebar.pack_start(&heading, false, false, 0);
 
     let search = gtk::SearchEntry::builder()

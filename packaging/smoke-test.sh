@@ -49,6 +49,17 @@ name=Legacy CI host
 target=legacy-ci-host
 trusted-x11=true
 HOSTS
+    mkdir -p "$HOME/.ssh/conf.d"
+    cat > "$HOME/.ssh/config" <<'SSH_CONFIG'
+Host imported-dev not-selected
+    HostName example.invalid
+Host LEGACY-CI-HOST
+    HostName existing.example.invalid
+Host *.invalid !pattern-exclusion
+    User fixture
+Include conf.d/*.conf
+SSH_CONFIG
+    printf '%s\n' 'Host=included-dev' > "$HOME/.ssh/conf.d/extra.conf"
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
     mkdir -p "$XDG_DATA_HOME/applications"
     cat > "$HOME/bin/span-test-open-link" <<'SCRIPT'
@@ -135,6 +146,8 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     first_bash="$(head -n1 "$HOME/bash-ready")"
 
     widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    read -r _ _ dot_width dot_height <<< "$(widget bounds '终端状态')"
+    ((dot_width == 8 && dot_height == 8))
     previous_bottom=0
     for action in '显示／隐藏侧栏' '工具栏 · 新建本地终端' '工具栏 · 快速连接'; do
         read -r _ rail_y rail_width rail_height <<< "$(widget bounds "$action")"
@@ -198,6 +211,24 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     grep -qx 'trusted-x11=false' "$profile"
 
     xdotool windowfocus --sync "$window"
+    widget mouse '导入 SSH 配置'
+    wait_until "the optional OpenSSH import dialog" dialog_open '导入 OpenSSH 主机'
+    SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget not-state '导入所选' sensitive
+    SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget bounds 'not-selected' >/dev/null
+    [[ $(SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget count 'LEGACY-CI-HOST') == 0 ]]
+    [[ $(SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget count '*.invalid') == 0 ]]
+    grep -q '^target=imported-dev$' "$profile" && exit 1
+    SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget mouse 'imported-dev'
+    SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget mouse 'included-dev'
+    SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget mouse '导入所选'
+    wait_until "the selected alias persisted" grep -qsx 'target=imported-dev' "$profile"
+    grep -qx 'target=included-dev' "$profile"
+    grep -qx 'name=Legacy CI host' "$profile"
+    grep -qx 'trusted-x11=true' "$profile"
+    grep -q '^target=not-selected$' "$profile" && exit 1
+    widget bounds 'included-dev' >/dev/null
+    printf '%s\n' 'OpenSSH import saved only the selected aliases, resolved Include files, and kept the existing profile.'
+
     xdotool mousemove 1250 770
     files_open="$(widget count '文件目录')"
     if ((files_open)); then
@@ -899,4 +930,27 @@ PY
         printf '%s\n' 'Span used the remote shared Codex socket, received external turn events and reopened the same session after SSH reconnect.'
         printf '%s\n' 'Picker files, model and effort overrides, token and account usage, and remote attachment uploads passed.'
     fi
+
+    read -r close_x close_y close_width close_height <<< "$(widget bounds 'Close')"
+    python3 - "$window" "$((close_x + close_width / 2))" "$((close_y + close_height / 2))" <<'PY'
+import subprocess
+import sys
+import time
+
+window, x, y = sys.argv[1:]
+started = time.monotonic()
+subprocess.run(["xdotool", "mousemove", x, y, "click", "1"], check=True)
+while time.monotonic() - started < 1.0:
+    result = subprocess.run(["xwininfo", "-id", window], capture_output=True, text=True)
+    if result.returncode != 0 or "IsViewable" not in result.stdout:
+        print(f"The close button hid Span in {round((time.monotonic() - started) * 1000)} ms.")
+        break
+    time.sleep(0.02)
+else:
+    sys.exit("The Span window remained visible for at least one second after clicking Close.")
+PY
+    app_exited() { ! kill -0 "$app_pid" 2>/dev/null; }
+    wait_until "graceful termination after the window closed" app_exited
+    wait "$app_pid"
+    app_pid=
 fi

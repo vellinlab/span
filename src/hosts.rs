@@ -1,5 +1,7 @@
 use gtk::glib;
+use std::collections::HashSet;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,12 +40,98 @@ pub fn path() -> PathBuf {
 pub fn load(path: &Path) -> Result<Vec<Host>, String> {
     let data = match fs::read_to_string(path) {
         Ok(data) => data,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(vec![Host::new("东京", "tokyo", false).unwrap()]);
-        }
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error.to_string()),
     };
     decode(&data)
+}
+
+pub fn ssh_aliases(home: &Path) -> Result<Vec<Host>, String> {
+    let directory = home.join(".ssh");
+    let mut hosts = Vec::new();
+    read_ssh_config(
+        &directory.join("config"),
+        &directory,
+        home,
+        0,
+        &mut HashSet::new(),
+        &mut hosts,
+    )?;
+    let mut seen = HashSet::new();
+    hosts.retain(|host| seen.insert(host.target.to_ascii_lowercase()));
+    Ok(hosts)
+}
+
+fn read_ssh_config(
+    path: &Path,
+    directory: &Path,
+    home: &Path,
+    depth: usize,
+    visited: &mut HashSet<PathBuf>,
+    hosts: &mut Vec<Host>,
+) -> Result<(), String> {
+    if depth >= 16 {
+        return Err(format!("SSH 配置的 Include 嵌套过深：{}", path.display()));
+    }
+    let resolved = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("{}：{error}", path.display())),
+    };
+    if !resolved.is_file() || !visited.insert(resolved.clone()) {
+        return Ok(());
+    }
+    let config =
+        fs::read_to_string(resolved).map_err(|error| format!("{}：{error}", path.display()))?;
+    for line in config.lines().map(str::trim_start) {
+        let end = line
+            .find(|c: char| c.is_ascii_whitespace() || c == '=')
+            .unwrap_or(line.len());
+        let (key, rest) = line.split_at(end);
+        let is_host = key.eq_ignore_ascii_case("host");
+        if !is_host && !key.eq_ignore_ascii_case("include") {
+            continue;
+        }
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix('=').unwrap_or(rest);
+        let Ok(arguments) = glib::shell_parse_argv(rest) else {
+            continue;
+        };
+        for value in arguments.iter().filter_map(|arg| arg.to_str()) {
+            if is_host {
+                if !value.starts_with('!') && !value.contains(['*', '?', '/', '\\', '@']) {
+                    hosts.extend(Host::new("", value, false).ok());
+                }
+            } else {
+                let pattern = if let Some(relative) = value.strip_prefix("~/") {
+                    format!(
+                        "{}/{relative}",
+                        glob::Pattern::escape(&home.to_string_lossy())
+                    )
+                } else if Path::new(value).is_absolute() {
+                    value.to_owned()
+                } else {
+                    format!(
+                        "{}/{value}",
+                        glob::Pattern::escape(&directory.to_string_lossy())
+                    )
+                };
+                let paths = glob::glob_with(
+                    &pattern,
+                    glob::MatchOptions {
+                        require_literal_leading_dot: true,
+                        ..glob::MatchOptions::new()
+                    },
+                )
+                .map_err(|error| format!("{}：{error}", path.display()))?;
+                for included in paths {
+                    let included = included.map_err(|error| error.to_string())?;
+                    read_ssh_config(&included, directory, home, depth + 1, visited, hosts)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn decode(data: &str) -> Result<Vec<Host>, String> {
@@ -89,6 +177,12 @@ fn encode(hosts: &[Host]) -> glib::GString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_profile_starts_with_no_hosts() {
+        let nonexistent = std::env::temp_dir().join(glib::uuid_string_random().as_str());
+        assert!(load(&nonexistent).unwrap().is_empty());
+    }
 
     #[test]
     fn hosts_keep_order_names_and_x11_settings() {
