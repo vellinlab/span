@@ -388,11 +388,14 @@ for line in sys.stdin:
             image_turn = "image-benchmark-turn"
             event = {"threadId": thread, "turnId": image_turn}
             send({"id": request_id, "result": {"turn": {"id": image_turn, "status": "inProgress"}}})
-            text = "\n\n".join(f"![Image {i}](bench-image-{i}.png)" for i in range(3))
+            # A dot directory permits inline Markdown images without opening
+            # the independent generated-artifact panel.
+            text = "\n\n".join(f"![Image {i}](.bench-images/preview-{i}.png)" for i in range(3))
             send({"method": "item/completed", "params": {**event, "item": {
                 "id": "image-benchmark", "type": "agentMessage", "text": text}}})
             send({"method": "turn/completed", "params": {
                 **event, "turn": {"id": image_turn, "status": "completed"}}})
+            (home / "bench-images-dispatched").touch()
             continue
         if message in ("Plan this update", "Back to normal"):
             assert shared and params["threadId"] == saved_thread

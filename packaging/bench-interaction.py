@@ -65,8 +65,9 @@ def benchmark(binary, workload):
         shutil.copy2("packaging/test-agent.py", home / "bin/codex")
         (home / "bin/codex").chmod(0o755)
         if workload == "images":
+            (home / ".bench-images").mkdir()
             for i, color in enumerate(IMAGE_COLORS):
-                write_image(home / f"bench-image-{i}.png", color)
+                write_image(home / ".bench-images" / f"preview-{i}.png", color)
         env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory, CODEX_HOME=directory,
                    PATH=str(home / "bin") + ":" + os.environ["PATH"],
                    SPAN_BENCH_HISTORY=str(int(workload == "history")),
@@ -130,10 +131,18 @@ def benchmark(binary, workload):
                     markers = tuple(bytes((blue, green, red, unused)) * 8 for unused in (0, 255))
 
                     def last_image_painted():
-                        data = win.get_image(285, 125, 450, 460, X.ZPixmap, 0xffffffff).data
+                        data = win.get_image(265, 75, 785, 625, X.ZPixmap, 0xffffffff).data
                         return any(marker in data for marker in markers)
 
-                    until(last_image_painted)
+                    try:
+                        until(last_image_painted)
+                    except RuntimeError:
+                        print("Image response sent by fixture:",
+                              (home / "bench-images-dispatched").exists(), flush=True)
+                        Path("dist").mkdir(exist_ok=True)
+                        subprocess.run(["import", "-window", str(wid), "dist/test-failure.png"],
+                                       check=False)
+                        raise
                     first_visible = (time.monotonic() - start) * 1000
                     time.sleep(max(0, start + 1.25 - time.monotonic()))
                     cpu_ms = (cpu_seconds() - before_cpu) * 1000
