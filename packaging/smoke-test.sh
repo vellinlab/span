@@ -539,7 +539,7 @@ SVG
     timeline_wheel 4 16
     sleep 0.2
     widget contains 'Deployment checklist'
-    widget mouse 'Build documentation'
+    widget mouse-text 'Build documentation'
     wait_until "opening the clicked Markdown link" grep -qFx 'https://example.invalid/span/docs?from=agent&view=build' "$HOME/span-opened-link"
     widget mouse-text 'GitHub 发布说明'
     wait_until "opening a Markdown link after Chinese text" grep -qFx 'https://example.invalid/span/notes?lang=zh&view=full' "$HOME/span-opened-link"
