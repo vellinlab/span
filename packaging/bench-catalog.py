@@ -1,7 +1,6 @@
 """Compare session catalog pagination with real button presses on one X11 runner."""
 
 import ctypes
-import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +17,10 @@ from Xlib import X, display
 
 screen = display.Display()
 context = GLib.MainContext.default()
+CAPTURE_WIDTH = 184
+CAPTURE_HEIGHT = 455
+# The 14×14 folder glyph in the first project heading in this fixture.
+FOLDER_ICON = (28, 63, 14, 14)
 
 
 def wait(check, stage):
@@ -123,10 +126,36 @@ def exercise(home, pid, name):
           f" app CPU {sum(costs):.0f} ms / 8 pages,"
           f" final four pages {sum(costs[-4:]):.0f} ms", flush=True)
     win = screen.create_resource_object("window", window)
-    pixels = win.get_image(48, 168, 184, 455, X.ZPixmap, 0xffffffff).data
-    return hashlib.sha256(pixels).hexdigest()
+    return win.get_image(48, 168, CAPTURE_WIDTH, CAPTURE_HEIGHT, X.ZPixmap, 0xffffffff).data
+
+
+def compare_release(reference, candidate):
+    # The cached Cairo mask rounds edge coverage slightly differently from
+    # rc.26's direct icon strokes. Keep all row, text and background pixels exact.
+    left, top, width, height = FOLDER_ICON
+    stride = CAPTURE_WIDTH * 4
+    icon_left, icon_right = left * 4, (left + width) * 4
+    edge_delta = 0
+    for y in range(CAPTURE_HEIGHT):
+        start = y * stride
+        old, new = reference[start:start + stride], candidate[start:start + stride]
+        if top <= y < top + height:
+            assert old[:icon_left] == new[:icon_left] and old[icon_right:] == new[icon_right:], y
+            for before, after in zip(old[icon_left:icon_right], new[icon_left:icon_right]):
+                delta = abs(before - after)
+                assert delta <= 32, f"folder glyph has changed by {delta} in one channel"
+                edge_delta += delta
+        else:
+            assert old == new, f"loaded sidebar pixels differ outside the icon in row {y}"
+    assert edge_delta <= width * height * 3 * 2, f"folder glyph coverage changed by {edge_delta}"
 
 
 if __name__ == "__main__":
-    captures = {benchmark(binary) for binary in sys.argv[1:]}
-    assert len(captures) == 1, f"loaded sidebar pixels differ across modes: {captures}"
+    captures = {}
+    for binary in sys.argv[1:]:
+        name = Path(binary).parent.name
+        pixels = benchmark(binary)
+        assert captures.setdefault(name, pixels) == pixels, f"loaded sidebar pixels vary within {name}"
+    reference, *others = captures.values()
+    for pixels in others:
+        compare_release(reference, pixels)
