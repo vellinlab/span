@@ -213,7 +213,9 @@ pub fn response(
         &prose_label,
         deferred,
     );
-    if !artifacts.is_empty() {
+    let actions = if artifacts.is_empty() {
+        None
+    } else {
         let actions = gtk::Box::new(gtk::Orientation::Vertical, 2);
         actions.style_context().add_class("agent-preview-actions");
         let mut unique = Vec::new();
@@ -228,17 +230,23 @@ pub fn response(
             }
             actions.add(&artifact_button(artifact, preview.clone()));
         }
-        blocks.add(&actions);
-    }
-    if let Some(window) = window.filter(|_| deferred.is_none()) {
-        window.group(&blocks, 3);
-    }
+        Some(actions)
+    };
     if let Some((_, region)) = prose_region {
         region.add(&blocks);
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, blocks.spacing());
         body.add(&region);
+        if let Some(actions) = actions {
+            body.add(&actions);
+        }
         TextSelection::new(&body, selectable, quote)
     } else {
+        if let Some(actions) = actions {
+            blocks.add(&actions);
+        }
+        if let Some(window) = window {
+            window.group(&blocks, 3);
+        }
         TextSelection::new(&blocks, selectable, quote)
     }
 }
