@@ -146,8 +146,6 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     first_bash="$(head -n1 "$HOME/bash-ready")"
 
     widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
-    read -r _ _ dot_width dot_height <<< "$(widget bounds '终端状态')"
-    ((dot_width == 8 && dot_height == 8))
     previous_bottom=0
     for action in '显示／隐藏侧栏' '工具栏 · 新建本地终端' '工具栏 · 快速连接'; do
         read -r _ rail_y rail_width rail_height <<< "$(widget bounds "$action")"
@@ -211,6 +209,9 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     grep -qx 'trusted-x11=false' "$profile"
 
     xdotool windowfocus --sync "$window"
+    if (( $(widget count '文件目录') )); then
+        xdotool key --clearmodifiers ctrl+shift+f
+    fi
     widget mouse '导入 SSH 配置'
     wait_until "the optional OpenSSH import dialog" dialog_open '导入 OpenSSH 主机'
     SPAN_TEST_DIALOG='导入 OpenSSH 主机' widget not-state '导入所选' sensitive
@@ -235,7 +236,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
         xdotool key --clearmodifiers ctrl+shift+f
     fi
     widget bounds 'CI Host' >/dev/null
-    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/host-workbench.png"
+    host_preview="$(dirname "$WORKBENCH_PREVIEW")/host-workbench.png"
+    import -window "$window" "$host_preview"
+    # The notebook exposes its text label, but not the other widgets in the tab.
+    tab_colors="$(convert "$host_preview" -crop 500x100+0+0 +repage -format '%c' histogram:info:-)"
+    grep -qi '#82D5A9' <<< "$tab_colors"
     if ((files_open)); then
         xdotool key --clearmodifiers ctrl+shift+f
     fi

@@ -661,6 +661,7 @@ impl Workbench {
         }) {
             self.search.set_text("");
             self.rebuild_hosts();
+            self.sidebar_pages.set_visible_child_name("hosts");
         }
     }
 
