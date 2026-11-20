@@ -1,6 +1,12 @@
+use futures_channel::mpsc;
+use futures_util::StreamExt;
 use gtk::prelude::*;
 use gtk::{gdk_pixbuf::Pixbuf, gio, glib};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::rc::Rc;
 
 const MAX_LOGO: usize = 160 * 1024;
 
@@ -33,22 +39,91 @@ async fn logo(uri: String) -> Option<Pixbuf> {
     {
         return pixbuf(glib::base64_decode(data).to_vec());
     }
-    let stream = gio::File::for_uri(&uri)
-        .read_future(glib::Priority::LOW)
+    gio::spawn_blocking(move || fetch(&uri))
         .await
+        .ok()
+        .flatten()
+        .and_then(pixbuf)
+}
+
+// GTK installations without GVfs (including the portable Windows build) need
+// an HTTPS transport. curl is optional; the tile already has an offline image.
+fn fetch(uri: &str) -> Option<Vec<u8>> {
+    let mut command = Command::new("curl");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = command
+        .args([
+            "-q",
+            "--silent",
+            "--fail",
+            "--location",
+            "--max-redirs",
+            "3",
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--connect-timeout",
+            "3",
+            "--max-time",
+            "6",
+            "--max-filesize",
+            "163840",
+            "--",
+            uri,
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
         .ok()?;
     let mut bytes = Vec::new();
-    while bytes.len() <= MAX_LOGO {
-        let chunk = stream
-            .read_bytes_future(8192, glib::Priority::LOW)
-            .await
-            .ok()?;
-        if chunk.is_empty() {
-            return pixbuf(bytes);
-        }
-        bytes.extend_from_slice(&chunk);
+    let read = child
+        .stdout
+        .take()?
+        .take((MAX_LOGO + 1) as u64)
+        .read_to_end(&mut bytes);
+    if read.is_err() || bytes.len() > MAX_LOGO {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
     }
-    None
+    child.wait().ok()?.success().then_some(bytes)
+}
+
+type TileRequest = (String, glib::WeakRef<gtk::Stack>);
+thread_local! {
+    static LOGOS: mpsc::UnboundedSender<TileRequest> = {
+        let (send, pending) = mpsc::unbounded::<TileRequest>();
+        let cache = Rc::new(RefCell::new(VecDeque::<(String, Pixbuf)>::new()));
+        glib::MainContext::default().spawn_local(pending.for_each_concurrent(3, move |(uri, weak)| {
+            let cache = cache.clone();
+            async move {
+                if weak.upgrade().is_none() { return; }
+                let cached = cache.borrow().iter().find(|(key, _)| key == &uri).map(|(_, p)| p.clone());
+                let image = if let Some(p) = cached { p } else {
+                    let Some(p) = logo(uri.clone()).await else { return; };
+                    if uri.starts_with("https://") {
+                        let mut cache = cache.borrow_mut();
+                        if cache.len() == 64 {cache.pop_front();}
+                        cache.push_back((uri, p.clone()));
+                    }
+                    p
+                };
+                if let Some(tile) = weak.upgrade() {
+                    let image = gtk::Image::from_pixbuf(Some(&image));
+                    tile.add_named(&image, "catalog");
+                    image.show();
+                    tile.set_visible_child(&image);
+                }
+            }
+        }));
+        send
+    };
 }
 
 pub fn tile(name: &str, uri: Option<&str>) -> gtk::Stack {
@@ -95,17 +170,8 @@ pub fn tile(name: &str, uri: Option<&str>) -> gtk::Stack {
             if started.replace(true) {
                 return;
             }
-            let weak = tile.downgrade();
-            let uri = uri.clone();
-            glib::MainContext::default().spawn_local(async move {
-                if let Some(image) = logo(uri).await
-                    && let Some(tile) = weak.upgrade()
-                {
-                    let image = gtk::Image::from_pixbuf(Some(&image));
-                    tile.add_named(&image, "catalog");
-                    image.show();
-                    tile.set_visible_child(&image);
-                }
+            LOGOS.with(|logos| {
+                let _ = logos.unbounded_send((uri.clone(), tile.downgrade()));
             });
         });
     }

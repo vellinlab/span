@@ -29,50 +29,21 @@ impl Section {
 
 #[derive(Clone)]
 pub struct Plugin {
-    id: String,
-    name: String,
-    title: String,
-    description: String,
-    logo: Option<String>,
-    source: String,
-    path: Option<String>,
-    marketplace: String,
-    installed: bool,
-    enabled: bool,
-    available: bool,
-    review: bool,
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) title: String,
+    pub(crate) description: String,
+    pub(crate) logo: Option<String>,
+    pub(crate) source: String,
+    pub(crate) path: Option<String>,
+    pub(crate) marketplace: String,
+    pub(crate) installed: bool,
+    pub(crate) enabled: bool,
+    pub(crate) available: bool,
+    pub(crate) review: bool,
 }
 
 impl Plugin {
-    fn parse(source: &Value, item: &Value) -> Option<Self> {
-        let name = item["name"].as_str()?;
-        Some(Self {
-            id: item["id"].as_str()?.to_owned(),
-            name: name.to_owned(),
-            title: item["interface"]["displayName"]
-                .as_str()
-                .unwrap_or(name)
-                .to_owned(),
-            description: synopsis(item["interface"]["shortDescription"].as_str()),
-            logo: crate::extension_art::reference(
-                &item["interface"],
-                &["logoUrlDark", "logoUrl", "composerIconUrl"],
-            )
-            .map(str::to_owned),
-            source: source["interface"]["displayName"]
-                .as_str()
-                .or(source["name"].as_str())?
-                .to_owned(),
-            path: source["path"].as_str().map(str::to_owned),
-            marketplace: source["name"].as_str()?.to_owned(),
-            installed: item["installed"] == true,
-            enabled: item["enabled"] == true,
-            available: item["installPolicy"] != "NOT_AVAILABLE"
-                && (item["availability"].is_null() || item["availability"] == "AVAILABLE"),
-            review: item["mustShowInstallationInterstitial"] == true,
-        })
-    }
-
     pub fn parameters(&self) -> Value {
         match &self.path {
             Some(path) => json!({"pluginName":self.name,"marketplacePath":path}),
@@ -227,6 +198,9 @@ impl Extensions {
             .width_chars(10)
             .build();
         search.style_context().add_class("host-search");
+        if let Some(a) = search.accessible() {
+            a.set_name("搜索扩展");
+        }
         panel.add(&search);
         let feedback = gtk::Box::new(gtk::Orientation::Vertical, 4);
         feedback.style_context().add_class("extensions-feedback");
@@ -376,59 +350,55 @@ impl Extensions {
         }
     }
 
-    pub fn update(&self, section: Section, append: bool, result: &Value) {
-        let page = self.page(section);
+    pub fn update_plugins(&self, plugins: Vec<Plugin>, failures: usize) {
+        let empty = plugins.is_empty();
+        self.plugins
+            .entries
+            .replace(plugins.into_iter().map(Entry::Plugin).collect());
+        let message = match (empty, failures) {
+            (true, 0) => "当前主机未返回插件。".into(),
+            (_, 0) => String::new(),
+            _ => format!("{failures} 个插件来源加载失败。"),
+        };
+        self.list_ready(Section::Plugins, &message);
+    }
+
+    pub fn update_apps(&self, append: bool, result: &Value) {
+        let page = &self.apps;
         let mut entries = page.entries.borrow_mut();
         if !append {
             entries.clear();
         }
-        let message = match section {
-            Section::Plugins => {
-                for source in array(&result["marketplaces"]) {
-                    entries.extend(
-                        array(&source["plugins"])
-                            .filter_map(|item| Plugin::parse(source, item))
-                            .map(Entry::Plugin),
-                    );
-                }
-                let failures = array(&result["marketplaceLoadErrors"]).count();
-                match (entries.is_empty(), failures) {
-                    (true, 0) => "当前主机未返回插件。".into(),
-                    (_, 0) => String::new(),
-                    _ => format!("{failures} 个插件来源加载失败。"),
-                }
+        for app in array(&result["data"]).filter_map(App::parse) {
+            if let Some(existing) = entries
+                .iter_mut()
+                .find(|entry| matches!(entry, Entry::App(old) if old.id == app.id))
+            {
+                *existing = Entry::App(app);
+            } else {
+                entries.push(Entry::App(app));
             }
-            Section::Apps => {
-                for app in array(&result["data"]).filter_map(App::parse) {
-                    if let Some(existing) = entries
-                        .iter_mut()
-                        .find(|entry| matches!(entry, Entry::App(old) if old.id == app.id))
-                    {
-                        *existing = Entry::App(app);
-                    } else {
-                        entries.push(Entry::App(app));
-                    }
-                }
-                let next = result["nextCursor"].as_str().filter(|cursor| {
-                    !cursor.is_empty()
-                        && (!append || page.cursor.borrow().as_deref() != Some(*cursor))
-                });
-                page.cursor.replace(next.map(str::to_owned));
-                if entries.is_empty() {
-                    "当前账号未返回连接器。".into()
-                } else {
-                    String::new()
-                }
-            }
+        }
+        let next = result["nextCursor"].as_str().filter(|cursor| {
+            !cursor.is_empty() && (!append || page.cursor.borrow().as_deref() != Some(*cursor))
+        });
+        page.cursor.replace(next.map(str::to_owned));
+        let message = if entries.is_empty() {
+            "当前账号未返回连接器。"
+        } else {
+            ""
         };
         drop(entries);
+        self.list_ready(Section::Apps, message);
+        self.render_auth();
+    }
+
+    fn list_ready(&self, section: Section, message: &str) {
+        let page = self.page(section);
         page.loaded.set(true);
-        self.show_message(section, &message);
+        self.show_message(section, message);
         page.state.set_visible(!message.is_empty());
         self.render(section);
-        if section == Section::Apps {
-            self.render_auth();
-        }
     }
 
     pub fn begin_change(&self, notice: &str) -> bool {
@@ -597,6 +567,7 @@ impl Extensions {
             toggle.set_tooltip_text(Some(&format!("查看{title}详情")));
             if let Some(accessible) = toggle.accessible() {
                 accessible.set_name(&format!("管理 {title}"));
+                accessible.set_description(&format!("{detail} · {description}"));
             }
             let heading = gtk::Box::new(gtk::Orientation::Horizontal, 10);
             heading.pack_start(&crate::extension_art::tile(title, logo), false, false, 0);
@@ -720,7 +691,7 @@ impl Extensions {
     }
 }
 
-fn synopsis(text: Option<&str>) -> String {
+pub(crate) fn synopsis(text: Option<&str>) -> String {
     let first = text
         .unwrap_or_default()
         .lines()

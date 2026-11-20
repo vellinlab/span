@@ -931,7 +931,12 @@ impl Agent {
     fn extension_response(&self, request: ExtensionRequest, result: &Value) {
         match request {
             ExtensionRequest::List { section, append } => {
-                self.extensions.update(section, append, result)
+                if section == ExtensionSection::Apps {
+                    self.extensions.update_apps(append, result);
+                } else {
+                    self.extensions
+                        .show_message(section, "主机返回的插件列表格式无法识别。");
+                }
             }
             ExtensionRequest::Review(plugin) => {
                 if !result["plugin"].is_object() {
@@ -1273,9 +1278,25 @@ impl Agent {
         }
     }
 
-    fn receive(self: &Rc<Self>, event: Result<Value, String>) {
+    fn receive(self: &Rc<Self>, event: Result<crate::plugin_catalog::Incoming, String>) {
         let event = match event {
-            Ok(event) => event,
+            Ok(crate::plugin_catalog::Incoming::Json(event)) => event,
+            Ok(crate::plugin_catalog::Incoming::Plugins {
+                id,
+                items,
+                failures,
+            }) => {
+                if matches!(
+                    self.pending.borrow_mut().remove(&id),
+                    Some(Request::Extensions(ExtensionRequest::List {
+                        section: ExtensionSection::Plugins,
+                        ..
+                    }))
+                ) {
+                    self.extensions.update_plugins(items, failures);
+                }
+                return;
+            }
             Err(error) => {
                 self.disconnect(&error);
                 return;

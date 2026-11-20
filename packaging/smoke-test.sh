@@ -359,22 +359,27 @@ SVG
     slash '/goal clear'
     widget contains '已清除会话目标'
     slash '/plugins'
-    widget contains 'Local Fixture Plugin'
+    widget state '管理 Local Fixture Plugin' sensitive
+    widget mouse '搜索扩展'
+    xdotool type --clearmodifiers 'sample 59'
+    widget state '管理 Directory sample 59' sensitive
+    xdotool key --clearmodifiers ctrl+a BackSpace
     widget click '管理 Local Fixture Plugin'
     widget click '安装'
     wait_until "plugin installed on the local fixture" test -f "$HOME/plugin-installed"
     widget click '卸载'
     wait_until "plugin removed on the local fixture" test -f "$HOME/plugin-uninstalled"
     slash '/apps'
-    widget contains 'Fixture Connector'
+    widget state '管理 ChatGPT Space' sensitive
     widget not-contains 'fixture internal text'
-    import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-extensions.png"
-    widget click '管理 Fixture Connector'
+    read -r catalog_x catalog_y catalog_width catalog_height <<< "$(widget bounds '工作区侧栏')"
+    import -window root -crop "${catalog_width}x${catalog_height}+${catalog_x}+${catalog_y}" "$(dirname "$WORKBENCH_PREVIEW")/agent-extensions.png"
+    widget click '管理 ChatGPT Space'
     widget click '停用'
     widget contains '此主机已停用'
-    widget click '管理 Fixture Connector'
+    widget click '管理 ChatGPT Space'
     widget click '加载更多'
-    widget contains 'Another Connector'
+    widget state '管理 Another Connector' sensitive
     widget click '管理 Another Connector'
     widget click '连接'
     wait_until "connector authorization URL opened in the browser" grep -qFx 'https://example.invalid/connect' "$HOME/span-opened-link"
@@ -941,8 +946,8 @@ PY
         widget contains 'Check the rollout from my other device.'
         widget contains 'The shared rollout is healthy.'
         widget mouse '工具栏 · 插件与连接器'
-        widget contains 'Remote Fixture Plugin'
-        widget not-contains 'Local Fixture Plugin'
+        widget state '管理 Remote Fixture Plugin' sensitive
+        [[ $(widget count '管理 Local Fixture Plugin') == 0 ]]
         widget click '管理 Remote Fixture Plugin'
         widget click '查看并安装'
         wait_until "the plugin installation review" dialog_open '安装插件'

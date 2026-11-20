@@ -154,11 +154,12 @@ for line in sys.stdin:
                 "installed": plugin_installed, "enabled": plugin_installed,
                 "mustShowInstallationInterstitial": shared,
                 "installPolicy": "AVAILABLE", "authPolicy": "ON_USE"}
+        others = [dict(item, id=f"sample-{n}@fixture", name=f"sample-{n}", interface={"displayName": f"Directory sample {n}"}) for n in range(60)]
         if not (home / "large-directory-sent").exists():
             item["interface"]["screenshotUrls"] = ["data:image/png;base64," + "A" * 40_652_012]
             (home / "large-directory-sent").touch()
         send({"id": request_id, "result": {"marketplaces": [
-            {"name": "fixture-catalog", "path": None, "plugins": [item]}]}})
+            {"name": "fixture-catalog", "path": None, "plugins": [item] + others}]}})
     elif method == "plugin/read":
         assert shared and params == {"pluginName": "fixture", "remoteMarketplaceName": "fixture-catalog"}
         send({"id": request_id, "result": {"plugin": {"description": "Remote plugin details",
@@ -176,7 +177,7 @@ for line in sys.stdin:
     elif method == "app/list":
         assert params["limit"] == 50
         if params["cursor"] is None:
-            data = [{"id": "fixture_app", "name": "Fixture Connector",
+            data = [{"id": "fixture_app", "name": "ChatGPT Space", "description": "Search and edit your pages and spaces.",
                      "isAccessible": True, "isEnabled": connector_enabled}]
             data.extend([
                 {"id": "github", "name": "GitHub", "description": "Inspect repositories and pull requests.", "isAccessible": True},

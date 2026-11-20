@@ -1,3 +1,4 @@
+use crate::plugin_catalog::Incoming;
 use async_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use futures_channel::mpsc;
 use futures_util::{
@@ -31,13 +32,13 @@ pub struct Rpc {
     outgoing: mpsc::UnboundedSender<String>,
     next_id: Cell<u64>,
     plugin_lists: RefCell<Vec<u64>>,
-    receive: Box<dyn Fn(Result<Value, String>)>,
+    receive: Box<dyn Fn(Result<Incoming, String>)>,
 }
 
 impl Rpc {
     pub fn start(
         socket: Option<&crate::ssh::Channel>,
-        receive: impl Fn(Result<Value, String>) + 'static,
+        receive: impl Fn(Result<Incoming, String>) + 'static,
     ) -> Result<Rc<Self>, String> {
         let remote_command = format!("bash -lc '{SERVER_COMMAND}'");
         let mut argv: Vec<&OsStr> = Vec::new();
@@ -123,12 +124,19 @@ impl Rpc {
                     Some(crate::plugin_catalog::decode(&bytes, &lists))
                 };
                 if let (Some(rpc), Some(Ok(message))) = (weak.upgrade(), decoded) {
-                    if message.get("result").is_some() || message.get("error").is_some() {
-                        if let Some(id) = message["id"].as_u64() {
-                            rpc.plugin_lists
-                                .borrow_mut()
-                                .retain(|pending| *pending != id);
+                    let id = match &message {
+                        Incoming::Plugins { id, .. } => Some(*id),
+                        Incoming::Json(v)
+                            if v.get("result").is_some() || v.get("error").is_some() =>
+                        {
+                            v["id"].as_u64()
                         }
+                        _ => None,
+                    };
+                    if let Some(id) = id {
+                        rpc.plugin_lists
+                            .borrow_mut()
+                            .retain(|pending| *pending != id);
                     }
                     (rpc.receive)(Ok(message));
                 }
