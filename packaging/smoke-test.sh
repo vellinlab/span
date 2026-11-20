@@ -754,7 +754,12 @@ SVG
     widget not-contains 'widget-file.txt'
     xdotool type --clearmodifiers 'wid'
     widget contains 'widget-directory'
-    import -window root "$(dirname "$WORKBENCH_PREVIEW")/files-completion.png"
+    read -r suggestion_x suggestion_y suggestion_width suggestion_height <<< "$(widget bounds 'widget-directory')"
+    completion_preview="$(dirname "$WORKBENCH_PREVIEW")/files-completion.png"
+    import -window root "$completion_preview"
+    suggestion_crop="${suggestion_width}x${suggestion_height}+${suggestion_x}+${suggestion_y}"
+    convert "$completion_preview" -crop "$suggestion_crop" +repage -colorspace gray \
+        -threshold 58% -format '%[fx:mean > 0.01]' info: | grep -qx 1
     xdotool key --clearmodifiers Down Return
     widget contains 'completed.txt'
     widget not-contains '.hidden-completion-fixture'

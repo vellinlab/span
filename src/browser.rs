@@ -676,13 +676,17 @@ impl Browser {
         for (label, name) in matches.take(MAX_PATH_MATCHES) {
             let row = gtk::ListBoxRow::new();
             row.set_can_focus(false);
+            row.style_context().add_class("files-path-option");
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            content.add(&icons::widget(Icon::Folder, 15));
+            let icon = icons::widget(Icon::Folder, 15);
+            icon.style_context().add_class("files-path-icon");
+            content.add(&icon);
             let title = gtk::Label::builder()
                 .label(&label)
                 .xalign(0.0)
                 .ellipsize(pango::EllipsizeMode::End)
                 .build();
+            title.style_context().add_class("files-path-label");
             content.pack_start(&title, true, true, 0);
             row.add(&content);
             self.path_matches.add(&row);

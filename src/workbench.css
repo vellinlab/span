@@ -495,19 +495,22 @@ popover.files-path-popup list {
     background: transparent;
 }
 
-popover.files-path-popup row {
+.files-path-option {
     min-height: 27px;
     padding: 0 7px;
     border-radius: 5px;
 }
 
-popover.files-path-popup row:hover,
-popover.files-path-popup row:selected {
+.files-path-option:hover,
+.files-path-option:selected {
     background: @selection;
+}
+
+label.files-path-label {
     color: @foreground;
 }
 
-popover.files-path-popup drawingarea {
+drawingarea.files-path-icon {
     color: @accent;
 }
 
