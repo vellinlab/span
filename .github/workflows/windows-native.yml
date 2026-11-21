@@ -151,7 +151,7 @@ jobs:
             try {
               if (!$span.WaitForExit(50000)) { throw "$backend session check timed out" }
               if ($span.ExitCode -ne 0) { throw "$backend session check exited with code $($span.ExitCode)" }
-              foreach ($file in "latest.png", "earlier.png", "history.json", "scroll.json", "attachment.png", "attachment.json", "goal-menu.png", "goal-edit.png", "goal-active.png", "goal.json") {
+              foreach ($file in "latest.png", "earlier.png", "history.json", "scroll.json", "attachment.png", "attachment.json", "goal-menu.png", "goal-edit.png", "goal-active.png", "goal.json", "resize-900.png", "resize-1320.png", "reading-position.json") {
                 if (!(Test-Path (Join-Path $output.FullName $file))) { throw "Missing $backend $file" }
               }
               Write-Host "$backend session and scroll metrics"
@@ -159,6 +159,7 @@ jobs:
               Get-Content (Join-Path $output.FullName "scroll.json")
               Get-Content (Join-Path $output.FullName "attachment.json")
               Get-Content (Join-Path $output.FullName "goal.json")
+              Get-Content (Join-Path $output.FullName "reading-position.json")
             } finally {
               if (!$span.HasExited) { Stop-Process -Id $span.Id }
               Get-Content $stderr

@@ -4,7 +4,7 @@ use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use iced::widget::operation::{AbsoluteOffset, scroll_to};
 use iced::widget::text_editor;
-use iced::{Task, window};
+use iced::{Size, Task, window};
 use serde_json::{Value, json};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Cursor;
@@ -30,6 +30,7 @@ pub enum Event {
     ScrollResults(Value),
     Attachment(window::Screenshot),
     Goal(window::Screenshot),
+    Resized(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -41,6 +42,7 @@ enum Step {
     WaitForAttachment,
     CaptureAttachment,
     WaitForAttachmentReply,
+    WaitForHistoryStream,
     WaitForGoalMenu,
     CaptureGoalMenu,
     WaitForGoalDraft,
@@ -48,6 +50,9 @@ enum Step {
     CaptureGoalDraft,
     WaitForGoalSave,
     CaptureSavedGoal,
+    WaitForResize(u32),
+    FollowLatest,
+    WaitForStream,
 }
 
 pub struct Check {
@@ -56,6 +61,7 @@ pub struct Check {
     first_frame: u64,
     items: usize,
     benchmark: Option<scroll::Benchmark>,
+    reading: Option<(String, f32)>,
 }
 
 pub fn enabled() -> bool {
@@ -77,6 +83,7 @@ impl Check {
             first_frame: 0,
             items: 0,
             benchmark: None,
+            reading: None,
         })
     }
 
@@ -108,6 +115,7 @@ impl Check {
             Event::ScrollResults(results) => {
                 scroll::save(&self.directory, &results);
                 self.benchmark = None;
+                self.reading = Some(agent.visual_reading_position().expect("reading history"));
                 put_bitmap_on_clipboard();
                 self.step = Step::WaitForAttachment;
                 return Task::done(Message::Agent(tab.id, agent::Action::Paste)).chain(observe());
@@ -195,16 +203,25 @@ impl Check {
                 if agent.visual_attachment_count() == 0
                     && probe.is_some_and(|(_, _, items, _)| items == self.items + 1)
                 {
+                    self.assert_reader(agent);
                     std::fs::write(
                         self.directory.join("attachment.json"),
                         br#"{"clipboard":"CF_DIB","input":"inline PNG","accepted":true}"#,
                     )
                     .expect("record Windows clipboard attachment test");
-                    self.step = Step::WaitForGoalMenu;
-                    paste(tab, "/goal").chain(observe())
+                    self.step = Step::WaitForHistoryStream;
+                    stream(tab, "incoming-while-reading")
                 } else {
                     observe()
                 }
+            }
+            (Event::Observe, Step::WaitForHistoryStream) => {
+                if !probe.is_some_and(|(_, _, items, _)| items == self.items + 2) {
+                    return observe();
+                }
+                self.assert_reader(agent);
+                self.step = Step::WaitForGoalMenu;
+                paste(tab, "/goal").chain(observe())
             }
             (Event::Observe, Step::WaitForGoalMenu)
                 if agent.visual_goal() == Some(VisualGoal::Menu) =>
@@ -268,6 +285,62 @@ impl Check {
                     br#"{"selectedWithMouse":true,"method":"thread/goal/set","saved":true}"#,
                 )
                 .expect("record native goal workflow");
+                self.step = Step::WaitForResize(900);
+                resize(900)
+            }
+            (Event::Observe, Step::WaitForResize(_)) => screenshot(Event::Resized),
+            (Event::Resized(frame), Step::WaitForResize(width)) => {
+                let logical_width = frame.size.width as f32 / frame.scale_factor;
+                if (logical_width - width as f32).abs() > 1.0 {
+                    return observe();
+                }
+                self.assert_reader(agent);
+                self.save(&format!("resize-{width}.png"), frame);
+                if width == 900 {
+                    self.step = Step::WaitForResize(1320);
+                    return resize(1320);
+                }
+
+                let (id, _, _, _) = probe.expect("resized viewport");
+                self.step = Step::FollowLatest;
+                scroll_to(
+                    id,
+                    AbsoluteOffset {
+                        x: None,
+                        y: Some(0.0),
+                    },
+                )
+                .chain(observe())
+            }
+            (Event::Observe, Step::FollowLatest) => {
+                if !probe.is_some_and(|(_, view, _, _)| view.absolute_offset().y < 1.0)
+                    || agent.visual_reading_position().is_some()
+                {
+                    return observe();
+                }
+                self.step = Step::WaitForStream;
+                stream(tab, "incoming-at-bottom")
+            }
+            (Event::Observe, Step::WaitForStream) => {
+                if !probe.is_some_and(|(_, _, items, _)| items == self.items + 3) {
+                    return observe();
+                }
+                let (_, view, _, _) = probe.expect("streaming viewport");
+                assert!(
+                    view.absolute_offset().y < 1.0,
+                    "latest reply did not stay visible"
+                );
+                assert!(agent.visual_reading_position().is_none());
+                let result = json!({
+                    "kept_history_position_during_streaming": true,
+                    "kept_history_position_at_widths": [900, 1320],
+                    "followed_reply_when_at_bottom": true,
+                });
+                std::fs::write(
+                    self.directory.join("reading-position.json"),
+                    result.to_string(),
+                )
+                .expect("record streaming and resize results");
                 Task::done(Message::CloseWindow)
             }
             (
@@ -279,6 +352,16 @@ impl Check {
             ) => observe(),
             _ => Task::none(),
         }
+    }
+
+    fn assert_reader(&self, agent: &agent::Agent) {
+        let (expected, before) = self.reading.as_ref().expect("history reader");
+        let (actual, after) = agent.visual_reading_position().expect("preserved reader");
+        assert_eq!(&actual, expected, "viewport jumped to another message");
+        assert!(
+            (after - before).abs() <= 1.5,
+            "message shifted from {before} to {after}"
+        );
     }
 
     fn save(&self, name: &str, frame: window::Screenshot) -> u64 {
@@ -296,6 +379,32 @@ impl Check {
         .expect("save native window screenshot");
         hash.finish()
     }
+}
+
+fn resize(width: u32) -> Task<Message> {
+    window::latest()
+        .then(move |id| {
+            window::resize(
+                id.expect("active Span window"),
+                Size::new(width as f32, 780.0),
+            )
+        })
+        .chain(observe())
+}
+
+fn stream(tab: &Tab, item_id: &str) -> Task<Message> {
+    let packet = json!({
+        "method": "item/agentMessage/delta",
+        "params": {
+            "threadId": THREAD, "turnId": "image-turn", "itemId": item_id,
+            "delta": "Streaming text expands the transcript at the bottom.\n".repeat(18)
+        }
+    });
+    Task::done(Message::Agent(
+        tab.id,
+        agent::Action::Event(codex_rpc::Event::Packet(packet)),
+    ))
+    .chain(observe())
 }
 
 fn paste(tab: &Tab, value: &str) -> Task<Message> {

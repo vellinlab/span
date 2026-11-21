@@ -16,6 +16,8 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "agent_scroll.rs"]
+mod agent_scroll;
 #[path = "agent_goal.rs"]
 mod goal;
 #[path = "agent_transcript.rs"]
@@ -102,6 +104,8 @@ impl Activity {
 
 struct Item {
     id: String,
+    turn_id: Option<String>,
+    copy_ready: bool,
     kind: Kind,
     title: String,
     value: String,
@@ -126,6 +130,7 @@ pub struct Agent {
     cursor: Option<String>,
     transcript_id: iced::widget::Id,
     transcript_generation: u64,
+    reading_position: agent_scroll::ReadingPosition,
     #[cfg(feature = "visual-check")]
     transcript_viewport: Option<scrollable::Viewport>,
     items: Vec<Item>,
@@ -158,6 +163,7 @@ impl Agent {
             cursor: None,
             transcript_id: iced::widget::Id::unique(),
             transcript_generation: 0,
+            reading_position: agent_scroll::ReadingPosition::default(),
             #[cfg(feature = "visual-check")]
             transcript_viewport: None,
             items: Vec::new(),
@@ -356,9 +362,23 @@ impl Agent {
                 }
             }
             Action::Copy(id) => {
-                if let Some(item) = self.items.iter().find(|item| item.id == id) {
+                if let Some(item) = self
+                    .items
+                    .iter()
+                    .find(|item| item.id == id && item.copy_ready)
+                {
+                    let markdown = self
+                        .items
+                        .iter()
+                        .filter(|reply| {
+                            matches!(reply.kind, Kind::Reply) && reply.turn_id == item.turn_id
+                        })
+                        .map(|reply| reply.value.as_str())
+                        .filter(|reply| !reply.trim().is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
                     self.copied = Some(id);
-                    return clipboard::write(item.value.clone());
+                    return clipboard::write(markdown);
                 }
             }
             Action::Toggle(id) => {
@@ -575,6 +595,7 @@ impl Agent {
                 self.preparing = None;
                 self.cursor = None;
                 self.transcript_generation += 1;
+                self.reading_position.clear();
                 #[cfg(feature = "visual-check")]
                 {
                     self.transcript_viewport = None;
@@ -652,10 +673,17 @@ impl Agent {
             self.turn = turn["id"].as_str().map(str::to_owned);
             self.in_flight = true;
         }
+        let turn_id = turn["id"].as_str();
+        let first_item = self.items.len();
         for item in values(&turn["items"]) {
             if item["id"].as_str().is_some_and(|id| !existing.contains(id)) {
-                self.item(item, true);
+                self.item(item, turn_id, true);
             }
+        }
+        if turn["status"] != "inProgress"
+            && let Some(turn_id) = turn_id
+        {
+            self.finish_reply(turn_id, first_item);
         }
     }
 
@@ -672,6 +700,11 @@ impl Agent {
     #[cfg(feature = "visual-check")]
     pub fn visual_attachment_count(&self) -> usize {
         self.attachments.len()
+    }
+
+    #[cfg(feature = "visual-check")]
+    pub fn visual_reading_position(&self) -> Option<(String, f32)> {
+        self.reading_position.probe()
     }
 
     fn server_request(&mut self, method: &str, params: &Value, id: &Value) {
@@ -698,6 +731,7 @@ impl Agent {
         if self.thread.is_none() || params["threadId"].as_str() != self.thread.as_deref() {
             return;
         }
+        let turn_id = params["turnId"].as_str();
         match method {
             "thread/goal/updated" | "thread/goal/cleared" => self.goals.update(&params["goal"]),
             "thread/tokenUsage/updated" => {
@@ -713,8 +747,16 @@ impl Agent {
                 self.turn = params["turn"]["id"].as_str().map(str::to_owned);
             }
             "turn/completed" => {
+                let active_turn = self.turn.take();
+                let completed_turn = params["turn"]["id"]
+                    .as_str()
+                    .or(turn_id)
+                    .or(active_turn.as_deref());
                 for item in values(&params["turn"]["items"]) {
-                    self.item(item, true);
+                    self.item(item, completed_turn, true);
+                }
+                if let Some(id) = completed_turn {
+                    self.finish_reply(id, 0);
                 }
                 self.in_flight = false;
                 self.turn = None;
@@ -725,13 +767,13 @@ impl Agent {
                     self.load_catalog();
                 }
             }
-            "item/started" => self.item(&params["item"], false),
-            "item/completed" => self.item(&params["item"], true),
+            "item/started" => self.item(&params["item"], turn_id, false),
+            "item/completed" => self.item(&params["item"], turn_id, true),
             "item/agentMessage/delta" => {
                 if let (Some(id), Some(delta)) =
                     (params["itemId"].as_str(), params["delta"].as_str())
                 {
-                    self.upsert(id, Kind::Reply, "", delta, true, false);
+                    self.upsert(id, turn_id, Kind::Reply, "", delta, true, false);
                 }
             }
             "item/reasoning/summaryTextDelta" => {
@@ -740,6 +782,7 @@ impl Agent {
                 {
                     self.upsert(
                         id,
+                        turn_id,
                         Kind::Activity(Activity::Reasoning),
                         "Reasoning summary",
                         delta,
@@ -753,6 +796,7 @@ impl Agent {
                 {
                     self.upsert(
                         &format!("{id}-diff"),
+                        Some(id),
                         Kind::Activity(Activity::Changes),
                         "Changes",
                         diff,
@@ -765,7 +809,7 @@ impl Agent {
         }
     }
 
-    fn item(&mut self, value: &Value, complete: bool) {
+    fn item(&mut self, value: &Value, turn_id: Option<&str>, complete: bool) {
         let Some(id) = value["id"].as_str() else {
             return;
         };
@@ -780,13 +824,13 @@ impl Agent {
                     .collect::<Vec<_>>()
                     .join("\n");
                 if !message.trim().is_empty() {
-                    self.upsert(id, Kind::User, "", &message, false, true);
+                    self.upsert(id, turn_id, Kind::User, "", &message, false, true);
                 }
             }
             Some("agentMessage" | "plan") => {
                 if let Some(message) = value["text"].as_str().filter(|message| !message.is_empty())
                 {
-                    self.upsert(id, Kind::Reply, "", message, false, complete);
+                    self.upsert(id, turn_id, Kind::Reply, "", message, false, complete);
                 }
             }
             Some("commandExecution") => {
@@ -794,6 +838,7 @@ impl Agent {
                 let output = value["aggregatedOutput"].as_str().unwrap_or("");
                 self.upsert(
                     id,
+                    turn_id,
                     Kind::Activity(Activity::Command),
                     command,
                     output,
@@ -809,6 +854,7 @@ impl Agent {
                 if !text.trim().is_empty() {
                     self.upsert(
                         id,
+                        turn_id,
                         Kind::Activity(Activity::Reasoning),
                         "Reasoning summary",
                         &text,
@@ -821,9 +867,20 @@ impl Agent {
         }
     }
 
+    fn finish_reply(&mut self, turn_id: &str, first_item: usize) {
+        let mut marked = false;
+        for item in self.items[first_item..].iter_mut().rev().filter(|item| {
+            item.turn_id.as_deref() == Some(turn_id) && matches!(item.kind, Kind::Reply)
+        }) {
+            item.copy_ready = !marked && !item.value.trim().is_empty();
+            marked |= item.copy_ready;
+        }
+    }
+
     fn upsert(
         &mut self,
         id: &str,
+        turn_id: Option<&str>,
         kind: Kind,
         title: &str,
         value: &str,
@@ -837,6 +894,8 @@ impl Agent {
             .unwrap_or_else(|| {
                 self.items.push(Item {
                     id: id.into(),
+                    turn_id: None,
+                    copy_ready: false,
                     kind,
                     title: title.chars().take(220).collect(),
                     value: String::new(),
@@ -847,6 +906,9 @@ impl Agent {
                 self.items.len() - 1
             });
         let item = &mut self.items[index];
+        if item.turn_id.is_none() {
+            item.turn_id = turn_id.or(self.turn.as_deref()).map(str::to_owned);
+        }
         if !append {
             if item.parsed.is_some() && item.value == value {
                 return;
@@ -978,13 +1040,13 @@ impl Agent {
             transcript = transcript.push(Element::new(transcript::Transcript::new(
                 &self.items,
                 theme,
-                self.in_flight,
                 self.copied.as_deref(),
+                &self.reading_position,
             )));
         }
         let scroll = scrollable(
             container(container(transcript).width(Fill).max_width(760))
-                .padding([20, 24])
+                .padding([agent_scroll::VERTICAL_PADDING, 24])
                 .center_x(Fill),
         )
         .height(Fill)
@@ -999,7 +1061,12 @@ impl Agent {
         .anchor_bottom();
         #[cfg(feature = "visual-check")]
         let scroll = scroll.on_scroll(move |viewport| Action::Scrolled(generation, viewport));
-        let scroll = keyed_column([(generation, scroll.into())]).height(Fill);
+        let scroll = agent_scroll::TranscriptScroll::wrap(
+            scroll.into(),
+            &self.reading_position,
+            &self.items,
+        );
+        let scroll = keyed_column([(generation, scroll)]).height(Fill);
         let drafting_goal = self.goals.draft.as_ref();
         let menu_open = self.goal_menu_open();
         let scroll: Element<'_, Action> = if menu_open {
@@ -1353,6 +1420,10 @@ mod tests {
             }),
         );
         agent.notification(
+            "turn/started",
+            &json!({"threadId":"fixture","turn":{"id":"active"}}),
+        );
+        agent.notification(
             "item/agentMessage/delta",
             &json!({
                 "threadId":"fixture","itemId":"live","delta":"**新"
@@ -1372,5 +1443,28 @@ mod tests {
         assert!(agent.items[0].parsed.is_some());
         assert_eq!(agent.items[2].value, "**新的回复**");
         assert!(agent.items[2].parsed.is_some());
+        assert!(agent.items[1].copy_ready);
+        assert!(!agent.items[2].copy_ready);
+
+        agent.notification(
+            "item/completed",
+            &json!({
+                "threadId":"fixture","turnId":"active",
+                "item":{"id":"final","type":"agentMessage","text":"Final answer"}
+            }),
+        );
+        agent.notification(
+            "turn/completed",
+            &json!({"threadId":"fixture","turn":{"id":"active","status":"completed"}}),
+        );
+        assert_eq!(
+            agent
+                .items
+                .iter()
+                .filter(|item| item.copy_ready)
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "final"]
+        );
     }
 }

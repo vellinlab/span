@@ -1,4 +1,4 @@
-use super::{Action, Activity, Item, Kind, action};
+use super::{Action, Activity, Item, Kind, action, agent_scroll::ReadingPosition};
 use crate::theme;
 use iced::advanced::{
     Clipboard, Layout, Shell, Widget, layout, mouse, overlay, renderer,
@@ -44,8 +44,8 @@ type RowStates = BTreeMap<usize, RowState>;
 pub(super) struct Transcript<'a> {
     items: &'a [Item],
     theme: &'a Theme,
-    in_flight: bool,
     copied: Option<&'a str>,
+    reading: &'a ReadingPosition,
     limits: layout::Limits,
     rows: RefCell<BTreeMap<usize, Row<'a>>>,
 }
@@ -54,21 +54,21 @@ impl<'a> Transcript<'a> {
     pub(super) fn new(
         items: &'a [Item],
         theme: &'a Theme,
-        in_flight: bool,
         copied: Option<&'a str>,
+        reading: &'a ReadingPosition,
     ) -> Self {
         Self {
             items,
             theme,
-            in_flight,
             copied,
+            reading,
             limits: layout::Limits::NONE,
             rows: RefCell::default(),
         }
     }
 
     fn copy_button(&self, item: &Item) -> CopyButton {
-        if self.in_flight || !matches!(item.kind, Kind::Reply) || item.parsed.is_none() {
+        if !item.copy_ready {
             CopyButton::Hidden
         } else if self.copied == Some(&item.id) {
             CopyButton::Copied
@@ -83,10 +83,7 @@ impl<'a> Transcript<'a> {
         let len = layout.children().len();
         let top = viewport.y - OVERSCAN;
         let bottom = viewport.y + viewport.height + OVERSCAN;
-        let first = partition(len, |index| {
-            let row = layout.child(index).bounds();
-            row.y + row.height < top
-        });
+        let first = first_row(layout, top);
         let end = first
             + partition(len - first, |index| {
                 layout.child(first + index).position().y <= bottom
@@ -160,6 +157,13 @@ mod tests {
             320..320
         );
     }
+}
+
+fn first_row(layout: Layout<'_>, top: f32) -> usize {
+    partition(layout.children().len(), |index| {
+        let row = layout.child(index).bounds();
+        row.y + row.height <= top
+    })
 }
 
 fn partition(len: usize, before: impl Fn(usize) -> bool) -> usize {
@@ -302,6 +306,8 @@ impl Widget<Action, Theme, Renderer> for Transcript<'_> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        self.reading
+            .capture(self.items, layout, viewport, first_row(layout, viewport.y));
         let mut states = tree.state.downcast_ref::<RefCell<RowStates>>().borrow_mut();
         self.mount(&mut states, renderer, Self::visible(layout, viewport));
         for (index, row) in self.rows.borrow().iter() {
