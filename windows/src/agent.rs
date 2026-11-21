@@ -1,12 +1,12 @@
 use crate::{agent_execution, agent_settings, codex_rpc, theme};
 use futures::channel::mpsc;
 use iced::widget::{
-    Space, button, column, container, keyed_column, markdown, row, scrollable, text, text_editor,
-    tooltip,
+    Space, button, column, container, keyed_column, markdown, row, scrollable, sensor, svg, text,
+    text_editor, tooltip,
 };
-use iced::{Center, Element, Fill, Right, Task, Theme, clipboard};
+use iced::{Bottom, Center, Element, Fill, Right, Task, Theme, clipboard};
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -17,7 +17,8 @@ pub enum Action {
     Event(codex_rpc::Event),
     New,
     Resume(String),
-    More,
+    More(u64, String),
+    #[cfg(feature = "visual-check")]
     Scrolled(u64, scrollable::Viewport),
     Draft(text_editor::Action),
     Paste,
@@ -50,11 +51,36 @@ struct Entry {
     folder: String,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum Kind {
     User,
     Reply,
-    Activity,
+    Activity(Activity),
+}
+
+#[derive(Clone, Copy)]
+enum Activity {
+    Command,
+    Reasoning,
+    Changes,
+}
+
+impl Activity {
+    fn icon(self) -> svg::Handle {
+        static COMMAND: OnceLock<svg::Handle> = OnceLock::new();
+        static REASONING: OnceLock<svg::Handle> = OnceLock::new();
+        static CHANGES: OnceLock<svg::Handle> = OnceLock::new();
+        let (handle, path) = match self {
+            Self::Command => (&COMMAND, "M3 5h18v14H3z M7 9l3 3-3 3m6 0h4"),
+            Self::Reasoning => (&REASONING, "M2.5 12h5l3-7 3.5 14 3-7h5"),
+            Self::Changes => (&CHANGES, "M6 3h8l4 4v14H6z M9 11h6m-3-3v6m-3 3h6"),
+        };
+        handle
+            .get_or_init(|| svg::Handle::from_memory(format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+            ).into_bytes()))
+            .clone()
+    }
 }
 
 struct Item {
@@ -82,6 +108,7 @@ pub struct Agent {
     cursor: Option<String>,
     transcript_id: iced::widget::Id,
     transcript_generation: u64,
+    #[cfg(feature = "visual-check")]
     transcript_viewport: Option<scrollable::Viewport>,
     items: Vec<Item>,
     draft: text_editor::Content,
@@ -109,6 +136,7 @@ impl Agent {
             cursor: None,
             transcript_id: iced::widget::Id::unique(),
             transcript_generation: 0,
+            #[cfg(feature = "visual-check")]
             transcript_viewport: None,
             items: Vec::new(),
             draft: text_editor::Content::new(),
@@ -229,16 +257,15 @@ impl Agent {
                     );
                 }
             }
-            Action::More => self.more_history(),
+            Action::More(generation, cursor)
+                if generation == self.transcript_generation
+                    && self.cursor.as_deref() == Some(cursor.as_str()) =>
+            {
+                self.more_history();
+            }
+            #[cfg(feature = "visual-check")]
             Action::Scrolled(generation, viewport) if generation == self.transcript_generation => {
-                let offset = viewport.absolute_offset().y;
-                let previous = self
-                    .transcript_viewport
-                    .replace(viewport)
-                    .map_or(0.0, |previous| previous.absolute_offset().y);
-                if offset > previous + 0.5 && viewport.absolute_offset_reversed().y <= 150.0 {
-                    self.more_history();
-                }
+                self.transcript_viewport = Some(viewport);
             }
             Action::Draft(action) => self.draft.perform(action),
             Action::Paste => {
@@ -411,7 +438,10 @@ impl Agent {
                 self.items.clear();
                 self.cursor = None;
                 self.transcript_generation += 1;
-                self.transcript_viewport = None;
+                #[cfg(feature = "visual-check")]
+                {
+                    self.transcript_viewport = None;
+                }
                 self.pending
                     .retain(|_, request| !matches!(request, Request::History | Request::Models));
                 self.settings.open(result);
@@ -556,7 +586,14 @@ impl Agent {
                 if let (Some(id), Some(delta)) =
                     (params["itemId"].as_str(), params["delta"].as_str())
                 {
-                    self.upsert(id, Kind::Activity, "Reasoning summary", delta, true, false);
+                    self.upsert(
+                        id,
+                        Kind::Activity(Activity::Reasoning),
+                        "Reasoning summary",
+                        delta,
+                        true,
+                        false,
+                    );
                 }
             }
             "turn/diff/updated" => {
@@ -564,7 +601,7 @@ impl Agent {
                 {
                     self.upsert(
                         &format!("{id}-diff"),
-                        Kind::Activity,
+                        Kind::Activity(Activity::Changes),
                         "Changes",
                         diff,
                         false,
@@ -603,7 +640,14 @@ impl Agent {
             Some("commandExecution") => {
                 let command = value["command"].as_str().unwrap_or("Run command");
                 let output = value["aggregatedOutput"].as_str().unwrap_or("");
-                self.upsert(id, Kind::Activity, command, output, false, false);
+                self.upsert(
+                    id,
+                    Kind::Activity(Activity::Command),
+                    command,
+                    output,
+                    false,
+                    false,
+                );
             }
             Some("reasoning") if complete => {
                 let text = values(&value["summary"])
@@ -611,7 +655,14 @@ impl Agent {
                     .collect::<Vec<_>>()
                     .join("\n\n");
                 if !text.trim().is_empty() {
-                    self.upsert(id, Kind::Activity, "Reasoning summary", &text, false, false);
+                    self.upsert(
+                        id,
+                        Kind::Activity(Activity::Reasoning),
+                        "Reasoning summary",
+                        &text,
+                        false,
+                        true,
+                    );
                 }
             }
             _ => {}
@@ -749,18 +800,25 @@ impl Agent {
             .center(Fill)
             .into();
         }
-        let mut transcript = column![].spacing(14).width(Fill);
-        if self.cursor.is_some() {
+        let generation = self.transcript_generation;
+        let mut transcript = column![].spacing(12).width(Fill);
+        if let Some(cursor) = &self.cursor {
             let loading = self.loading_history();
-            transcript = transcript.push(action(
+            let load = action(
                 if loading {
                     "Loading history…"
                 } else {
                     "Load earlier messages"
                 },
-                (!loading).then_some(Action::More),
+                (!loading).then(|| Action::More(generation, cursor.clone())),
                 false,
-            ));
+            );
+            transcript = transcript.push(
+                sensor(load)
+                    .key_ref(cursor)
+                    .anticipate(150)
+                    .on_show(move |_| Action::More(generation, cursor.clone())),
+            );
         }
         for item in &self.items {
             let entry = match item.kind {
@@ -805,27 +863,51 @@ impl Agent {
                     }
                     container(body)
                 }
-                Kind::Activity => {
-                    let label = if item.expanded { "−" } else { "+" };
-                    let mut activity = column![action(
-                        &format!("{label}  {}", item.title),
-                        Some(Action::Toggle(item.id.clone())),
-                        false
-                    )];
+                Kind::Activity(kind) => {
+                    let toggle = button(
+                        row![
+                            svg(kind.icon())
+                                .width(15)
+                                .height(15)
+                                .style(|_, _| svg::Style {
+                                    color: Some(theme::MUTED),
+                                }),
+                            text(&item.title).size(13),
+                            Space::new().width(Fill),
+                            text(if item.expanded { "⌃" } else { "⌄" }).size(15),
+                        ]
+                        .spacing(8)
+                        .align_y(Center),
+                    )
+                    .on_press(Action::Toggle(item.id.clone()))
+                    .width(Fill)
+                    .padding([4, 7])
+                    .style(move |_, status| theme::tab(item.expanded, status));
+                    let mut activity = column![toggle].spacing(5);
                     if item.expanded {
-                        activity = activity.push(
-                            container(text(&item.value).size(13).font(iced::Font::MONOSPACE))
-                                .padding(12),
-                        );
+                        let detail: Element<'_, Action> = match kind {
+                            Activity::Reasoning => item.parsed.as_ref().map_or_else(
+                                || text(&item.value).size(14).into(),
+                                |document| {
+                                    markdown::view(
+                                        document.items(),
+                                        markdown::Settings::with_text_size(14, theme),
+                                    )
+                                    .map(Action::Link)
+                                },
+                            ),
+                            _ => text(&item.value)
+                                .size(13)
+                                .font(iced::Font::MONOSPACE)
+                                .into(),
+                        };
+                        activity = activity.push(container(detail).padding([7, 14]));
                     }
-                    container(activity)
-                        .width(Fill)
-                        .style(|_| theme::rounded(theme::INSET, 9.0))
+                    container(activity).width(Fill)
                 }
             };
             transcript = transcript.push(entry);
         }
-        let generation = self.transcript_generation;
         let scroll = scrollable(
             container(container(transcript).width(Fill).max_width(760))
                 .padding([20, 24])
@@ -834,15 +916,23 @@ impl Agent {
         .height(Fill)
         .width(Fill)
         .id(self.transcript_id.clone())
-        .anchor_bottom()
-        .on_scroll(move |viewport| Action::Scrolled(generation, viewport));
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(7)
+                .scroller_width(5)
+                .margin(2),
+        ))
+        .anchor_bottom();
+        #[cfg(feature = "visual-check")]
+        let scroll = scroll.on_scroll(move |viewport| Action::Scrolled(generation, viewport));
         let scroll = keyed_column([(generation, scroll.into())]).height(Fill);
         let editor = text_editor(&self.draft)
             .placeholder("Message Codex")
             .on_action(Action::Draft)
-            .height(75)
-            .padding(10)
+            .height(63)
+            .padding([9, 10])
             .size(15)
+            .style(theme::editor)
             .key_binding(|press| {
                 let shift = press.modifiers.shift();
                 match text_editor::Binding::from_key_press(press)? {
@@ -904,22 +994,17 @@ impl Agent {
         }
         controls = controls.push(action(
             if running { "Follow up" } else { "Send" },
-            self.can_send().then_some(Action::Send),
+            (self.can_send() && !self.draft.is_empty()).then_some(Action::Send),
             true,
         ));
-        composer = composer
-            .push(editor)
-            .push(self.settings.view(running).map(Action::Setting))
-            .push(
-                row![
-                    text(if running { "Working…" } else { "" })
-                        .size(13)
-                        .color(theme::MUTED),
-                    Space::new().width(Fill),
-                    controls,
-                ]
-                .align_y(Center),
-            );
+        composer = composer.push(editor).push(
+            row![
+                container(self.settings.view(running).map(Action::Setting)).width(Fill),
+                controls,
+            ]
+            .spacing(10)
+            .align_y(Bottom),
+        );
         column![
             container(text(&self.title).size(16).font(theme::SEMIBOLD)).padding([10, 23]),
             scroll,

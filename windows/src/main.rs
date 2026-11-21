@@ -395,22 +395,26 @@ impl Span {
     fn view(&self) -> Element<'_, Message> {
         let chrome = container(
             row![
-                svg(self.logo.clone()).width(34).height(34),
+                svg(self.logo.clone()).width(31).height(31),
                 text("Span")
-                    .size(22)
+                    .size(20)
                     .font(theme::SEMIBOLD)
                     .color(theme::INK),
+                Space::new().width(14),
+                theme::mode(
+                    "Terminal",
+                    Message::ShowTerminal,
+                    !self.sessions && !self.show_files
+                ),
+                theme::mode("Codex", Message::ShowAgent, self.sessions),
+                theme::mode("Files", Message::ShowFiles, self.show_files),
                 Space::new().width(Fill),
-                theme::action("Terminal", Message::ShowTerminal, false),
-                theme::action("Codex", Message::ShowAgent, false),
-                theme::action("Files", Message::ShowFiles, false),
-                theme::action("＋  New terminal", Message::NewTerminal, false),
                 theme::action("Connect SSH", Message::ShowConnect, true),
             ]
             .align_y(Center)
-            .spacing(12),
+            .spacing(8),
         )
-        .padding([12, 18])
+        .padding([9, 18])
         .width(Fill)
         .style(|_| theme::surface(theme::CHROME));
         let mut body = row![self.sidebar(), rule::vertical(1).style(theme::rule)].height(Fill);

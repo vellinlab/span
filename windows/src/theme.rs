@@ -1,10 +1,10 @@
 use crate::Message;
-use iced::widget::{button, container, rule, text};
+use iced::widget::{button, container, rule, text, text_editor};
 use iced::{Background, Border, Color, Fill, Font, Theme, font, theme};
 
-pub const CHROME: Color = hex(0x141a25);
-pub const SIDE: Color = hex(0x151a23);
-pub const WORK: Color = hex(0x1a1e28);
+pub const CHROME: Color = hex(0x1b202a);
+pub const SIDE: Color = hex(0x131820);
+pub const WORK: Color = hex(0x171b24);
 pub const INSET: Color = hex(0x111620);
 pub const TERMINAL: Color = hex(crate::terminal_theme::BACKGROUND);
 pub const LINE: Color = hex(0x2b3444);
@@ -62,11 +62,36 @@ pub fn rule(theme: &Theme) -> rule::Style {
     }
 }
 
+pub fn editor(_: &Theme, status: text_editor::Status) -> text_editor::Style {
+    text_editor::Style {
+        background: Background::Color(if matches!(status, text_editor::Status::Focused { .. }) {
+            hex(0x1e2430)
+        } else {
+            CHROME
+        }),
+        border: Border::default().rounded(8),
+        placeholder: MUTED,
+        value: INK,
+        selection: hex(0x394d76),
+    }
+}
+
 pub fn action<'a>(label: &'a str, message: Message, accent: bool) -> button::Button<'a, Message> {
     button(text(label).size(14))
         .on_press(message)
         .padding([7, 12])
         .style(move |_, status| button_status(accent, status))
+}
+
+pub fn mode(
+    label: &'static str,
+    message: Message,
+    selected: bool,
+) -> button::Button<'static, Message> {
+    button(text(label).size(14))
+        .on_press(message)
+        .padding([6, 13])
+        .style(move |_, status| tab(selected, status))
 }
 
 pub fn nav<'a>(label: &'a str, message: Message, selected: bool) -> button::Button<'a, Message> {
@@ -101,7 +126,11 @@ pub fn button_status(accent: bool, status: button::Status) -> button::Style {
 pub fn tab(selected: bool, status: button::Status) -> button::Style {
     let hover = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
-        background: hover.then_some(Background::Color(HIGHLIGHT)),
+        background: (hover || selected).then_some(Background::Color(if hover {
+            HIGHLIGHT
+        } else {
+            hex(0x242d3e)
+        })),
         text_color: if hover || selected { INK } else { MUTED },
         border: Border::default().rounded(7),
         ..button::Style::default()
