@@ -100,6 +100,10 @@ impl Tab {
     fn name(&self) -> &str {
         self.host.as_deref().unwrap_or("PowerShell")
     }
+
+    fn shown_agent(&self) -> Option<&agent::Agent> {
+        self.agent.as_ref().filter(|_| self.show_agent)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +260,32 @@ impl Span {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let before = self.visible_terminal_id();
+        let task = self.handle_message(message);
+        let after = self.visible_terminal_id();
+        if before != after {
+            for tab in &mut self.terminals {
+                let id = Some(tab.id);
+                if (id == before || id == after)
+                    && let TerminalState::Ready(terminal) = &mut tab.terminal
+                {
+                    terminal.set_visible(id == after);
+                }
+            }
+        }
+        task
+    }
+
+    fn visible_terminal_id(&self) -> Option<TerminalId> {
+        let tab = self
+            .terminals
+            .iter()
+            .find(|tab| self.active == Some(tab.id))?;
+        (tab.shown_agent().is_none() && matches!(tab.terminal, TerminalState::Ready(_)))
+            .then_some(tab.id)
+    }
+
+    fn handle_message(&mut self, message: Message) -> Task<Message> {
         match message {
             #[cfg(feature = "visual-check")]
             Message::Visual(event) => {
@@ -630,9 +660,7 @@ impl Span {
             .active
             .and_then(|id| self.terminals.iter().find(|tab| tab.id == id));
         let content = if let Some(tab) = selected {
-            if tab.show_agent
-                && let Some(agent) = &tab.agent
-            {
+            if let Some(agent) = tab.shown_agent() {
                 let id = tab.id;
                 return column![
                     header,

@@ -34,13 +34,31 @@ pub enum Notice {
 struct Events {
     id: TerminalId,
     sender: mpsc::UnboundedSender<Notice>,
-    pending: Arc<AtomicBool>,
+    redraw: Arc<Redraw>,
+}
+
+#[derive(Default)]
+struct Redraw {
+    visible: AtomicBool,
+    pending: AtomicBool,
 }
 
 impl EventListener for Events {
     fn send_event(&self, event: Event) {
-        if matches!(event, Event::Wakeup) && self.pending.swap(true, Ordering::AcqRel) {
-            return;
+        match event {
+            Event::Wakeup => {
+                if !self.redraw.visible.load(Ordering::Acquire)
+                    || self.redraw.pending.swap(true, Ordering::AcqRel)
+                {
+                    return;
+                }
+            }
+            Event::PtyWrite(_)
+            | Event::TextAreaSizeRequest(_)
+            | Event::ColorRequest(_, _)
+            | Event::ChildExit(_)
+            | Event::Exit => {}
+            _ => return,
         }
         let _ = self.sender.unbounded_send(Notice::Event(self.id, event));
     }
@@ -82,7 +100,7 @@ pub struct PtySession {
     id: TerminalId,
     term: Arc<FairMutex<Term<Events>>>,
     channel: EventLoopSender,
-    pending: Arc<AtomicBool>,
+    redraw: Arc<Redraw>,
 }
 
 impl std::fmt::Debug for PtySession {
@@ -155,11 +173,11 @@ impl Terminal {
             escape_args: true,
         };
         let pty = tty::new(&options, size.0, 0).map_err(|error| error.to_string())?;
-        let pending = Arc::new(AtomicBool::new(false));
+        let redraw = Arc::new(Redraw::default());
         let events = Events {
             id,
             sender,
-            pending: pending.clone(),
+            redraw: redraw.clone(),
         };
         let config = Config {
             scrolling_history: 4_000,
@@ -172,7 +190,7 @@ impl Terminal {
             id,
             term,
             channel: event_loop.channel(),
-            pending,
+            redraw,
         });
         Ok((session, event_loop))
     }
@@ -186,10 +204,21 @@ impl Terminal {
         }
     }
 
+    pub fn set_visible(&mut self, visible: bool) {
+        self.session
+            .redraw
+            .visible
+            .store(visible, Ordering::Release);
+        if !visible {
+            // Discard the painted geometry. The PTY keeps parsing into its scrollback.
+            self.cache = canvas::Cache::new();
+        }
+    }
+
     pub fn event(&mut self, event: Event) {
         match event {
             Event::Wakeup => {
-                self.session.pending.store(false, Ordering::Release);
+                self.session.redraw.pending.store(false, Ordering::Release);
                 self.cache.clear();
             }
             Event::PtyWrite(text) => self.write(text),
@@ -585,58 +614,92 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn conpty_powershell_round_trip() {
-        let (sender, mut receiver) = mpsc::unbounded();
-        Terminal::launch(1, None, None, sender).expect("launch PowerShell worker");
-        let mut terminal: Option<Terminal> = None;
+    fn conpty_keeps_output_without_redrawing_hidden_terminal() {
+        let (session, mut receiver) = launch_powershell();
+        let mut terminal = Terminal::new(session);
+        terminal.input("1..8 | ForEach-Object { Write-Output ('span-hidden-' + $_) }\r".into());
+        wait_for_output(&mut terminal, &mut receiver, "span-hidden-8", false);
+
+        terminal.set_visible(true);
+        terminal.input("Write-Output ('span-' + 'native-ready')\r".into());
+        let screen = wait_for_output(&mut terminal, &mut receiver, "span-native-ready", true);
+        for line in 1..=8 {
+            assert!(screen.contains(&format!("span-hidden-{line}")));
+        }
+
+        terminal.set_visible(false);
+        terminal.input("exit 7\r".into());
         let deadline = Instant::now() + Duration::from_secs(15);
-        while Instant::now() < deadline {
-            while let Ok(notice) = receiver.try_recv() {
-                match notice {
-                    Notice::Ready(1, result) => {
-                        let ready = Terminal::new(result.expect("start PowerShell in ConPTY"));
-                        ready.input("Write-Output ('span-' + 'native-ready')\rexit\r".into());
-                        assert!(terminal.replace(ready).is_none());
-                    }
-                    Notice::Event(1, event) => terminal
-                        .as_mut()
-                        .expect("PTY events must follow the handover")
-                        .event(event),
-                    _ => panic!("unexpected PTY id"),
-                }
-            }
-            if let Some(terminal) = &terminal {
-                let grid = terminal.session.term.lock();
-                let text: String = grid
-                    .renderable_content()
-                    .display_iter
-                    .map(|cell| cell.c)
-                    .collect();
-                if text.contains("span-native-ready") {
-                    return;
-                }
+        while terminal.exit.is_none() && Instant::now() < deadline {
+            while let Ok(Notice::Event(1, event)) = receiver.try_recv() {
+                terminal.event(event);
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        panic!("The shell did not produce the output in the terminal grid");
+        assert_eq!(
+            terminal.exit,
+            Some(7),
+            "hidden terminal did not report exit"
+        );
     }
 
-    #[test]
-    fn an_unclaimed_terminal_releases_its_pty() {
+    fn wait_for_output(
+        terminal: &mut Terminal,
+        receiver: &mut mpsc::UnboundedReceiver<Notice>,
+        expected: &str,
+        visible: bool,
+    ) -> String {
+        let mut wakeup = false;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            while let Ok(notice) = receiver.try_recv() {
+                let Notice::Event(1, event) = notice else {
+                    panic!("unexpected PTY message");
+                };
+                if matches!(event, Event::Wakeup) {
+                    assert!(visible, "hidden terminal requested a redraw");
+                    wakeup = true;
+                }
+                terminal.event(event);
+            }
+            let screen: String = terminal
+                .session
+                .term
+                .lock()
+                .renderable_content()
+                .display_iter
+                .map(|cell| cell.c)
+                .collect();
+            if screen.contains(expected) && (!visible || wakeup) {
+                return screen;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "missing terminal output {expected}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn launch_powershell() -> (Arc<PtySession>, mpsc::UnboundedReceiver<Notice>) {
         let (sender, mut receiver) = mpsc::unbounded();
         Terminal::launch(1, None, None, sender).expect("launch PowerShell worker");
         let deadline = Instant::now() + Duration::from_secs(15);
-        let session = loop {
+        loop {
             if let Ok(notice) = receiver.try_recv() {
                 let Notice::Ready(1, result) = notice else {
                     panic!("expected the terminal handover first");
                 };
-                break result.expect("start PowerShell in ConPTY");
+                return (result.expect("start PowerShell in ConPTY"), receiver);
             }
             assert!(Instant::now() < deadline, "PTY startup timed out");
             std::thread::sleep(Duration::from_millis(20));
-        };
+        }
+    }
 
+    #[test]
+    fn an_unclaimed_terminal_releases_its_pty() {
+        let (session, _receiver) = launch_powershell();
         let grid = Arc::downgrade(&session.term);
         drop(session);
         let deadline = Instant::now() + Duration::from_secs(15);
