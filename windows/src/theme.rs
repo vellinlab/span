@@ -141,9 +141,14 @@ pub fn reading_markdown<'a>(
     settings.h4_size = 16.0.into();
     settings.code_size = 13.0.into();
     settings.spacing = 11.0.into();
-    container(markdown::view_with(items, settings, &ReadingMarkdown))
-        .style(move |_| container::Style::default().color(color))
-        .into()
+    let content = markdown::view_with(items, settings, &ReadingMarkdown);
+    if color == INK {
+        content
+    } else {
+        container(content)
+            .style(move |_| container::Style::default().color(color))
+            .into()
+    }
 }
 
 struct ReadingMarkdown;

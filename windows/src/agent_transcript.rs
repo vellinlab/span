@@ -266,11 +266,17 @@ impl Widget<Action, Theme, Renderer> for Transcript<'_> {
     ) {
         let states = tree.state.downcast_mut::<RefCell<RowStates>>().get_mut();
         self.mount(states, renderer, Self::visible(layout, viewport));
+        let wheel = matches!(event, Event::Mouse(mouse::Event::WheelScrolled { .. }));
         for (index, row) in self.rows.get_mut() {
+            let row_layout = positioned(&row.node, layout.child(*index));
+            // Nested code and diff scrollbars take wheel input within their own row.
+            if wheel && cursor.position_over(row_layout.bounds()).is_none() {
+                continue;
+            }
             row.element.as_widget_mut().update(
                 &mut states.get_mut(index).expect("mounted row state").tree,
                 event,
-                positioned(&row.node, layout.child(*index)),
+                row_layout,
                 cursor,
                 renderer,
                 clipboard,
