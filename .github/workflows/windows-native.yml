@@ -83,51 +83,44 @@ jobs:
             "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
             "$env:SystemRoot\System32\OpenSSH"
           ) -join ';'
-          $metrics = foreach ($backend in 'tiny-skia', 'auto') {
-            if ($backend -eq 'auto') {
-              Remove-Item Env:ICED_BACKEND -ErrorAction SilentlyContinue
-            } else {
-              $env:ICED_BACKEND = $backend
-            }
-            $timer = [Diagnostics.Stopwatch]::StartNew()
-            $stderr = Join-Path $env:RUNNER_TEMP "$backend-stderr.log"
-            $env:RUST_BACKTRACE = "1"
-            $span = Start-Process (Join-Path $portable 'Span.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru -RedirectStandardError $stderr
-            try {
-              for ($i = 0; $i -lt 120; $i++) {
-                $span.Refresh()
-                if ($span.HasExited) { throw "Span exited during $backend startup with code $($span.ExitCode)" }
-                if ($span.MainWindowHandle -ne [IntPtr]::Zero) { break }
-                Start-Sleep -Milliseconds 100
-              }
-              if ($span.MainWindowHandle -eq [IntPtr]::Zero) { throw "No window opened for $backend" }
-              $startup = $timer.ElapsedMilliseconds
-              Write-Host "$backend window handle: $($span.MainWindowHandle)"
-              Start-Sleep -Seconds 2
+          Remove-Item Env:ICED_BACKEND -ErrorAction SilentlyContinue
+          $env:RUST_BACKTRACE = "1"
+          $timer = [Diagnostics.Stopwatch]::StartNew()
+          $stderr = Join-Path $env:RUNNER_TEMP "span-startup-stderr.log"
+          $span = Start-Process (Join-Path $portable 'Span.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru -RedirectStandardError $stderr
+          try {
+            for ($i = 0; $i -lt 120; $i++) {
               $span.Refresh()
-              if ($span.HasExited) { throw "Span exited after opening its $backend window" }
-              if ($span.MainWindowTitle -ne "Span") { throw "Unexpected window: $($span.MainWindowTitle)" }
-              [PSCustomObject]@{
-                Renderer = $backend
-                WindowMs = $startup
-                PrivateBytes = $span.PrivateMemorySize64
-                WorkingSetBytes = $span.WorkingSet64
-              }
-            } finally {
-              if (!$span.HasExited) {
-                $closePosted = $span.CloseMainWindow()
-                if (!$span.WaitForExit(5000)) {
-                  $span.Refresh()
-                  Write-Host "Close posted: $closePosted. Backend: $backend. Remaining handle: $($span.MainWindowHandle). Title: $($span.MainWindowTitle). Responding: $($span.Responding)."
-                  Get-CimInstance Win32_Process -Filter "ParentProcessId=$($span.Id)" |
-                    Format-Table ProcessId, Name
-                  Stop-Process -Id $span.Id
-                  Get-Content $stderr
-                  throw "Span did not close within five seconds"
-                }
-              }
-              if (Test-Path $stderr) { Get-Content $stderr }
+              if ($span.HasExited) { throw "Span exited before opening its window with code $($span.ExitCode)" }
+              if ($span.MainWindowHandle -ne [IntPtr]::Zero) { break }
+              Start-Sleep -Milliseconds 100
             }
+            if ($span.MainWindowHandle -eq [IntPtr]::Zero) { throw "Span did not open a window" }
+            $startup = $timer.ElapsedMilliseconds
+            Start-Sleep -Seconds 2
+            $span.Refresh()
+            if ($span.HasExited) { throw "Span exited after opening its window" }
+            if ($span.MainWindowTitle -ne "Span") { throw "Unexpected window: $($span.MainWindowTitle)" }
+            $metrics = [PSCustomObject]@{
+              Renderer = 'tiny-skia'
+              WindowMs = $startup
+              PrivateBytes = $span.PrivateMemorySize64
+              WorkingSetBytes = $span.WorkingSet64
+            }
+          } finally {
+            if (!$span.HasExited) {
+              $closePosted = $span.CloseMainWindow()
+              if (!$span.WaitForExit(5000)) {
+                $span.Refresh()
+                Write-Host "Close posted: $closePosted. Remaining handle: $($span.MainWindowHandle). Title: $($span.MainWindowTitle). Responding: $($span.Responding)."
+                Get-CimInstance Win32_Process -Filter "ParentProcessId=$($span.Id)" |
+                  Format-Table ProcessId, Name
+                Stop-Process -Id $span.Id
+                Get-Content $stderr
+                throw "Span did not close within five seconds"
+              }
+            }
+            if (Test-Path $stderr) { Get-Content $stderr }
           }
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           $metrics | ConvertTo-Json | Set-Content dist/windows-native-startup.json
@@ -137,15 +130,12 @@ jobs:
       - name: Verify history and measure Windows wheel input
         shell: pwsh
         run: |
-          cargo +1.98.1 build --locked --release --features visual-check --manifest-path windows/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:ICED_BACKEND -ErrorAction SilentlyContinue
           $env:RUST_BACKTRACE = "1"
           foreach ($backend in "tiny-skia", "auto") {
-            if ($backend -eq "auto") {
-              Remove-Item Env:ICED_BACKEND -ErrorAction SilentlyContinue
-            } else {
-              $env:ICED_BACKEND = $backend
-            }
+            $features = if ($backend -eq "auto") { "visual-check,gpu" } else { "visual-check" }
+            cargo +1.98.1 build --locked --release --features $features --manifest-path windows/Cargo.toml
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $output = New-Item -ItemType Directory -Path "dist/windows-session-check/$backend" -Force
             $env:SPAN_VISUAL_CHECK_DIR = $output.FullName
             $stderr = Join-Path $output.FullName "stderr.log"
