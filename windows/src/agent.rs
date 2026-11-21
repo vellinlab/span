@@ -1,9 +1,10 @@
 use crate::agent_attachments::{self, Attachment, Prepared};
 use crate::{agent_execution, agent_settings, codex_rpc, theme};
 use futures::channel::mpsc;
+use iced::keyboard::{Key, key::Named};
 use iced::widget::{
-    Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor, svg,
-    text, text_editor, tooltip,
+    Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor,
+    stack, svg, text, text_editor, tooltip,
 };
 use iced::{Bottom, Center, Element, Fill, Right, Task, Theme, clipboard};
 use serde_json::{Value, json};
@@ -14,6 +15,9 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "agent_goal.rs"]
+mod goal;
+
 #[derive(Clone, Debug)]
 pub enum Action {
     Event(codex_rpc::Event),
@@ -23,12 +27,16 @@ pub enum Action {
     #[cfg(feature = "visual-check")]
     Scrolled(u64, scrollable::Viewport),
     Draft(text_editor::Action),
+    GoalSelect(goal::Command),
+    GoalAdvance(i8),
+    GoalDismiss,
     Paste,
     AttachImage,
     Prepared(Uuid, Result<Option<Prepared>, String>),
     RemoveImage(usize),
     Send,
     Interrupt,
+    Goal(goal::Pending),
     Setting(agent_settings::Change),
     Copy(String),
     Link(String),
@@ -115,7 +123,9 @@ pub struct Agent {
     #[cfg(feature = "visual-check")]
     transcript_viewport: Option<scrollable::Viewport>,
     items: Vec<Item>,
+    composer_id: iced::widget::Id,
     draft: text_editor::Content,
+    goals: goal::State,
     submitted_draft: Option<String>,
     attachments: Vec<Attachment>,
     preparing: Option<Uuid>,
@@ -145,7 +155,9 @@ impl Agent {
             #[cfg(feature = "visual-check")]
             transcript_viewport: None,
             items: Vec::new(),
+            composer_id: iced::widget::Id::unique(),
             draft: text_editor::Content::new(),
+            goals: goal::State::default(),
             submitted_draft: None,
             attachments: Vec::new(),
             preparing: None,
@@ -238,7 +250,13 @@ impl Agent {
 
     pub fn update(&mut self, action: Action) -> Task<Action> {
         match action {
-            Action::Event(codex_rpc::Event::Packet(packet)) => self.packet(packet),
+            Action::Event(codex_rpc::Event::Packet(packet)) => {
+                let drafting_goal = self.goals.draft.is_some();
+                self.packet(packet);
+                if drafting_goal && self.goals.draft.is_none() {
+                    return iced::widget::operation::focus(self.composer_id.clone());
+                }
+            }
             Action::Event(codex_rpc::Event::Disconnected(reason)) => {
                 self.connection = None;
                 self.pending.clear();
@@ -275,8 +293,14 @@ impl Agent {
             Action::Scrolled(generation, viewport) if generation == self.transcript_generation => {
                 self.transcript_viewport = Some(viewport);
             }
-            Action::Draft(action) => self.draft.perform(action),
-            Action::Paste if self.preparing.is_none() => {
+            Action::Draft(action) => self.edit_composer(action),
+            Action::GoalSelect(command) => return self.select_goal(command),
+            Action::GoalAdvance(delta) => self.goals.advance(delta),
+            Action::GoalDismiss => return self.dismiss_goal(),
+            Action::Paste
+                if self.preparing.is_none()
+                    && !(self.goals.draft.is_some() && self.goal_pending()) =>
+            {
                 return self.prepare(agent_attachments::from_clipboard);
             }
             Action::AttachImage if self.can_attach() && self.preparing.is_none() => {
@@ -286,10 +310,12 @@ impl Agent {
                 self.preparing = None;
                 match result {
                     Ok(Some(Prepared::Text(text))) => {
-                        self.draft
-                            .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
-                                Arc::new(text),
-                            )));
+                        self.edit_composer(text_editor::Action::Edit(text_editor::Edit::Paste(
+                            Arc::new(text),
+                        )));
+                    }
+                    Ok(Some(Prepared::Image(_))) if self.goals.draft.is_some() => {
+                        self.status = Some("Session goals accept text.".into());
                     }
                     Ok(Some(Prepared::Image(image))) => self.add_attachment(image),
                     Ok(None) => {}
@@ -301,7 +327,7 @@ impl Agent {
             {
                 self.attachments.remove(index);
             }
-            Action::Send => self.send_draft(),
+            Action::Send => return self.send_composer(),
             Action::Setting(change) => self.settings.change(change),
             Action::Interrupt if self.in_flight => {
                 if let (Some(thread), Some(turn)) = (&self.thread, &self.turn)
@@ -346,6 +372,21 @@ impl Agent {
         Task::none()
     }
 
+    fn edit_composer(&mut self, action: text_editor::Action) {
+        let editing = action.is_edit();
+        let goal_pending = self.goal_pending();
+        if let Some(goal) = &mut self.goals.draft {
+            if !editing || !goal_pending {
+                goal.content.perform(action);
+            }
+        } else {
+            self.draft.perform(action);
+            if editing {
+                self.goals.refresh_suggestions(&self.draft);
+            }
+        }
+    }
+
     fn prepare(&mut self, operation: fn() -> Result<Option<Prepared>, String>) -> Task<Action> {
         let id = Uuid::new_v4();
         self.preparing = Some(id);
@@ -361,6 +402,7 @@ impl Agent {
 
     fn can_attach(&self) -> bool {
         self.thread.is_some()
+            && self.goals.draft.is_none()
             && self.submitted_draft.is_none()
             && self.attachments.len() < agent_attachments::MAX_IMAGES
             && !self
@@ -472,7 +514,14 @@ impl Agent {
                         self.in_flight = false;
                     }
                 }
-                if request != Request::Models {
+                if !matches!(
+                    request,
+                    Request::Models
+                        | Request::Goal(goal::Pending {
+                            operation: goal::Operation::Refresh,
+                            ..
+                        })
+                ) {
                     self.status = Some(error.into());
                 }
                 return;
@@ -515,6 +564,7 @@ impl Agent {
                 self.status = None;
                 self.copied = None;
                 self.items.clear();
+                self.goals = goal::State::default();
                 self.attachments.clear();
                 self.preparing = None;
                 self.cursor = None;
@@ -523,8 +573,13 @@ impl Agent {
                 {
                     self.transcript_viewport = None;
                 }
-                self.pending
-                    .retain(|_, request| !matches!(request, Request::History | Request::Models));
+                self.pending.retain(|_, request| {
+                    !matches!(
+                        request,
+                        Request::History | Request::Models | Request::Goal(_)
+                    )
+                });
+                self.refresh_goal(id);
                 self.settings.open(result);
                 self.model_provider = result["modelProvider"].as_str().map(str::to_owned);
                 self.load_models(None);
@@ -566,6 +621,7 @@ impl Agent {
                 }
             }
             Request::Interrupt => {}
+            Request::Goal(pending) => self.goal_response(pending, result),
         }
     }
 
@@ -637,6 +693,7 @@ impl Agent {
             return;
         }
         match method {
+            "thread/goal/updated" | "thread/goal/cleared" => self.goals.update(&params["goal"]),
             "thread/tokenUsage/updated" => {
                 let usage = &params["tokenUsage"];
                 self.settings.context = usage["last"]["totalTokens"].as_u64().zip(
@@ -1015,15 +1072,45 @@ impl Agent {
         #[cfg(feature = "visual-check")]
         let scroll = scroll.on_scroll(move |viewport| Action::Scrolled(generation, viewport));
         let scroll = keyed_column([(generation, scroll.into())]).height(Fill);
-        let editor = text_editor(&self.draft)
-            .placeholder("Message Codex")
+        let drafting_goal = self.goals.draft.as_ref();
+        let menu_open =
+            drafting_goal.is_none() && self.can_use_goal() && !self.goals.suggestions.is_empty();
+        let scroll: Element<'_, Action> = if menu_open {
+            stack![scroll, self.goals.palette()].into()
+        } else {
+            stack![scroll].into()
+        };
+        let content = drafting_goal.map_or(&self.draft, |draft| &draft.content);
+        let editor = text_editor(content)
+            .id(self.composer_id.clone())
+            .placeholder(if drafting_goal.is_some() {
+                "What should this session accomplish?"
+            } else {
+                "Message Codex"
+            })
             .on_action(Action::Draft)
             .height(63)
             .padding([9, 10])
             .size(15)
             .style(theme::editor)
-            .key_binding(|press| {
+            .key_binding(move |press| {
                 let shift = press.modifiers.shift();
+                if press.modifiers.is_empty()
+                    && matches!(press.status, text_editor::Status::Focused { .. })
+                {
+                    match press.key.as_ref() {
+                        Key::Named(Named::Escape) if menu_open || drafting_goal.is_some() => {
+                            return Some(text_editor::Binding::Custom(Action::GoalDismiss));
+                        }
+                        Key::Named(Named::ArrowUp) if menu_open => {
+                            return Some(text_editor::Binding::Custom(Action::GoalAdvance(-1)));
+                        }
+                        Key::Named(Named::ArrowDown) if menu_open => {
+                            return Some(text_editor::Binding::Custom(Action::GoalAdvance(1)));
+                        }
+                        _ => {}
+                    }
+                }
                 match text_editor::Binding::from_key_press(press)? {
                     text_editor::Binding::Enter if !shift => {
                         Some(text_editor::Binding::Custom(Action::Send))
@@ -1059,6 +1146,27 @@ impl Agent {
         }
         if let Some(status) = &self.status {
             composer = composer.push(text(status).size(13).color(theme::MUTED));
+        }
+        if let Some(goal) = self.goals.summary() {
+            composer = composer.push(goal);
+        }
+        if drafting_goal.is_some() {
+            composer = composer.push(self.goal_draft_header()).push(editor).push(
+                row![
+                    Space::new().width(Fill),
+                    action(
+                        if self.goal_pending() {
+                            "Saving…"
+                        } else {
+                            "Save goal"
+                        },
+                        (self.can_use_goal() && !content.is_empty()).then_some(Action::Send),
+                        true,
+                    ),
+                ]
+                .align_y(Center),
+            );
+            return self.conversation(scroll, composer);
         }
         if !self.attachments.is_empty() {
             let mut attachments = row![].spacing(6);
@@ -1154,6 +1262,14 @@ impl Agent {
             .spacing(10)
             .align_y(Bottom),
         );
+        self.conversation(scroll, composer)
+    }
+
+    fn conversation<'a>(
+        &'a self,
+        scroll: Element<'a, Action>,
+        composer: iced::widget::Column<'a, Action>,
+    ) -> Element<'a, Action> {
         column![
             container(text(&self.title).size(16).font(theme::SEMIBOLD)).padding([10, 23]),
             scroll,
