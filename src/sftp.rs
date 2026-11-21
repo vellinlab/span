@@ -53,8 +53,7 @@ pub fn download(socket: &Channel, path: &Path, output: &mut fs::File) -> Result<
 }
 
 pub fn upload(socket: &Channel, path: &Path, input: &mut fs::File) -> Result<(), String> {
-    let temporary =
-        path.with_file_name(format!(".span-upload-{}", gtk::glib::uuid_string_random()));
+    let temporary = path.with_file_name(format!(".span-upload-{}", uuid::Uuid::new_v4()));
     through_channel(socket, "600s", |sftp| {
         let finish = sftp.write_file(&temporary, input).and_then(|_| {
             let mut payload = string_payload(&path_bytes(&temporary))?;
@@ -82,7 +81,7 @@ pub fn upload_attachments(
     }) {
         return Err("附件名称无效。".into());
     }
-    let directory = Path::new("/tmp").join(format!("span-{}", gtk::glib::uuid_string_random()));
+    let directory = Path::new("/tmp").join(format!("span-{}", uuid::Uuid::new_v4()));
     through_channel(socket, "60s", |sftp| {
         let mut payload = string_payload(&path_bytes(&directory))?;
         payload.extend_from_slice(&4u32.to_be_bytes()); // SSH_FILEXFER_ATTR_PERMISSIONS
@@ -610,7 +609,7 @@ mod tests {
         let remote = crate::files::Source::Sftp {
             socket: Some(socket.into()),
         };
-        let id = gtk::glib::uuid_string_random();
+        let id = uuid::Uuid::new_v4();
         let input = directory.join(format!("upload source {id}.txt"));
         let uploaded = directory.join(format!("跨接 {id}.txt"));
         let downloaded = directory.join(format!("downloaded {id}.txt"));

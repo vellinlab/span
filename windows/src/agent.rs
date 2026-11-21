@@ -68,6 +68,7 @@ pub struct Agent {
     catalog: Vec<Entry>,
     thread: Option<String>,
     title: String,
+    cwd: Option<PathBuf>,
     cursor: Option<String>,
     items: Vec<Item>,
     draft: text_editor::Content,
@@ -81,7 +82,7 @@ pub struct Agent {
 
 impl Agent {
     pub fn new(host: Option<String>, cwd: Option<PathBuf>) -> (Self, Task<Action>) {
-        let (connection, events) = codex_rpc::connect(host, cwd);
+        let (connection, events) = codex_rpc::connect(host, cwd.clone());
         let mut agent = Self {
             connection: Some(connection),
             pending: HashMap::new(),
@@ -89,6 +90,7 @@ impl Agent {
             catalog: Vec::new(),
             thread: None,
             title: String::new(),
+            cwd: cwd.clone(),
             cursor: None,
             items: Vec::new(),
             draft: text_editor::Content::new(),
@@ -323,6 +325,9 @@ impl Agent {
                 };
                 self.thread = Some(id.into());
                 self.title = thread_title(thread);
+                if let Some(cwd) = result["cwd"].as_str().or_else(|| thread["cwd"].as_str()) {
+                    self.cwd = Some(cwd.into());
+                }
                 self.status = None;
                 self.copied = None;
                 self.items.clear();
@@ -529,6 +534,44 @@ impl Agent {
         item.parsed = parse.then(|| markdown::Content::parse(&item.value));
     }
 
+    pub fn artifact_path(&self, action: &Action) -> Option<PathBuf> {
+        let Action::Event(codex_rpc::Event::Packet(packet)) = action else {
+            return None;
+        };
+        let params = &packet["params"];
+        if packet["method"] != "item/completed"
+            || self.thread.is_none()
+            || params["threadId"].as_str() != self.thread.as_deref()
+        {
+            return None;
+        }
+        let item = &params["item"];
+        let path = match item["type"].as_str() {
+            Some("imageGeneration") => item["savedPath"].as_str(),
+            Some("fileChange") => values(&item["changes"])
+                .filter(|change| change["kind"] == "add" || change["kind"]["type"] == "add")
+                .filter_map(|change| change["path"].as_str())
+                .find(|path| {
+                    std::path::Path::new(path)
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| {
+                            matches!(
+                                ext.to_ascii_lowercase().as_str(),
+                                "svg" | "png" | "jpg" | "jpeg" | "md" | "html"
+                            )
+                        })
+                }),
+            _ => None,
+        }?;
+        let file = PathBuf::from(path);
+        if file.has_root() {
+            Some(file)
+        } else {
+            Some(self.cwd.as_ref()?.join(file))
+        }
+    }
+
     pub fn catalog(&self) -> Element<'_, Action> {
         let mut list = column![].spacing(4);
         for entry in &self.catalog {
@@ -733,11 +776,11 @@ impl Agent {
     }
 }
 
-fn action(
+fn action<'a>(
     label: impl Into<String>,
     message: Option<Action>,
     accent: bool,
-) -> button::Button<'static, Action> {
+) -> button::Button<'a, Action> {
     button(text(label.into()).size(13))
         .on_press_maybe(message)
         .padding([6, 10])

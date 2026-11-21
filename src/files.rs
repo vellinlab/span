@@ -1,4 +1,5 @@
 use crate::ssh::{Channel, ChannelBuf};
+#[cfg(unix)]
 use gtk::glib;
 #[cfg(unix)]
 use gtk::glib::translate::from_glib_full;
@@ -99,8 +100,7 @@ fn write_local(
     overwrite: bool,
     write: impl FnOnce(&mut File) -> Result<(), String>,
 ) -> Result<(), String> {
-    let temporary =
-        destination.with_file_name(format!(".span-copy-{}", glib::uuid_string_random()));
+    let temporary = destination.with_file_name(format!(".span-copy-{}", uuid::Uuid::new_v4()));
     let mut file = create_private_file(&temporary).map_err(file_error)?;
     let result = write(&mut file).and_then(|_| file.sync_all().map_err(file_error));
     drop(file);
@@ -207,7 +207,14 @@ pub struct Directory {
 }
 
 fn list_local(path: Option<&Path>) -> io::Result<Directory> {
-    let path = fs::canonicalize(path.map_or_else(glib::home_dir, Path::to_path_buf))?;
+    #[cfg(unix)]
+    let default_path = || Ok(glib::home_dir());
+    #[cfg(windows)]
+    let default_path = || {
+        std::env::home_dir()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "No home directory"))
+    };
+    let path = fs::canonicalize(path.map_or_else(default_path, |path| Ok(path.to_path_buf()))?)?;
     let mut entries = Vec::new();
     let mut truncated = false;
     for item in fs::read_dir(&path)? {

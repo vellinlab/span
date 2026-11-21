@@ -224,9 +224,18 @@ pub enum Clipboard {
     Paste(TerminalId),
 }
 
-#[derive(Default)]
 pub struct Interaction {
     dragging: bool,
+    focused: bool,
+}
+
+impl Default for Interaction {
+    fn default() -> Self {
+        Self {
+            dragging: false,
+            focused: true,
+        }
+    }
 }
 
 impl canvas::Program<Clipboard> for Terminal {
@@ -245,9 +254,10 @@ impl canvas::Program<Clipboard> for Terminal {
                 None
             }
             UiEvent::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                let position = cursor.position_in(bounds)?;
+                let position = cursor.position_in(bounds);
+                state.focused = position.is_some();
+                self.select(position?, true);
                 state.dragging = true;
-                self.select(position, true);
                 Some(canvas::Action::request_redraw().and_capture())
             }
             UiEvent::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -271,7 +281,7 @@ impl canvas::Program<Clipboard> for Terminal {
                 modifiers,
                 text,
                 ..
-            }) => {
+            }) if state.focused => {
                 if modifiers.control() && modifiers.shift() {
                     let message = match key.as_ref() {
                         Key::Character("c" | "C") => Some(Clipboard::Copy(self.id)),

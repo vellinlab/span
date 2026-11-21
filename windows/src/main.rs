@@ -2,6 +2,15 @@
 
 mod agent;
 mod codex_rpc;
+mod file_panel;
+#[path = "../../src/files.rs"]
+#[allow(dead_code)]
+mod files;
+#[path = "../../src/process_environment.rs"]
+mod process_environment;
+#[path = "../../src/sftp.rs"]
+#[allow(dead_code)]
+mod sftp;
 #[path = "../../src/ssh.rs"]
 #[allow(dead_code)]
 mod ssh;
@@ -53,6 +62,7 @@ struct Span {
     terminals: Vec<Tab>,
     active: Option<TerminalId>,
     sessions: bool,
+    show_files: bool,
     next_id: TerminalId,
     events: mpsc::UnboundedSender<(TerminalId, Event)>,
     connecting: bool,
@@ -69,6 +79,7 @@ struct Tab {
     terminal: Terminal,
     agent: Option<agent::Agent>,
     show_agent: bool,
+    file_panel: Option<file_panel::Panel>,
 }
 
 impl Tab {
@@ -82,6 +93,8 @@ enum Message {
     NewTerminal,
     ShowTerminal,
     ShowAgent,
+    ShowFiles,
+    Files(TerminalId, file_panel::Action),
     Agent(TerminalId, agent::Action),
     Select(TerminalId),
     Close(TerminalId),
@@ -112,6 +125,7 @@ impl Span {
             terminals: Vec::new(),
             active: None,
             sessions: false,
+            show_files: false,
             next_id: 0,
             events,
             connecting: false,
@@ -143,8 +157,10 @@ impl Span {
                     terminal,
                     agent: None,
                     show_agent: false,
+                    file_panel: None,
                 });
                 self.sessions = false;
+                self.show_files = false;
             }
             Err(error) => self.error = Some(error),
         }
@@ -176,6 +192,7 @@ impl Span {
             Message::NewTerminal => self.open(None),
             Message::ShowTerminal => {
                 self.sessions = false;
+                self.show_files = false;
                 if let Some(tab) = self
                     .terminals
                     .iter_mut()
@@ -193,10 +210,41 @@ impl Span {
                     return Task::none();
                 };
                 self.sessions = true;
+                self.show_files = false;
                 tab.show_agent = true;
                 self.connecting = false;
                 if tab.agent.is_none() {
                     return start_agent(tab, self.home.clone());
+                }
+            }
+            Message::ShowFiles => {
+                let Some(tab) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|tab| Some(tab.id) == self.active)
+                else {
+                    return Task::none();
+                };
+                self.sessions = false;
+                self.show_files = true;
+                self.connecting = false;
+                if tab.file_panel.is_none() {
+                    let (panel, task) = file_panel::Panel::new(tab.host.clone());
+                    tab.file_panel = Some(panel);
+                    let id = tab.id;
+                    return task.map(move |action| Message::Files(id, action));
+                }
+            }
+            Message::Files(id, action) => {
+                if let Some(panel) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|tab| tab.id == id)
+                    .and_then(|tab| tab.file_panel.as_mut())
+                {
+                    return panel
+                        .update(action)
+                        .map(move |action| Message::Files(id, action));
                 }
             }
             Message::Agent(id, action) => {
@@ -207,9 +255,38 @@ impl Span {
                     return start_agent(tab, self.home.clone());
                 }
                 if let Some(agent) = tab.agent.as_mut() {
-                    return agent
+                    let artifact = (self.active == Some(id) && tab.show_agent)
+                        .then(|| agent.artifact_path(&action))
+                        .flatten();
+                    let event = agent
                         .update(action)
                         .map(move |action| Message::Agent(id, action));
+                    if let Some(path) = artifact {
+                        if tab.file_panel.is_none() {
+                            let (panel, listing) = file_panel::Panel::new(tab.host.clone());
+                            tab.file_panel = Some(panel);
+                            let preview = tab
+                                .file_panel
+                                .as_mut()
+                                .expect("file panel")
+                                .preview_file(path);
+                            return Task::batch([
+                                event,
+                                listing.map(move |action| Message::Files(id, action)),
+                                preview.map(move |action| Message::Files(id, action)),
+                            ]);
+                        }
+                        let preview = tab
+                            .file_panel
+                            .as_mut()
+                            .expect("file panel")
+                            .preview_file(path);
+                        return Task::batch([
+                            event,
+                            preview.map(move |action| Message::Files(id, action)),
+                        ]);
+                    }
+                    return event;
                 }
             }
             Message::CloseWindow => {
@@ -218,6 +295,7 @@ impl Span {
                 return iced::exit();
             }
             Message::Select(id) => {
+                self.show_files = false;
                 self.active = Some(id);
                 self.sessions = self
                     .terminals
@@ -228,6 +306,7 @@ impl Span {
                 if let Some(position) = self.terminals.iter().position(|tab| tab.id == id) {
                     self.terminals.remove(position);
                     if self.active == Some(id) {
+                        self.show_files = false;
                         self.active = self
                             .terminals
                             .get(position)
@@ -242,6 +321,7 @@ impl Span {
             }
             Message::ShowConnect => {
                 self.sessions = false;
+                self.show_files = false;
                 self.connecting = !self.connecting;
                 self.error = None;
             }
@@ -288,6 +368,7 @@ impl Span {
                 Space::new().width(Fill),
                 theme::action("Terminal", Message::ShowTerminal, false),
                 theme::action("Codex", Message::ShowAgent, false),
+                theme::action("Files", Message::ShowFiles, false),
                 theme::action("＋  New terminal", Message::NewTerminal, false),
                 theme::action("Connect SSH", Message::ShowConnect, true),
             ]
@@ -297,16 +378,51 @@ impl Span {
         .padding([12, 18])
         .width(Fill)
         .style(|_| theme::surface(theme::CHROME));
-        let body = row![
-            self.sidebar(),
-            rule::vertical(1).style(theme::rule),
-            self.workspace()
-        ]
-        .height(Fill);
+        let mut body = row![self.sidebar(), rule::vertical(1).style(theme::rule)].height(Fill);
+        if let Some(tab) = self
+            .terminals
+            .iter()
+            .find(|tab| Some(tab.id) == self.active)
+            && let Some(panel) = tab.file_panel.as_ref().filter(|panel| panel.has_preview())
+        {
+            let id = tab.id;
+            body = body
+                .push(container(self.workspace()).width(iced::FillPortion(3)))
+                .push(rule::vertical(1).style(theme::rule))
+                .push(
+                    container(
+                        panel
+                            .view(&self.theme)
+                            .map(move |action| Message::Files(id, action)),
+                    )
+                    .width(iced::FillPortion(2)),
+                );
+        } else {
+            body = body.push(self.workspace());
+        }
         column![chrome, rule::horizontal(1).style(theme::rule), body].into()
     }
 
     fn sidebar(&self) -> Element<'_, Message> {
+        if self.show_files
+            && let Some(tab) = self
+                .terminals
+                .iter()
+                .find(|tab| Some(tab.id) == self.active)
+            && let Some(panel) = &tab.file_panel
+        {
+            let id = tab.id;
+            return container(
+                panel
+                    .sidebar()
+                    .map(move |action| Message::Files(id, action)),
+            )
+            .width(238)
+            .height(Fill)
+            .padding([18, 13])
+            .style(|_| theme::surface(theme::SIDE))
+            .into();
+        }
         if self.sessions
             && let Some(tab) = self
                 .terminals
