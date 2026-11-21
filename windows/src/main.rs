@@ -37,13 +37,17 @@ mod visual_check;
 use futures::channel::mpsc;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::{
-    Space, button, canvas, column, container, opaque, pick_list, row, rule, scrollable, stack, svg,
-    text, text_input,
+    Space, button, canvas, column, container, mouse_area, opaque, pin, row, rule, scrollable,
+    stack, svg, text, text_input,
 };
 use iced::{Center, Element, Fill, Size, Task, Theme, clipboard, window};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use terminal::{Clipboard, Notice, Terminal, TerminalId};
+
+const TITLE_PADDING: u32 = 13;
+const BRAND_WIDTH: u32 = 89;
+const MENU_BUTTON_WIDTH: u32 = 48;
 
 const LOGO: &[u8] =
     include_bytes!("../../packaging/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg");
@@ -87,6 +91,7 @@ struct Span {
     next_id: TerminalId,
     events: mpsc::UnboundedSender<Notice>,
     connecting: bool,
+    open_menu: Option<WorkspaceMenu>,
     host_input: iced::widget::Id,
     host: String,
     error: Option<String>,
@@ -159,17 +164,6 @@ enum WorkspaceCommand {
 }
 
 impl WorkspaceCommand {
-    const SESSION: [Self; 3] = [Self::Local, Self::Connect, Self::CloseTab];
-    const VIEW: [Self; 7] = [
-        Self::Sidebar,
-        Self::Files,
-        Self::Agent,
-        Self::Catalog,
-        Self::Drawer,
-        Self::PreviousTab,
-        Self::NextTab,
-    ];
-
     fn label(self) -> &'static str {
         match self {
             Self::Local => "新建本地终端",
@@ -186,9 +180,56 @@ impl WorkspaceCommand {
     }
 }
 
-impl std::fmt::Display for WorkspaceCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceMenu {
+    Session,
+    View,
+}
+
+impl WorkspaceMenu {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Session => "会话",
+            Self::View => "视图",
+        }
+    }
+
+    fn commands(self) -> &'static [WorkspaceCommand] {
+        use WorkspaceCommand::*;
+        match self {
+            Self::Session => &[Local, Connect, CloseTab],
+            Self::View => &[Sidebar, Files, Agent, Catalog, Drawer, PreviousTab, NextTab],
+        }
+    }
+
+    fn button(self, selected: Option<Self>) -> Element<'static, Message> {
+        theme::mode(
+            self.label(),
+            Message::ToggleMenu(self),
+            selected == Some(self),
+        )
+        .width(MENU_BUTTON_WIDTH)
+        .into()
+    }
+
+    fn popup(self) -> Element<'static, Message> {
+        let entries =
+            column(self.commands().iter().map(|&command| {
+                theme::nav(command.label(), Message::Command(command), false).into()
+            }))
+            .spacing(1);
+        let panel = opaque(
+            container(entries)
+                .width(182)
+                .padding(4)
+                .style(|_| theme::panel(theme::PANEL, 8.0)),
+        );
+        let left = TITLE_PADDING + BRAND_WIDTH + self as u32 * MENU_BUTTON_WIDTH;
+        stack![
+            mouse_area(Space::new().width(Fill).height(Fill)).on_press(Message::DismissPopup),
+            pin(panel).x(left as f32).y(2),
+        ]
+        .into()
     }
 }
 
@@ -223,7 +264,8 @@ enum Message {
     Close(TerminalId),
     CloseWindow,
     ShowConnect,
-    CancelConnect,
+    DismissPopup,
+    ToggleMenu(WorkspaceMenu),
     ChangeHost(String),
     Connect,
     ConnectRecent(String),
@@ -244,7 +286,7 @@ impl Span {
                 return None;
             };
             (key.as_ref() == Key::Named(Named::Escape) && modifiers.is_empty())
-                .then_some(Message::CancelConnect)
+                .then_some(Message::DismissPopup)
                 .or_else(|| workbench_shortcut(key.as_ref(), modifiers).map(Message::Command))
         });
         let events = iced::Subscription::batch([close, shortcuts]);
@@ -286,6 +328,7 @@ impl Span {
             next_id: 0,
             events,
             connecting: false,
+            open_menu: None,
             host_input: iced::widget::Id::unique(),
             host: String::new(),
             error: None,
@@ -441,6 +484,7 @@ impl Span {
                         active,
                         self.sidebar_visible.then_some(self.sidebar),
                         self.connecting,
+                        self.open_menu,
                     );
                 }
             }
@@ -450,7 +494,14 @@ impl Span {
             }
             Message::Command(command)
                 if self.connecting && command != WorkspaceCommand::Connect => {}
-            Message::Command(command) => return self.run_command(command),
+            Message::Command(command) => {
+                self.open_menu = None;
+                return self.run_command(command);
+            }
+            Message::ToggleMenu(menu) if !self.connecting => {
+                self.open_menu = (self.open_menu != Some(menu)).then_some(menu);
+            }
+            Message::ToggleMenu(_) => {}
             Message::Sidebar(page) => return self.show_sidebar(page),
             Message::Files(id, action) => {
                 if let Some(panel) = self
@@ -538,13 +589,15 @@ impl Span {
                 }
             }
             Message::ShowConnect => {
+                self.open_menu = None;
                 self.connecting = !self.connecting;
                 self.error = None;
                 if self.connecting {
                     return iced::widget::operation::focus(self.host_input.clone());
                 }
             }
-            Message::CancelConnect => {
+            Message::DismissPopup => {
+                self.open_menu = None;
                 if self.connecting {
                     self.connecting = false;
                     self.error = None;
@@ -680,14 +733,20 @@ impl Span {
         let agent_visible = self.active_tab().is_some_and(|tab| tab.show_agent);
         let chrome = container(
             row![
-                svg(self.logo.clone()).width(28).height(28),
-                text("Span")
-                    .size(17)
-                    .font(theme::SEMIBOLD)
-                    .color(theme::INK),
-                Space::new().width(10),
-                workspace_menu("会话", WorkspaceCommand::SESSION),
-                workspace_menu("视图", WorkspaceCommand::VIEW),
+                container(
+                    row![
+                        svg(self.logo.clone()).width(28).height(28),
+                        text("Span")
+                            .size(17)
+                            .font(theme::SEMIBOLD)
+                            .color(theme::INK),
+                    ]
+                    .spacing(7)
+                    .align_y(Center)
+                )
+                .width(BRAND_WIDTH),
+                WorkspaceMenu::Session.button(self.open_menu),
+                WorkspaceMenu::View.button(self.open_menu),
                 Space::new().width(Fill),
                 WorkspaceIcon::Conversation.control(
                     "Codex 会话／终端 (Ctrl+Shift+A)",
@@ -696,10 +755,9 @@ impl Span {
                     agent_visible,
                 ),
             ]
-            .align_y(Center)
-            .spacing(6),
+            .align_y(Center),
         )
-        .padding([6, 13])
+        .padding([6, TITLE_PADDING as u16])
         .width(Fill)
         .style(|_| theme::surface(theme::CHROME));
         let mut body = row![self.rail(), rule::vertical(1).style(theme::rule)].height(Fill);
@@ -728,6 +786,10 @@ impl Span {
                 );
         } else {
             body = body.push(self.workspace());
+        }
+        let mut body = stack![body].height(Fill);
+        if let Some(menu) = self.open_menu {
+            body = body.push(menu.popup());
         }
         let workbench = column![chrome, rule::horizontal(1).style(theme::rule), body];
         if self.connecting {
@@ -861,7 +923,7 @@ impl Span {
         dialog = dialog.push(
             row![
                 Space::new().width(Fill),
-                theme::action("取消", Message::CancelConnect, false),
+                theme::action("取消", Message::DismissPopup, false),
                 connect,
             ]
             .align_y(Center)
@@ -1069,21 +1131,6 @@ impl Span {
         ]
         .into()
     }
-}
-
-fn workspace_menu<const N: usize>(
-    label: &'static str,
-    options: [WorkspaceCommand; N],
-) -> Element<'static, Message> {
-    pick_list(options, None::<WorkspaceCommand>, Message::Command)
-        .placeholder(label)
-        .text_size(13)
-        .text_shaping(iced::widget::text::Shaping::Advanced)
-        .padding([6, 8])
-        .width(131)
-        .style(theme::choice)
-        .menu_style(theme::choice_menu)
-        .into()
 }
 
 fn start_agent(tab: &mut Tab, home: Option<PathBuf>) -> Task<Message> {

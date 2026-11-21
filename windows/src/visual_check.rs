@@ -1,5 +1,5 @@
 use crate::{
-    Message, SidebarPage, Tab, WorkspaceCommand, agent,
+    Message, SidebarPage, Tab, WorkspaceCommand, WorkspaceMenu, agent,
     agent::{CopyFormat, VisualGoal},
     codex_rpc, file_panel,
 };
@@ -42,6 +42,7 @@ pub enum Event {
     FileSuggestions(window::Screenshot),
     QuickConnect(window::Screenshot),
     WorkspaceNavigation(window::Screenshot),
+    Menu(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -78,6 +79,9 @@ enum Step {
     CaptureConnect,
     WaitForDrawer,
     CaptureNavigation,
+    WaitForMenu,
+    CaptureMenu,
+    WaitForMenuAction,
 }
 
 pub struct Check {
@@ -124,6 +128,7 @@ impl Check {
         tab: Option<&Tab>,
         sidebar: Option<SidebarPage>,
         connecting: bool,
+        menu: Option<WorkspaceMenu>,
     ) -> Task<Message> {
         let Some(tab) = tab else {
             return observe();
@@ -599,18 +604,7 @@ impl Check {
                 assert_eq!(sidebar, Some(SidebarPage::Files));
                 assert!(tab.show_agent && !tab.show_drawer);
                 self.step = Step::WaitForConnect;
-                window::latest()
-                    .then(move |id| {
-                        window::run(id.expect("active Span window"), move |window| {
-                            scroll::Target::click(
-                                window,
-                                (19.0 * scale) as i32,
-                                (130.0 * scale) as i32,
-                            );
-                        })
-                        .discard()
-                    })
-                    .chain(observe())
+                click_workspace(19.0, 130.0, scale)
             }
             (Event::Observe, Step::WaitForConnect) => {
                 if !connecting {
@@ -624,7 +618,7 @@ impl Check {
             (Event::QuickConnect(frame), Step::CaptureConnect) => {
                 self.save("quick-connect.png", frame);
                 self.step = Step::WaitForDrawer;
-                Task::done(Message::CancelConnect)
+                Task::done(Message::DismissPopup)
                     .chain(Task::done(Message::Command(WorkspaceCommand::Files)))
                     .chain(Task::done(Message::Command(WorkspaceCommand::Drawer)))
                     .chain(observe())
@@ -640,10 +634,32 @@ impl Check {
                 screenshot(Event::WorkspaceNavigation)
             }
             (Event::WorkspaceNavigation(frame), Step::CaptureNavigation) => {
+                let scale = frame.scale_factor;
                 self.save("workspace-navigation.png", frame);
+                self.step = Step::WaitForMenu;
+                click_workspace(174.0, 21.0, scale)
+            }
+            (Event::Observe, Step::WaitForMenu) => {
+                if menu != Some(WorkspaceMenu::View) {
+                    return observe();
+                }
+                self.step = Step::CaptureMenu;
+                screenshot(Event::Menu)
+            }
+            (Event::Menu(frame), Step::CaptureMenu) => {
+                let scale = frame.scale_factor;
+                self.save("workspace-menu.png", frame);
+                self.step = Step::WaitForMenuAction;
+                click_workspace(185.0, 101.0, scale)
+            }
+            (Event::Observe, Step::WaitForMenuAction) => {
+                if menu.is_some() || sidebar != Some(SidebarPage::Files) {
+                    return observe();
+                }
+                assert!(tab.show_agent && tab.show_drawer);
                 std::fs::write(
                     self.directory.join("workspace-navigation.json"),
-                    br#"{"quickConnectOpenedFromRail":true,"filePageKeepsConversation":true,"fileShortcutReturnsToSessions":true,"terminalDrawerKeepsConversation":true}"#,
+                    br#"{"quickConnectOpenedFromRail":true,"filePageKeepsConversation":true,"fileShortcutReturnsToSessions":true,"terminalDrawerKeepsConversation":true,"viewMenuOpenedFilesWithMouse":true}"#,
                 ).expect("record Windows workbench navigation");
                 Task::done(Message::CloseWindow)
             }
@@ -834,6 +850,17 @@ fn paste(tab: &Tab, value: &str) -> Task<Message> {
             Arc::new(value.into()),
         ))),
     ))
+}
+
+fn click_workspace(x: f32, y: f32, scale: f32) -> Task<Message> {
+    window::latest()
+        .then(move |id| {
+            window::run(id.expect("active Span window"), move |window| {
+                scroll::Target::click(window, (x * scale) as i32, (y * scale) as i32);
+            })
+            .discard()
+        })
+        .chain(observe())
 }
 
 fn screenshot(event: fn(window::Screenshot) -> Event) -> Task<Message> {
