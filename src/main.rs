@@ -36,6 +36,7 @@ mod source_preview;
 mod ssh;
 mod svg;
 mod terminal_theme;
+mod unified_diff;
 #[cfg_attr(windows, path = "windows_terminal.rs")]
 mod vte;
 mod workbench;

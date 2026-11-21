@@ -6,7 +6,7 @@ use iced::widget::{
     Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor,
     stack, svg, text, text_editor, tooltip,
 };
-use iced::{Center, Element, Fill, Task, Theme};
+use iced::{Center, Element, Fill, Task, Theme, Top};
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::sync::{Arc, OnceLock};
@@ -17,6 +17,8 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "agent_activity.rs"]
+mod activity;
 #[path = "agent_scroll.rs"]
 mod agent_scroll;
 #[path = "agent_copy.rs"]
@@ -49,6 +51,7 @@ pub enum Action {
     Interrupt,
     Setting(agent_settings::Change),
     Copy(String, CopyFormat),
+    CopyActivity(String),
     CopyWritten(Uuid, String, CopyFormat, Result<(), String>),
     CopyExpired(Uuid),
     Link(String),
@@ -376,6 +379,15 @@ impl Agent {
                     return copy::write(markdown, format).map(move |result| {
                         Action::CopyWritten(request, id.clone(), format, result)
                     });
+                }
+            }
+            Action::CopyActivity(id) => {
+                if let Some(item) = self
+                    .items
+                    .iter()
+                    .find(|item| item.id == id && matches!(item.kind, Kind::Activity(_)))
+                {
+                    return iced::clipboard::write(item.value.clone());
                 }
             }
             Action::CopyWritten(request, id, format, result)
@@ -735,6 +747,11 @@ impl Agent {
         self.reading_position.probe()
     }
 
+    #[cfg(feature = "visual-check")]
+    pub fn visual_activity_expanded(&self, id: &str) -> bool {
+        self.items.iter().any(|item| item.id == id && item.expanded)
+    }
+
     fn server_request(&mut self, method: &str, params: &Value, id: &Value) {
         let same_thread = params["threadId"].as_str() == self.thread.as_deref();
         let supported = matches!(
@@ -796,6 +813,21 @@ impl Agent {
             }
             "item/started" => self.item(&params["item"], turn_id, false),
             "item/completed" => self.item(&params["item"], turn_id, true),
+            "item/commandExecution/outputDelta" => {
+                if let (Some(id), Some(delta)) =
+                    (params["itemId"].as_str(), params["delta"].as_str())
+                {
+                    self.upsert(
+                        id,
+                        turn_id,
+                        Kind::Activity(Activity::Command),
+                        "",
+                        delta,
+                        true,
+                        false,
+                    );
+                }
+            }
             "item/agentMessage/delta" => {
                 if let (Some(id), Some(delta)) =
                     (params["itemId"].as_str(), params["delta"].as_str())
@@ -862,14 +894,14 @@ impl Agent {
             }
             Some("commandExecution") => {
                 let command = value["command"].as_str().unwrap_or("Run command");
-                let output = value["aggregatedOutput"].as_str().unwrap_or("");
+                let output = value["aggregatedOutput"].as_str();
                 self.upsert(
                     id,
                     turn_id,
                     Kind::Activity(Activity::Command),
                     command,
-                    output,
-                    false,
+                    output.unwrap_or_default(),
+                    output.is_none(),
                     false,
                 );
             }
@@ -950,7 +982,7 @@ impl Agent {
                     turn_id: None,
                     copy_ready: false,
                     kind,
-                    title: title.chars().take(220).collect(),
+                    title: String::new(),
                     value: String::new(),
                     parsed: None,
                     expanded: false,
@@ -962,6 +994,10 @@ impl Agent {
         if item.turn_id.is_none() {
             item.turn_id = turn_id.or(self.turn.as_deref()).map(str::to_owned);
         }
+        if !title.is_empty() && item.title != title {
+            item.title = title.chars().take(220).collect();
+            item.measurement.set(None);
+        }
         if !append {
             if item.parsed.is_some() && item.value == value {
                 return;
@@ -972,7 +1008,9 @@ impl Agent {
         item.value
             .push_str(&value[..value.floor_char_boundary(remaining.min(value.len()))]);
         item.parsed = parse.then(|| markdown::Content::parse(&item.value));
-        item.measurement.set(None);
+        if !matches!(item.kind, Kind::Activity(_)) || item.expanded {
+            item.measurement.set(None);
+        }
     }
 
     pub fn artifact_path(&self, action: &Action) -> Option<PathBuf> {
@@ -1275,11 +1313,11 @@ impl Agent {
         composer = composer.push(editor).push(
             row![
                 attach,
-                container(self.settings.view(running).map(Action::Setting)).width(Fill),
+                container(self.settings.view().map(Action::Setting)).width(Fill),
                 controls,
             ]
-            .spacing(10)
-            .align_y(Center),
+            .spacing(7)
+            .align_y(Top),
         );
         self.conversation(scroll, composer)
     }
@@ -1423,6 +1461,37 @@ mod tests {
         assert_eq!(next["params"]["sandboxPolicy"]["type"], "readOnly");
         assert_eq!(next["params"]["approvalPolicy"], "never");
         assert_eq!(next["params"]["serviceTierForTurn"], "priority");
+    }
+
+    #[test]
+    fn command_output_streams_into_one_row_and_keeps_the_final_snapshot() {
+        let (mut agent, _) = Agent::new(None, None);
+        agent.thread = Some("fixture".into());
+        for chunk in ["working\n", "finished\n"] {
+            agent.notification(
+                "item/commandExecution/outputDelta",
+                &json!({
+                    "threadId":"fixture","turnId":"round","itemId":"command","delta":chunk
+                }),
+            );
+        }
+        agent.notification(
+            "item/started",
+            &json!({
+                "threadId":"fixture","turnId":"round",
+                "item":{"id":"command","type":"commandExecution","command":"cargo test"}
+            }),
+        );
+        assert_eq!(agent.items.len(), 1);
+        assert_eq!(agent.items[0].title, "cargo test");
+        assert_eq!(agent.items[0].value, "working\nfinished\n");
+
+        agent.notification("item/completed", &json!({
+            "threadId":"fixture","turnId":"round",
+            "item":{"id":"command","type":"commandExecution","command":"cargo test", "aggregatedOutput":"working\nfinished\n16 passed\n"}
+        }));
+        assert_eq!(agent.items.len(), 1);
+        assert_eq!(agent.items[0].value, "working\nfinished\n16 passed\n");
     }
 
     #[test]

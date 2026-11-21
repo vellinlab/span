@@ -1,6 +1,7 @@
 use crate::agent::limited;
 use crate::agent_activity::FoldedDetail;
 use crate::agent_render::{CodeCard, clipboard};
+use crate::unified_diff::{self, Kind};
 use gtk::glib;
 use gtk::prelude::*;
 use std::cell::RefCell;
@@ -114,36 +115,25 @@ impl DiffCard {
         buffer.set_text("");
         let mut cursor = buffer.start_iter();
         let (mut additions, mut deletions) = (0, 0);
-        let mut hunk = None;
-        for line in source.split_inclusive('\n') {
-            let (old, new, tag) = if let Some(range) = Hunk::parse(line) {
-                hunk = Some(range);
-                (None, None, Some(&self.meta))
-            } else if let Some(range) = hunk
-                .as_mut()
-                .filter(|range| range.old.1 > 0 || range.new.1 > 0)
-            {
-                match line.as_bytes().first() {
-                    Some(b'+') => {
-                        additions += 1;
-                        (None, next_line(&mut range.new), Some(&self.added))
-                    }
-                    Some(b'-') => {
-                        deletions += 1;
-                        (next_line(&mut range.old), None, Some(&self.removed))
-                    }
-                    Some(b' ') => (next_line(&mut range.old), next_line(&mut range.new), None),
-                    _ => (None, None, Some(&self.meta)),
+        for line in unified_diff::lines(&source) {
+            let tag = match line.kind {
+                Kind::Added => {
+                    additions += 1;
+                    Some(&self.added)
                 }
-            } else {
-                (None, None, Some(&self.meta))
+                Kind::Removed => {
+                    deletions += 1;
+                    Some(&self.removed)
+                }
+                Kind::Context => None,
+                Kind::Header => Some(&self.meta),
             };
             let start = cursor.offset();
-            let old = old.map_or_else(String::new, |value| value.to_string());
-            let new = new.map_or_else(String::new, |value| value.to_string());
+            let old = line.old.map_or_else(String::new, |value| value.to_string());
+            let new = line.new.map_or_else(String::new, |value| value.to_string());
             buffer.insert(&mut cursor, &format!("{old:>5} {new:>5}  "));
             buffer.apply_tag(&self.number, &buffer.iter_at_offset(start), &cursor);
-            buffer.insert(&mut cursor, line);
+            buffer.insert(&mut cursor, line.text);
             if let Some(tag) = tag {
                 buffer.apply_tag(tag, &buffer.iter_at_offset(start), &cursor);
             }
@@ -157,33 +147,4 @@ impl DiffCard {
             });
         }
     }
-}
-
-struct Hunk {
-    old: (u32, u32),
-    new: (u32, u32),
-}
-
-impl Hunk {
-    fn parse(line: &str) -> Option<Self> {
-        let mut parts = line.strip_prefix("@@ ")?.split_whitespace();
-        let old = parse_range(parts.next()?.strip_prefix('-')?)?;
-        let new = parse_range(parts.next()?.strip_prefix('+')?)?;
-        (parts.next()? == "@@").then_some(Self { old, new })
-    }
-}
-
-fn parse_range(range: &str) -> Option<(u32, u32)> {
-    let (line, count) = range.split_once(',').unwrap_or((range, "1"));
-    Some((line.parse().ok()?, count.parse().ok()?))
-}
-
-fn next_line(range: &mut (u32, u32)) -> Option<u32> {
-    if range.1 == 0 {
-        return None;
-    }
-    let line = range.0;
-    range.0 = range.0.saturating_add(1);
-    range.1 -= 1;
-    Some(line)
 }

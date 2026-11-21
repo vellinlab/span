@@ -29,6 +29,8 @@ mod terminal;
 #[allow(dead_code)]
 mod terminal_theme;
 mod theme;
+#[path = "../../src/unified_diff.rs"]
+mod unified_diff;
 #[cfg(feature = "visual-check")]
 mod visual_check;
 

@@ -1,13 +1,11 @@
-use super::{Action, Activity, CopyFormat, Item, Kind, agent_scroll::ReadingPosition};
+use super::{Action, CopyFormat, Item, Kind, activity, agent_scroll::ReadingPosition};
 use crate::theme;
 use iced::advanced::{
     Clipboard, Layout, Shell, Widget, layout, mouse, overlay, renderer,
     widget::{Operation, Tree, tree},
 };
-use iced::widget::{Space, button, column, container, markdown, row, svg, text, tooltip};
-use iced::{
-    Center, Element, Event, Fill, Length, Point, Rectangle, Renderer, Right, Size, Theme, Vector,
-};
+use iced::widget::{button, column, container, markdown, row, svg, text, tooltip};
+use iced::{Element, Event, Fill, Length, Point, Rectangle, Renderer, Right, Size, Theme, Vector};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -386,7 +384,8 @@ fn entry<'a>(
             .style(|_| theme::rounded(theme::HIGHLIGHT, 14.0)),
         )
         .width(Fill)
-        .align_x(Right),
+        .align_x(Right)
+        .into(),
         Kind::Reply => {
             let response = if let Some(parsed) = &item.parsed {
                 markdown::view(
@@ -397,52 +396,10 @@ fn entry<'a>(
             } else {
                 text(&item.value).size(15).into()
             };
-            container(response)
+            container(response).into()
         }
-        Kind::Activity(kind) => {
-            let toggle = button(
-                row![
-                    svg(kind.icon())
-                        .width(15)
-                        .height(15)
-                        .style(|_, _| svg::Style {
-                            color: Some(theme::MUTED),
-                        }),
-                    text(&item.title).size(13),
-                    Space::new().width(Fill),
-                    text(if item.expanded { "⌃" } else { "⌄" }).size(15),
-                ]
-                .spacing(8)
-                .align_y(Center),
-            )
-            .on_press(Action::Toggle(item.id.clone()))
-            .width(Fill)
-            .padding([4, 7])
-            .style(move |_, status| theme::tab(item.expanded, status));
-            let mut activity = column![toggle].spacing(5);
-            if item.expanded {
-                let detail: Element<'_, Action> = match kind {
-                    Activity::Reasoning => item.parsed.as_ref().map_or_else(
-                        || text(&item.value).size(14).into(),
-                        |document| {
-                            markdown::view(
-                                document.items(),
-                                markdown::Settings::with_text_size(14, theme),
-                            )
-                            .map(Action::Link)
-                        },
-                    ),
-                    _ => text(&item.value)
-                        .size(13)
-                        .font(iced::Font::MONOSPACE)
-                        .into(),
-                };
-                activity = activity.push(container(detail).padding([7, 14]));
-            }
-            container(activity).width(Fill)
-        }
-    }
-    .into();
+        Kind::Activity(kind) => activity::view(item, kind, theme),
+    };
     if !item.copy_ready {
         return body;
     }

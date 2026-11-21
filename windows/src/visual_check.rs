@@ -25,6 +25,7 @@ const INITIAL_ITEMS: usize = 320;
 const EARLIER_ITEMS: usize = 32;
 const COPY_INTRO: &str = "Progress: the preview has finished.";
 const COPY_MARKDOWN: &str = "### Build report\n\n| 检查 | 状态 |\n| --- | --- |\n| 终端 | **通过** |\n\n[Details](https://example.invalid/build-report)\n\n```powershell\nspan check --preview\n```";
+const ACTIVITY_DIFF: &str = "diff --git a/src/preview.rs b/src/preview.rs\n--- a/src/preview.rs\n+++ b/src/preview.rs\n@@ -14,3 +14,4 @@ fn render() {\n-    let frame = redraw();\n+    let frame = cache.get_or_draw();\n+    frame.keep_position();\n     show(frame);\n }\n";
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -37,6 +38,7 @@ pub enum Event {
     Attachment(window::Screenshot),
     Goal(window::Screenshot),
     Resized(window::Screenshot),
+    Activity(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +63,9 @@ enum Step {
     WaitForResize(u32),
     FollowLatest,
     WaitForStream,
+    CaptureActivityIdle,
+    CaptureActivityHover,
+    CaptureActivityExpanded,
 }
 
 pub struct Check {
@@ -394,6 +399,88 @@ impl Check {
                     result.to_string(),
                 )
                 .expect("record streaming and resize results");
+                self.step = Step::CaptureActivityIdle;
+                let packet = json!({
+                    "method": "turn/diff/updated",
+                    "params": { "threadId": THREAD, "turnId": "image-turn", "diff": ACTIVITY_DIFF }
+                });
+                Task::done(Message::Agent(
+                    tab.id,
+                    agent::Action::Event(codex_rpc::Event::Packet(packet)),
+                ))
+                .chain(observe())
+            }
+            (Event::Activity(frame), Step::CaptureActivityIdle | Step::CaptureActivityHover) => {
+                let hovered = matches!(self.step, Step::CaptureActivityHover);
+                let (_, view, _, _) = probe.expect("activity viewport");
+                let bounds = view.bounds();
+                let (right, bottom) = activity_corner(bounds, frame.scale_factor);
+                let scale = frame.scale_factor;
+                let arrow = iced::Rectangle::new(
+                    iced::Point::new(right - 21.0 * scale, bottom - 47.0 * scale),
+                    Size::new(17.0 * scale, 27.0 * scale),
+                );
+                assert_eq!(
+                    pixels_where(&frame, arrow, |[r, g, b]| r > 130 && g > 130 && b > 130) > 0,
+                    hovered,
+                    "activity chevron should be visible only on hover"
+                );
+                self.save(
+                    if hovered {
+                        "activity-hover.png"
+                    } else {
+                        "activity-idle.png"
+                    },
+                    frame,
+                );
+                self.step = if hovered {
+                    Step::CaptureActivityExpanded
+                } else {
+                    Step::CaptureActivityHover
+                };
+                let x = (bounds.center_x() * scale).round() as i32;
+                let y = (bottom - 33.0 * scale).round() as i32;
+                window::latest()
+                    .then(move |id| {
+                        window::run(id.expect("active Span window"), move |window| {
+                            if hovered {
+                                scroll::Target::click(window, x, y);
+                            } else {
+                                scroll::Target::locate(window, x, y);
+                            }
+                        })
+                        .discard()
+                    })
+                    .chain(observe())
+            }
+            (Event::Observe, Step::CaptureActivityIdle | Step::CaptureActivityHover) => {
+                screenshot(Event::Activity)
+            }
+            (Event::Observe, Step::CaptureActivityExpanded) => {
+                if agent.visual_activity_expanded("image-turn-diff") {
+                    screenshot(Event::Activity)
+                } else {
+                    observe()
+                }
+            }
+            (Event::Activity(frame), Step::CaptureActivityExpanded) => {
+                let (_, view, _, _) = probe.expect("expanded activity viewport");
+                let logical = view.bounds();
+                let scale = frame.scale_factor;
+                let bounds = iced::Rectangle::new(
+                    iced::Point::new(logical.x * scale, logical.y * scale),
+                    Size::new(logical.width * scale, logical.height * scale),
+                );
+                for color in [[0x20, 0x38, 0x2e], [0x40, 0x29, 0x30]] {
+                    assert!(
+                        pixels_where(&frame, bounds, |pixel| pixel == color) > 100,
+                        "missing expanded diff line color {color:?}"
+                    );
+                }
+                self.save("activity-diff.png", frame);
+                std::fs::write(self.directory.join("activity.json"),
+                    br#"{"hoverRevealsChevron":true,"clickedDiff":true,"addedAndRemovedRowsPainted":true}"#,
+                ).expect("record native activity workflow");
                 Task::done(Message::CloseWindow)
             }
             (
@@ -432,6 +519,36 @@ impl Check {
         .expect("save native window screenshot");
         hash.finish()
     }
+}
+
+fn activity_corner(bounds: iced::Rectangle, scale: f32) -> (f32, f32) {
+    let reading_width = (bounds.width - 48.0).min(760.0);
+    (
+        (bounds.x + (bounds.width + reading_width) / 2.0) * scale,
+        (bounds.y + bounds.height) * scale,
+    )
+}
+
+fn pixels_where(
+    frame: &window::Screenshot,
+    bounds: iced::Rectangle,
+    test: impl Fn([u8; 3]) -> bool,
+) -> usize {
+    let right = ((bounds.x + bounds.width).ceil() as u32).min(frame.size.width);
+    let bottom = ((bounds.y + bounds.height).ceil() as u32).min(frame.size.height);
+    let mut count = 0;
+    for y in bounds.y as u32..bottom {
+        for x in bounds.x as u32..right {
+            let offset = ((y * frame.size.width + x) * 4) as usize;
+            let pixel = [
+                frame.rgba[offset],
+                frame.rgba[offset + 1],
+                frame.rgba[offset + 2],
+            ];
+            count += usize::from(test(pixel));
+        }
+    }
+    count
 }
 
 fn resize(width: u32) -> Task<Message> {

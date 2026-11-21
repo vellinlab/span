@@ -112,7 +112,7 @@ impl Settings {
         }
     }
 
-    pub fn view(&self, running: bool) -> Element<'_, Change> {
+    pub fn view(&self) -> Element<'_, Change> {
         let model = self.active_model();
         let model_placeholder = if self.current_model.is_empty() {
             "Session model"
@@ -147,7 +147,7 @@ impl Settings {
                 Change::Permission
             )
             .placeholder("Session access")
-            .padding([5, 8])
+            .padding([6, 7])
             .text_size(13)
             .handle(pick_list::Handle::Arrow {
                 size: Some(10.into())
@@ -166,7 +166,7 @@ impl Settings {
             toolbar = toolbar.push(
                 pick_list(model.efforts.as_slice(), effort, Change::Effort)
                     .placeholder("Reasoning")
-                    .padding([5, 8])
+                    .padding([6, 7])
                     .text_size(13)
                     .handle(pick_list::Handle::Arrow {
                         size: Some(10.into()),
@@ -184,9 +184,6 @@ impl Settings {
                 },
                 Some(Change::Fast),
             ));
-        }
-        if running {
-            toolbar = toolbar.push(text("Next turn").size(12).color(theme::MUTED));
         }
         toolbar.wrap().vertical_spacing(5).into()
     }
