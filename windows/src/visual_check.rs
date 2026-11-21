@@ -332,10 +332,11 @@ impl Check {
                 stream(tab, "incoming-at-bottom")
             }
             (Event::Observe, Step::WaitForStream) => {
-                if !probe.is_some_and(|(_, _, items, _)| items == self.items + 3) {
+                let Some((_, view, _, _)) =
+                    probe.filter(|(_, _, items, _)| *items == self.items + 3)
+                else {
                     return observe();
-                }
-                let (_, view, _, _) = probe.expect("streaming viewport");
+                };
                 assert!(
                     view.absolute_offset().y < 1.0,
                     "latest reply did not stay visible"

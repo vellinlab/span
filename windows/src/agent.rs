@@ -759,7 +759,6 @@ impl Agent {
                     self.finish_reply(id, 0);
                 }
                 self.in_flight = false;
-                self.turn = None;
                 self.approval = None;
                 if let Some(error) = params["turn"]["error"]["message"].as_str() {
                     self.status = Some(error.into());
