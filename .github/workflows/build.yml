@@ -145,6 +145,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
       - name: Download the verified release bundle
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -172,7 +178,9 @@ jobs:
               exit 0
             fi
           else
-            gh release create "$RELEASE_TAG" --verify-tag --title "Span $version" --notes-from-tag --draft "${flags[@]}"
+            git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+            git for-each-ref --format='%(contents)' "refs/tags/$RELEASE_TAG" |
+              gh release create "$RELEASE_TAG" --verify-tag --title "Span $version" --notes-file - --draft "${flags[@]}"
           fi
           gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           gh release edit "$RELEASE_TAG" --draft=false "${flags[@]}"
