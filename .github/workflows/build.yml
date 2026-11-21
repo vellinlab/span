@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-linux-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -65,18 +65,14 @@ jobs:
           retention-days: 30
 
   windows:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    uses: ./.github/workflows/windows.yml
+    uses: ./.github/workflows/windows-native.yml
 
-  release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  release-bundle:
     needs: [el8-x86_64, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: write
     steps:
-      - name: Check out the tagged source
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -101,14 +97,18 @@ jobs:
           merge-multiple: true
           skip-decompress: true
 
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Download the Windows package test result
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-native-startup.json
+          path: ${{ runner.temp }}
+          skip-decompress: true
+
+      - name: Verify the release assets
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml)"
-          if [[ "$RELEASE_TAG" != "v$version" ]]; then
-            printf 'Tag %s does not match Cargo version %s.\n' "$RELEASE_TAG" "$version" >&2
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            printf 'Tag %s does not match Cargo version %s.\n' "$GITHUB_REF_NAME" "$version" >&2
             exit 1
           fi
           package_version="$(bash packaging/package-version.sh)"
@@ -124,6 +124,44 @@ jobs:
           for asset in "${assets[@]}"; do
             test -s "$asset"
           done
+          windows_asset="${assets[1]}"
+          tested_sha="$(jq -er '.ZipSHA256' "$RUNNER_TEMP/windows-native-startup.json")"
+          printf '%s  %s\n' "${tested_sha,,}" "$windows_asset" | sha256sum -c -
+          sha256sum "${assets[@]}"
+
+      - name: Upload the verified release bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: span-release-bundle
+          path: release/
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: release-bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified release bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: span-release-bundle
+          path: release
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          assets=(
+            "release/span-$version-1.el8.x86_64.rpm"
+            "release/span-$version-windows-x86_64.zip"
+            "release/vte-0.64.2.tar.xz"
+          )
           flags=()
           if [[ "$version" == *-* ]]; then
             flags+=(--prerelease --latest=false)
