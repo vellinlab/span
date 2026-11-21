@@ -13,6 +13,7 @@ mod file_panel;
 #[path = "../../src/files.rs"]
 #[allow(dead_code)]
 mod files;
+mod host_panel;
 #[path = "../../src/process_environment.rs"]
 mod process_environment;
 #[path = "../../src/sftp.rs"]
@@ -23,6 +24,8 @@ mod sftp;
 mod ssh;
 #[cfg(test)]
 mod ssh_check;
+#[path = "../../src/ssh_config.rs"]
+mod ssh_config;
 mod ssh_destination;
 mod terminal;
 #[path = "../../src/terminal_theme.rs"]
@@ -42,7 +45,7 @@ use iced::widget::{
 };
 use iced::{Center, Element, Fill, Size, Task, Theme, clipboard, window};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use terminal::{Clipboard, Notice, Terminal, TerminalId};
 
 const TITLE_PADDING: u32 = 13;
@@ -96,8 +99,9 @@ struct Span {
     host: String,
     error: Option<String>,
     recent: Vec<String>,
+    hosts: host_panel::Panel,
     home: Option<PathBuf>,
-    hosts_path: Option<PathBuf>,
+    recent_path: Option<PathBuf>,
     #[cfg(feature = "visual-check")]
     visual_check: Option<visual_check::Check>,
 }
@@ -105,6 +109,7 @@ struct Span {
 struct Tab {
     id: TerminalId,
     host: Option<String>,
+    host_name: Option<String>,
     terminal: TerminalState,
     agent: Option<agent::Agent>,
     show_agent: bool,
@@ -120,9 +125,11 @@ enum TerminalState {
 
 impl Tab {
     fn name(&self) -> &str {
-        self.host
-            .as_deref()
-            .map_or("PowerShell", ssh_destination::label)
+        self.host_name.as_deref().unwrap_or_else(|| {
+            self.host
+                .as_deref()
+                .map_or("PowerShell", ssh_destination::label)
+        })
     }
 
     fn shown_agent(&self) -> Option<&agent::Agent> {
@@ -154,6 +161,8 @@ enum WorkspaceCommand {
     Local,
     Connect,
     CloseTab,
+    AddHost,
+    ImportHosts,
     Sidebar,
     Files,
     Agent,
@@ -169,6 +178,8 @@ impl WorkspaceCommand {
             Self::Local => "新建本地终端",
             Self::Connect => "快速连接…",
             Self::CloseTab => "关闭标签",
+            Self::AddHost => "添加主机…",
+            Self::ImportHosts => "导入 SSH 配置…",
             Self::Sidebar => "显示／隐藏侧栏",
             Self::Files => "文件目录",
             Self::Agent => "Codex 会话／终端",
@@ -183,6 +194,7 @@ impl WorkspaceCommand {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkspaceMenu {
     Session,
+    Host,
     View,
 }
 
@@ -190,6 +202,7 @@ impl WorkspaceMenu {
     fn label(self) -> &'static str {
         match self {
             Self::Session => "会话",
+            Self::Host => "主机",
             Self::View => "视图",
         }
     }
@@ -198,6 +211,7 @@ impl WorkspaceMenu {
         use WorkspaceCommand::*;
         match self {
             Self::Session => &[Local, Connect, CloseTab],
+            Self::Host => &[AddHost, ImportHosts],
             Self::View => &[Sidebar, Files, Agent, Catalog, Drawer, PreviousTab, NextTab],
         }
     }
@@ -242,6 +256,7 @@ fn workbench_shortcut(key: Key<&str>, modifiers: Modifiers) -> Option<WorkspaceC
         (true, Key::Character("t" | "T")) => Some(Local),
         (true, Key::Character("o" | "O")) => Some(Connect),
         (true, Key::Character("w" | "W")) => Some(CloseTab),
+        (true, Key::Character("n" | "N")) => Some(AddHost),
         (true, Key::Character("b" | "B")) => Some(Sidebar),
         (true, Key::Character("f" | "F")) => Some(Files),
         (true, Key::Character("a" | "A")) => Some(Agent),
@@ -268,7 +283,7 @@ enum Message {
     ToggleMenu(WorkspaceMenu),
     ChangeHost(String),
     Connect,
-    ConnectRecent(String),
+    Hosts(host_panel::Action),
     Terminal(Notice),
     Clipboard(Clipboard),
     Pasted(TerminalId, Option<String>),
@@ -304,10 +319,14 @@ impl Span {
     fn boot() -> (Self, Task<Message>) {
         let (events, receiver) = mpsc::unbounded();
         let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
-        let hosts_path = std::env::var_os("LOCALAPPDATA")
-            .map(|path| PathBuf::from(path).join("Span").join("recent-hosts.json"));
+        let config = std::env::var_os("LOCALAPPDATA").map(|path| PathBuf::from(path).join("Span"));
+        #[cfg(feature = "visual-check")]
+        let config = std::env::var_os("SPAN_VISUAL_CHECK_DIR")
+            .map(|path| PathBuf::from(path).join("profile-fixture"))
+            .or(config);
+        let recent_path = config.as_ref().map(|path| path.join("recent-hosts.json"));
         let mut seen = HashSet::new();
-        let recent = hosts_path
+        let recent = recent_path
             .as_ref()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|data| serde_json::from_slice::<Vec<String>>(&data).ok())
@@ -333,12 +352,13 @@ impl Span {
             host: String::new(),
             error: None,
             recent,
+            hosts: host_panel::Panel::new(config.map(|path| path.join("hosts.json"))),
             home,
-            hosts_path,
+            recent_path,
             #[cfg(feature = "visual-check")]
             visual_check: visual_check::Check::from_env(),
         };
-        span.open(None);
+        span.open(None, None);
         let terminal_events = Task::run(receiver, Message::Terminal);
         #[cfg(feature = "visual-check")]
         if span.visual_check.is_some() {
@@ -359,7 +379,7 @@ impl Span {
         self.theme.clone()
     }
 
-    fn open(&mut self, host: Option<String>) {
+    fn open(&mut self, host: Option<String>, host_name: Option<String>) {
         self.cancel_file_suggestions();
         self.next_id += 1;
         let id = self.next_id;
@@ -373,6 +393,7 @@ impl Span {
         self.terminals.push(Tab {
             id,
             host,
+            host_name,
             terminal,
             agent: None,
             show_agent: false,
@@ -400,7 +421,7 @@ impl Span {
             self.error = Some("请输入 SSH 别名或 user@host:2222。".into());
             return Task::none();
         };
-        self.open(Some(host));
+        self.open(Some(host), None);
         self.connecting = false;
         self.host.clear();
         self.sync_sidebar()
@@ -426,8 +447,8 @@ impl Span {
                     self.recent.retain(|entry| entry != host);
                     self.recent.insert(0, host.clone());
                     self.recent.truncate(12);
-                    if let Some(path) = self.hosts_path.as_deref()
-                        && let Err(error) = save_recent(path, &self.recent)
+                    if let Some(path) = self.recent_path.as_deref()
+                        && let Err(error) = host_panel::write_json(path, &self.recent)
                     {
                         self.error = Some(format!("Could not save recent connections: {error}"));
                     }
@@ -466,8 +487,8 @@ impl Span {
             .find(|tab| self.active == Some(tab.id))?;
         ((tab.shown_agent().is_none() || tab.show_drawer)
             && matches!(tab.terminal, TerminalState::Ready(_))
-            && !self.connecting)
-            .then_some(tab.id)
+            && !self.modal_open())
+        .then_some(tab.id)
     }
 
     fn handle_message(&mut self, message: Message) -> Task<Message> {
@@ -485,20 +506,20 @@ impl Span {
                         self.sidebar_visible.then_some(self.sidebar),
                         self.connecting,
                         self.open_menu,
+                        self.hosts.dialog_open(),
                     );
                 }
             }
             Message::NewTerminal => {
-                self.open(None);
+                self.open(None, None);
                 return self.sync_sidebar();
             }
-            Message::Command(command)
-                if self.connecting && command != WorkspaceCommand::Connect => {}
+            Message::Command(_) if self.modal_open() => {}
             Message::Command(command) => {
                 self.open_menu = None;
                 return self.run_command(command);
             }
-            Message::ToggleMenu(menu) if !self.connecting => {
+            Message::ToggleMenu(menu) if !self.modal_open() => {
                 self.open_menu = (self.open_menu != Some(menu)).then_some(menu);
             }
             Message::ToggleMenu(_) => {}
@@ -588,7 +609,7 @@ impl Span {
                     }
                 }
             }
-            Message::ShowConnect => {
+            Message::ShowConnect if !self.hosts.dialog_open() => {
                 self.open_menu = None;
                 self.connecting = !self.connecting;
                 self.error = None;
@@ -596,8 +617,10 @@ impl Span {
                     return iced::widget::operation::focus(self.host_input.clone());
                 }
             }
+            Message::ShowConnect => {}
             Message::DismissPopup => {
                 self.open_menu = None;
+                self.hosts.dismiss();
                 if self.connecting {
                     self.connecting = false;
                     self.error = None;
@@ -608,7 +631,12 @@ impl Span {
                 self.error = None;
             }
             Message::Connect => return self.connect(&self.host.clone()),
-            Message::ConnectRecent(host) => return self.connect(&host),
+            Message::Hosts(host_panel::Action::Connect(host)) => {
+                self.open(Some(host.target), Some(host.name));
+                return self.sync_sidebar();
+            }
+            Message::Hosts(host_panel::Action::ConnectRecent(host)) => return self.connect(&host),
+            Message::Hosts(action) => return self.host_action(action),
             Message::Terminal(notice) => self.terminal_notice(notice),
             Message::Clipboard(Clipboard::Copy(id)) => {
                 if let Some(text) = self.terminal(id).and_then(Terminal::selection) {
@@ -623,6 +651,20 @@ impl Span {
                     terminal.paste(text);
                 }
             }
+        }
+        Task::none()
+    }
+
+    fn modal_open(&self) -> bool {
+        self.connecting || self.hosts.dialog_open()
+    }
+
+    fn host_action(&mut self, action: host_panel::Action) -> Task<Message> {
+        if !self.connecting {
+            return self
+                .hosts
+                .update(action, self.home.as_deref())
+                .map(Message::Hosts);
         }
         Task::none()
     }
@@ -667,6 +709,8 @@ impl Span {
         match command {
             Local => self.handle_message(Message::NewTerminal),
             Connect => self.handle_message(Message::ShowConnect),
+            AddHost => self.host_action(host_panel::Action::Add),
+            ImportHosts => self.host_action(host_panel::Action::Import),
             CloseTab => self
                 .active
                 .map_or_else(Task::none, |id| self.handle_message(Message::Close(id))),
@@ -746,6 +790,7 @@ impl Span {
                 )
                 .width(BRAND_WIDTH),
                 WorkspaceMenu::Session.button(self.open_menu),
+                WorkspaceMenu::Host.button(self.open_menu),
                 WorkspaceMenu::View.button(self.open_menu),
                 Space::new().width(Fill),
                 WorkspaceIcon::Conversation.control(
@@ -794,6 +839,8 @@ impl Span {
         let workbench = column![chrome, rule::horizontal(1).style(theme::rule), body];
         if self.connecting {
             stack![workbench, self.connect_dialog()].into()
+        } else if let Some(dialog) = self.hosts.dialog() {
+            stack![workbench, dialog.map(Message::Hosts)].into()
         } else {
             stack![workbench].into()
         }
@@ -842,7 +889,10 @@ impl Span {
         .spacing(3);
         let active = self.active_tab();
         let contents = match self.sidebar {
-            SidebarPage::Hosts => self.hosts(),
+            SidebarPage::Hosts => self
+                .hosts
+                .sidebar(&self.recent, active.and_then(|tab| tab.host.as_deref()))
+                .map(Message::Hosts),
             SidebarPage::Files => {
                 match active.and_then(|tab| Some((tab.id, tab.file_panel.as_ref()?))) {
                     Some((id, panel)) => panel
@@ -868,33 +918,6 @@ impl Span {
             .padding([10, 12])
             .style(|_| theme::surface(theme::SIDE))
             .into()
-    }
-
-    fn hosts(&self) -> Element<'_, Message> {
-        let mut contents = column![
-            row![
-                text("SSH 主机").size(14).font(theme::SEMIBOLD),
-                Space::new().width(Fill),
-                theme::WorkspaceIcon::Plus.control("快速连接", Some(Message::ShowConnect), false),
-            ]
-            .align_y(Center),
-        ]
-        .spacing(8);
-        if self.recent.is_empty() {
-            contents = contents.push(text("还没有最近连接").size(13).color(theme::MUTED));
-        } else {
-            for host in &self.recent {
-                let active = self
-                    .active_tab()
-                    .is_some_and(|tab| tab.host.as_ref() == Some(host));
-                contents = contents.push(theme::nav(
-                    ssh_destination::label(host),
-                    Message::ConnectRecent(host.clone()),
-                    active,
-                ));
-            }
-        }
-        scrollable(contents).width(Fill).height(Fill).into()
     }
 
     fn connect_dialog(&self) -> Element<'_, Message> {
@@ -1138,15 +1161,4 @@ fn start_agent(tab: &mut Tab, home: Option<PathBuf>) -> Task<Message> {
     let (agent, events) = agent::Agent::new(tab.host.clone(), home);
     tab.agent = Some(agent);
     events.map(move |action| Message::Agent(id, action))
-}
-
-fn save_recent(path: &Path, recent: &[String]) -> std::io::Result<()> {
-    std::fs::create_dir_all(path.parent().expect("configuration parent"))?;
-    let pending = path.with_extension(format!("{}.tmp", std::process::id()));
-    std::fs::write(&pending, serde_json::to_vec(recent)?)?;
-    if let Err(error) = std::fs::rename(&pending, path) {
-        let _ = std::fs::remove_file(pending);
-        return Err(error);
-    }
-    Ok(())
 }

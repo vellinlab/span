@@ -34,8 +34,8 @@ Ubuntu／DEB 暂停更新。已发布的 Ubuntu 安装包仍可在对应的 Rele
 ## 使用
 
 - 启动后进入本地终端。Linux 默认使用 Bash，Windows 默认使用 PowerShell。标签栏的「+」打开另一个本地终端，标签可拖动排序。
-- Linux 主机栏的「+」添加配置，点击主机打开 SSH 标签，「…」菜单提供编辑和删除。配置保存在 `$XDG_CONFIG_HOME/ssh-workbench/hosts.ini`，通常是 `~/.config/ssh-workbench/hosts.ini`。「主机 → 导入 SSH 配置」可从本机 SSH 配置选中要保存的别名。
-- SSH 目标可填 OpenSSH 别名或 `user@host`。Linux 从「会话 → 快速连接」打开，Windows 使用左栏的连接入口，也可以从最近连接重新打开。系统 OpenSSH 读取现有配置、代理和认证设置。
+- 主机栏的「+」添加配置，点击主机打开 SSH 标签，「…」提供编辑和删除。「主机 → 导入 SSH 配置」可从本机 SSH 配置选中要保存的别名。Linux 配置保存在 `$XDG_CONFIG_HOME/ssh-workbench/hosts.ini`，Windows 配置保存在 `%LOCALAPPDATA%\Span\hosts.json`。
+- SSH 目标可填 OpenSSH 别名或 `user@host`。从「会话 → 快速连接」或左侧工具栏打开。Windows 主机页还列出最近连接。系统 OpenSSH 读取现有配置、代理和认证设置。
 - Linux 下，为可信主机开启「信任 X11 转发」后，应用使用 `ssh -Y` 和当前标签的专用控制套接字。连接后在远端 Codex 中按 `Ctrl+V` 附上本机截图。
 - 文字复制和粘贴使用 `Ctrl+Shift+C` 和 `Ctrl+Shift+V`。用 `Ctrl+Shift+T` 新建本地标签，`Ctrl+Shift+W` 关闭当前标签。
 

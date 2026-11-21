@@ -34,6 +34,7 @@ mod session;
 mod sftp;
 mod source_preview;
 mod ssh;
+mod ssh_config;
 mod svg;
 mod terminal_theme;
 mod unified_diff;

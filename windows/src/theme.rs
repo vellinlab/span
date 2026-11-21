@@ -230,11 +230,13 @@ pub enum WorkspaceIcon {
     Drawer,
     Plus,
     Close,
+    More,
+    Import,
 }
 
 impl WorkspaceIcon {
     fn handle(self) -> svg::Handle {
-        static GLYPHS: [OnceLock<svg::Handle>; 8] = [const { OnceLock::new() }; 8];
+        static GLYPHS: [OnceLock<svg::Handle>; 10] = [const { OnceLock::new() }; 10];
         let path = match self {
             Self::Sidebar => {
                 "M14 14H4a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 4 4h12a1.5 1.5 0 0 1 1.5 1.5V9M7 18h4m8-5.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8m-1 2.5 1.5 1.5-1.5 1.5"
@@ -256,6 +258,8 @@ impl WorkspaceIcon {
             }
             Self::Plus => "M12 5v14M5 12h14",
             Self::Close => "m6 6 12 12m0-12L6 18",
+            Self::More => "M5 12h.5m6 0h.5m6 0h.5",
+            Self::Import => "M12 3v11m-4-4 4 4 4-4M4 16v4h16v-4",
         };
         GLYPHS[self as usize].get_or_init(|| svg::Handle::from_memory(format!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>"#

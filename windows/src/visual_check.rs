@@ -1,7 +1,7 @@
 use crate::{
     Message, SidebarPage, Tab, WorkspaceCommand, WorkspaceMenu, agent,
     agent::{CopyFormat, VisualGoal},
-    codex_rpc, file_panel,
+    codex_rpc, file_panel, host_panel,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::channel::mpsc;
@@ -43,6 +43,8 @@ pub enum Event {
     QuickConnect(window::Screenshot),
     WorkspaceNavigation(window::Screenshot),
     Menu(window::Screenshot),
+    HostEditor(window::Screenshot),
+    Hosts(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -82,6 +84,11 @@ enum Step {
     WaitForMenu,
     CaptureMenu,
     WaitForMenuAction,
+    WaitForHostSidebar,
+    WaitForHostEditor,
+    CaptureHostEditor,
+    WaitForSavedHost,
+    CaptureHosts,
 }
 
 pub struct Check {
@@ -92,6 +99,7 @@ pub struct Check {
     benchmark: Option<scroll::Benchmark>,
     reading: Option<(String, f32)>,
     narrow_content_height: Option<f32>,
+    scale: Option<f32>,
 }
 
 pub fn enabled() -> bool {
@@ -115,6 +123,7 @@ impl Check {
             benchmark: None,
             reading: None,
             narrow_content_height: None,
+            scale: None,
         })
     }
 
@@ -129,6 +138,7 @@ impl Check {
         sidebar: Option<SidebarPage>,
         connecting: bool,
         menu: Option<WorkspaceMenu>,
+        host_editor: bool,
     ) -> Task<Message> {
         let Some(tab) = tab else {
             return observe();
@@ -635,9 +645,10 @@ impl Check {
             }
             (Event::WorkspaceNavigation(frame), Step::CaptureNavigation) => {
                 let scale = frame.scale_factor;
+                self.scale = Some(scale);
                 self.save("workspace-navigation.png", frame);
                 self.step = Step::WaitForMenu;
-                click_workspace(174.0, 21.0, scale)
+                click_workspace(222.0, 21.0, scale)
             }
             (Event::Observe, Step::WaitForMenu) => {
                 if menu != Some(WorkspaceMenu::View) {
@@ -650,7 +661,7 @@ impl Check {
                 let scale = frame.scale_factor;
                 self.save("workspace-menu.png", frame);
                 self.step = Step::WaitForMenuAction;
-                click_workspace(185.0, 101.0, scale)
+                click_workspace(233.0, 101.0, scale)
             }
             (Event::Observe, Step::WaitForMenuAction) => {
                 if menu.is_some() || sidebar != Some(SidebarPage::Files) {
@@ -661,6 +672,52 @@ impl Check {
                     self.directory.join("workspace-navigation.json"),
                     br#"{"quickConnectOpenedFromRail":true,"filePageKeepsConversation":true,"fileShortcutReturnsToSessions":true,"terminalDrawerKeepsConversation":true,"viewMenuOpenedFilesWithMouse":true}"#,
                 ).expect("record Windows workbench navigation");
+                self.step = Step::WaitForHostSidebar;
+                Task::done(Message::Sidebar(SidebarPage::Hosts)).chain(observe())
+            }
+            (Event::Observe, Step::WaitForHostSidebar) => {
+                assert_eq!(sidebar, Some(SidebarPage::Hosts));
+                self.step = Step::WaitForHostEditor;
+                let scale = self.scale.expect("captured workbench scale");
+                click_workspace(218.0, 106.0, scale)
+            }
+            (Event::Observe, Step::WaitForHostEditor) => {
+                if !host_editor {
+                    return observe();
+                }
+                self.step = Step::CaptureHostEditor;
+                Task::done(Message::Hosts(host_panel::Action::Name(
+                    "开发服务器".to_owned(),
+                )))
+                .chain(Task::done(Message::Hosts(host_panel::Action::Target(
+                    "dev@workbench.example:2222".to_owned(),
+                ))))
+                .chain(screenshot(Event::HostEditor))
+            }
+            (Event::HostEditor(frame), Step::CaptureHostEditor) => {
+                self.save("host-editor.png", frame);
+                self.step = Step::WaitForSavedHost;
+                Task::done(Message::Hosts(host_panel::Action::Confirm)).chain(observe())
+            }
+            (Event::Observe, Step::WaitForSavedHost) => {
+                if host_editor {
+                    return observe();
+                }
+                let profile = self.directory.join("profile-fixture/hosts.json");
+                let json: Value = serde_json::from_slice(
+                    &std::fs::read(profile).expect("saved Windows host profile"),
+                )
+                .expect("valid host profile");
+                assert_eq!(
+                    json,
+                    json!([{"name":"开发服务器","target":"ssh://dev@workbench.example:2222"}])
+                );
+                assert!(tab.show_agent && tab.show_drawer);
+                self.step = Step::CaptureHosts;
+                screenshot(Event::Hosts)
+            }
+            (Event::Hosts(frame), Step::CaptureHosts) => {
+                self.save("hosts.png", frame);
                 Task::done(Message::CloseWindow)
             }
             (
