@@ -131,7 +131,7 @@ impl Benchmark {
             return self.next_input();
         }
 
-        let (start, baseline) = self.started.expect("scroll baseline");
+        let (start, baseline) = self.started.take().expect("scroll baseline");
         let end = Resources::read();
         let wall_ms = now.duration_since(start).as_secs_f64() * 1000.0;
         self.latencies.sort_by(f64::total_cmp);
