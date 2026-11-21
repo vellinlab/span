@@ -24,15 +24,22 @@ pub(super) fn write(markdown: String, format: Format) -> Task<Result<(), String>
         }),
     };
     prepared.then(|prepared| match prepared {
-        Ok((markdown, rich)) => window::latest().then(move |id| {
-            let Some(id) = id else {
-                return Task::done(Err("The Span window is no longer available.".into()));
-            };
-            // Keep the native window handle and clipboard ownership on the UI thread.
-            window::run(id, move |window| {
-                write_clipboard(window, &markdown, rich.as_deref())
+        Ok(contents) => {
+            // `latest` yields a single window ID. Transfer the payload without copying it.
+            let mut contents = Some(contents);
+            window::latest().then(move |id| {
+                let Some((markdown, rich)) = contents.take() else {
+                    return Task::none();
+                };
+                let Some(id) = id else {
+                    return Task::done(Err("The Span window is no longer available.".into()));
+                };
+                // Keep the native window handle and clipboard ownership on the UI thread.
+                window::run(id, move |window| {
+                    write_clipboard(window, &markdown, rich.as_deref())
+                })
             })
-        }),
+        }
         Err(error) => Task::done(Err(error)),
     })
 }
