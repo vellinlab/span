@@ -52,7 +52,7 @@ fn main() -> iced::Result {
         .title("Span")
         .default_font(Font::with_name("Segoe UI"))
         .theme(Span::theme)
-        .subscription(|_| window::close_requests().map(|_| Message::CloseWindow))
+        .subscription(Span::subscription)
         .window(window::Settings {
             size: Size::new(1216.0, 780.0),
             min_size: Some(Size::new(760.0, 480.0)),
@@ -120,6 +120,19 @@ enum Message {
 }
 
 impl Span {
+    fn subscription(&self) -> iced::Subscription<Message> {
+        let close = window::close_requests().map(|_| Message::CloseWindow);
+        #[cfg(feature = "visual-check")]
+        if self
+            .visual_check
+            .as_ref()
+            .is_some_and(visual_check::Check::measuring)
+        {
+            return iced::Subscription::batch([close, visual_check::frames()]);
+        }
+        close
+    }
+
     fn boot() -> (Self, Task<Message>) {
         let (events, receiver) = mpsc::unbounded();
         let home = std::env::var_os("USERPROFILE").map(PathBuf::from);

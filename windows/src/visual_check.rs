@@ -6,18 +6,23 @@ use iced::{Task, window};
 use serde_json::{Value, json};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+mod scroll;
+pub use scroll::frames;
 const DIRECTORY: &str = "SPAN_VISUAL_CHECK_DIR";
 const THREAD: &str = "visual-check";
-const INITIAL_ITEMS: usize = 48;
-const EARLIER_ITEMS: usize = 16;
+const INITIAL_ITEMS: usize = 320;
+const EARLIER_ITEMS: usize = 32;
 
 #[derive(Clone, Debug)]
 pub enum Event {
     Observe,
     Latest(window::Screenshot),
     Earlier(window::Screenshot),
+    Target(scroll::Target, f32),
+    Frame(Instant),
+    ScrollResults(Value),
 }
 
 #[derive(Clone, Copy)]
@@ -33,6 +38,7 @@ pub struct Check {
     step: Step,
     first_frame: u64,
     items: usize,
+    benchmark: Option<scroll::Benchmark>,
 }
 
 pub fn enabled() -> bool {
@@ -53,7 +59,12 @@ impl Check {
             step: Step::Open,
             first_frame: 0,
             items: 0,
+            benchmark: None,
         })
+    }
+
+    pub fn measuring(&self) -> bool {
+        self.benchmark.is_some()
     }
 
     pub fn update(&mut self, event: Event, tab: Option<&Tab>) -> Task<Message> {
@@ -64,6 +75,26 @@ impl Check {
             return observe();
         };
         let probe = agent.visual_probe();
+        match event {
+            Event::Target(target, offset) => {
+                let benchmark = scroll::Benchmark::new(target, offset);
+                let first = benchmark.next_input();
+                self.benchmark = Some(benchmark);
+                return first;
+            }
+            Event::Frame(started) => {
+                if let (Some(benchmark), Some((_, view, _, _))) = (&mut self.benchmark, probe) {
+                    return benchmark.frame(started, view.absolute_offset().y);
+                }
+                return Task::none();
+            }
+            Event::ScrollResults(results) => {
+                scroll::save(&self.directory, &results);
+                self.benchmark = None;
+                return Task::done(Message::CloseWindow);
+            }
+            _ => {}
+        }
         match (event, self.step) {
             (Event::Observe, Step::Open) => match probe {
                 Some((_, view, INITIAL_ITEMS, true)) => {
@@ -105,6 +136,7 @@ impl Check {
                 _ => observe(),
             },
             (Event::Earlier(frame), Step::CaptureEarlier { end, actual }) => {
+                let scale = frame.scale_factor;
                 assert_ne!(self.first_frame, self.save("earlier.png", frame));
                 let metrics = json!({
                     "initial_items": INITIAL_ITEMS,
@@ -117,7 +149,16 @@ impl Check {
                     serde_json::to_vec_pretty(&metrics).expect("encode history metrics"),
                 )
                 .expect("write history metrics");
-                Task::done(Message::CloseWindow)
+                let (_, view, _, _) = probe.expect("earlier viewport");
+                let bounds = view.bounds();
+                let x = ((bounds.x + bounds.width * 0.46) * scale).round() as i32;
+                let y = ((bounds.y + bounds.height * 0.52) * scale).round() as i32;
+                window::latest().then(move |id| {
+                    window::run(id.expect("active Span window"), move |window| {
+                        scroll::Target::locate(window, x, y)
+                    })
+                    .map(move |target| Message::Visual(Event::Target(target, actual)))
+                })
             }
             _ => Task::none(),
         }

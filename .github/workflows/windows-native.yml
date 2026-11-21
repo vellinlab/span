@@ -134,27 +134,35 @@ jobs:
           $metrics | Format-Table
           Compress-Archive -Path $portable -DestinationPath dist/span-native-windows-x86_64.zip
 
-      - name: Capture native session and verify paged history
+      - name: Verify history and measure Windows wheel input
         shell: pwsh
         run: |
           cargo +1.98.1 build --locked --release --features visual-check --manifest-path windows/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $output = New-Item -ItemType Directory -Path dist/windows-session-check -Force
-          $env:SPAN_VISUAL_CHECK_DIR = $output.FullName
-          $env:ICED_BACKEND = "tiny-skia"
           $env:RUST_BACKTRACE = "1"
-          $stderr = Join-Path $output.FullName "stderr.log"
-          $span = Start-Process windows/target/release/span.exe -PassThru -RedirectStandardError $stderr
-          try {
-            if (!$span.WaitForExit(35000)) { throw "Session check timed out" }
-            if ($span.ExitCode -ne 0) { throw "Session check exited with code $($span.ExitCode)" }
-            foreach ($file in "latest.png", "earlier.png", "history.json") {
-              if (!(Test-Path (Join-Path $output.FullName $file))) { throw "Missing $file" }
+          foreach ($backend in "tiny-skia", "auto") {
+            if ($backend -eq "auto") {
+              Remove-Item Env:ICED_BACKEND -ErrorAction SilentlyContinue
+            } else {
+              $env:ICED_BACKEND = $backend
             }
-            Get-Content (Join-Path $output.FullName "history.json")
-          } finally {
-            if (!$span.HasExited) { Stop-Process -Id $span.Id }
-            Get-Content $stderr
+            $output = New-Item -ItemType Directory -Path "dist/windows-session-check/$backend" -Force
+            $env:SPAN_VISUAL_CHECK_DIR = $output.FullName
+            $stderr = Join-Path $output.FullName "stderr.log"
+            $span = Start-Process windows/target/release/span.exe -PassThru -RedirectStandardError $stderr
+            try {
+              if (!$span.WaitForExit(50000)) { throw "$backend session check timed out" }
+              if ($span.ExitCode -ne 0) { throw "$backend session check exited with code $($span.ExitCode)" }
+              foreach ($file in "latest.png", "earlier.png", "history.json", "scroll.json") {
+                if (!(Test-Path (Join-Path $output.FullName $file))) { throw "Missing $backend $file" }
+              }
+              Write-Host "$backend session and scroll metrics"
+              Get-Content (Join-Path $output.FullName "history.json")
+              Get-Content (Join-Path $output.FullName "scroll.json")
+            } finally {
+              if (!$span.HasExited) { Stop-Process -Id $span.Id }
+              Get-Content $stderr
+            }
           }
 
       - name: Upload session screenshots and metrics
