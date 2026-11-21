@@ -13,7 +13,7 @@ use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::canvas::{self, Frame};
 use iced::{Color, Event as UiEvent, Font, Point, Rectangle, Size, mouse, window};
 use std::cell::Cell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -24,10 +24,16 @@ const INSET: f32 = 16.0;
 
 pub type TerminalId = u64;
 
+#[derive(Clone, Debug)]
+pub enum Notice {
+    Ready(TerminalId, Result<Arc<PtySession>, String>),
+    Event(TerminalId, Event),
+}
+
 #[derive(Clone)]
-pub struct Events {
+struct Events {
     id: TerminalId,
-    sender: mpsc::UnboundedSender<(TerminalId, Event)>,
+    sender: mpsc::UnboundedSender<Notice>,
     pending: Arc<AtomicBool>,
 }
 
@@ -36,7 +42,7 @@ impl EventListener for Events {
         if matches!(event, Event::Wakeup) && self.pending.swap(true, Ordering::AcqRel) {
             return;
         }
-        let _ = self.sender.unbounded_send((self.id, event));
+        let _ = self.sender.unbounded_send(Notice::Event(self.id, event));
     }
 }
 
@@ -44,6 +50,10 @@ impl EventListener for Events {
 struct GridSize(WindowSize);
 
 impl GridSize {
+    fn initial() -> Self {
+        Self::new(Size::new(704.0, 488.0))
+    }
+
     fn new(size: Size) -> Self {
         Self(WindowSize {
             num_cols: ((size.width - INSET * 2.0) / CELL_WIDTH).clamp(2.0, 500.0) as u16,
@@ -68,24 +78,71 @@ impl Dimensions for GridSize {
     }
 }
 
-pub struct Terminal {
+pub struct PtySession {
     id: TerminalId,
     term: Arc<FairMutex<Term<Events>>>,
     channel: EventLoopSender,
     pending: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for PtySession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PtySession")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for PtySession {
+    fn drop(&mut self) {
+        let _ = self.channel.send(Msg::Shutdown);
+    }
+}
+
+pub struct Terminal {
+    session: Arc<PtySession>,
     size: Cell<GridSize>,
     cache: canvas::Cache,
     pub exit: Option<i32>,
 }
 
 impl Terminal {
-    pub fn open(
+    pub fn launch(
+        id: TerminalId,
+        host: Option<String>,
+        cwd: Option<PathBuf>,
+        sender: mpsc::UnboundedSender<Notice>,
+    ) -> Result<(), String> {
+        std::thread::Builder::new()
+            .name("span-pty-start".into())
+            .spawn(move || {
+                if sender.is_closed() {
+                    return;
+                }
+                let cwd = cwd.as_deref().filter(|path| path.is_dir());
+                match Self::prepare(id, host.as_deref(), cwd, sender.clone()) {
+                    Ok((session, event_loop)) => {
+                        // Queue the handover before the event loop can emit PTY output.
+                        let _ = sender.unbounded_send(Notice::Ready(id, Ok(session)));
+                        drop(event_loop.spawn());
+                    }
+                    Err(error) => {
+                        let _ = sender.unbounded_send(Notice::Ready(id, Err(error)));
+                    }
+                }
+            })
+            .map(drop)
+            .map_err(|error| error.to_string())
+    }
+
+    fn prepare(
         id: TerminalId,
         host: Option<&str>,
         cwd: Option<&Path>,
-        sender: mpsc::UnboundedSender<(TerminalId, Event)>,
-    ) -> Result<Self, String> {
-        let size = GridSize::new(Size::new(704.0, 488.0));
+        sender: mpsc::UnboundedSender<Notice>,
+    ) -> Result<(Arc<PtySession>, EventLoop<tty::Pty, Events>), String> {
+        let size = GridSize::initial();
         let (program, args) = match host {
             Some(host) => ("ssh.exe", vec!["-tt".into(), "--".into(), host.into()]),
             None => ("powershell.exe", vec!["-NoLogo".into()]),
@@ -111,29 +168,34 @@ impl Terminal {
         let term = Arc::new(FairMutex::new(Term::new(config, &size, events.clone())));
         let event_loop = EventLoop::new(term.clone(), events, pty, true, false)
             .map_err(|error| error.to_string())?;
-        let channel = event_loop.channel();
-        drop(event_loop.spawn());
-        Ok(Self {
+        let session = Arc::new(PtySession {
             id,
             term,
-            channel,
+            channel: event_loop.channel(),
             pending,
-            size: Cell::new(size),
+        });
+        Ok((session, event_loop))
+    }
+
+    pub fn new(session: Arc<PtySession>) -> Self {
+        Self {
+            session,
+            size: Cell::new(GridSize::initial()),
             cache: canvas::Cache::new(),
             exit: None,
-        })
+        }
     }
 
     pub fn event(&mut self, event: Event) {
         match event {
             Event::Wakeup => {
-                self.pending.store(false, Ordering::Release);
+                self.session.pending.store(false, Ordering::Release);
                 self.cache.clear();
             }
             Event::PtyWrite(text) => self.write(text),
             Event::TextAreaSizeRequest(reply) => self.write(reply(self.size.get().0)),
             Event::ColorRequest(index, reply) => {
-                let color = self.term.lock().renderable_content().colors[index]
+                let color = self.session.term.lock().renderable_content().colors[index]
                     .unwrap_or_else(|| palette(index));
                 self.write(reply(color));
             }
@@ -146,7 +208,7 @@ impl Terminal {
     }
 
     pub fn selection(&self) -> Option<String> {
-        self.term.lock().selection_to_string()
+        self.session.term.lock().selection_to_string()
     }
 
     pub fn paste(&self, value: String) {
@@ -161,7 +223,7 @@ impl Terminal {
     }
 
     fn mode(&self, mode: TermMode) -> bool {
-        self.term.lock().mode().contains(mode)
+        self.session.term.lock().mode().contains(mode)
     }
 
     fn input(&self, text: String) {
@@ -172,11 +234,14 @@ impl Terminal {
     }
 
     fn write(&self, text: String) {
-        let _ = self.channel.send(Msg::Input(text.into_bytes().into()));
+        let _ = self
+            .session
+            .channel
+            .send(Msg::Input(text.into_bytes().into()));
     }
 
     fn scroll(&self, scroll: Scroll) {
-        self.term.lock().scroll_display(scroll);
+        self.session.term.lock().scroll_display(scroll);
         self.cache.clear();
     }
 
@@ -185,8 +250,8 @@ impl Terminal {
         let previous = self.size.get();
         if previous.columns() != next.columns() || previous.screen_lines() != next.screen_lines() {
             self.size.set(next);
-            self.term.lock().resize(next);
-            let _ = self.channel.send(Msg::Resize(next.0));
+            self.session.term.lock().resize(next);
+            let _ = self.session.channel.send(Msg::Resize(next.0));
             self.cache.clear();
         }
     }
@@ -194,7 +259,7 @@ impl Terminal {
     fn select(&self, position: Point, start: bool) {
         let x = ((position.x - INSET) / CELL_WIDTH).max(0.0);
         let y = ((position.y - INSET) / CELL_HEIGHT).max(0.0);
-        let mut term = self.term.lock();
+        let mut term = self.session.term.lock();
         let line =
             (y as usize).min(term.screen_lines() - 1) as i32 - term.grid().display_offset() as i32;
         let point = CellPoint::new(Line(line), Column((x as usize).min(term.columns() - 1)));
@@ -209,12 +274,6 @@ impl Terminal {
             selection.update(point, side);
         }
         self.cache.clear();
-    }
-}
-
-impl Drop for Terminal {
-    fn drop(&mut self) {
-        let _ = self.channel.send(Msg::Shutdown);
     }
 }
 
@@ -284,8 +343,8 @@ impl canvas::Program<Clipboard> for Terminal {
             }) if state.focused => {
                 if modifiers.control() && modifiers.shift() {
                     let message = match key.as_ref() {
-                        Key::Character("c" | "C") => Some(Clipboard::Copy(self.id)),
-                        Key::Character("v" | "V") => Some(Clipboard::Paste(self.id)),
+                        Key::Character("c" | "C") => Some(Clipboard::Copy(self.session.id)),
+                        Key::Character("v" | "V") => Some(Clipboard::Paste(self.session.id)),
                         _ => None,
                     };
                     if let Some(message) = message {
@@ -322,7 +381,7 @@ impl canvas::Program<Clipboard> for Terminal {
 
 impl Terminal {
     fn paint(&self, frame: &mut Frame) {
-        let term = self.term.lock();
+        let term = self.session.term.lock();
         let content = term.renderable_content();
         let mut run = String::new();
         let mut origin = Point::ORIGIN;
@@ -528,24 +587,35 @@ mod tests {
     #[test]
     fn conpty_powershell_round_trip() {
         let (sender, mut receiver) = mpsc::unbounded();
-        let mut terminal =
-            Terminal::open(1, None, None, sender).expect("start PowerShell in ConPTY");
-        terminal.input("Write-Output ('span-' + 'native-ready')\rexit\r".into());
+        Terminal::launch(1, None, None, sender).expect("launch PowerShell worker");
+        let mut terminal: Option<Terminal> = None;
         let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
-            while let Ok((1, event)) = receiver.try_recv() {
-                terminal.event(event);
+            while let Ok(notice) = receiver.try_recv() {
+                match notice {
+                    Notice::Ready(1, result) => {
+                        let ready = Terminal::new(result.expect("start PowerShell in ConPTY"));
+                        ready.input("Write-Output ('span-' + 'native-ready')\rexit\r".into());
+                        assert!(terminal.replace(ready).is_none());
+                    }
+                    Notice::Event(1, event) => terminal
+                        .as_mut()
+                        .expect("PTY events must follow the handover")
+                        .event(event),
+                    _ => panic!("unexpected PTY id"),
+                }
             }
-            let grid = terminal.term.lock();
-            let text: String = grid
-                .renderable_content()
-                .display_iter
-                .map(|cell| cell.c)
-                .collect();
-            if text.contains("span-native-ready") {
-                return;
+            if let Some(terminal) = &terminal {
+                let grid = terminal.session.term.lock();
+                let text: String = grid
+                    .renderable_content()
+                    .display_iter
+                    .map(|cell| cell.c)
+                    .collect();
+                if text.contains("span-native-ready") {
+                    return;
+                }
             }
-            drop(grid);
             std::thread::sleep(Duration::from_millis(20));
         }
         panic!("The shell did not produce the output in the terminal grid");

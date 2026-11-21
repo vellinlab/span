@@ -27,14 +27,13 @@ mod theme;
 #[cfg(feature = "visual-check")]
 mod visual_check;
 
-use alacritty_terminal::event::Event;
 use futures::channel::mpsc;
 use iced::widget::{
     Space, button, canvas, column, container, row, rule, scrollable, svg, text, text_input,
 };
 use iced::{Center, Element, Fill, Font, Size, Task, Theme, clipboard, window};
 use std::path::{Path, PathBuf};
-use terminal::{Clipboard, Terminal, TerminalId};
+use terminal::{Clipboard, Notice, Terminal, TerminalId};
 
 const LOGO: &[u8] =
     include_bytes!("../../packaging/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg");
@@ -71,7 +70,7 @@ struct Span {
     sessions: bool,
     show_files: bool,
     next_id: TerminalId,
-    events: mpsc::UnboundedSender<(TerminalId, Event)>,
+    events: mpsc::UnboundedSender<Notice>,
     connecting: bool,
     host: String,
     error: Option<String>,
@@ -85,10 +84,16 @@ struct Span {
 struct Tab {
     id: TerminalId,
     host: Option<String>,
-    terminal: Terminal,
+    terminal: TerminalState,
     agent: Option<agent::Agent>,
     show_agent: bool,
     file_panel: Option<file_panel::Panel>,
+}
+
+enum TerminalState {
+    Opening,
+    Ready(Terminal),
+    Failed(String),
 }
 
 impl Tab {
@@ -112,7 +117,7 @@ enum Message {
     ChangeHost(String),
     Connect,
     ConnectRecent(String),
-    Pty((TerminalId, Event)),
+    Terminal(Notice),
     Clipboard(Clipboard),
     Pasted(TerminalId, Option<String>),
     #[cfg(feature = "visual-check")]
@@ -162,7 +167,7 @@ impl Span {
             visual_check: visual_check::Check::from_env(),
         };
         span.open(None);
-        let terminal_events = Task::run(receiver, Message::Pty);
+        let terminal_events = Task::run(receiver, Message::Terminal);
         #[cfg(feature = "visual-check")]
         if span.visual_check.is_some() {
             return (
@@ -184,24 +189,23 @@ impl Span {
     fn open(&mut self, host: Option<String>) {
         self.next_id += 1;
         let id = self.next_id;
-        let home = self.home.as_deref().filter(|path| path.is_dir());
-        match Terminal::open(id, host.as_deref(), home, self.events.clone()) {
-            Ok(terminal) => {
-                self.error = None;
-                self.active = Some(id);
-                self.terminals.push(Tab {
-                    id,
-                    host,
-                    terminal,
-                    agent: None,
-                    show_agent: false,
-                    file_panel: None,
-                });
-                self.sessions = false;
-                self.show_files = false;
-            }
-            Err(error) => self.error = Some(error),
-        }
+        let terminal =
+            match Terminal::launch(id, host.clone(), self.home.clone(), self.events.clone()) {
+                Ok(()) => TerminalState::Opening,
+                Err(error) => TerminalState::Failed(error),
+            };
+        self.error = None;
+        self.active = Some(id);
+        self.terminals.push(Tab {
+            id,
+            host,
+            terminal,
+            agent: None,
+            show_agent: false,
+            file_panel: None,
+        });
+        self.sessions = false;
+        self.show_files = false;
     }
 
     fn connect(&mut self, value: &str) {
@@ -211,17 +215,43 @@ impl Span {
             return;
         }
         self.open(Some(host.into()));
-        if self.error.is_none() {
-            self.connecting = false;
-            self.host.clear();
-            self.recent.retain(|entry| entry != host);
-            self.recent.insert(0, host.into());
-            self.recent.truncate(12);
-            if let Some(path) = self.hosts_path.as_deref()
-                && let Err(error) = save_recent(path, &self.recent)
-            {
-                self.error = Some(format!("Could not save recent connections: {error}"));
+        self.connecting = false;
+        self.host.clear();
+    }
+
+    fn terminal_notice(&mut self, notice: Notice) {
+        let id = match &notice {
+            Notice::Ready(id, _) | Notice::Event(id, _) => *id,
+        };
+        let Some(tab) = self.terminals.iter_mut().find(|tab| tab.id == id) else {
+            // Dropping an unclaimed PTY requests shutdown on its own thread.
+            return;
+        };
+        match notice {
+            Notice::Ready(_, result) if matches!(tab.terminal, TerminalState::Opening) => {
+                tab.terminal = match result {
+                    Ok(session) => TerminalState::Ready(Terminal::new(session)),
+                    Err(error) => TerminalState::Failed(error),
+                };
+                if matches!(tab.terminal, TerminalState::Ready(_))
+                    && let Some(host) = &tab.host
+                {
+                    self.recent.retain(|entry| entry != host);
+                    self.recent.insert(0, host.clone());
+                    self.recent.truncate(12);
+                    if let Some(path) = self.hosts_path.as_deref()
+                        && let Err(error) = save_recent(path, &self.recent)
+                    {
+                        self.error = Some(format!("Could not save recent connections: {error}"));
+                    }
+                }
             }
+            Notice::Event(_, event) => {
+                if let TerminalState::Ready(terminal) = &mut tab.terminal {
+                    terminal.event(event);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -376,11 +406,7 @@ impl Span {
             Message::ChangeHost(host) => self.host = host,
             Message::Connect => self.connect(&self.host.clone()),
             Message::ConnectRecent(host) => self.connect(&host),
-            Message::Pty((id, event)) => {
-                if let Some(tab) = self.terminals.iter_mut().find(|tab| tab.id == id) {
-                    tab.terminal.event(event);
-                }
-            }
+            Message::Terminal(notice) => self.terminal_notice(notice),
             Message::Clipboard(Clipboard::Copy(id)) => {
                 if let Some(text) = self.terminal(id).and_then(Terminal::selection) {
                     return clipboard::write(text);
@@ -399,10 +425,10 @@ impl Span {
     }
 
     fn terminal(&self, id: TerminalId) -> Option<&Terminal> {
-        self.terminals
-            .iter()
-            .find(|tab| tab.id == id)
-            .map(|tab| &tab.terminal)
+        match &self.terminals.iter().find(|tab| tab.id == id)?.terminal {
+            TerminalState::Ready(terminal) => Some(terminal),
+            _ => None,
+        }
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -549,10 +575,11 @@ impl Span {
         let mut tabs = row![].align_y(Center).spacing(5);
         for tab in &self.terminals {
             let active = self.active == Some(tab.id);
-            let state_color = if tab.terminal.exit.is_none() {
-                theme::GREEN
-            } else {
-                theme::MUTED
+            let state_color = match &tab.terminal {
+                TerminalState::Opening => theme::BLUE,
+                TerminalState::Ready(terminal) if terminal.exit.is_none() => theme::GREEN,
+                TerminalState::Ready(_) => theme::MUTED,
+                TerminalState::Failed(_) => theme::ERROR,
             };
             let tab_control = row![
                 button(
@@ -618,24 +645,56 @@ impl Span {
                 .height(Fill)
                 .into();
             }
-            let footer = tab.terminal.exit.map_or_else(
-                || match tab.host {
-                    Some(_) => "SSH · OpenSSH".into(),
-                    None => "Local · ConPTY".into(),
-                },
-                |code| format!("Exited · {code}"),
-            );
-            let terminal = canvas(&tab.terminal).width(Fill).height(Fill);
-            column![
-                container(Element::from(terminal).map(Message::Clipboard))
+            match &tab.terminal {
+                TerminalState::Ready(terminal) => {
+                    let footer = terminal.exit.map_or_else(
+                        || match tab.host {
+                            Some(_) => "SSH · OpenSSH".into(),
+                            None => "Local · ConPTY".into(),
+                        },
+                        |code| format!("Exited · {code}"),
+                    );
+                    let terminal = canvas(terminal).width(Fill).height(Fill);
+                    column![
+                        container(Element::from(terminal).map(Message::Clipboard))
+                            .style(|_| theme::surface(theme::TERMINAL))
+                            .height(Fill),
+                        rule::horizontal(1).style(theme::rule),
+                        container(text(footer).size(12).color(theme::MUTED))
+                            .padding([5, 12])
+                            .width(Fill)
+                            .style(|_| theme::surface(theme::WORK))
+                    ]
+                }
+                TerminalState::Opening => column![
+                    container(
+                        text(if tab.host.is_some() {
+                            "Opening SSH terminal…"
+                        } else {
+                            "Starting PowerShell…"
+                        })
+                        .size(14)
+                        .color(theme::MUTED)
+                    )
+                    .center(Fill)
                     .style(|_| theme::surface(theme::TERMINAL))
-                    .height(Fill),
-                rule::horizontal(1).style(theme::rule),
-                container(text(footer).size(12).color(theme::MUTED))
-                    .padding([5, 12])
-                    .width(Fill)
-                    .style(|_| theme::surface(theme::WORK))
-            ]
+                ],
+                TerminalState::Failed(error) => column![
+                    container(
+                        column![
+                            text("Could not open terminal")
+                                .size(18)
+                                .font(theme::SEMIBOLD),
+                            text(error).size(14).color(theme::ERROR),
+                        ]
+                        .spacing(8)
+                        .align_x(Center)
+                    )
+                    .padding(24)
+                    .center(Fill)
+                    .style(|_| theme::surface(theme::TERMINAL))
+                ],
+            }
         } else {
             column![
                 container(
