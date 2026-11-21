@@ -3460,6 +3460,7 @@ dependencies = [
  "iced",
  "image",
  "open",
+ "pulldown-cmark",
  "rfd",
  "serde",
  "serde_json",

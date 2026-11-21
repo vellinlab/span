@@ -1,4 +1,8 @@
-use crate::{Message, Tab, agent, agent::VisualGoal, codex_rpc};
+use crate::{
+    Message, Tab, agent,
+    agent::{CopyFormat, VisualGoal},
+    codex_rpc,
+};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
@@ -19,6 +23,8 @@ const THREAD: &str = "visual-check";
 const OBJECTIVE: &str = "Reduce response latency for long Windows sessions.";
 const INITIAL_ITEMS: usize = 320;
 const EARLIER_ITEMS: usize = 32;
+const COPY_INTRO: &str = "Progress: the preview has finished.";
+const COPY_MARKDOWN: &str = "### Build report\n\n| 检查 | 状态 |\n| --- | --- |\n| 终端 | **通过** |\n\n[Details](https://example.invalid/build-report)\n\n```powershell\nspan check --preview\n```";
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -37,6 +43,8 @@ pub enum Event {
 enum Step {
     Open,
     CaptureLatest,
+    WaitForRichCopy { scale: f32 },
+    WaitForMarkdownCopy,
     WaitForHistory { end: f32 },
     CaptureEarlier { end: f32, actual: f32 },
     WaitForAttachment,
@@ -138,7 +146,31 @@ impl Check {
                 ]),
             },
             (Event::Latest(frame), Step::CaptureLatest) => {
+                let scale = frame.scale_factor;
                 self.first_frame = self.save("latest.png", frame);
+                let (_, view, _, _) = probe.expect("latest viewport");
+                self.step = Step::WaitForRichCopy { scale };
+                click_copy(view.bounds(), scale, CopyFormat::RichText)
+            }
+            (Event::Observe, Step::WaitForRichCopy { scale }) => {
+                if !agent.visual_copied(CopyFormat::RichText) {
+                    return observe();
+                }
+                verify_copy(CopyFormat::RichText);
+                let (_, view, _, _) = probe.expect("copy viewport");
+                self.step = Step::WaitForMarkdownCopy;
+                click_copy(view.bounds(), scale, CopyFormat::Markdown)
+            }
+            (Event::Observe, Step::WaitForMarkdownCopy) => {
+                if !agent.visual_copied(CopyFormat::Markdown) {
+                    return observe();
+                }
+                verify_copy(CopyFormat::Markdown);
+                std::fs::write(
+                    self.directory.join("copy.json"),
+                    br#"{"clickedBothIcons":true,"entireTurn":true,"unicodeMarkdown":true,"formattedTable":true,"formattedLink":true,"formattedCode":true}"#,
+                )
+                .expect("record Windows clipboard export test");
                 let (id, view, _, _) = probe.expect("latest viewport");
                 let end = view.absolute_offset_reversed().y - 45.0;
                 self.step = Step::WaitForHistory { end };
@@ -403,6 +435,49 @@ fn resize(width: u32) -> Task<Message> {
         .chain(observe())
 }
 
+fn click_copy(bounds: iced::Rectangle, scale: f32, format: CopyFormat) -> Task<Message> {
+    let reading_width = (bounds.width - 48.0).min(760.0);
+    let right = bounds.x + (bounds.width + reading_width) / 2.0;
+    let from_right = match format {
+        CopyFormat::Markdown => 46.0,
+        CopyFormat::RichText => 14.0,
+    };
+    let x = ((right - from_right) * scale).round() as i32;
+    let y = ((bounds.y + bounds.height - 34.0) * scale).round() as i32;
+    window::latest()
+        .then(move |id| {
+            window::run(id.expect("active Span window"), move |window| {
+                scroll::Target::click(window, x, y);
+            })
+            .discard()
+        })
+        .chain(observe())
+}
+
+fn verify_copy(format: CopyFormat) {
+    use clipboard_win::{Clipboard, formats, raw};
+    let _clipboard = Clipboard::new_attempts(10).expect("read Windows clipboard");
+    let markdown: String = clipboard_win::get(formats::Unicode).expect("read Unicode Markdown");
+    assert_eq!(markdown, format!("{COPY_INTRO}\n\n{COPY_MARKDOWN}"));
+    let html_format = formats::Html::new().expect("Windows HTML clipboard format");
+    if format == CopyFormat::RichText {
+        let html: String = clipboard_win::get(html_format).expect("read formatted HTML fragment");
+        for fragment in [
+            COPY_INTRO,
+            "<table>",
+            "<th>检查</th>",
+            "<strong>通过</strong>",
+            r#"<a href="https://example.invalid/build-report">Details</a>"#,
+            "<pre><code",
+            "span check --preview",
+        ] {
+            assert!(html.contains(fragment), "copy missing {fragment}: {html}");
+        }
+    } else {
+        assert!(!raw::is_format_avail(html_format.code()));
+    }
+}
+
 fn stream(tab: &Tab, item_id: &str) -> Task<Message> {
     let packet = json!({
         "method": "item/agentMessage/delta",
@@ -536,6 +611,16 @@ fn page(start: usize, end: usize, next: Option<&str>) -> Value {
         .step_by(4)
         .rev()
         .map(|turn| {
+            let mut progress = json!({"id":format!("check-{turn}"),"type":"commandExecution",
+                "command":"cargo test --workspace", "aggregatedOutput":"24 passed"});
+            let mut reply = format!(
+                "### Preview build {}\n\nThe **deployment** now reuses the same artifact on retry.\n\n- The validation stage completed successfully.\n- The preview stays available while a replacement is deployed, so readers can finish their work safely.\n\n```powershell\nspan check --preview {}\n```",
+                turn + 1, turn + 1
+            );
+            if turn + 4 == EARLIER_ITEMS + INITIAL_ITEMS {
+                progress = json!({"id":format!("check-{turn}"),"type":"agentMessage","text":COPY_INTRO});
+                reply = COPY_MARKDOWN.into();
+            }
             json!({
                 "id":format!("turn-{turn}"),
                 "status":"completed",
@@ -543,15 +628,11 @@ fn page(start: usize, end: usize, next: Option<&str>) -> Value {
                     {"id":format!("user-{turn}"),"type":"userMessage","content":[
                         {"type":"text","text":format!("Review preview build **{}** and summarize what changed.", turn + 1)}
                     ]},
-                    {"id":format!("check-{turn}"),"type":"commandExecution",
-                        "command":"cargo test --workspace", "aggregatedOutput":"24 passed"},
+                    progress,
                     {"id":format!("reason-{turn}"),"type":"reasoning","summary":[
                         "Check the lockfile, then compare the deployment logs with the previous build."
                     ]},
-                    {"id":format!("reply-{turn}"),"type":"agentMessage","text":format!(
-                        "### Preview build {}\n\nThe **deployment** now reuses the same artifact on retry.\n\n- The validation stage completed successfully.\n- The preview stays available while a replacement is deployed, so readers can finish their work safely.\n\n```powershell\nspan check --preview {}\n```",
-                        turn + 1, turn + 1
-                    )},
+                    {"id":format!("reply-{turn}"),"type":"agentMessage","text":reply},
                 ],
             })
         })

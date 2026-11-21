@@ -6,10 +6,11 @@ use iced::widget::{
     Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor,
     stack, svg, text, text_editor, tooltip,
 };
-use iced::{Bottom, Center, Element, Fill, Task, Theme, clipboard};
+use iced::{Bottom, Center, Element, Fill, Task, Theme};
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -18,6 +19,9 @@ use uuid::Uuid;
 
 #[path = "agent_scroll.rs"]
 mod agent_scroll;
+#[path = "agent_copy.rs"]
+mod copy;
+pub(crate) use copy::Format as CopyFormat;
 #[path = "agent_goal.rs"]
 mod goal;
 #[path = "agent_transcript.rs"]
@@ -44,7 +48,9 @@ pub enum Action {
     Send,
     Interrupt,
     Setting(agent_settings::Change),
-    Copy(String),
+    Copy(String, CopyFormat),
+    CopyWritten(Uuid, String, CopyFormat, Result<(), String>),
+    CopyExpired(Uuid),
     Link(String),
     Toggle(String),
     Approve(Value, bool),
@@ -146,7 +152,8 @@ pub struct Agent {
     settings: agent_settings::Settings,
     model_provider: Option<String>,
     status: Option<String>,
-    copied: Option<String>,
+    copied: Option<(Uuid, String, CopyFormat)>,
+    copy_request: Option<Uuid>,
 }
 
 impl Agent {
@@ -180,6 +187,7 @@ impl Agent {
             model_provider: None,
             status: Some("Connecting to Codex…".into()),
             copied: None,
+            copy_request: None,
         };
         agent.request(
             Request::Initialize,
@@ -361,25 +369,37 @@ impl Agent {
                     self.approval = None;
                 }
             }
-            Action::Copy(id) => {
-                if let Some(item) = self
-                    .items
-                    .iter()
-                    .find(|item| item.id == id && item.copy_ready)
-                {
-                    let markdown = self
-                        .items
-                        .iter()
-                        .filter(|reply| {
-                            matches!(reply.kind, Kind::Reply) && reply.turn_id == item.turn_id
-                        })
-                        .map(|reply| reply.value.as_str())
-                        .filter(|reply| !reply.trim().is_empty())
-                        .collect::<Vec<_>>()
-                        .join("\n\n");
-                    self.copied = Some(id);
-                    return clipboard::write(markdown);
+            Action::Copy(id, format) if self.copy_request.is_none() => {
+                if let Some(markdown) = self.turn_markdown(&id) {
+                    let request = Uuid::new_v4();
+                    self.copy_request = Some(request);
+                    return copy::write(markdown, format).map(move |result| {
+                        Action::CopyWritten(request, id.clone(), format, result)
+                    });
                 }
+            }
+            Action::CopyWritten(request, id, format, result)
+                if self.copy_request == Some(request) =>
+            {
+                self.copy_request = None;
+                match result {
+                    Ok(()) => {
+                        self.copied = Some((request, id, format));
+                        return Task::perform(
+                            async { tokio::time::sleep(Duration::from_millis(1400)).await },
+                            move |()| Action::CopyExpired(request),
+                        );
+                    }
+                    Err(error) => self.status = Some(error),
+                }
+            }
+            Action::CopyExpired(request)
+                if self
+                    .copied
+                    .as_ref()
+                    .is_some_and(|(active, _, _)| *active == request) =>
+            {
+                self.copied = None;
             }
             Action::Toggle(id) => {
                 if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
@@ -589,6 +609,7 @@ impl Agent {
                 }
                 self.status = None;
                 self.copied = None;
+                self.copy_request = None;
                 self.items.clear();
                 self.goals = goal::State::default();
                 self.attachments.clear();
@@ -700,6 +721,13 @@ impl Agent {
     #[cfg(feature = "visual-check")]
     pub fn visual_attachment_count(&self) -> usize {
         self.attachments.len()
+    }
+
+    #[cfg(feature = "visual-check")]
+    pub fn visual_copied(&self, format: CopyFormat) -> bool {
+        self.copied
+            .as_ref()
+            .is_some_and(|(_, _, active)| *active == format)
     }
 
     #[cfg(feature = "visual-check")]
@@ -867,13 +895,39 @@ impl Agent {
     }
 
     fn finish_reply(&mut self, turn_id: &str, first_item: usize) {
-        let mut marked = false;
-        for item in self.items[first_item..].iter_mut().rev().filter(|item| {
-            item.turn_id.as_deref() == Some(turn_id) && matches!(item.kind, Kind::Reply)
-        }) {
-            item.copy_ready = !marked && !item.value.trim().is_empty();
-            marked |= item.copy_ready;
+        let mut last = None;
+        let mut has_reply = false;
+        for item in self.items[first_item..]
+            .iter_mut()
+            .filter(|item| item.turn_id.as_deref() == Some(turn_id))
+        {
+            item.copy_ready = false;
+            has_reply |= matches!(item.kind, Kind::Reply) && !item.value.trim().is_empty();
+            last = Some(item);
         }
+        if let Some(last) = last {
+            last.copy_ready = has_reply;
+        }
+    }
+
+    fn turn_markdown(&self, row_id: &str) -> Option<String> {
+        let turn_id = self
+            .items
+            .iter()
+            .find(|item| item.id == row_id && item.copy_ready)?
+            .turn_id
+            .as_deref()?;
+        Some(
+            self.items
+                .iter()
+                .filter(|item| {
+                    matches!(item.kind, Kind::Reply) && item.turn_id.as_deref() == Some(turn_id)
+                })
+                .map(|item| item.value.as_str())
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        )
     }
 
     fn upsert(
@@ -1039,7 +1093,9 @@ impl Agent {
             transcript = transcript.push(Element::new(transcript::Transcript::new(
                 &self.items,
                 theme,
-                self.copied.as_deref(),
+                self.copied
+                    .as_ref()
+                    .map(|(_, id, format)| (id.as_str(), *format)),
                 &self.reading_position,
             )));
         }
@@ -1453,6 +1509,13 @@ mod tests {
             }),
         );
         agent.notification(
+            "item/completed",
+            &json!({
+                "threadId":"fixture","turnId":"active",
+                "item":{"id":"tool","type":"commandExecution","command":"echo ok"}
+            }),
+        );
+        agent.notification(
             "turn/completed",
             &json!({"threadId":"fixture","turn":{"id":"active","status":"completed"}}),
         );
@@ -1463,7 +1526,12 @@ mod tests {
                 .filter(|item| item.copy_ready)
                 .map(|item| item.id.as_str())
                 .collect::<Vec<_>>(),
-            ["a", "final"]
+            ["a", "tool"]
         );
+        assert_eq!(
+            agent.turn_markdown("tool").as_deref(),
+            Some("**新的回复**\n\nFinal answer")
+        );
+        assert_eq!(agent.turn_markdown("a").as_deref(), Some("**你好**"));
     }
 }

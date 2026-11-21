@@ -1,11 +1,13 @@
 use crate::agent_selection::{LabelSlot, Part, TextSelection, scroll_vertical, vertical_delta};
+use crate::clipboard_markup::rich_html;
+pub(crate) use crate::clipboard_markup::web_url;
 use crate::history_window::{prose_label, wrapped_lines};
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
 use crate::quote;
 use gtk::prelude::*;
 use gtk::{cairo, gdk, gdk_pixbuf, gio, glib, pango};
-use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
+use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd};
 use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::Read;
@@ -314,15 +316,6 @@ pub(crate) fn push_link(markup: &mut String, uri: &str) {
     markup.push_str(&escaped(uri));
     // Mark the link's range in the layout while suppressing font-specific underlines.
     markup.push_str("\"><span underline=\"none\" underline_color=\"#000000\">");
-}
-
-pub(crate) fn web_url(uri: &str) -> bool {
-    uri.split_once("://").is_some_and(|(scheme, rest)| {
-        (scheme.eq_ignore_ascii_case("https") || scheme.eq_ignore_ascii_case("http"))
-            && !rest.is_empty()
-            && !rest.chars().any(char::is_whitespace)
-            && !rest.chars().any(char::is_control)
-    })
 }
 
 pub(crate) fn open_link(widget: &impl IsA<gtk::Widget>, uri: &str) {
@@ -1426,25 +1419,6 @@ pub fn copy_rich(markdown: String) -> bool {
             selection.set_text(&markdown);
         }
     })
-}
-
-fn rich_html(markdown: &str) -> String {
-    let mut formatted = String::new();
-    let mut link = false;
-    html::push_html(
-        &mut formatted,
-        parser(markdown).filter_map(|event| match event {
-            Event::Html(text) | Event::InlineHtml(text) => Some(Event::Text(text)),
-            Event::Start(Tag::Link { ref dest_url, .. }) => {
-                link = web_url(dest_url);
-                link.then_some(event)
-            }
-            Event::End(TagEnd::Link) => std::mem::take(&mut link).then_some(event),
-            Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) => None,
-            event => Some(event),
-        }),
-    );
-    formatted
 }
 
 #[cfg(test)]

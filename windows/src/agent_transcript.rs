@@ -1,31 +1,25 @@
-use super::{Action, Activity, Item, Kind, action, agent_scroll::ReadingPosition};
+use super::{Action, Activity, CopyFormat, Item, Kind, agent_scroll::ReadingPosition};
 use crate::theme;
 use iced::advanced::{
     Clipboard, Layout, Shell, Widget, layout, mouse, overlay, renderer,
     widget::{Operation, Tree, tree},
 };
-use iced::widget::{Space, button, column, container, markdown, row, svg, text};
+use iced::widget::{Space, button, column, container, markdown, row, svg, text, tooltip};
 use iced::{
     Center, Element, Event, Fill, Length, Point, Rectangle, Renderer, Right, Size, Theme, Vector,
 };
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::sync::OnceLock;
 
 const SPACING: f32 = 12.0;
 const OVERSCAN: f32 = 160.0;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CopyButton {
-    Hidden,
-    Copy,
-    Copied,
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct Measurement {
     limits: layout::Limits,
-    copy: CopyButton,
+    has_copy: bool,
     size: Size,
 }
 
@@ -44,7 +38,7 @@ type RowStates = BTreeMap<usize, RowState>;
 pub(super) struct Transcript<'a> {
     items: &'a [Item],
     theme: &'a Theme,
-    copied: Option<&'a str>,
+    copied: Option<(&'a str, CopyFormat)>,
     reading: &'a ReadingPosition,
     limits: layout::Limits,
     rows: RefCell<BTreeMap<usize, Row<'a>>>,
@@ -54,7 +48,7 @@ impl<'a> Transcript<'a> {
     pub(super) fn new(
         items: &'a [Item],
         theme: &'a Theme,
-        copied: Option<&'a str>,
+        copied: Option<(&'a str, CopyFormat)>,
         reading: &'a ReadingPosition,
     ) -> Self {
         Self {
@@ -64,16 +58,6 @@ impl<'a> Transcript<'a> {
             reading,
             limits: layout::Limits::NONE,
             rows: RefCell::default(),
-        }
-    }
-
-    fn copy_button(&self, item: &Item) -> CopyButton {
-        if !item.copy_ready {
-            CopyButton::Hidden
-        } else if self.copied == Some(&item.id) {
-            CopyButton::Copied
-        } else {
-            CopyButton::Copy
         }
     }
 
@@ -104,7 +88,7 @@ impl<'a> Transcript<'a> {
         for index in visible {
             rows.entry(index).or_insert_with(|| {
                 let item = &self.items[index];
-                let mut element = entry(item, self.theme, self.copy_button(item));
+                let mut element = entry(item, self.theme, self.copied);
                 let state = states.entry(index).or_insert_with(|| RowState {
                     id: item.id.clone(),
                     tree: Tree::empty(),
@@ -219,13 +203,15 @@ impl Widget<Action, Theme, Renderer> for Transcript<'_> {
             .items
             .iter()
             .map(|item| {
-                let copy = self.copy_button(item);
                 let size = match item.measurement.get() {
-                    Some(measured) if measured.limits == row_limits && measured.copy == copy => {
+                    Some(measured)
+                        if measured.limits == row_limits
+                            && measured.has_copy == item.copy_ready =>
+                    {
                         measured.size
                     }
                     _ => {
-                        let mut element = entry(item, self.theme, copy);
+                        let mut element = entry(item, self.theme, None);
                         let mut state = Tree::new(element.as_widget());
                         let size = element
                             .as_widget_mut()
@@ -233,7 +219,7 @@ impl Widget<Action, Theme, Renderer> for Transcript<'_> {
                             .size();
                         item.measurement.set(Some(Measurement {
                             limits: row_limits,
-                            copy,
+                            has_copy: item.copy_ready,
                             size,
                         }));
                         size
@@ -379,8 +365,12 @@ impl Widget<Action, Theme, Renderer> for Transcript<'_> {
     }
 }
 
-fn entry<'a>(item: &'a Item, theme: &'a Theme, copy: CopyButton) -> Element<'a, Action> {
-    match item.kind {
+fn entry<'a>(
+    item: &'a Item,
+    theme: &'a Theme,
+    copied: Option<(&str, CopyFormat)>,
+) -> Element<'a, Action> {
+    let body: Element<'a, Action> = match item.kind {
         Kind::User => container(
             container(if let Some(parsed) = &item.parsed {
                 markdown::view(
@@ -407,20 +397,7 @@ fn entry<'a>(item: &'a Item, theme: &'a Theme, copy: CopyButton) -> Element<'a, 
             } else {
                 text(&item.value).size(15).into()
             };
-            let mut body = column![response].spacing(4);
-            if copy != CopyButton::Hidden {
-                let label = if copy == CopyButton::Copied {
-                    "Copied"
-                } else {
-                    "Copy"
-                };
-                body = body.push(
-                    container(action(label, Some(Action::Copy(item.id.clone())), false))
-                        .width(Fill)
-                        .align_x(Right),
-                );
-            }
-            container(body)
+            container(response)
         }
         Kind::Activity(kind) => {
             let toggle = button(
@@ -465,5 +442,77 @@ fn entry<'a>(item: &'a Item, theme: &'a Theme, copy: CopyButton) -> Element<'a, 
             container(activity).width(Fill)
         }
     }
+    .into();
+    if !item.copy_ready {
+        return body;
+    }
+    let selected = copied
+        .filter(|(id, _)| *id == item.id)
+        .map(|(_, format)| format);
+    column![
+        body,
+        container(
+            row![
+                copy_icon(&item.id, CopyFormat::Markdown, selected),
+                copy_icon(&item.id, CopyFormat::RichText, selected),
+            ]
+            .spacing(4)
+        )
+        .width(Fill)
+        .align_x(Right),
+    ]
+    .spacing(4)
+    .into()
+}
+
+fn copy_icon<'a>(
+    id: &str,
+    format: CopyFormat,
+    selected: Option<CopyFormat>,
+) -> Element<'a, Action> {
+    static MARKDOWN: OnceLock<svg::Handle> = OnceLock::new();
+    static RICH_TEXT: OnceLock<svg::Handle> = OnceLock::new();
+    static CHECK: OnceLock<svg::Handle> = OnceLock::new();
+    let (handle, path, label) = match (format, selected == Some(format)) {
+        (_, true) => (&CHECK, "m5 12 4 4L19 6", "Copied"),
+        (CopyFormat::Markdown, false) => (
+            &MARKDOWN,
+            "M2 5h20v14H2z M5 15V9l3 3 3-3v6 M16.5 9v6m-2-2 2 2 2-2",
+            "Copy Markdown",
+        ),
+        (CopyFormat::RichText, false) => (
+            &RICH_TEXT,
+            "M7 7V3h13v14h-4 M4 7h12v14H4z M7 11h6m-6 4h6",
+            "Copy formatted text",
+        ),
+    };
+    let icon = handle.get_or_init(|| svg::Handle::from_memory(format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+    ).into_bytes())).clone();
+    let icon_color = if selected == Some(format) {
+        theme::GREEN
+    } else {
+        theme::MUTED
+    };
+    tooltip(
+        button(
+            svg(icon)
+                .width(16)
+                .height(16)
+                .style(move |_, _| svg::Style {
+                    color: Some(icon_color),
+                }),
+        )
+        .on_press(Action::Copy(id.into(), format))
+        .width(28)
+        .height(28)
+        .padding(6)
+        .style(|_, status| theme::tab(false, status)),
+        container(text(label).size(12))
+            .padding([5, 8])
+            .style(|_| theme::panel(theme::CHROME, 6.0)),
+        tooltip::Position::Top,
+    )
+    .gap(5)
     .into()
 }
