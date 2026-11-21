@@ -1,7 +1,7 @@
 use crate::{
     Message, Tab, agent,
     agent::{CopyFormat, VisualGoal},
-    codex_rpc,
+    codex_rpc, file_panel,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::channel::mpsc;
@@ -39,6 +39,7 @@ pub enum Event {
     Goal(window::Screenshot),
     Resized(window::Screenshot),
     Activity(window::Screenshot),
+    FileSuggestions(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -66,6 +67,11 @@ enum Step {
     CaptureActivityIdle,
     CaptureActivityHover,
     CaptureActivityExpanded,
+    OpenFileSidebar,
+    WaitForPartialPath,
+    WaitForExactPath,
+    CaptureFileSuggestions,
+    WaitForFolder,
 }
 
 pub struct Check {
@@ -481,6 +487,99 @@ impl Check {
                 std::fs::write(self.directory.join("activity.json"),
                     br#"{"hoverRevealsChevron":true,"clickedDiff":true,"addedAndRemovedRowsPainted":true}"#,
                 ).expect("record native activity workflow");
+                let fixture = self.directory.join("file-fixture");
+                for folder in [
+                    "mnt/data",
+                    "mnt/logs",
+                    "mnt/.cache",
+                    "mnt/Internal",
+                    "monitor",
+                ] {
+                    std::fs::create_dir_all(fixture.join(folder))
+                        .expect("create directory fixture");
+                }
+                assert!(
+                    std::process::Command::new("attrib.exe")
+                        .arg("+H")
+                        .arg(fixture.join("mnt/Internal"))
+                        .status()
+                        .expect("mark the fixture as hidden")
+                        .success()
+                );
+                std::fs::write(
+                    fixture.join("mnt/data.txt"),
+                    "A file excluded from directory suggestions",
+                )
+                .expect("create file fixture");
+                self.step = Step::OpenFileSidebar;
+                Task::done(Message::ShowFiles).chain(observe())
+            }
+            (Event::Observe, Step::OpenFileSidebar) => {
+                if !tab
+                    .file_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.visual_folder().is_some())
+                {
+                    return observe();
+                }
+                self.step = Step::WaitForPartialPath;
+                self.type_directory(tab, "m")
+            }
+            (Event::Observe, Step::WaitForPartialPath) => {
+                let panel = tab.file_panel.as_ref().expect("open file sidebar");
+                if !panel.visual_matches().eq(["mnt", "monitor"]) {
+                    return observe();
+                }
+                self.step = Step::WaitForExactPath;
+                self.type_directory(tab, "mnt")
+            }
+            (Event::Observe, Step::WaitForExactPath) => {
+                let panel = tab.file_panel.as_ref().expect("open file sidebar");
+                if !panel.visual_matches().eq(["data", "logs"]) {
+                    return observe();
+                }
+                assert_ne!(
+                    panel.visual_folder().and_then(|path| path.file_name()),
+                    Some(std::ffi::OsStr::new("mnt"))
+                );
+                self.step = Step::CaptureFileSuggestions;
+                screenshot(Event::FileSuggestions)
+            }
+            (Event::FileSuggestions(frame), Step::CaptureFileSuggestions) => {
+                let scale = frame.scale_factor;
+                let x = (180.0 * scale) as u32;
+                let top = (120.0 * scale) as u32;
+                let bottom = (210.0 * scale) as u32;
+                let y = (top..bottom).find(|y| {
+                    let offset = ((y * frame.size.width + x) * 4) as usize;
+                    frame.rgba.get(offset..offset + 3) == Some(&[0x1b, 0x20, 0x2a])
+                });
+                self.save("file-suggestions.png", frame);
+                let y = y.expect("painted directory suggestion card") + (16.0 * scale) as u32;
+                self.step = Step::WaitForFolder;
+                window::latest()
+                    .then(move |id| {
+                        window::run(id.expect("active Span window"), move |window| {
+                            scroll::Target::click(window, x as i32, y as i32);
+                        })
+                        .discard()
+                    })
+                    .chain(observe())
+            }
+            (Event::Observe, Step::WaitForFolder) => {
+                let panel = tab.file_panel.as_ref().expect("open file sidebar");
+                if !panel
+                    .visual_folder()
+                    .is_some_and(|path| path.ends_with("mnt/data"))
+                {
+                    return observe();
+                }
+                assert_eq!(panel.visual_matches().count(), 0);
+                std::fs::remove_dir_all(self.directory.join("file-fixture"))
+                    .expect("clean up temporary file fixture");
+                std::fs::write(self.directory.join("file-suggestions.json"),
+                    br#"{"partialPrefix":true,"exactPathShowsChildrenWithoutEnter":true,"hiddenAndFilesFiltered":true,"openedWithMouse":true}"#,
+                ).expect("record native file suggestions");
                 Task::done(Message::CloseWindow)
             }
             (
@@ -502,6 +601,15 @@ impl Check {
             (after - before).abs() <= 1.5,
             "message shifted from {before} to {after}"
         );
+    }
+
+    fn type_directory(&self, tab: &Tab, path: &str) -> Task<Message> {
+        let address = self.directory.join("file-fixture").join(path);
+        Task::done(Message::Files(
+            tab.id,
+            file_panel::Action::Path(address.to_string_lossy().into_owned()),
+        ))
+        .chain(observe())
     }
 
     fn save(&self, name: &str, frame: window::Screenshot) -> u64 {

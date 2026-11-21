@@ -10,6 +10,8 @@ use std::io::{self, Read};
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub const MAX_ENTRIES: usize = 10_000;
@@ -191,10 +193,16 @@ pub struct Entry {
     pub size: Option<u64>,
     pub modified: Option<i64>,
     pub mode: Option<u32>,
+    #[cfg(windows)]
+    pub windows_hidden: bool,
 }
 
 impl Entry {
     pub fn hidden(&self) -> bool {
+        #[cfg(windows)]
+        if self.windows_hidden {
+            return true;
+        }
         self.name.as_encoded_bytes().starts_with(b".")
     }
 }
@@ -244,6 +252,10 @@ fn list_local(path: Option<&Path>) -> io::Result<Directory> {
             mode: metadata.as_ref().map(MetadataExt::mode),
             #[cfg(windows)]
             mode: None,
+            #[cfg(windows)]
+            windows_hidden: metadata
+                .as_ref()
+                .is_some_and(|meta| meta.file_attributes() & 0x2 != 0),
         });
     }
     Ok(Directory {

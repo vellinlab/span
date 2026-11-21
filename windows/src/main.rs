@@ -207,6 +207,7 @@ impl Span {
     }
 
     fn open(&mut self, host: Option<String>) {
+        self.hide_file_sidebar();
         self.next_id += 1;
         let id = self.next_id;
         let terminal =
@@ -225,7 +226,21 @@ impl Span {
             file_panel: None,
         });
         self.sessions = false;
+    }
+
+    fn hide_file_sidebar(&mut self) {
+        if !self.show_files {
+            return;
+        }
         self.show_files = false;
+        if let Some(panel) = self
+            .terminals
+            .iter_mut()
+            .find(|tab| self.active == Some(tab.id))
+            .and_then(|tab| tab.file_panel.as_mut())
+        {
+            panel.cancel_suggestions();
+        }
     }
 
     fn connect(&mut self, value: &str) {
@@ -315,7 +330,7 @@ impl Span {
             Message::NewTerminal => self.open(None),
             Message::ShowTerminal => {
                 self.sessions = false;
-                self.show_files = false;
+                self.hide_file_sidebar();
                 if let Some(tab) = self
                     .terminals
                     .iter_mut()
@@ -325,6 +340,7 @@ impl Span {
                 }
             }
             Message::ShowAgent => {
+                self.hide_file_sidebar();
                 let Some(tab) = self
                     .terminals
                     .iter_mut()
@@ -333,7 +349,6 @@ impl Span {
                     return Task::none();
                 };
                 self.sessions = true;
-                self.show_files = false;
                 tab.show_agent = true;
                 self.connecting = false;
                 if tab.agent.is_none() {
@@ -418,7 +433,7 @@ impl Span {
                 return iced::exit();
             }
             Message::Select(id) => {
-                self.show_files = false;
+                self.hide_file_sidebar();
                 self.active = Some(id);
                 self.sessions = self
                     .terminals
@@ -444,7 +459,7 @@ impl Span {
             }
             Message::ShowConnect => {
                 self.sessions = false;
-                self.show_files = false;
+                self.hide_file_sidebar();
                 self.connecting = !self.connecting;
                 self.error = None;
             }

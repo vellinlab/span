@@ -517,6 +517,8 @@ impl Packet {
             size,
             modified,
             mode,
+            #[cfg(windows)]
+            windows_hidden: false,
         }))
     }
 }
