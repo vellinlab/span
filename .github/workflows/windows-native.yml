@@ -7,12 +7,14 @@ on:
     paths:
       - 'windows/**'
       - 'src/terminal_theme.rs'
+      - 'src/ssh.rs'
       - 'packaging/icons/**'
       - '.github/workflows/windows-native.yml'
   pull_request:
     paths:
       - 'windows/**'
       - 'src/terminal_theme.rs'
+      - 'src/ssh.rs'
       - 'packaging/icons/**'
       - '.github/workflows/windows-native.yml'
   workflow_dispatch:
@@ -37,6 +39,14 @@ jobs:
         shell: pwsh
         run: rustup toolchain install 1.98.1 --profile minimal
 
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            windows/target
+          key: windows-native-rust-1.98.1-${{ hashFiles('windows/Cargo.lock') }}
+          restore-keys: windows-native-rust-1.98.1-
+
       - name: Build and test ConPTY
         shell: pwsh
         run: |
@@ -56,14 +66,16 @@ jobs:
             "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
             "$env:SystemRoot\System32\OpenSSH"
           ) -join ';'
-          $metrics = foreach ($backend in 'auto', 'tiny-skia') {
+          $metrics = foreach ($backend in 'tiny-skia', 'auto') {
             if ($backend -eq 'auto') {
               Remove-Item Env:ICED_BACKEND -ErrorAction SilentlyContinue
             } else {
               $env:ICED_BACKEND = $backend
             }
             $timer = [Diagnostics.Stopwatch]::StartNew()
-            $span = Start-Process (Join-Path $portable 'Span.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru
+            $stderr = Join-Path $env:RUNNER_TEMP "$backend-stderr.log"
+            $env:RUST_BACKTRACE = "1"
+            $span = Start-Process (Join-Path $portable 'Span.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru -RedirectStandardError $stderr
             try {
               for ($i = 0; $i -lt 120; $i++) {
                 $span.Refresh()
@@ -77,6 +89,7 @@ jobs:
               Start-Sleep -Seconds 2
               $span.Refresh()
               if ($span.HasExited) { throw "Span exited after opening its $backend window" }
+              if ($span.MainWindowTitle -ne "Span") { throw "Unexpected window: $($span.MainWindowTitle)" }
               [PSCustomObject]@{
                 Renderer = $backend
                 WindowMs = $startup
@@ -88,13 +101,15 @@ jobs:
                 $closePosted = $span.CloseMainWindow()
                 if (!$span.WaitForExit(5000)) {
                   $span.Refresh()
-                  Write-Host "Close posted: $closePosted. Backend: $backend. Remaining handle: $($span.MainWindowHandle). Responding: $($span.Responding)."
+                  Write-Host "Close posted: $closePosted. Backend: $backend. Remaining handle: $($span.MainWindowHandle). Title: $($span.MainWindowTitle). Responding: $($span.Responding)."
                   Get-CimInstance Win32_Process -Filter "ParentProcessId=$($span.Id)" |
                     Format-Table ProcessId, Name
                   Stop-Process -Id $span.Id
+                  Get-Content $stderr
                   throw "Span did not close within five seconds"
                 }
               }
+              if (Test-Path $stderr) { Get-Content $stderr }
             }
           }
           New-Item -ItemType Directory -Path dist -Force | Out-Null

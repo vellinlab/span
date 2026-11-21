@@ -46,15 +46,7 @@ async fn serve(
 
     let mut command = if let Some(host) = &host {
         let mut ssh = Command::new("ssh.exe");
-        ssh.args([
-            "-T",
-            "-x",
-            "-oBatchMode=yes",
-            "-oConnectTimeout=12",
-            "--",
-            host,
-            ROUTE,
-        ]);
+        ssh.args(crate::ssh::BACKGROUND).args(["--", host, ROUTE]);
         ssh
     } else {
         let mut codex = Command::new("codex.exe");

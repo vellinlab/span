@@ -2,6 +2,9 @@
 
 mod agent;
 mod codex_rpc;
+#[path = "../../src/ssh.rs"]
+#[allow(dead_code)]
+mod ssh;
 mod terminal;
 #[path = "../../src/terminal_theme.rs"]
 #[allow(dead_code)]
@@ -33,7 +36,7 @@ fn main() -> iced::Result {
         .title("Span")
         .default_font(Font::with_name("Segoe UI"))
         .theme(Span::theme)
-        .subscription(|_| window::close_requests().map(Message::CloseWindow))
+        .subscription(|_| window::close_requests().map(|_| Message::CloseWindow))
         .window(window::Settings {
             size: Size::new(1216.0, 780.0),
             min_size: Some(Size::new(760.0, 480.0)),
@@ -82,7 +85,7 @@ enum Message {
     Agent(TerminalId, agent::Action),
     Select(TerminalId),
     Close(TerminalId),
-    CloseWindow(window::Id),
+    CloseWindow,
     ShowConnect,
     ChangeHost(String),
     Connect,
@@ -209,10 +212,10 @@ impl Span {
                         .map(move |action| Message::Agent(id, action));
                 }
             }
-            Message::CloseWindow(id) => {
+            Message::CloseWindow => {
                 self.terminals.clear();
                 self.events.close_channel();
-                return window::close(id);
+                return iced::exit();
             }
             Message::Select(id) => {
                 self.active = Some(id);
