@@ -8,6 +8,9 @@ on:
       - 'windows/**'
       - 'src/terminal_theme.rs'
       - 'src/ssh.rs'
+      - 'src/files.rs'
+      - 'src/sftp.rs'
+      - 'src/clipboard_markup.rs'
       - 'packaging/icons/**'
       - '.github/workflows/windows-native.yml'
   pull_request:
@@ -15,6 +18,9 @@ on:
       - 'windows/**'
       - 'src/terminal_theme.rs'
       - 'src/ssh.rs'
+      - 'src/files.rs'
+      - 'src/sftp.rs'
+      - 'src/clipboard_markup.rs'
       - 'packaging/icons/**'
       - '.github/workflows/windows-native.yml'
   workflow_dispatch:

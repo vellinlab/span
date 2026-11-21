@@ -1,6 +1,8 @@
 #![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
 mod agent;
+#[path = "../../src/clipboard_markup.rs"]
+mod clipboard_markup;
 mod codex_rpc;
 mod file_panel;
 #[path = "../../src/files.rs"]

@@ -15,6 +15,7 @@ iced = { version = "0.14", default-features = false, features = [
     "advanced", "canvas", "highlighter", "image", "markdown", "svg", "tiny-skia", "tokio", "wgpu",
 ] }
 futures = "0.3"
+htmd = "0.6"
 image = { version = "0.25", default-features = false, features = ["ico", "jpeg", "png"] }
 open = "5"
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +25,7 @@ tokio-util = { version = "0.7", features = ["compat"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
 rfd = { version = "0.17", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]

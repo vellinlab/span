@@ -1,11 +1,11 @@
 use crate::{codex_rpc, theme};
 use futures::channel::mpsc;
-use iced::keyboard::{Key, key::Named};
 use iced::widget::{
     Space, button, column, container, markdown, row, scrollable, text, text_editor,
 };
 use iced::{Center, Element, Fill, Right, Task, Theme, clipboard};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Clone, Debug)]
@@ -15,6 +15,8 @@ pub enum Action {
     Resume(String),
     More,
     Draft(text_editor::Action),
+    Paste,
+    Pasted(Option<String>, Option<String>),
     Send,
     Interrupt,
     Copy(String),
@@ -197,6 +199,23 @@ impl Agent {
                 }
             }
             Action::Draft(action) => self.draft.perform(action),
+            Action::Paste => {
+                if let Some(markdown) = crate::clipboard_markup::from_windows() {
+                    self.draft
+                        .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                            Arc::new(markdown),
+                        )));
+                } else {
+                    let thread = self.thread.clone();
+                    return clipboard::read().map(move |text| Action::Pasted(thread.clone(), text));
+                }
+            }
+            Action::Pasted(thread, Some(text)) if thread == self.thread => {
+                self.draft
+                    .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                        Arc::new(text),
+                    )));
+            }
             Action::Send => self.send_draft(),
             Action::Interrupt if self.in_flight => {
                 if let (Some(thread), Some(turn)) = (&self.thread, &self.turn)
@@ -636,10 +655,18 @@ impl Agent {
         for item in &self.items {
             let entry = match item.kind {
                 Kind::User => container(
-                    container(text(&item.value).size(15))
-                        .padding([10, 14])
-                        .max_width(580)
-                        .style(|_| theme::rounded(theme::HIGHLIGHT, 14.0)),
+                    container(if let Some(parsed) = &item.parsed {
+                        markdown::view(
+                            parsed.items(),
+                            markdown::Settings::with_text_size(15, theme),
+                        )
+                        .map(Action::Link)
+                    } else {
+                        text(&item.value).size(15).into()
+                    })
+                    .padding([10, 14])
+                    .max_width(580)
+                    .style(|_| theme::rounded(theme::HIGHLIGHT, 14.0)),
                 )
                 .width(Fill)
                 .align_x(Right),
@@ -703,10 +730,15 @@ impl Agent {
             .padding(10)
             .size(15)
             .key_binding(|press| {
-                if press.key.as_ref() == Key::Named(Named::Enter) && !press.modifiers.shift() {
-                    Some(text_editor::Binding::Custom(Action::Send))
-                } else {
-                    text_editor::Binding::from_key_press(press)
+                let shift = press.modifiers.shift();
+                match text_editor::Binding::from_key_press(press)? {
+                    text_editor::Binding::Enter if !shift => {
+                        Some(text_editor::Binding::Custom(Action::Send))
+                    }
+                    text_editor::Binding::Paste => {
+                        Some(text_editor::Binding::Custom(Action::Paste))
+                    }
+                    action => Some(action),
                 }
             });
         let mut composer = column![].spacing(8);
@@ -814,7 +846,7 @@ mod tests {
             &json!({
                 "thread":{"id":"fixture","name":"Fixture"},
                 "initialTurnsPage":{"data":[{"id":"stored","items":[
-                    {"id":"q","type":"userMessage","content":[{"type":"text","text":"你好"}]},
+                    {"id":"q","type":"userMessage","content":[{"type":"text","text":"**你好**"}]},
                     {"id":"a","type":"agentMessage","text":"**你好**"}
                 ]}]}
             }),
@@ -842,6 +874,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["q", "a", "live"]
         );
+        assert!(agent.items[0].parsed.is_some());
         assert_eq!(agent.items[2].value, "**新的回复**");
         assert!(agent.items[2].parsed.is_some());
     }
