@@ -12,6 +12,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
 };
+use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -24,7 +25,7 @@ pub enum Action {
     Draft(text_editor::Action),
     Paste,
     AttachImage,
-    Prepared(u64, Result<Option<Prepared>, String>),
+    Prepared(Uuid, Result<Option<Prepared>, String>),
     RemoveImage(usize),
     Send,
     Interrupt,
@@ -117,7 +118,7 @@ pub struct Agent {
     draft: text_editor::Content,
     submitted_draft: Option<String>,
     attachments: Vec<Attachment>,
-    preparing: bool,
+    preparing: Option<Uuid>,
     in_flight: bool,
     turn: Option<String>,
     approval: Option<Approval>,
@@ -147,7 +148,7 @@ impl Agent {
             draft: text_editor::Content::new(),
             submitted_draft: None,
             attachments: Vec::new(),
-            preparing: false,
+            preparing: None,
             in_flight: false,
             turn: None,
             approval: None,
@@ -275,14 +276,14 @@ impl Agent {
                 self.transcript_viewport = Some(viewport);
             }
             Action::Draft(action) => self.draft.perform(action),
-            Action::Paste if !self.preparing => {
+            Action::Paste if self.preparing.is_none() => {
                 return self.prepare(agent_attachments::from_clipboard);
             }
-            Action::AttachImage if self.can_attach() && !self.preparing => {
+            Action::AttachImage if self.can_attach() && self.preparing.is_none() => {
                 return self.prepare(agent_attachments::pick_file);
             }
-            Action::Prepared(generation, result) if generation == self.transcript_generation => {
-                self.preparing = false;
+            Action::Prepared(id, result) if self.preparing == Some(id) => {
+                self.preparing = None;
                 match result {
                     Ok(Some(Prepared::Text(text))) => {
                         self.draft
@@ -346,15 +347,15 @@ impl Agent {
     }
 
     fn prepare(&mut self, operation: fn() -> Result<Option<Prepared>, String>) -> Task<Action> {
-        self.preparing = true;
-        let generation = self.transcript_generation;
+        let id = Uuid::new_v4();
+        self.preparing = Some(id);
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(operation)
                     .await
                     .unwrap_or_else(|_| Err("Could not prepare the attachment.".into()))
             },
-            move |result| Action::Prepared(generation, result),
+            move |result| Action::Prepared(id, result),
         )
     }
 
@@ -405,7 +406,7 @@ impl Agent {
         self.connection.is_some()
             && self.thread.is_some()
             && self.submitted_draft.is_none()
-            && !self.preparing
+            && self.preparing.is_none()
             && (!self.in_flight || self.turn.is_some())
             && !self
                 .pending
@@ -515,7 +516,7 @@ impl Agent {
                 self.copied = None;
                 self.items.clear();
                 self.attachments.clear();
-                self.preparing = false;
+                self.preparing = None;
                 self.cursor = None;
                 self.transcript_generation += 1;
                 #[cfg(feature = "visual-check")]
@@ -1129,9 +1130,11 @@ impl Agent {
             )
             .padding([6, 7])
             .style(|_, status| theme::button_status(false, status))
-            .on_press_maybe((self.can_attach() && !self.preparing).then_some(Action::AttachImage)),
+            .on_press_maybe(
+                (self.can_attach() && self.preparing.is_none()).then_some(Action::AttachImage),
+            ),
             container(
-                text(if self.preparing {
+                text(if self.preparing.is_some() {
                     "Preparing attachment…"
                 } else {
                     "Attach image"
@@ -1142,9 +1145,6 @@ impl Agent {
             .style(|_| theme::panel(theme::CHROME, 6.0)),
             tooltip::Position::Top,
         );
-        if self.preparing {
-            composer = composer.push(text("Preparing attachment…").size(12).color(theme::MUTED));
-        }
         composer = composer.push(editor).push(
             row![
                 attach,
@@ -1235,7 +1235,7 @@ mod tests {
         assert!(agent.attachments.is_empty());
         assert_eq!(agent.draft.text().trim_end(), "Next draft");
         let _ = agent.update(Action::Prepared(
-            agent.transcript_generation + 1,
+            Uuid::new_v4(),
             Ok(Some(Prepared::Image(screenshot))),
         ));
         assert!(agent.attachments.is_empty());
