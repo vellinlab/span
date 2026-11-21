@@ -882,6 +882,14 @@ impl Span {
     fn workspace(&self) -> Element<'_, Message> {
         let mut tabs = row![].align_y(Center).spacing(5);
         for tab in &self.terminals {
+            use theme::WorkspaceIcon;
+            let symbol = if tab.show_agent {
+                WorkspaceIcon::Conversation
+            } else if tab.host.is_some() {
+                WorkspaceIcon::Remote
+            } else {
+                WorkspaceIcon::Terminal
+            };
             let active = self.active == Some(tab.id);
             let state_color = match &tab.terminal {
                 TerminalState::Opening => theme::BLUE,
@@ -892,9 +900,10 @@ impl Span {
             let tab_control = row![
                 button(
                     row![
+                        symbol.glyph(14, theme::MUTED),
+                        text(tab.name()).size(13),
                         container(Space::new().width(7).height(7))
                             .style(move |_| theme::rounded(state_color, 4.0)),
-                        text(tab.name()).size(13),
                     ]
                     .spacing(8)
                     .align_y(Center)
@@ -902,10 +911,11 @@ impl Span {
                 .on_press(Message::Select(tab.id))
                 .padding([6, 8])
                 .style(move |_, status| theme::tab(active, status)),
-                button(text("×").size(16))
-                    .on_press(Message::Close(tab.id))
-                    .padding([5, 7])
-                    .style(move |_, status| theme::tab(active, status)),
+                WorkspaceIcon::Close.control(
+                    "关闭标签 (Ctrl+Shift+W)",
+                    Some(Message::Close(tab.id)),
+                    false
+                ),
             ]
             .align_y(Center);
             tabs = tabs.push(container(tab_control).style(move |_| {

@@ -1315,7 +1315,7 @@ impl Agent {
             .spacing(7)
             .align_y(Center),
         );
-        self.conversation(scroll, composer)
+        self.conversation(scroll, composer, drawer)
     }
 
     fn conversation<'a>(
