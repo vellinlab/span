@@ -17,16 +17,9 @@ span
 
 CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下启动已安装的 RPM。RPM 带有仅由 Span 加载的 VTE 0.64.2。该版本能忽略 Codex 的 OSC 状态序列。对应源码 `vte-0.64.2.tar.xz` 随 Release 提供。
 
-### Ubuntu 24.04 amd64
-
-从同一个 Release 下载 `.deb` 文件。
-
-```sh
-sudo apt install ./span_0.1.0-rc.26_amd64.deb
-span
-```
-
 安装包与启动命令均使用 `span`。安装时会替换旧的 `ssh-workbench` 软件包，继续读取已有的主机配置。`ssh-workbench` 启动命令仍可作为兼容别名使用。
+
+Ubuntu／DEB 暂停更新。已发布的 Ubuntu 安装包仍可在对应的 Release 下载。
 
 ### Windows x86_64
 
@@ -36,7 +29,7 @@ span
 
 带 `-alpha.N`、`-beta.N` 或 `-rc.N` 后缀的版本会标记为预发布，供测试使用。
 
-界面英文字体优先使用本机的 Segoe UI，简体中文优先使用微软雅黑 UI 或微软雅黑。NewStartOS／EL8 的 RPM 使用系统已有字体。DEB 包附带微软的 [Selawik 1.01](https://github.com/microsoft/Selawik/releases/tag/1.01)，供缺少 Segoe UI 的系统使用。缺少微软雅黑时，优先使用系统已有的思源黑体或 Noto Sans CJK SC。
+界面英文字体优先使用本机的 Segoe UI，简体中文优先使用微软雅黑 UI 或微软雅黑。NewStartOS／EL8 的 RPM 使用系统已有字体。缺少微软雅黑时，优先使用系统已有的思源黑体或 Noto Sans CJK SC。
 
 ## 使用
 
@@ -71,6 +64,7 @@ Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会�
 - 在输入框开头输入 `/` 打开命令列表，可用方向键和 `Enter` 选择。`/model` 打开模型菜单，输入 `/goal` 并选择「设置目标」，直接在聊天框填写并发送，也可键入 `/goal <目标>`。`/goal status` 查看会话目标，`/goal edit` 编辑，`/goal pause`、`/goal resume`、`/goal clear` 管理同一个目标。
 - 会话命令还包括 `/plan [任务]`、`/review [--base 分支 | --commit SHA | 审查重点]`、`/compact`、`/diff`、`/status`、`/usage`、`/mcp [verbose]`、`/reasoning [强度]`、`/new [名称]`、`/resume [会话 ID]`、`/fork`、`/rename <名称>`、`/pwd` 和 `/copy [rich]`。`/diff` 显示已跟踪文件的改动并列出未跟踪文件，Git 操作在当前会话的主机上执行。`/usage` 打开套餐额度。
 - 左侧「扩展」页和工具栏的拼图按钮用于管理当前终端标签所在主机的插件与连接器，也可用 `/plugins` 或 `/apps` 进入。插件目录和安装状态来自该主机的 Codex App Server，取决于主机上的 Codex 版本与其登录的账号。连接器在账号层面的授权和解绑通过浏览器中的 ChatGPT 完成，Span 内可启停该主机对已可用连接器的使用。
+- 用户消息支持 Markdown。粘贴 Notion 等应用的富文本时，标题、列表、链接、代码和表格会转换为可编辑的 Markdown，发送后在消息气泡中排版。
 - 推理摘要、生成中的回复和已完成的回复支持 Markdown 加粗与可点击的 HTTP／HTTPS 链接。每轮完成后，末尾的两个图标分别复制该轮的 Markdown 和富文本。
 - 鼠标选中回复、推理摘要或文件预览中的文字后，点击「引用」把选区加入输入框上方的引用卡片。每条可单独移除，发送时与正文一同交给 Codex。
 - 点击「附件」选择本机文件，或在输入框按 `Ctrl+V` 粘贴剪贴板图片。发送前可移除，每条消息最多 6 个、合计 16 MiB。SSH 会话通过当前连接的 SFTP 将附件放入远端私有临时目录。支持视觉输入的模型会直接收到 PNG、JPEG、GIF 和 WebP 图片，其余附件按文件路径交给 Agent 读取。
