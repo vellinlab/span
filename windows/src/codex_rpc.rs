@@ -50,7 +50,7 @@ async fn serve(
     use std::process::Stdio;
 
     let mut command = if let Some(host) = &host {
-        let mut ssh = Command::new("ssh.exe");
+        let mut ssh = Command::new(crate::ssh::PROGRAM);
         ssh.args(crate::ssh::BACKGROUND).args(["--", host, ROUTE]);
         ssh
     } else {

@@ -162,7 +162,10 @@ impl Terminal {
     ) -> Result<(Arc<PtySession>, EventLoop<tty::Pty, Events>), String> {
         let size = GridSize::initial();
         let (program, args) = match host {
-            Some(host) => ("ssh.exe", vec!["-tt".into(), "--".into(), host.into()]),
+            Some(host) => (
+                crate::ssh::PROGRAM,
+                vec!["-tt".into(), "--".into(), host.into()],
+            ),
             None => ("powershell.exe", vec!["-NoLogo".into()]),
         };
         let options = tty::Options {

@@ -33,7 +33,7 @@ pub fn normalize(value: &str) -> Option<String> {
         authority
     };
 
-    let Endpoint { host, ipv6, port } = endpoint(address)?;
+    let Endpoint { host, ipv6, port } = endpoint(address, uri.is_none())?;
     if uri.is_none() && !address.starts_with('[') && port.is_none() {
         return Some(value.into());
     }
@@ -74,7 +74,7 @@ struct Endpoint<'a> {
     port: Option<u16>,
 }
 
-fn endpoint(address: &str) -> Option<Endpoint<'_>> {
+fn endpoint(address: &str, plain: bool) -> Option<Endpoint<'_>> {
     if let Some(address) = address.strip_prefix('[') {
         let (host, suffix) = address.split_once(']')?;
         if !is_ipv6(host) {
@@ -102,11 +102,13 @@ fn endpoint(address: &str) -> Option<Endpoint<'_>> {
         Some((host, port)) => (host, Some(parse_port(port)?)),
         None => (address, None),
     };
+    // OpenSSH aliases without a URI can contain characters unavailable in URI hostnames.
+    let alias = plain && port.is_none();
     (!host.is_empty()
         && !host.starts_with('-')
-        && host
-            .chars()
-            .all(|ch| ch.is_alphanumeric() || matches!(ch, '.' | '-' | '_')))
+        && host.chars().all(|ch| {
+            ch.is_alphanumeric() || ".-_".contains(ch) || (alias && "+~!=#%".contains(ch))
+        }))
     .then_some(Endpoint {
         host,
         ipv6: false,
@@ -145,6 +147,7 @@ mod tests {
     fn normalizes_ssh_aliases_ports_and_ipv6() {
         for (input, expected) in [
             (" office ", "office"),
+            ("office+dev", "office+dev"),
             ("dev@office", "dev@office"),
             ("dev@office:02222", "ssh://dev@office:2222"),
             ("[::1]:2222", "ssh://[::1]:2222"),
@@ -187,7 +190,7 @@ mod tests {
         let config = std::env::temp_dir().join(format!("span-ssh-{}.conf", uuid::Uuid::new_v4()));
         std::fs::write(
             &config,
-            "Host fixture\n  HostName 127.0.0.1\n  User span-ci\n  Port 21000\n",
+            "Host fixture fixture+lab\n  HostName 127.0.0.1\n  User span-ci\n  Port 21000\n",
         )
         .unwrap();
         let resolve = |destination: &str, options: &[&str], extra: &[&str]| {
@@ -204,6 +207,10 @@ mod tests {
         let sftp = [crate::ssh::BACKGROUND, &["-s"]].concat();
         let results = [
             (resolve("fixture", &["-tt"], &[]), 21000),
+            (
+                resolve(&normalize("fixture+lab").unwrap(), &["-tt"], &[]),
+                21000,
+            ),
             (resolve(&destination, &["-tt"], &[]), 2222),
             (resolve(&destination, &sftp, &["sftp"]), 2222),
             (
