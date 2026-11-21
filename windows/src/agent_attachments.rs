@@ -17,7 +17,7 @@ const MAX_BITMAP_BYTES: usize = (MAX_PIXELS as usize * 4) + 4096;
 #[derive(Clone)]
 pub struct Attachment {
     pub name: Arc<str>,
-    pub url: Arc<str>,
+    pub url: Arc<String>,
     pub thumbnail: Handle,
     pub bytes: usize,
 }
@@ -78,8 +78,14 @@ pub fn pick_file() -> Result<Option<Prepared>, String> {
         return Ok(None);
     };
     let file = File::open(&path).map_err(|error| format!("Could not open the image. {error}"))?;
-    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("Could not read the image size. {error}"))?;
+    if !metadata.is_file() {
         return Err("Select an image file.".into());
+    }
+    if metadata.len() > MAX_BYTES as u64 {
+        return Err("Image attachments are limited to 8 MiB.".into());
     }
     let mut bytes = Vec::new();
     file.take(MAX_BYTES as u64 + 1)
@@ -160,7 +166,7 @@ fn attachment(name: Arc<str>, mime: &str, bytes: Vec<u8>, thumbnail: Handle) -> 
     STANDARD.encode_string(&bytes, &mut url);
     Attachment {
         name,
-        url: url.into(),
+        url: Arc::new(url),
         thumbnail,
         bytes: bytes.len(),
     }

@@ -1,10 +1,12 @@
 use crate::{Message, Tab, agent, codex_rpc};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use iced::widget::operation::{AbsoluteOffset, scroll_to};
 use iced::{Task, window};
 use serde_json::{Value, json};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -23,6 +25,7 @@ pub enum Event {
     Target(scroll::Target, f32),
     Frame(Instant),
     ScrollResults(Value),
+    Attachment(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -31,6 +34,9 @@ enum Step {
     CaptureLatest,
     WaitForHistory { end: f32 },
     CaptureEarlier { end: f32, actual: f32 },
+    WaitForAttachment,
+    CaptureAttachment,
+    WaitForAttachmentReply,
 }
 
 pub struct Check {
@@ -91,7 +97,9 @@ impl Check {
             Event::ScrollResults(results) => {
                 scroll::save(&self.directory, &results);
                 self.benchmark = None;
-                return Task::done(Message::CloseWindow);
+                put_bitmap_on_clipboard();
+                self.step = Step::WaitForAttachment;
+                return Task::done(Message::Agent(tab.id, agent::Action::Paste)).chain(observe());
             }
             _ => {}
         }
@@ -160,6 +168,32 @@ impl Check {
                     .map(move |target| Message::Visual(Event::Target(target, actual)))
                 })
             }
+            (Event::Observe, Step::WaitForAttachment) => {
+                if agent.visual_attachment_count() != 1 {
+                    return observe();
+                }
+                self.step = Step::CaptureAttachment;
+                screenshot(Event::Attachment)
+            }
+            (Event::Attachment(frame), Step::CaptureAttachment) => {
+                self.save("attachment.png", frame);
+                self.step = Step::WaitForAttachmentReply;
+                Task::done(Message::Agent(tab.id, agent::Action::Send)).chain(observe())
+            }
+            (Event::Observe, Step::WaitForAttachmentReply) => {
+                if agent.visual_attachment_count() == 0
+                    && probe.is_some_and(|(_, _, items, _)| items == self.items + 1)
+                {
+                    std::fs::write(
+                        self.directory.join("attachment.json"),
+                        br#"{"clipboard":"CF_DIB","input":"inline PNG","accepted":true}"#,
+                    )
+                    .expect("record Windows clipboard attachment test");
+                    Task::done(Message::CloseWindow)
+                } else {
+                    observe()
+                }
+            }
             _ => Task::none(),
         }
     }
@@ -186,6 +220,22 @@ fn screenshot(event: fn(window::Screenshot) -> Event) -> Task<Message> {
         window::screenshot(id.expect("active Span window"))
             .map(move |image| Message::Visual(event(image)))
     })
+}
+
+fn put_bitmap_on_clipboard() {
+    let mut bitmap = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        80,
+        48,
+        image::Rgb([165, 187, 255]),
+    ))
+    .write_to(&mut bitmap, image::ImageFormat::Bmp)
+    .expect("encode fixture bitmap");
+    clipboard_win::set_clipboard(
+        clipboard_win::formats::RawData(clipboard_win::formats::CF_DIB),
+        &bitmap.into_inner()[14..],
+    )
+    .expect("copy the fixture bitmap to the live Windows clipboard");
 }
 
 pub async fn serve(mut input: mpsc::Receiver<Value>, output: &mut mpsc::Sender<codex_rpc::Event>) {
@@ -216,6 +266,38 @@ pub async fn serve(mut input: mpsc::Receiver<Value>, output: &mut mpsc::Sender<c
                 "supportedReasoningEfforts":[{"reasoningEffort":"medium"},{"reasoningEffort":"high"}],
                 "serviceTiers":[{"id":"priority"}],
             }]}),
+            Some("turn/start") => {
+                let inputs = request["params"]["input"].as_array().expect("turn inputs");
+                assert_eq!(inputs.len(), 1, "send the image without placeholder text");
+                assert_eq!(inputs[0]["type"], "image");
+                let url = inputs[0]["url"].as_str().expect("image URL");
+                let data = STANDARD
+                    .decode(
+                        url.strip_prefix("data:image/png;base64,")
+                            .expect("inline PNG"),
+                    )
+                    .expect("decode the submitted image");
+                let image = image::load_from_memory(&data)
+                    .expect("decode the PNG received by Codex")
+                    .into_rgb8();
+                assert_eq!(image.dimensions(), (80, 48));
+                assert_eq!(image.get_pixel(12, 12).0, [165, 187, 255]);
+                let completed = json!({
+                    "method":"item/completed",
+                    "params": {
+                        "threadId":THREAD,
+                        "item":{"id":"clipboard-image","type":"userMessage","content":inputs}
+                    }
+                });
+                if output
+                    .send(codex_rpc::Event::Packet(completed))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                json!({"turn":{"id":"image-turn","status":"inProgress"}})
+            }
             _ => Value::Null,
         };
         let message = codex_rpc::Event::Packet(json!({"id":id,"result":result}));

@@ -435,7 +435,7 @@ impl Agent {
         input.extend(
             self.attachments
                 .iter()
-                .map(|image| json!({"type":"image","url":image.url.as_ref()})),
+                .map(|image| json!({"type":"image","url":image.url.as_str()})),
         );
         let mut params = json!({"threadId":thread,"input":input});
         let (request, method) = if let Some(turn) = &self.turn {
@@ -604,6 +604,11 @@ impl Agent {
             self.items.len(),
             self.cursor.is_some(),
         ))
+    }
+
+    #[cfg(feature = "visual-check")]
+    pub fn visual_attachment_count(&self) -> usize {
+        self.attachments.len()
     }
 
     fn server_request(&mut self, method: &str, params: &Value, id: &Value) {
@@ -1207,7 +1212,7 @@ mod tests {
         let url = "data:image/png;base64,AAAA";
         let screenshot = Attachment {
             name: "Screenshot.png".into(),
-            url: url.into(),
+            url: Arc::new(url.into()),
             thumbnail: image::Handle::from_rgba(1, 1, vec![255; 4]),
             bytes: 3,
         };
