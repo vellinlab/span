@@ -620,4 +620,29 @@ mod tests {
         }
         panic!("The shell did not produce the output in the terminal grid");
     }
+
+    #[test]
+    fn an_unclaimed_terminal_releases_its_pty() {
+        let (sender, mut receiver) = mpsc::unbounded();
+        Terminal::launch(1, None, None, sender).expect("launch PowerShell worker");
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let session = loop {
+            if let Ok(notice) = receiver.try_recv() {
+                let Notice::Ready(1, result) = notice else {
+                    panic!("expected the terminal handover first");
+                };
+                break result.expect("start PowerShell in ConPTY");
+            }
+            assert!(Instant::now() < deadline, "PTY startup timed out");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+
+        let grid = Arc::downgrade(&session.term);
+        drop(session);
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while grid.strong_count() > 0 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(grid.strong_count(), 0, "unclaimed PTY still owns its grid");
+    }
 }
