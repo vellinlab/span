@@ -14,6 +14,7 @@ cargo fmt --all -- --check
 export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib64/span'
 cargo build --locked --release
 cargo test --locked --release svg::tests
+cargo test --locked --release clipboard_markup::tests
 bash packaging/build-vte-el8.sh
 gcc -o target/verify-osc packaging/verify-osc.c $(pkg-config --cflags --libs gtk+-3.0 vte-2.91)
 

@@ -15,6 +15,7 @@ mod agent_selection;
 mod agent_task;
 mod agent_usage;
 mod browser;
+mod clipboard_markup;
 mod extension_art;
 mod files;
 mod heap;

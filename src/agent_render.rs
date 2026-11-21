@@ -480,6 +480,32 @@ fn underline_segments(layout: &pango::Layout) -> Vec<(f64, f64, f64)> {
     segments
 }
 
+pub fn has_block_markdown(markdown: &str) -> bool {
+    parser(markdown).any(|event| {
+        matches!(
+            event,
+            Event::Start(
+                Tag::Table(_)
+                    | Tag::CodeBlock(_)
+                    | Tag::Image { .. }
+                    | Tag::List(_)
+                    | Tag::Heading { .. }
+                    | Tag::BlockQuote(_)
+            ) | Event::Rule
+        )
+    })
+}
+
+pub fn has_inline_markdown(markdown: &str) -> bool {
+    parser(markdown).any(|event| {
+        matches!(
+            event,
+            Event::Code(_)
+                | Event::Start(Tag::Strong | Tag::Emphasis | Tag::Strikethrough | Tag::Link { .. })
+        )
+    })
+}
+
 pub fn set_markdown(label: &gtk::Label, markdown: &str) {
     let mut markup = String::new();
     let mut link = false;
