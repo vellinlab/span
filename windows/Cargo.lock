@@ -3455,7 +3455,7 @@ dependencies = [
 
 [[package]]
 name = "span-native"
-version = "0.1.0-rc.26"
+version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "async-tungstenite",

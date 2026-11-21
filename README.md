@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/vellinlab/span/releases) 直接下载 `.rpm` 文件并安装。
 
 ```sh
-sudo dnf install ./span-0.1.0-rc.26-1.el8.x86_64.rpm
+sudo dnf install ./span-0.1.0-1.el8.x86_64.rpm
 span
 ```
 
@@ -23,7 +23,7 @@ Ubuntu／DEB 暂停更新。已发布的 Ubuntu 安装包仍可在对应的 Rele
 
 ### Windows x86_64
 
-下载 `span-*-windows-x86_64.zip`，解压后打开 `Span/Span.exe`。Windows 原生版默认使用 tiny-skia 软件渲染，用系统自带的 ConPTY 运行 PowerShell。便携包内只有一个可执行文件。原生版候选包与 EL8 RPM 一起随 GitHub Release 发布，分支测试包见 [GitHub Actions](https://github.com/vellinlab/span/actions/workflows/build.yml)。
+下载 `span-*-windows-x86_64.zip`，解压后打开 `Span/Span.exe`。Windows 原生版默认使用 tiny-skia 软件渲染，用系统自带的 ConPTY 运行 PowerShell。便携包内只有一个可执行文件。从 [GitHub Releases](https://github.com/vellinlab/span/releases) 下载，Windows 便携包与 EL8 RPM 同时发布。
 
 远程终端使用系统 OpenSSH 客户端，密码和验证码在终端中输入。Windows 的 SFTP 和远程 Codex 会为同一主机建立后台 SSH 连接，需要可直接使用的密钥或 SSH Agent。先在终端确认主机公钥，后台连接会验证已保存的主机身份。使用本地 Codex 会话需要将已登录的 `codex.exe` 放在 `PATH` 中。本地 Windows Codex 目前使用独立的 App Server。
 
@@ -33,7 +33,7 @@ Ubuntu／DEB 暂停更新。已发布的 Ubuntu 安装包仍可在对应的 Rele
 
 ## 使用
 
-- 启动后进入本地终端。Linux 默认使用 Bash，Windows 默认使用 PowerShell。标签栏的「+」打开另一个本地终端，标签可拖动排序。
+- 启动后进入本地终端。Linux 默认使用 Bash，Windows 默认使用 PowerShell。标签栏的「+」打开另一个本地终端。Linux 标签可拖动排序。
 - 主机栏的「+」添加配置，点击主机打开 SSH 标签，「…」提供编辑和删除。「主机 → 导入 SSH 配置」可从本机 SSH 配置选中要保存的别名。Linux 配置保存在 `$XDG_CONFIG_HOME/ssh-workbench/hosts.ini`，Windows 配置保存在 `%LOCALAPPDATA%\Span\hosts.json`，首次启动原生版会读取并迁移旧版 Windows 的 `ssh-workbench\hosts.ini`。
 - SSH 目标可填 OpenSSH 别名或 `user@host`。从「会话 → 快速连接」或左侧工具栏打开。Windows 主机页还列出最近连接。系统 OpenSSH 读取现有配置、代理和认证设置。
 - Linux 下，为可信主机开启「信任 X11 转发」后，应用使用 `ssh -Y` 和当前标签的专用控制套接字。连接后在远端 Codex 中按 `Ctrl+V` 附上本机截图。
