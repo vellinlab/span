@@ -58,6 +58,7 @@ pub enum Action {
     Toggle(String),
     Approve(Value, bool),
     Retry,
+    ToggleTerminalDrawer,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1078,21 +1079,25 @@ impl Agent {
         .into()
     }
 
-    pub fn view<'a>(&'a self, theme: &'a Theme) -> Element<'a, Action> {
+    pub fn view<'a>(&'a self, theme: &'a Theme, drawer: bool) -> Element<'a, Action> {
         if self.thread.is_none() {
             let hint = self
                 .status
                 .as_deref()
                 .unwrap_or("Start a session or open one from the sidebar.");
-            return container(
-                column![
-                    text("Codex").size(28).font(theme::SEMIBOLD),
-                    text(hint).size(15).color(theme::MUTED)
-                ]
-                .spacing(12)
-                .align_x(Center),
-            )
-            .center(Fill)
+            return column![
+                self.header("Codex", drawer),
+                container(
+                    column![
+                        text("Codex").size(28).font(theme::SEMIBOLD),
+                        text(hint).size(15).color(theme::MUTED)
+                    ]
+                    .spacing(12)
+                    .align_x(Center)
+                )
+                .center(Fill),
+            ]
+            .height(Fill)
             .into();
         }
         let generation = self.transcript_generation;
@@ -1240,7 +1245,7 @@ impl Agent {
                 ]
                 .align_y(Center),
             );
-            return self.conversation(scroll, composer);
+            return self.conversation(scroll, composer, drawer);
         }
         if !self.attachments.is_empty() {
             let mut attachments = row![].spacing(6);
@@ -1317,12 +1322,10 @@ impl Agent {
         &'a self,
         scroll: Element<'a, Action>,
         composer: iced::widget::Column<'a, Action>,
+        drawer: bool,
     ) -> Element<'a, Action> {
         column![
-            container(text(&self.title).size(14).font(theme::SEMIBOLD))
-                .padding([8, 15])
-                .width(Fill)
-                .style(|_| theme::surface(theme::WORK)),
+            self.header(&self.title, drawer),
             scroll,
             container(
                 container(composer)
@@ -1335,6 +1338,25 @@ impl Agent {
             .center_x(Fill),
         ]
         .height(Fill)
+        .into()
+    }
+
+    fn header<'a>(&self, title: &'a str, drawer: bool) -> Element<'a, Action> {
+        container(
+            row![
+                text(title).size(14).font(theme::SEMIBOLD),
+                Space::new().width(Fill),
+                theme::WorkspaceIcon::Drawer.control(
+                    "会话页终端面板 (Ctrl+Shift+J)",
+                    Some(Action::ToggleTerminalDrawer),
+                    drawer,
+                ),
+            ]
+            .align_y(Center),
+        )
+        .padding([1, 14])
+        .width(Fill)
+        .style(|_| theme::surface(theme::WORK))
         .into()
     }
 }

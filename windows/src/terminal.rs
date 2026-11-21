@@ -372,7 +372,10 @@ impl canvas::Program<Clipboard> for Terminal {
                 modifiers,
                 text,
                 ..
-            }) if state.focused => {
+            }) if state.focused && self.session.redraw.visible.load(Ordering::Acquire) => {
+                if crate::workbench_shortcut(key.as_ref(), *modifiers).is_some() {
+                    return None;
+                }
                 if modifiers.control() && modifiers.shift() {
                     let message = match key.as_ref() {
                         Key::Character("c" | "C") => Some(Clipboard::Copy(self.session.id)),

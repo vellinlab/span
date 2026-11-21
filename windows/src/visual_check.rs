@@ -1,5 +1,5 @@
 use crate::{
-    Message, Tab, agent,
+    Message, SidebarPage, Tab, WorkspaceCommand, agent,
     agent::{CopyFormat, VisualGoal},
     codex_rpc, file_panel,
 };
@@ -40,6 +40,8 @@ pub enum Event {
     Resized(window::Screenshot),
     Activity(window::Screenshot),
     FileSuggestions(window::Screenshot),
+    QuickConnect(window::Screenshot),
+    WorkspaceNavigation(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -71,7 +73,11 @@ enum Step {
     WaitForPartialPath,
     WaitForExactPath,
     CaptureFileSuggestions,
-    WaitForFolder,
+    WaitForFolder { scale: f32 },
+    WaitForConnect,
+    CaptureConnect,
+    WaitForDrawer,
+    CaptureNavigation,
 }
 
 pub struct Check {
@@ -112,7 +118,13 @@ impl Check {
         self.benchmark.is_some()
     }
 
-    pub fn update(&mut self, event: Event, tab: Option<&Tab>) -> Task<Message> {
+    pub fn update(
+        &mut self,
+        event: Event,
+        tab: Option<&Tab>,
+        sidebar: Option<SidebarPage>,
+        connecting: bool,
+    ) -> Task<Message> {
         let Some(tab) = tab else {
             return observe();
         };
@@ -515,7 +527,7 @@ impl Check {
                 )
                 .expect("create file fixture");
                 self.step = Step::OpenFileSidebar;
-                Task::done(Message::ShowFiles).chain(observe())
+                Task::done(Message::Sidebar(crate::SidebarPage::Files)).chain(observe())
             }
             (Event::Observe, Step::OpenFileSidebar) => {
                 if !tab
@@ -551,8 +563,8 @@ impl Check {
             (Event::FileSuggestions(frame), Step::CaptureFileSuggestions) => {
                 let scale = frame.scale_factor;
                 let x = (180.0 * scale) as u32;
-                let top = (120.0 * scale) as u32;
-                let bottom = (210.0 * scale) as u32;
+                let top = (130.0 * scale) as u32;
+                let bottom = (235.0 * scale) as u32;
                 let suggestion_card = crate::theme::CHROME.into_rgba8();
                 let y = (top..bottom).find(|y| {
                     let offset = ((y * frame.size.width + x) * 4) as usize;
@@ -560,7 +572,7 @@ impl Check {
                 });
                 self.save("file-suggestions.png", frame);
                 let y = y.expect("painted directory suggestion card") + (16.0 * scale) as u32;
-                self.step = Step::WaitForFolder;
+                self.step = Step::WaitForFolder { scale };
                 window::latest()
                     .then(move |id| {
                         window::run(id.expect("active Span window"), move |window| {
@@ -570,7 +582,7 @@ impl Check {
                     })
                     .chain(observe())
             }
-            (Event::Observe, Step::WaitForFolder) => {
+            (Event::Observe, Step::WaitForFolder { scale }) => {
                 let panel = tab.file_panel.as_ref().expect("open file sidebar");
                 if !panel
                     .visual_folder()
@@ -584,6 +596,55 @@ impl Check {
                 std::fs::write(self.directory.join("file-suggestions.json"),
                     br#"{"partialPrefix":true,"exactPathShowsChildrenWithoutEnter":true,"hiddenAndFilesFiltered":true,"openedWithMouse":true}"#,
                 ).expect("record native file suggestions");
+                assert_eq!(sidebar, Some(SidebarPage::Files));
+                assert!(tab.show_agent && !tab.show_drawer);
+                self.step = Step::WaitForConnect;
+                window::latest()
+                    .then(move |id| {
+                        window::run(id.expect("active Span window"), move |window| {
+                            scroll::Target::click(
+                                window,
+                                (19.0 * scale) as i32,
+                                (130.0 * scale) as i32,
+                            );
+                        })
+                        .discard()
+                    })
+                    .chain(observe())
+            }
+            (Event::Observe, Step::WaitForConnect) => {
+                if !connecting {
+                    return observe();
+                }
+                assert_eq!(sidebar, Some(SidebarPage::Files));
+                assert!(tab.show_agent);
+                self.step = Step::CaptureConnect;
+                screenshot(Event::QuickConnect)
+            }
+            (Event::QuickConnect(frame), Step::CaptureConnect) => {
+                self.save("quick-connect.png", frame);
+                self.step = Step::WaitForDrawer;
+                Task::done(Message::CancelConnect)
+                    .chain(Task::done(Message::Command(WorkspaceCommand::Files)))
+                    .chain(Task::done(Message::Command(WorkspaceCommand::Drawer)))
+                    .chain(observe())
+            }
+            (Event::Observe, Step::WaitForDrawer) => {
+                assert!(!connecting);
+                assert_eq!(sidebar, Some(SidebarPage::Sessions));
+                assert!(tab.show_agent && tab.show_drawer);
+                if probe.is_none() || !matches!(tab.terminal, crate::TerminalState::Ready(_)) {
+                    return observe();
+                }
+                self.step = Step::CaptureNavigation;
+                screenshot(Event::WorkspaceNavigation)
+            }
+            (Event::WorkspaceNavigation(frame), Step::CaptureNavigation) => {
+                self.save("workspace-navigation.png", frame);
+                std::fs::write(
+                    self.directory.join("workspace-navigation.json"),
+                    br#"{"quickConnectOpenedFromRail":true,"filePageKeepsConversation":true,"fileShortcutReturnsToSessions":true,"terminalDrawerKeepsConversation":true}"#,
+                ).expect("record Windows workbench navigation");
                 Task::done(Message::CloseWindow)
             }
             (

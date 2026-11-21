@@ -35,8 +35,10 @@ mod unified_diff;
 mod visual_check;
 
 use futures::channel::mpsc;
+use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::{
-    Space, button, canvas, column, container, row, rule, scrollable, svg, text, text_input,
+    Space, button, canvas, column, container, opaque, pick_list, row, rule, scrollable, stack, svg,
+    text, text_input,
 };
 use iced::{Center, Element, Fill, Size, Task, Theme, clipboard, window};
 use std::collections::HashSet;
@@ -79,11 +81,13 @@ struct Span {
     logo: svg::Handle,
     terminals: Vec<Tab>,
     active: Option<TerminalId>,
-    sessions: bool,
-    show_files: bool,
+    sidebar: SidebarPage,
+    sidebar_visible: bool,
+    files_return: SidebarPage,
     next_id: TerminalId,
     events: mpsc::UnboundedSender<Notice>,
     connecting: bool,
+    host_input: iced::widget::Id,
     host: String,
     error: Option<String>,
     recent: Vec<String>,
@@ -99,6 +103,7 @@ struct Tab {
     terminal: TerminalState,
     agent: Option<agent::Agent>,
     show_agent: bool,
+    show_drawer: bool,
     file_panel: Option<file_panel::Panel>,
 }
 
@@ -120,18 +125,105 @@ impl Tab {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidebarPage {
+    Hosts,
+    Sessions,
+    Files,
+}
+
+impl SidebarPage {
+    const ALL: [Self; 3] = [Self::Hosts, Self::Sessions, Self::Files];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Hosts => "主机",
+            Self::Sessions => "会话",
+            Self::Files => "文件",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceCommand {
+    Local,
+    Connect,
+    CloseTab,
+    Sidebar,
+    Files,
+    Agent,
+    Catalog,
+    Drawer,
+    PreviousTab,
+    NextTab,
+}
+
+impl WorkspaceCommand {
+    const SESSION: [Self; 3] = [Self::Local, Self::Connect, Self::CloseTab];
+    const VIEW: [Self; 7] = [
+        Self::Sidebar,
+        Self::Files,
+        Self::Agent,
+        Self::Catalog,
+        Self::Drawer,
+        Self::PreviousTab,
+        Self::NextTab,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Local => "新建本地终端",
+            Self::Connect => "快速连接…",
+            Self::CloseTab => "关闭标签",
+            Self::Sidebar => "显示／隐藏侧栏",
+            Self::Files => "文件目录",
+            Self::Agent => "Codex 会话／终端",
+            Self::Catalog => "Codex 会话列表",
+            Self::Drawer => "会话页终端面板",
+            Self::PreviousTab => "上一个标签",
+            Self::NextTab => "下一个标签",
+        }
+    }
+}
+
+impl std::fmt::Display for WorkspaceCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+fn workbench_shortcut(key: Key<&str>, modifiers: Modifiers) -> Option<WorkspaceCommand> {
+    use WorkspaceCommand::*;
+    if !modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+    match (modifiers.shift(), key) {
+        (true, Key::Character("t" | "T")) => Some(Local),
+        (true, Key::Character("o" | "O")) => Some(Connect),
+        (true, Key::Character("w" | "W")) => Some(CloseTab),
+        (true, Key::Character("b" | "B")) => Some(Sidebar),
+        (true, Key::Character("f" | "F")) => Some(Files),
+        (true, Key::Character("a" | "A")) => Some(Agent),
+        (true, Key::Character("h" | "H")) => Some(Catalog),
+        (true, Key::Character("j" | "J")) => Some(Drawer),
+        (false, Key::Named(Named::PageUp)) => Some(PreviousTab),
+        (false, Key::Named(Named::PageDown)) => Some(NextTab),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
 enum Message {
     NewTerminal,
-    ShowTerminal,
-    ShowAgent,
-    ShowFiles,
+    Command(WorkspaceCommand),
+    Sidebar(SidebarPage),
     Files(TerminalId, file_panel::Action),
     Agent(TerminalId, agent::Action),
     Select(TerminalId),
     Close(TerminalId),
     CloseWindow,
     ShowConnect,
+    CancelConnect,
     ChangeHost(String),
     Connect,
     ConnectRecent(String),
@@ -145,15 +237,26 @@ enum Message {
 impl Span {
     fn subscription(&self) -> iced::Subscription<Message> {
         let close = window::close_requests().map(|_| Message::CloseWindow);
+        let shortcuts = iced::event::listen_with(|event, _, _| {
+            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) =
+                event
+            else {
+                return None;
+            };
+            (key.as_ref() == Key::Named(Named::Escape) && modifiers.is_empty())
+                .then_some(Message::CancelConnect)
+                .or_else(|| workbench_shortcut(key.as_ref(), modifiers).map(Message::Command))
+        });
+        let events = iced::Subscription::batch([close, shortcuts]);
         #[cfg(feature = "visual-check")]
         if self
             .visual_check
             .as_ref()
             .is_some_and(visual_check::Check::measuring)
         {
-            return iced::Subscription::batch([close, visual_check::frames()]);
+            return iced::Subscription::batch([events, visual_check::frames()]);
         }
-        close
+        events
     }
 
     fn boot() -> (Self, Task<Message>) {
@@ -177,11 +280,13 @@ impl Span {
             logo: svg::Handle::from_memory(LOGO),
             terminals: Vec::new(),
             active: None,
-            sessions: false,
-            show_files: false,
+            sidebar: SidebarPage::Hosts,
+            sidebar_visible: true,
+            files_return: SidebarPage::Hosts,
             next_id: 0,
             events,
             connecting: false,
+            host_input: iced::widget::Id::unique(),
             host: String::new(),
             error: None,
             recent,
@@ -198,7 +303,8 @@ impl Span {
                 span,
                 Task::batch([
                     terminal_events,
-                    Task::done(Message::ShowAgent),
+                    Task::done(Message::Sidebar(SidebarPage::Sessions))
+                        .chain(Task::done(Message::Command(WorkspaceCommand::Agent))),
                     visual_check::observe(),
                 ]),
             );
@@ -211,7 +317,7 @@ impl Span {
     }
 
     fn open(&mut self, host: Option<String>) {
-        self.hide_file_sidebar();
+        self.cancel_file_suggestions();
         self.next_id += 1;
         let id = self.next_id;
         let terminal =
@@ -227,16 +333,15 @@ impl Span {
             terminal,
             agent: None,
             show_agent: false,
+            show_drawer: false,
             file_panel: None,
         });
-        self.sessions = false;
     }
 
-    fn hide_file_sidebar(&mut self) {
-        if !self.show_files {
+    fn cancel_file_suggestions(&mut self) {
+        if self.sidebar != SidebarPage::Files {
             return;
         }
-        self.show_files = false;
         if let Some(panel) = self
             .terminals
             .iter_mut()
@@ -247,14 +352,15 @@ impl Span {
         }
     }
 
-    fn connect(&mut self, value: &str) {
+    fn connect(&mut self, value: &str) -> Task<Message> {
         let Some(host) = ssh_destination::normalize(value) else {
-            self.error = Some("Enter an SSH alias or a destination like user@host:2222.".into());
-            return;
+            self.error = Some("请输入 SSH 别名或 user@host:2222。".into());
+            return Task::none();
         };
         self.open(Some(host));
         self.connecting = false;
         self.host.clear();
+        self.sync_sidebar()
     }
 
     fn terminal_notice(&mut self, notice: Notice) {
@@ -315,7 +421,9 @@ impl Span {
             .terminals
             .iter()
             .find(|tab| self.active == Some(tab.id))?;
-        (tab.shown_agent().is_none() && matches!(tab.terminal, TerminalState::Ready(_)))
+        ((tab.shown_agent().is_none() || tab.show_drawer)
+            && matches!(tab.terminal, TerminalState::Ready(_))
+            && !self.connecting)
             .then_some(tab.id)
     }
 
@@ -328,55 +436,22 @@ impl Span {
                         .terminals
                         .iter()
                         .find(|tab| self.active == Some(tab.id));
-                    return check.update(event, active);
+                    return check.update(
+                        event,
+                        active,
+                        self.sidebar_visible.then_some(self.sidebar),
+                        self.connecting,
+                    );
                 }
             }
-            Message::NewTerminal => self.open(None),
-            Message::ShowTerminal => {
-                self.sessions = false;
-                self.hide_file_sidebar();
-                if let Some(tab) = self
-                    .terminals
-                    .iter_mut()
-                    .find(|tab| Some(tab.id) == self.active)
-                {
-                    tab.show_agent = false;
-                }
+            Message::NewTerminal => {
+                self.open(None);
+                return self.sync_sidebar();
             }
-            Message::ShowAgent => {
-                self.hide_file_sidebar();
-                let Some(tab) = self
-                    .terminals
-                    .iter_mut()
-                    .find(|tab| Some(tab.id) == self.active)
-                else {
-                    return Task::none();
-                };
-                self.sessions = true;
-                tab.show_agent = true;
-                self.connecting = false;
-                if tab.agent.is_none() {
-                    return start_agent(tab, self.home.clone());
-                }
-            }
-            Message::ShowFiles => {
-                let Some(tab) = self
-                    .terminals
-                    .iter_mut()
-                    .find(|tab| Some(tab.id) == self.active)
-                else {
-                    return Task::none();
-                };
-                self.sessions = false;
-                self.show_files = true;
-                self.connecting = false;
-                if tab.file_panel.is_none() {
-                    let (panel, task) = file_panel::Panel::new(tab.host.clone());
-                    tab.file_panel = Some(panel);
-                    let id = tab.id;
-                    return task.map(move |action| Message::Files(id, action));
-                }
-            }
+            Message::Command(command)
+                if self.connecting && command != WorkspaceCommand::Connect => {}
+            Message::Command(command) => return self.run_command(command),
+            Message::Sidebar(page) => return self.show_sidebar(page),
             Message::Files(id, action) => {
                 if let Some(panel) = self
                     .terminals
@@ -395,6 +470,13 @@ impl Span {
                 };
                 if matches!(action, agent::Action::Retry) {
                     return start_agent(tab, self.home.clone());
+                }
+                if matches!(action, agent::Action::ToggleTerminalDrawer) {
+                    tab.show_drawer = !tab.show_drawer;
+                    return Task::none();
+                }
+                if matches!(action, agent::Action::New | agent::Action::Resume(_)) {
+                    tab.show_agent = true;
                 }
                 if let Some(agent) = tab.agent.as_mut() {
                     let artifact = (self.active == Some(id) && tab.show_agent)
@@ -436,43 +518,44 @@ impl Span {
                 self.events.close_channel();
                 return iced::exit();
             }
-            Message::Select(id) => {
-                self.hide_file_sidebar();
+            Message::Select(id) if self.active != Some(id) => {
+                self.cancel_file_suggestions();
                 self.active = Some(id);
-                self.sessions = self
-                    .terminals
-                    .iter()
-                    .any(|tab| tab.id == id && tab.show_agent);
+                return self.sync_sidebar();
             }
+            Message::Select(_) => {}
             Message::Close(id) => {
                 if let Some(position) = self.terminals.iter().position(|tab| tab.id == id) {
                     self.terminals.remove(position);
                     if self.active == Some(id) {
-                        self.show_files = false;
                         self.active = self
                             .terminals
                             .get(position)
                             .or_else(|| self.terminals.last())
                             .map(|tab| tab.id);
-                        self.sessions = self
-                            .terminals
-                            .iter()
-                            .any(|tab| Some(tab.id) == self.active && tab.show_agent);
+                        return self.sync_sidebar();
                     }
                 }
             }
             Message::ShowConnect => {
-                self.sessions = false;
-                self.hide_file_sidebar();
                 self.connecting = !self.connecting;
                 self.error = None;
+                if self.connecting {
+                    return iced::widget::operation::focus(self.host_input.clone());
+                }
+            }
+            Message::CancelConnect => {
+                if self.connecting {
+                    self.connecting = false;
+                    self.error = None;
+                }
             }
             Message::ChangeHost(host) => {
                 self.host = host;
                 self.error = None;
             }
-            Message::Connect => self.connect(&self.host.clone()),
-            Message::ConnectRecent(host) => self.connect(&host),
+            Message::Connect => return self.connect(&self.host.clone()),
+            Message::ConnectRecent(host) => return self.connect(&host),
             Message::Terminal(notice) => self.terminal_notice(notice),
             Message::Clipboard(Clipboard::Copy(id)) => {
                 if let Some(text) = self.terminal(id).and_then(Terminal::selection) {
@@ -491,6 +574,100 @@ impl Span {
         Task::none()
     }
 
+    fn show_sidebar(&mut self, page: SidebarPage) -> Task<Message> {
+        if self.sidebar != page {
+            self.cancel_file_suggestions();
+            if page == SidebarPage::Files {
+                self.files_return = self.sidebar;
+            }
+            self.sidebar = page;
+        }
+        self.sidebar_visible = true;
+        self.sync_sidebar()
+    }
+
+    fn sync_sidebar(&mut self) -> Task<Message> {
+        if !self.sidebar_visible {
+            return Task::none();
+        }
+        let Some(tab) = self
+            .terminals
+            .iter_mut()
+            .find(|tab| Some(tab.id) == self.active)
+        else {
+            return Task::none();
+        };
+        match self.sidebar {
+            SidebarPage::Sessions if tab.agent.is_none() => start_agent(tab, self.home.clone()),
+            SidebarPage::Files if tab.file_panel.is_none() => {
+                let (panel, task) = file_panel::Panel::new(tab.host.clone());
+                tab.file_panel = Some(panel);
+                let id = tab.id;
+                task.map(move |action| Message::Files(id, action))
+            }
+            _ => Task::none(),
+        }
+    }
+
+    fn run_command(&mut self, command: WorkspaceCommand) -> Task<Message> {
+        use WorkspaceCommand::*;
+        match command {
+            Local => self.handle_message(Message::NewTerminal),
+            Connect => self.handle_message(Message::ShowConnect),
+            CloseTab => self
+                .active
+                .map_or_else(Task::none, |id| self.handle_message(Message::Close(id))),
+            Sidebar => {
+                self.sidebar_visible = !self.sidebar_visible;
+                if !self.sidebar_visible {
+                    self.cancel_file_suggestions();
+                }
+                self.sync_sidebar()
+            }
+            Files => self.show_sidebar(
+                if self.sidebar_visible && self.sidebar == SidebarPage::Files {
+                    self.files_return
+                } else {
+                    SidebarPage::Files
+                },
+            ),
+            Catalog => self.show_sidebar(SidebarPage::Sessions),
+            Agent | Drawer => {
+                let Some(tab) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|tab| Some(tab.id) == self.active)
+                else {
+                    return Task::none();
+                };
+                if command == Drawer {
+                    if tab.show_agent {
+                        tab.show_drawer = !tab.show_drawer;
+                    }
+                } else {
+                    tab.show_agent = !tab.show_agent;
+                    if tab.show_agent && tab.agent.is_none() {
+                        return start_agent(tab, self.home.clone());
+                    }
+                }
+                Task::none()
+            }
+            PreviousTab | NextTab => {
+                let Some(current) = self
+                    .terminals
+                    .iter()
+                    .position(|tab| Some(tab.id) == self.active)
+                else {
+                    return Task::none();
+                };
+                let len = self.terminals.len();
+                let offset = if command == PreviousTab { len - 1 } else { 1 };
+                let id = self.terminals[(current + offset) % len].id;
+                self.handle_message(Message::Select(id))
+            }
+        }
+    }
+
     fn terminal(&self, id: TerminalId) -> Option<&Terminal> {
         match &self.terminals.iter().find(|tab| tab.id == id)?.terminal {
             TerminalState::Ready(terminal) => Some(terminal),
@@ -499,6 +676,8 @@ impl Span {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        use theme::WorkspaceIcon;
+        let agent_visible = self.active_tab().is_some_and(|tab| tab.show_agent);
         let chrome = container(
             row![
                 svg(self.logo.clone()).width(28).height(28),
@@ -506,24 +685,29 @@ impl Span {
                     .size(17)
                     .font(theme::SEMIBOLD)
                     .color(theme::INK),
-                Space::new().width(14),
-                theme::mode(
-                    "Terminal",
-                    Message::ShowTerminal,
-                    !self.sessions && !self.show_files
-                ),
-                theme::mode("Codex", Message::ShowAgent, self.sessions),
-                theme::mode("Files", Message::ShowFiles, self.show_files),
+                Space::new().width(10),
+                workspace_menu("会话", WorkspaceCommand::SESSION),
+                workspace_menu("视图", WorkspaceCommand::VIEW),
                 Space::new().width(Fill),
-                theme::action("Connect SSH", Message::ShowConnect, false),
+                WorkspaceIcon::Conversation.control(
+                    "Codex 会话／终端 (Ctrl+Shift+A)",
+                    self.active
+                        .map(|_| Message::Command(WorkspaceCommand::Agent)),
+                    agent_visible,
+                ),
             ]
             .align_y(Center)
-            .spacing(8),
+            .spacing(6),
         )
-        .padding([8, 15])
+        .padding([6, 13])
         .width(Fill)
         .style(|_| theme::surface(theme::CHROME));
-        let mut body = row![self.sidebar(), rule::vertical(1).style(theme::rule)].height(Fill);
+        let mut body = row![self.rail(), rule::vertical(1).style(theme::rule)].height(Fill);
+        if self.sidebar_visible {
+            body = body
+                .push(self.sidebar())
+                .push(rule::vertical(1).style(theme::rule));
+        }
         if let Some(tab) = self
             .terminals
             .iter()
@@ -545,86 +729,102 @@ impl Span {
         } else {
             body = body.push(self.workspace());
         }
-        column![chrome, rule::horizontal(1).style(theme::rule), body].into()
+        let workbench = column![chrome, rule::horizontal(1).style(theme::rule), body];
+        if self.connecting {
+            stack![workbench, self.connect_dialog()].into()
+        } else {
+            stack![workbench].into()
+        }
+    }
+
+    fn active_tab(&self) -> Option<&Tab> {
+        self.terminals
+            .iter()
+            .find(|tab| Some(tab.id) == self.active)
+    }
+
+    fn rail(&self) -> Element<'_, Message> {
+        use theme::WorkspaceIcon;
+        container(
+            column![
+                WorkspaceIcon::Sidebar.control(
+                    "显示／隐藏侧栏 (Ctrl+Shift+B)",
+                    Some(Message::Command(WorkspaceCommand::Sidebar)),
+                    self.sidebar_visible,
+                ),
+                WorkspaceIcon::Terminal.control(
+                    "新建本地终端 (Ctrl+Shift+T)",
+                    Some(Message::NewTerminal),
+                    false,
+                ),
+                WorkspaceIcon::Connect.control(
+                    "快速连接 (Ctrl+Shift+O)",
+                    Some(Message::ShowConnect),
+                    self.connecting,
+                ),
+            ]
+            .spacing(5),
+        )
+        .height(Fill)
+        .padding([7, 5])
+        .style(|_| theme::surface(theme::CHROME))
+        .into()
     }
 
     fn sidebar(&self) -> Element<'_, Message> {
-        if self.show_files
-            && let Some(tab) = self
-                .terminals
-                .iter()
-                .find(|tab| Some(tab.id) == self.active)
-            && let Some(panel) = &tab.file_panel
-        {
-            let id = tab.id;
-            return container(
-                panel
-                    .sidebar()
-                    .map(move |action| Message::Files(id, action)),
-            )
+        let tabs = row(SidebarPage::ALL.into_iter().map(|page| {
+            theme::mode(page.label(), Message::Sidebar(page), self.sidebar == page)
+                .width(Fill)
+                .into()
+        }))
+        .spacing(3);
+        let active = self.active_tab();
+        let contents = match self.sidebar {
+            SidebarPage::Hosts => self.hosts(),
+            SidebarPage::Files => {
+                match active.and_then(|tab| Some((tab.id, tab.file_panel.as_ref()?))) {
+                    Some((id, panel)) => panel
+                        .sidebar()
+                        .map(move |action| Message::Files(id, action)),
+                    None => text("打开一个本地或 SSH 标签后可浏览文件。")
+                        .size(13)
+                        .into(),
+                }
+            }
+            SidebarPage::Sessions => {
+                match active.and_then(|tab| Some((tab.id, tab.agent.as_ref()?))) {
+                    Some((id, agent)) => agent
+                        .catalog()
+                        .map(move |action| Message::Agent(id, action)),
+                    None => text("打开一个标签后可查看 Codex 会话。").size(13).into(),
+                }
+            }
+        };
+        container(column![tabs, contents].spacing(12))
             .width(238)
             .height(Fill)
-            .padding([18, 13])
+            .padding([10, 12])
             .style(|_| theme::surface(theme::SIDE))
-            .into();
-        }
-        if self.sessions
-            && let Some(tab) = self
-                .terminals
-                .iter()
-                .find(|tab| Some(tab.id) == self.active)
-            && let Some(agent) = &tab.agent
-        {
-            let id = tab.id;
-            return container(
-                agent
-                    .catalog()
-                    .map(move |action| Message::Agent(id, action)),
-            )
-            .width(238)
-            .height(Fill)
-            .padding([18, 13])
-            .style(|_| theme::surface(theme::SIDE))
-            .into();
-        }
+            .into()
+    }
+
+    fn hosts(&self) -> Element<'_, Message> {
         let mut contents = column![
-            text("Connections").size(14).font(theme::SEMIBOLD),
-            theme::nav("Local PowerShell", Message::NewTerminal, false),
-        ]
-        .spacing(10);
-        if self.connecting {
-            let mut connect = button(text("Connect").size(14))
-                .padding([7, 11])
-                .style(|_, status| theme::button_status(true, status));
-            if ssh_destination::normalize(&self.host).is_some() {
-                connect = connect.on_press(Message::Connect);
-            }
-            let mut form = column![
-                text("SSH destination").size(13).color(theme::MUTED),
-                text_input("alias or user@host:port", &self.host)
-                    .on_input(Message::ChangeHost)
-                    .on_submit(Message::Connect)
-                    .padding(9)
-                    .size(14),
-                connect,
+            row![
+                text("SSH 主机").size(14).font(theme::SEMIBOLD),
+                Space::new().width(Fill),
+                theme::WorkspaceIcon::Plus.control("快速连接", Some(Message::ShowConnect), false),
             ]
-            .spacing(8);
-            if let Some(error) = &self.error {
-                form = form.push(text(error).size(13).color(theme::ERROR));
-            }
-            contents = contents.push(
-                container(form)
-                    .padding(10)
-                    .style(|_| theme::panel(theme::INSET, 10.0)),
-            );
-        }
-        if !self.recent.is_empty() {
-            contents = contents.push(text("Recent").size(13).color(theme::MUTED));
+            .align_y(Center),
+        ]
+        .spacing(8);
+        if self.recent.is_empty() {
+            contents = contents.push(text("还没有最近连接").size(13).color(theme::MUTED));
+        } else {
             for host in &self.recent {
                 let active = self
-                    .terminals
-                    .iter()
-                    .any(|tab| Some(tab.id) == self.active && tab.host.as_ref() == Some(host));
+                    .active_tab()
+                    .is_some_and(|tab| tab.host.as_ref() == Some(host));
                 contents = contents.push(theme::nav(
                     ssh_destination::label(host),
                     Message::ConnectRecent(host.clone()),
@@ -632,12 +832,51 @@ impl Span {
                 ));
             }
         }
-        container(scrollable(contents).width(Fill))
-            .width(238)
-            .height(Fill)
-            .padding([18, 13])
-            .style(|_| theme::surface(theme::SIDE))
-            .into()
+        scrollable(contents).width(Fill).height(Fill).into()
+    }
+
+    fn connect_dialog(&self) -> Element<'_, Message> {
+        let connect = button(text("连接").size(14))
+            .on_press_maybe(
+                ssh_destination::normalize(&self.host)
+                    .is_some()
+                    .then_some(Message::Connect),
+            )
+            .padding([7, 15])
+            .style(|_, status| theme::button_status(true, status));
+        let mut dialog = column![
+            text("快速连接").size(19).font(theme::SEMIBOLD),
+            text("SSH 目标").size(13).color(theme::MUTED),
+            text_input("SSH 别名或 user@host:port", &self.host)
+                .id(self.host_input.clone())
+                .on_input(Message::ChangeHost)
+                .on_submit(Message::Connect)
+                .padding(10)
+                .size(14),
+        ]
+        .spacing(12);
+        if let Some(error) = &self.error {
+            dialog = dialog.push(text(error).size(13).color(theme::ERROR));
+        }
+        dialog = dialog.push(
+            row![
+                Space::new().width(Fill),
+                theme::action("取消", Message::CancelConnect, false),
+                connect,
+            ]
+            .align_y(Center)
+            .spacing(8),
+        );
+        opaque(
+            container(
+                container(dialog)
+                    .width(390)
+                    .padding(18)
+                    .style(|_| theme::panel(theme::PANEL, 12.0)),
+            )
+            .center(Fill)
+            .style(|_| theme::surface(iced::Color::BLACK.scale_alpha(0.48))),
+        )
     }
 
     fn workspace(&self) -> Element<'_, Message> {
@@ -680,7 +919,11 @@ impl Span {
                         scrollable::Scrollbar::new()
                     ))
                     .width(Fill),
-                theme::action("＋", Message::NewTerminal, false),
+                theme::WorkspaceIcon::Plus.control(
+                    "新建本地终端 (Ctrl+Shift+T)",
+                    Some(Message::NewTerminal),
+                    false,
+                ),
             ]
             .spacing(8)
             .align_y(Center),
@@ -688,22 +931,20 @@ impl Span {
         .width(Fill)
         .padding([6, 12])
         .style(|_| theme::surface(theme::WORK));
-        let selected = self
-            .active
-            .and_then(|id| self.terminals.iter().find(|tab| tab.id == id));
-        let content = if let Some(tab) = selected {
+        let content = if let Some(tab) = self.active_tab() {
             if let Some(agent) = tab.shown_agent() {
                 let id = tab.id;
-                return column![
+                let mut view = column![
                     header,
                     rule::horizontal(1).style(theme::rule),
                     agent
-                        .view(&self.theme)
-                        .map(move |action| Message::Agent(id, action))
-                ]
-                .width(Fill)
-                .height(Fill)
-                .into();
+                        .view(&self.theme, tab.show_drawer)
+                        .map(move |action| Message::Agent(id, action)),
+                ];
+                if tab.show_drawer {
+                    view = view.push(self.terminal_drawer(tab));
+                }
+                return view.width(Fill).height(Fill).into();
             }
             match &tab.terminal {
                 TerminalState::Ready(terminal) => {
@@ -714,9 +955,8 @@ impl Span {
                         },
                         |code| format!("Exited · {code}"),
                     );
-                    let terminal = canvas(terminal).width(Fill).height(Fill);
                     column![
-                        container(Element::from(terminal).map(Message::Clipboard))
+                        container(self.terminal_surface(terminal))
                             .style(|_| theme::surface(theme::TERMINAL))
                             .height(Fill),
                         rule::horizontal(1).style(theme::rule),
@@ -782,6 +1022,58 @@ impl Span {
             .width(Fill)
             .into()
     }
+
+    fn terminal_surface<'a>(&self, terminal: &'a Terminal) -> Element<'a, Message> {
+        let terminal: Element<'a, Clipboard> = canvas(terminal).width(Fill).height(Fill).into();
+        terminal.map(Message::Clipboard)
+    }
+
+    fn terminal_drawer<'a>(&self, tab: &'a Tab) -> Element<'a, Message> {
+        let content = match &tab.terminal {
+            TerminalState::Ready(terminal) => self.terminal_surface(terminal),
+            TerminalState::Opening => container(text("正在启动终端…")).center(Fill).into(),
+            TerminalState::Failed(error) => container(text(error).color(theme::ERROR))
+                .center(Fill)
+                .into(),
+        };
+        column![
+            rule::horizontal(1).style(theme::rule),
+            container(
+                row![
+                    text("终端").size(13).font(theme::SEMIBOLD),
+                    Space::new().width(Fill),
+                    theme::WorkspaceIcon::Close.control(
+                        "关闭终端面板 (Ctrl+Shift+J)",
+                        Some(Message::Command(WorkspaceCommand::Drawer)),
+                        false,
+                    ),
+                ]
+                .align_y(Center)
+            )
+            .width(Fill)
+            .padding([2, 10])
+            .style(|_| theme::surface(theme::CHROME)),
+            container(content)
+                .height(164)
+                .style(|_| theme::surface(theme::TERMINAL)),
+        ]
+        .into()
+    }
+}
+
+fn workspace_menu<const N: usize>(
+    label: &'static str,
+    options: [WorkspaceCommand; N],
+) -> Element<'static, Message> {
+    pick_list(options, None::<WorkspaceCommand>, Message::Command)
+        .placeholder(label)
+        .text_size(13)
+        .text_shaping(iced::widget::text::Shaping::Advanced)
+        .padding([6, 8])
+        .width(131)
+        .style(theme::choice)
+        .menu_style(theme::choice_menu)
+        .into()
 }
 
 fn start_agent(tab: &mut Tab, home: Option<PathBuf>) -> Task<Message> {

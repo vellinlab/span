@@ -221,6 +221,67 @@ pub fn hint<'a, Message: 'a>(label: impl Into<String>) -> Element<'a, Message> {
 }
 
 #[derive(Clone, Copy)]
+pub enum WorkspaceIcon {
+    Sidebar,
+    Terminal,
+    Connect,
+    Conversation,
+    Drawer,
+    Plus,
+    Close,
+}
+
+impl WorkspaceIcon {
+    pub fn control<'a, Message: Clone + 'a>(
+        self,
+        label: &'static str,
+        message: Option<Message>,
+        active: bool,
+    ) -> Element<'a, Message> {
+        static GLYPHS: [OnceLock<svg::Handle>; 7] = [const { OnceLock::new() }; 7];
+        let path = match self {
+            Self::Sidebar => {
+                "M14 14H4a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 4 4h12a1.5 1.5 0 0 1 1.5 1.5V9M7 18h4m8-5.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8m-1 2.5 1.5 1.5-1.5 1.5"
+            }
+            Self::Terminal => {
+                "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm3 4 3 3-3 3m6 0h4"
+            }
+            Self::Connect => {
+                "M4 5h12a1 1 0 0 1 1 1v4M4 5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h5m-2 3h3m8-7v8m-4-4h8"
+            }
+            Self::Conversation => {
+                "M6 4h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 4v-4a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3zm2 6h8m-8 3h5"
+            }
+            Self::Drawer => {
+                "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm0 10h16m-13 2 1.5 1.5L7 19m4-1h3"
+            }
+            Self::Plus => "M12 5v14M5 12h14",
+            Self::Close => "m6 6 12 12m0-12L6 18",
+        };
+        let glyph = GLYPHS[self as usize].get_or_init(|| svg::Handle::from_memory(format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>"#
+        ).into_bytes()));
+        let color = if message.is_none() {
+            MUTED.scale_alpha(0.5)
+        } else if active {
+            BLUE
+        } else {
+            MUTED
+        };
+        let control = button(
+            svg(glyph.clone())
+                .width(17)
+                .height(17)
+                .style(move |_, _| svg::Style { color: Some(color) }),
+        )
+        .on_press_maybe(message)
+        .padding(6)
+        .style(move |_, status| tab(active, status));
+        tooltip(control, hint(label), tooltip::Position::FollowCursor).into()
+    }
+}
+
+#[derive(Clone, Copy)]
 pub enum ComposerIcon {
     Attach,
     Fast(bool),
@@ -349,10 +410,15 @@ pub fn mode(
     message: Message,
     selected: bool,
 ) -> button::Button<'static, Message> {
-    button(text(label).size(14))
-        .on_press(message)
-        .padding([6, 13])
-        .style(move |_, status| tab(selected, status))
+    button(
+        text(label)
+            .size(13)
+            .shaping(text::Shaping::Advanced)
+            .center(),
+    )
+    .on_press(message)
+    .padding([6, 6])
+    .style(move |_, status| tab(selected, status))
 }
 
 pub fn nav<'a>(label: &'a str, message: Message, selected: bool) -> button::Button<'a, Message> {
