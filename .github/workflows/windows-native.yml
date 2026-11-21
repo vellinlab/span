@@ -133,6 +133,48 @@ jobs:
           $metrics | ConvertTo-Json | Set-Content dist/windows-native-startup.json
           $metrics | Format-Table
 
+      - name: Verify the portable app inherits GTK host profiles
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:RUNNER_TEMP 'Span relocated/Span/Span.exe'
+          $local = Join-Path $env:RUNNER_TEMP 'span profile migration/local'
+          $env:LOCALAPPDATA = $local
+          $env:XDG_CONFIG_HOME = Join-Path $env:RUNNER_TEMP 'span profile migration/legacy'
+          $legacyDirectory = Join-Path $env:XDG_CONFIG_HOME 'ssh-workbench'
+          New-Item -ItemType Directory -Path $legacyDirectory -Force | Out-Null
+          $legacy = Join-Path $legacyDirectory 'hosts.ini'
+          @"
+          [Workbench]
+          version=1
+
+          [Host 1]
+          name=旧版开发服务器
+          target=dev@fixture:2222
+          trusted-x11=false
+          "@ | Set-Content -LiteralPath $legacy -Encoding utf8NoBOM
+          $hash = (Get-FileHash -LiteralPath $legacy).Hash
+          $span = Start-Process $app -PassThru
+          try {
+            for ($i = 0; $i -lt 120; $i++) {
+              $span.Refresh()
+              if ($span.HasExited) { throw "Span exited during GTK profile migration" }
+              if ($span.MainWindowHandle -ne [IntPtr]::Zero) { break }
+              Start-Sleep -Milliseconds 100
+            }
+            if ($span.MainWindowHandle -eq [IntPtr]::Zero) { throw "Span did not open after GTK profile migration" }
+            $migrated = @(Get-Content -LiteralPath (Join-Path $local 'Span/hosts.json') -Raw | ConvertFrom-Json)
+            if ($migrated.Count -ne 1 -or $migrated[0].name -ne '旧版开发服务器' -or $migrated[0].target -ne 'ssh://dev@fixture:2222') {
+              throw "The migrated SSH profile lost its name or destination"
+            }
+            if ((Get-FileHash -LiteralPath $legacy).Hash -ne $hash) { throw "Span changed the legacy profile" }
+          } finally {
+            if (!$span.HasExited) {
+              [void]$span.CloseMainWindow()
+              if (!$span.WaitForExit(5000)) { Stop-Process -Id $span.Id; throw "Span did not close after migrating profiles" }
+            }
+          }
+          if ($span.ExitCode -ne 0) { throw "Span exited after migrating profiles with code $($span.ExitCode)" }
+
       - name: Verify Windows history, clipboard and session goals, and measure wheel input
         shell: pwsh
         run: |

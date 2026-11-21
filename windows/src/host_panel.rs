@@ -72,8 +72,8 @@ pub struct Panel {
 }
 
 impl Panel {
-    pub fn new(path: Option<PathBuf>) -> Self {
-        let (hosts, load_error) = match path.as_deref().map(read_hosts) {
+    pub fn new(path: Option<PathBuf>, legacy: Option<&Path>) -> Self {
+        let (hosts, load_error) = match path.as_deref().map(|path| load_profiles(path, legacy)) {
             Some(Ok(hosts)) => (hosts, None),
             Some(Err(error)) => (Vec::new(), Some(error)),
             None => (Vec::new(), Some("找不到 Windows 用户配置目录。".to_owned())),
@@ -477,13 +477,87 @@ fn action_button(label: &str, action: Option<Action>, primary: bool) -> button::
         .style(move |_, status| theme::button_status(primary, status))
 }
 
-fn read_hosts(path: &Path) -> Result<Vec<Host>, String> {
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.to_string()),
-    };
-    let hosts: Vec<Host> = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+fn load_profiles(path: &Path, legacy: Option<&Path>) -> Result<Vec<Host>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => decode_hosts(&bytes),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            let Some(legacy) = legacy else {
+                return Ok(Vec::new());
+            };
+            let data = match std::fs::read_to_string(legacy) {
+                Ok(data) => data,
+                Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(error) => return Err(format!("{}：{error}", legacy.display())),
+            };
+            let hosts =
+                legacy_hosts(&data).map_err(|error| format!("{}：{error}", legacy.display()))?;
+            write_json(path, &hosts).map_err(|error| format!("迁移主机配置失败：{error}"))?;
+            Ok(hosts)
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn legacy_hosts(data: &str) -> Result<Vec<Host>, String> {
+    // The GTK release wrote one Workbench version and ordered Host N groups.
+    let mut hosts = Vec::new();
+    let mut group = "";
+    let mut version = None;
+    let mut name = None;
+    let mut target = None;
+    let groups = data.lines().chain(["[End]"]);
+    for line in groups.map(str::trim_start) {
+        if let Some(next) = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.trim_end().strip_suffix(']'))
+        {
+            if group.starts_with("Host ") {
+                let (Some(name), Some(target)) = (name.take(), target.take()) else {
+                    return Err(format!("{group} 缺少主机名称或地址。"));
+                };
+                let host = Host::new(&keyfile_string(name)?, &keyfile_string(target)?)
+                    .map_err(|error| format!("{group}：{error}"))?;
+                hosts.push(host);
+            }
+            group = next;
+        } else if let Some((key, value)) = line.split_once('=') {
+            let value = value.trim_start_matches([' ', '\t']);
+            match (group, key.trim_end()) {
+                ("Workbench", "version") => version = Some(value.trim_end()),
+                (group, "name") if group.starts_with("Host ") => name = Some(value),
+                (group, "target") if group.starts_with("Host ") => target = Some(value),
+                _ => {}
+            }
+        }
+    }
+    if version != Some("1") {
+        return Err("无法识别旧版主机配置版本。".to_owned());
+    }
+    Ok(hosts)
+}
+
+fn keyfile_string(value: &str) -> Result<String, String> {
+    let mut result = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        result.push(if ch == '\\' {
+            match chars.next() {
+                Some('\\') => '\\',
+                Some('s') => ' ',
+                Some('n') => '\n',
+                Some('r') => '\r',
+                Some('t') => '\t',
+                _ => return Err("旧版主机配置包含无效的转义字符。".to_owned()),
+            }
+        } else {
+            ch
+        });
+    }
+    Ok(result)
+}
+
+fn decode_hosts(bytes: &[u8]) -> Result<Vec<Host>, String> {
+    let hosts: Vec<Host> = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
     hosts
         .into_iter()
         .map(|host| Host::new(&host.name, &host.target).map_err(str::to_owned))
@@ -506,6 +580,44 @@ pub fn write_json(path: &Path, data: &impl Serialize) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrates_gtk_hosts_without_overwriting_either_profile() {
+        let root = std::env::temp_dir().join(format!("span-old-hosts-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let legacy = root.join("hosts.ini");
+        let current = root.join("Span/hosts.json");
+        let old = r"[Workbench]
+version=1
+
+[Host 1]
+name=开发 \\ 办公
+target=dev@fixture:2222
+trusted-x11=false
+
+[Host 2]
+name=build
+target=build
+trusted-x11=false
+";
+        std::fs::write(&legacy, old).unwrap();
+        let hosts = load_profiles(&current, Some(&legacy)).unwrap();
+        assert_eq!(
+            hosts,
+            [
+                Host::new("开发 \\ 办公", "dev@fixture:2222").unwrap(),
+                Host::new("", "build").unwrap()
+            ]
+        );
+        assert_eq!(std::fs::read_to_string(&legacy).unwrap(), old);
+        assert!(current.is_file());
+        write_json(&current, &Vec::<Host>::new()).unwrap();
+        assert!(load_profiles(&current, Some(&legacy)).unwrap().is_empty());
+        std::fs::write(&current, "invalid JSON").unwrap();
+        assert!(load_profiles(&current, Some(&legacy)).is_err());
+        assert_eq!(std::fs::read_to_string(&current).unwrap(), "invalid JSON");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn imports_only_selected_config_aliases() {
@@ -531,7 +643,7 @@ HostName fixture.invalid
         let aliases = ssh_config::aliases(&home).unwrap();
         assert_eq!(aliases, ["office", "build", "deploy"]);
         let path = home.join("hosts.json");
-        let mut panel = Panel::new(Some(path.clone()));
+        let mut panel = Panel::new(Some(path.clone()), None);
         let candidates = panel.new_aliases(aliases);
         panel.dialog = Some(Dialog::Import(
             candidates.into_iter().map(|host| (host, false)).collect(),
@@ -541,7 +653,7 @@ HostName fixture.invalid
         let _ = panel.update(Action::SelectAlias(1, true), Some(&home));
         panel.save_dialog().unwrap();
         assert_eq!(
-            read_hosts(&path).unwrap(),
+            load_profiles(&path, None).unwrap(),
             [Host::new("", "build").unwrap()]
         );
         std::fs::remove_dir_all(home).unwrap();
@@ -551,7 +663,7 @@ HostName fixture.invalid
     fn saves_edits_and_deletes_profiles_across_restarts() {
         let directory = std::env::temp_dir().join(format!("span-hosts-{}", Uuid::new_v4()));
         let path = directory.join("hosts.json");
-        let mut panel = Panel::new(Some(path.clone()));
+        let mut panel = Panel::new(Some(path.clone()), None);
         assert!(panel.hosts.is_empty());
         panel.dialog = Some(Dialog::Edit {
             index: None,
@@ -559,7 +671,7 @@ HostName fixture.invalid
             target: "operator@host:2222".into(),
         });
         panel.save_dialog().unwrap();
-        let mut panel = Panel::new(Some(path.clone()));
+        let mut panel = Panel::new(Some(path.clone()), None);
         assert_eq!(
             panel.hosts,
             [Host::new("办公台", "operator@host:2222").unwrap()]
@@ -570,14 +682,14 @@ HostName fixture.invalid
             target: "alias".into(),
         });
         panel.save_dialog().unwrap();
-        let mut panel = Panel::new(Some(path.clone()));
+        let mut panel = Panel::new(Some(path.clone()), None);
         assert!(panel.new_aliases(vec!["ALIAS".into()]).is_empty());
         assert_eq!(panel.hosts, [Host::new("工作台", "alias").unwrap()]);
         panel.dialog = Some(Dialog::Delete(0));
         panel.save_dialog().unwrap();
-        assert!(read_hosts(&path).unwrap().is_empty());
+        assert!(load_profiles(&path, None).unwrap().is_empty());
         std::fs::write(&path, b"invalid JSON").unwrap();
-        let mut panel = Panel::new(Some(path.clone()));
+        let mut panel = Panel::new(Some(path.clone()), None);
         assert!(panel.load_error.is_some());
         panel.dialog = Some(Dialog::Edit {
             index: None,

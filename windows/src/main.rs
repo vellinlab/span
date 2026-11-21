@@ -319,11 +319,18 @@ impl Span {
     fn boot() -> (Self, Task<Message>) {
         let (events, receiver) = mpsc::unbounded();
         let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
-        let config = std::env::var_os("LOCALAPPDATA").map(|path| PathBuf::from(path).join("Span"));
+        let local_config = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+        let legacy = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| local_config.clone())
+            .map(|path| path.join("ssh-workbench").join("hosts.ini"));
+        let config = local_config.map(|path| path.join("Span"));
         #[cfg(feature = "visual-check")]
-        let config = std::env::var_os("SPAN_VISUAL_CHECK_DIR")
-            .map(|path| PathBuf::from(path).join("profile-fixture"))
-            .or(config);
+        let (config, legacy) = std::env::var_os("SPAN_VISUAL_CHECK_DIR")
+            .map_or((config, legacy), |path| {
+                (Some(PathBuf::from(path).join("profile-fixture")), None)
+            });
         let recent_path = config.as_ref().map(|path| path.join("recent-hosts.json"));
         let mut seen = HashSet::new();
         let recent = recent_path
@@ -352,7 +359,10 @@ impl Span {
             host: String::new(),
             error: None,
             recent,
-            hosts: host_panel::Panel::new(config.map(|path| path.join("hosts.json"))),
+            hosts: host_panel::Panel::new(
+                config.map(|path| path.join("hosts.json")),
+                legacy.as_deref(),
+            ),
             home,
             recent_path,
             #[cfg(feature = "visual-check")]
