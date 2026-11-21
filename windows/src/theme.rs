@@ -249,7 +249,7 @@ impl WorkspaceIcon {
                 "M6 4h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7l-5 4v-4a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3zm2 6h8m-8 3h5"
             }
             Self::Remote => {
-                "M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm4 15h8M8 10h8m-2-2 2 2-2 2m-4 2H8"
+                "M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm4 15h8M8 10h8m-2-2 2 2-2 2M8 13h4"
             }
             Self::Drawer => {
                 "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm0 10h16m-13 2 1.5 1.5L7 19m4-1h3"
@@ -262,7 +262,7 @@ impl WorkspaceIcon {
         ).into_bytes())).clone()
     }
 
-    pub fn glyph(self, size: u16, color: Color) -> svg::Svg<'static, Theme> {
+    pub fn glyph<'a>(self, size: u32, color: Color) -> svg::Svg<'a, Theme> {
         svg(self.handle())
             .width(size)
             .height(size)
