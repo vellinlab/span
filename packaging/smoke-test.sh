@@ -6,6 +6,7 @@ app_pid=
 xvfb_pid=
 probe_pid=
 askpass_pid=
+widget_pid=
 cleanup() {
     if [[ $1 != 0 && -f "$test_home/app.log" ]]; then
         cat "$test_home/app.log" >&2
@@ -17,7 +18,7 @@ cleanup() {
             import -window root "$(dirname "$WORKBENCH_PREVIEW")/test-failure.png" || true
         fi
     fi
-    for pid in "$askpass_pid" "$probe_pid" "$app_pid" "$xvfb_pid"; do
+    for pid in "$widget_pid" "$askpass_pid" "$probe_pid" "$app_pid" "$xvfb_pid"; do
         if [[ -n "$pid" ]]; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -60,10 +61,16 @@ Host *.invalid !pattern-exclusion
 Include conf.d/*.conf
 SSH_CONFIG
     printf '%s\n' 'Host=included-dev' > "$HOME/.ssh/conf.d/extra.conf"
+    if [[ ! -v GDK_GL ]]; then
+        export SPAN_TEST_GDK_GL_DEFAULT=1
+    fi
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
     mkdir -p "$XDG_DATA_HOME/applications"
     cat > "$HOME/bin/span-test-open-link" <<'SCRIPT'
 #!/usr/bin/env bash
+if [[ ${SPAN_TEST_GDK_GL_DEFAULT:-0} == 1 && -v GDK_GL ]]; then
+    exit 1
+fi
 printf '%s\n' "$1" > "$HOME/span-opened-link"
 SCRIPT
     chmod +x "$HOME/bin/span-test-open-link"
@@ -129,6 +136,35 @@ window_exists() {
 }
 wait_until "the GTK3 window" window_exists
 wait_until "the local Bash PTY" test -s "$HOME/bash-ready"
+first_bash="$(head -n 1 "$HOME/bash-ready")"
+bash_env="$(tr '\0' '\n' < "/proc/$first_bash/environ")"
+grep -qx 'TERM=xterm-256color' <<< "$bash_env"
+grep -qx 'COLORTERM=truecolor' <<< "$bash_env"
+if [[ -v GDK_GL ]]; then
+    grep -Fqx "GDK_GL=$GDK_GL" <<< "$bash_env"
+elif grep -q '^GDK_GL=' <<< "$bash_env"; then
+    printf '%s\n' 'The private GTK graphics setting reached the terminal.' >&2
+    exit 1
+fi
+if [[ ${SPAN_TEST_RPM_ALLOCATOR:-0} == 1 ]]; then
+    span_env="$(tr '\0' '\n' < "/proc/$app_pid/environ")"
+    if [[ -v G_SLICE ]]; then
+        grep -Fqx "G_SLICE=$G_SLICE" <<< "$span_env"
+        grep -Fqx "G_SLICE=$G_SLICE" <<< "$bash_env"
+    else
+        grep -qx 'SPAN_INTERNAL_G_SLICE=1' <<< "$span_env"
+        grep -qx 'G_SLICE=always-malloc' <<< "$span_env"
+        if grep -q '^G_SLICE=' <<< "$bash_env"; then
+            printf '%s\n' 'The private RPM allocator setting reached the terminal.' >&2
+            exit 1
+        fi
+    fi
+    if grep -q '^SPAN_INTERNAL_G_SLICE=' <<< "$bash_env"; then
+        printf '%s\n' 'The private RPM allocator marker reached the terminal.' >&2
+        exit 1
+    fi
+    printf '%s\n' 'The RPM preserves the terminal environment and scopes its allocator setting.'
+fi
 window="$(xwininfo -root -tree | awk '/"Span"/ && !found { print $1; found=1 }')"
 xprop -id "$window" _NET_WM_ICON | grep -F '_NET_WM_ICON(CARDINAL) =' >/dev/null
 if grep -q 'Failed to load Workbench theme' "$HOME/app.log"; then
@@ -145,7 +181,11 @@ if [[ -n ${WORKBENCH_PREVIEW:-} ]]; then
     xdotool windowfocus --sync "$window"
     first_bash="$(head -n1 "$HOME/bash-ready")"
 
-    widget() { /usr/bin/python3 packaging/test-widget.py "$@"; }
+    widget_socket="$test_home/widgets.sock"
+    /usr/bin/python3 packaging/test-widget.py --serve "$widget_socket" &
+    widget_pid=$!
+    wait_until "the persistent accessibility test client" test -S "$widget_socket"
+    widget() { /usr/bin/python3 packaging/test-widget.py --request "$widget_socket" "$@"; }
     previous_bottom=0
     for action in '显示／隐藏侧栏' '工具栏 · 新建本地终端' '工具栏 · 快速连接' '工具栏 · 插件与连接器'; do
         read -r _ rail_y rail_width rail_height <<< "$(widget bounds "$action")"
@@ -332,6 +372,7 @@ SVG
     widget contains 'GPT Vision'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-model-picker.png"
     widget mouse 'GPT Vision'
+    widget description '选择模型' 'GPT Vision'
     read -r _ _ effort_width _ <<< "$(widget bounds '思考强度')"
     [[ $effort_width -lt 112 ]]
     widget mouse '思考强度'
@@ -710,8 +751,10 @@ SVG
     widget description '会话权限' '只读。从下一轮起生效。'
     widget mouse '选择模型'
     widget mouse 'GPT Base'
+    widget description '选择模型' 'GPT Base'
     widget mouse '选择模型'
     widget mouse 'GPT Vision'
+    widget description '选择模型' 'GPT Vision'
     widget mouse '思考强度'
     widget mouse '中'
     widget mouse 'Fast 模式'
@@ -788,7 +831,7 @@ SVG
     widget click '复制会话 ID'
     xclip -out -selection clipboard | grep -qx 'preview-thread'
     widget click '会话页终端面板'
-    sleep 0.25
+    widget state 'Terminal' focused
     xdotool type --clearmodifiers 'printf "%s\n" "$BASHPID" > "$HOME/drawer-bash"'
     xdotool key --clearmodifiers Return
     wait_until "the original Bash in the Agent drawer" grep -qsx "$first_bash" "$HOME/drawer-bash"
@@ -892,8 +935,17 @@ SVG
     printf '%s\n' 'The path popup lists children before Enter with or without a trailing slash, dismisses with Esc, and opens a keyboard selection.'
     xdotool key --clearmodifiers ctrl+shift+f
     widget contains 'Workspace preview fixture'
+    xdotool key --clearmodifiers ctrl+Page_Down
+    widget not-contains 'Workspace preview fixture'
+    widget mouse '文件'
+    widget mouse '000-layout.txt'
+    widget click '预览'
+    widget contains 'Split workspace preview'
+    xdotool key --clearmodifiers ctrl+shift+w
+    widget not-contains 'Split workspace preview'
+    widget contains 'Workspace preview fixture'
     widget click '关闭预览'
-    xdotool key --clearmodifiers ctrl+Page_Down ctrl+shift+w
+    printf '%s\n' 'Closing a session dropped its preview and restored the remaining session’s preview.'
     printf '%s\n' 'Warm tab switches reused their catalogs and directory models. Explicit refresh read the new file.'
     xdotool key --clearmodifiers ctrl+shift+a
     printf '%s\n' 'The Codex session tested formatted table data, structured questions, diff, drawer, search and paginated history.'
@@ -956,7 +1008,7 @@ PY
         widget contains 'Are you sure you want to continue connecting'
         widget click '继续连接'
         wait_until "the authenticated SSH shell" test -s "$WORKBENCH_SSH_FIXTURE/remote-shells"
-        xdotool key --clearmodifiers ctrl+shift+f
+        widget mouse '文件'
         widget state '目录路径' sensitive
         widget mouse '目录路径'
         xdotool key --clearmodifiers ctrl+a
@@ -992,11 +1044,13 @@ PY
         widget click '卸载'
         wait_until "plugin uninstalled through the SSH host app server" test -f "$WORKBENCH_SSH_FIXTURE/plugin-uninstalled"
         widget click '会话页终端面板'
+        widget state 'Terminal' focused
         xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-primary-connection"'
         xdotool key --clearmodifiers Return
         wait_until "the original connection in the remote terminal drawer" test -s "$WORKBENCH_SSH_FIXTURE/drawer-primary-connection"
         widget click '在面板中新建终端'
         widget state '关闭底部终端' sensitive
+        widget state 'Terminal' focused
         xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-extra-connection"; seq 1 160'
         xdotool key --clearmodifiers Return
         wait_until "a second remote terminal in the drawer" test -s "$WORKBENCH_SSH_FIXTURE/drawer-extra-connection"
@@ -1006,6 +1060,7 @@ PY
         import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/remote-terminal-drawer.png"
         widget click '关闭底部终端'
         widget not-state '关闭底部终端' sensitive
+        widget state 'Terminal' focused
         xdotool type --clearmodifiers 'printf "%s\n" "$SSH_CONNECTION" > "$HOME/drawer-returned-connection"'
         xdotool key --clearmodifiers Return
         wait_until "input returned to the original remote terminal" test -s "$WORKBENCH_SSH_FIXTURE/drawer-returned-connection"

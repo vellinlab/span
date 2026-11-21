@@ -1,11 +1,12 @@
-use crate::agent_selection::{Part, TextSelection, scroll_vertical, vertical_delta};
+use crate::agent_selection::{LabelSlot, Part, TextSelection, scroll_vertical, vertical_delta};
+use crate::history_window::{prose_label, wrapped_lines};
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};
 use crate::quote;
 use gtk::prelude::*;
 use gtk::{cairo, gdk, gdk_pixbuf, gio, glib, pango};
 use pulldown_cmark::{CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd, html};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -19,20 +20,45 @@ pub struct Context {
     pub socket: Option<crate::ssh::ChannelBuf>,
 }
 
+// Replies with stateful controls stay mounted so scrolling preserves the
+// user's image loads, code and table scroll positions, and diagram controls.
+fn can_defer(markdown: &str) -> bool {
+    markdown.len() >= 4 * 1024
+        && !parser(markdown).any(|event| {
+            matches!(
+                event,
+                Event::Start(Tag::Table(_) | Tag::CodeBlock(_) | Tag::Image { .. })
+            )
+        })
+}
+
+pub enum ResponseMode {
+    Preview,
+    History,
+    Completed { reading_earlier: bool },
+}
+
 pub fn response(
     markdown: &str,
     context: &Context,
-    live: bool,
+    mode: ResponseMode,
     window: Option<&Rc<crate::history_window::HistoryWindow>>,
     preview: &Offer,
     quote: &quote::Action,
 ) -> TextSelection {
+    let live = matches!(mode, ResponseMode::Completed { .. });
+    let defer_prose = match mode {
+        ResponseMode::Preview => false,
+        ResponseMode::History => true,
+        ResponseMode::Completed { reading_earlier } => reading_earlier,
+    };
     let blocks = gtk::Box::new(gtk::Orientation::Vertical, 10);
     let context = Rc::new(context.clone());
-    let prose_label = || {
+    let linked_label = |deferred| {
         let context = context.clone();
         let preview = preview.clone();
-        markdown_label_with(move |label, uri| {
+        let label = if deferred { prose_label() } else { text("") };
+        markdown_label_with(label, move |label, uri| {
             if let Some(artifact) = Artifact::output(uri, &context) {
                 preview(artifact, false);
             } else {
@@ -40,6 +66,12 @@ pub fn response(
             }
         })
     };
+    let prose_region = window
+        .filter(|_| defer_prose && can_defer(markdown))
+        .map(|window| (window, Part::region()));
+    let deferred = prose_region
+        .as_ref()
+        .map(|(window, region)| (*window, region));
     let mut pending = String::new();
     let mut selectable = Vec::new();
     let mut list_depth: u32 = 0;
@@ -50,7 +82,13 @@ pub fn response(
     while let Some((event, range)) = events.next() {
         match event {
             Event::Start(Tag::Table(_)) => {
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &linked_label,
+                    deferred,
+                );
                 blocks.add(&table(
                     &mut events,
                     markdown,
@@ -60,7 +98,13 @@ pub fn response(
                 ));
             }
             Event::Start(Tag::CodeBlock(kind)) => {
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &linked_label,
+                    deferred,
+                );
                 let mut code = String::new();
                 for (event, _) in events.by_ref() {
                     match event {
@@ -100,7 +144,13 @@ pub fn response(
                     pending.push_str(&escaped(&alt));
                     continue;
                 }
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &linked_label,
+                    deferred,
+                );
                 let relative = Path::new(dest_url.as_ref()).components().all(|part| {
                     matches!(
                         part,
@@ -129,7 +179,13 @@ pub fn response(
                 }
                 // Group short adjacent paragraphs to reduce native input windows and layout work.
                 if pending.len() >= 2048 {
-                    flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                    flush_text(
+                        &blocks,
+                        &mut pending,
+                        &mut selectable,
+                        &linked_label,
+                        deferred,
+                    );
                 } else {
                     pending.push_str("\n\n");
                 }
@@ -138,7 +194,13 @@ pub fn response(
             Event::Start(Tag::List(_)) => list_depth = list_depth.saturating_add(1),
             Event::End(TagEnd::List(_)) => {
                 list_depth = list_depth.saturating_sub(1);
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &linked_label,
+                    deferred,
+                );
             }
             Event::Start(Tag::Item) => {
                 pending.push_str(&"   ".repeat(list_depth.saturating_sub(1).min(8) as usize));
@@ -146,14 +208,28 @@ pub fn response(
             }
             Event::End(TagEnd::Item) => pending.push('\n'),
             Event::Rule => {
-                flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
+                flush_text(
+                    &blocks,
+                    &mut pending,
+                    &mut selectable,
+                    &linked_label,
+                    deferred,
+                );
                 blocks.add(&gtk::Separator::new(gtk::Orientation::Horizontal));
             }
             event => inline(&mut pending, event, &mut link),
         }
     }
-    flush_text(&blocks, &mut pending, &mut selectable, &prose_label);
-    if !artifacts.is_empty() {
+    flush_text(
+        &blocks,
+        &mut pending,
+        &mut selectable,
+        &linked_label,
+        deferred,
+    );
+    let actions = if artifacts.is_empty() {
+        None
+    } else {
         let actions = gtk::Box::new(gtk::Orientation::Vertical, 2);
         actions.style_context().add_class("agent-preview-actions");
         let mut unique = Vec::new();
@@ -168,12 +244,25 @@ pub fn response(
             }
             actions.add(&artifact_button(artifact, preview.clone()));
         }
-        blocks.add(&actions);
+        Some(actions)
+    };
+    if let Some((_, region)) = prose_region {
+        region.add(&blocks);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, blocks.spacing());
+        body.add(&region);
+        if let Some(actions) = actions {
+            body.add(&actions);
+        }
+        TextSelection::new(&body, selectable, quote)
+    } else {
+        if let Some(actions) = actions {
+            blocks.add(&actions);
+        }
+        if let Some(window) = window {
+            window.group(&blocks, 3);
+        }
+        TextSelection::new(&blocks, selectable, quote)
     }
-    if let Some(window) = window {
-        window.group(&blocks, 3);
-    }
-    TextSelection::new(&blocks, selectable, quote)
 }
 
 pub fn artifact_button(artifact: Artifact, preview: Offer) -> gtk::Button {
@@ -240,7 +329,15 @@ pub(crate) fn open_link(widget: &impl IsA<gtk::Widget>, uri: &str) {
     if !web_url(uri) {
         return;
     }
-    let Err(error) = gio::AppInfo::launch_default_for_uri(uri, gio::AppLaunchContext::NONE) else {
+    let mut private = crate::process_environment::private_variables().peekable();
+    let context = private.peek().is_some().then(|| {
+        let context = gio::AppLaunchContext::new();
+        for variable in private {
+            context.unsetenv(variable);
+        }
+        context
+    });
+    let Err(error) = gio::AppInfo::launch_default_for_uri(uri, context.as_ref()) else {
         return;
     };
     let parent = widget.toplevel().and_downcast::<gtk::Window>();
@@ -267,18 +364,26 @@ pub(crate) fn open_link(widget: &impl IsA<gtk::Widget>, uri: &str) {
 }
 
 pub fn markdown_label() -> gtk::Label {
-    markdown_label_with(open_link)
+    markdown_label_with(text(""), open_link)
 }
 
-fn markdown_label_with(activate: impl Fn(&gtk::Label, &str) + 'static) -> gtk::Label {
-    let label = text("");
+fn markdown_label_with(
+    label: gtk::Label,
+    activate: impl Fn(&gtk::Label, &str) + 'static,
+) -> gtk::Label {
     label.style_context().add_class("agent-markdown");
     label.connect_activate_link(move |label, uri| {
         activate(label, uri);
         glib::Propagation::Stop
     });
     // Scrolling changes the paint origin, but usually leaves the shaped layout intact.
-    let underline_cache = RefCell::new(None::<(pango::Layout, u32, Vec<(f64, f64, f64)>)>);
+    let underline_cache = Rc::new(RefCell::new(
+        None::<(pango::Layout, u32, Vec<(f64, f64, f64)>)>,
+    ));
+    let cache = underline_cache.clone();
+    label.connect_unmap(move |_| {
+        cache.take();
+    });
     label.connect_draw(move |label, cr| {
         let Some(layout) = label.layout() else {
             return glib::Propagation::Proceed;
@@ -425,16 +530,70 @@ fn flush_text(
     blocks: &gtk::Box,
     pending: &mut String,
     selectable: &mut Vec<Part>,
-    new_label: &impl Fn() -> gtk::Label,
+    new_label: &impl Fn(bool) -> gtk::Label,
+    deferred: Option<(&Rc<crate::history_window::HistoryWindow>, &gtk::EventBox)>,
 ) {
-    if !pending.trim().is_empty() {
-        let label = static_label(pending.trim(), new_label);
-        label.style_context().add_class("agent-prose");
-        let part = Part::new(&label, "\n\n");
-        blocks.add(&part.widget);
-        selectable.push(part);
+    let markup = pending.trim();
+    if !markup.is_empty() {
+        if let Some((window, region)) = deferred {
+            let linked = markup.contains("<a href=");
+            let label = if linked {
+                new_label(true)
+            } else {
+                prose_label()
+            };
+            label.style_context().add_class("agent-markdown");
+            label.style_context().add_class("agent-prose");
+            let plain = unmarked_text(markup);
+            let uses_markup = linked || plain.is_some();
+            let source: Rc<str> = Rc::from(markup);
+            let plain = plain.map_or_else(|| source.clone(), |text| Rc::from(text.as_str()));
+            selectable.push(Part::deferred(&label, region, "\n\n", plain.clone()));
+            window.defer_prose(blocks, &label, source, &plain, uses_markup);
+        } else {
+            let label = static_label(markup, || new_label(false));
+            label.style_context().add_class("agent-prose");
+            let part = Part::new(&label, "\n\n");
+            blocks.add(&part.widget);
+            selectable.push(part);
+        }
     }
     pending.clear();
+}
+
+// Pango understands the inline formatting but GtkLabel handles the <a> wrapper.
+fn unmarked_text(markup: &str) -> Option<glib::GString> {
+    if !markup.contains(['<', '&']) {
+        return None;
+    }
+    let mut without_links = String::with_capacity(markup.len());
+    let mut remaining = markup;
+    while let Some((text, destination)) = remaining.split_once("<a href=") {
+        without_links.push_str(text);
+        remaining = destination.split_once('>')?.1;
+    }
+    without_links.push_str(remaining);
+    let without_links = without_links.replace("</a>", "");
+    pango::parse_markup(&without_links, '\0')
+        .ok()
+        .map(|(_, text, _)| text)
+}
+
+struct DeferredCell {
+    row: i32,
+    column: i32,
+    markup: Rc<str>,
+    label: LabelSlot,
+}
+
+fn table_label(label: &gtk::Label, heading: bool) {
+    label.set_selectable(false);
+    label.set_hexpand(true);
+    label.set_width_chars(9);
+    label.set_max_width_chars(48);
+    if heading {
+        label.style_context().add_class("agent-table-head");
+    }
 }
 
 fn table(
@@ -448,6 +607,7 @@ fn table(
     bands.style_context().add_class("agent-table");
     let band = || {
         let grid = gtk::Grid::builder().column_homogeneous(true).build();
+        grid.show();
         let region = Part::region();
         region.add(&grid);
         bands.add(&region);
@@ -455,6 +615,15 @@ fn table(
     };
     let (mut grid, mut region) = band();
     const BAND_ROWS: i32 = 8;
+    let defer = window.is_some()
+        && markdown.get(start..).is_some_and(|text| {
+            text.lines()
+                .take(20)
+                .filter(|line| line.contains('|'))
+                .count()
+                >= 18
+        });
+    let mut deferred_bands = vec![(region.clone(), grid.clone(), Vec::new())];
 
     let mut row = 0;
     let mut col = 0;
@@ -475,13 +644,6 @@ fn table(
             Event::End(TagEnd::TableCell) => {
                 in_cell = false;
                 if row < 100 && col < 20 {
-                    let label = static_label(&cell_markup, markdown_label);
-                    label.set_hexpand(true);
-                    label.set_width_chars(9);
-                    label.set_max_width_chars(48);
-                    if row == 0 {
-                        label.style_context().add_class("agent-table-head");
-                    }
                     let separator = match (row, col) {
                         (0, 0) => "\n\n",
                         (_, 0) => "\n",
@@ -489,9 +651,37 @@ fn table(
                     };
                     if col == 0 && row > 0 && row % BAND_ROWS == 0 {
                         (grid, region) = band();
+                        if defer {
+                            deferred_bands.push((region.clone(), grid.clone(), Vec::new()));
+                        }
                     }
-                    grid.attach(&label, col, row % BAND_ROWS, 1, 1);
-                    selectable.push(Part::in_region(&label, separator, &region));
+                    if defer {
+                        let markup: Rc<str> = Rc::from(cell_markup.as_str());
+                        let plain = unmarked_text(&markup)
+                            .map_or_else(|| markup.clone(), |value| Rc::from(value.as_str()));
+                        let label = LabelSlot::default();
+                        selectable.push(Part::deferred_in_region(
+                            label.clone(),
+                            separator,
+                            &region,
+                            plain,
+                        ));
+                        deferred_bands
+                            .last_mut()
+                            .expect("table band")
+                            .2
+                            .push(DeferredCell {
+                                row,
+                                column: col,
+                                markup,
+                                label,
+                            });
+                    } else {
+                        let label = static_label(&cell_markup, markdown_label);
+                        table_label(&label, row == 0);
+                        grid.attach(&label, col, row % BAND_ROWS, 1, 1);
+                        selectable.push(Part::in_region(&label, separator, &region));
+                    }
                 }
                 cells.push(std::mem::take(&mut cell));
                 col += 1;
@@ -516,6 +706,59 @@ fn table(
             _ => {}
         }
     }
+    if let Some(window) = window.filter(|_| defer) {
+        let columns = rows
+            .first()
+            .map_or(1, |row: &Vec<String>| row.len().clamp(1, 20));
+        let minimum_width = 85 * columns as i32;
+        let cell_width = window.reading_width().max(minimum_width) as usize / columns;
+        let cell_columns = ((cell_width - 21) / 8).max(1);
+        let row_heights = rows
+            .iter()
+            .take(100)
+            .map(|row| {
+                let lines = row
+                    .iter()
+                    .take(columns)
+                    .map(|cell| wrapped_lines(cell, cell_columns))
+                    .max()
+                    .unwrap_or(1);
+                (lines.clamp(1, 250) * 17 + 13) as i32
+            })
+            .collect::<Vec<_>>();
+        for ((region, grid, cells), heights) in deferred_bands
+            .into_iter()
+            .zip(row_heights.chunks(BAND_ROWS as usize))
+        {
+            bands.remove(&region);
+            let grid = grid.downgrade();
+            window.defer_content(
+                &bands,
+                &region,
+                minimum_width,
+                heights.iter().sum(),
+                move |visible| {
+                    let Some(grid) = grid.upgrade() else { return };
+                    if visible {
+                        for cell in &cells {
+                            let label = static_label(&cell.markup, markdown_label);
+                            table_label(&label, cell.row == 0);
+                            grid.attach(&label, cell.column, cell.row % BAND_ROWS, 1, 1);
+                            cell.label.set(Some(&label));
+                            label.show();
+                        }
+                    } else {
+                        for child in grid.children() {
+                            grid.remove(&child);
+                        }
+                        for cell in &cells {
+                            cell.label.set(None);
+                        }
+                    }
+                },
+            );
+        }
+    }
     if row > 100 {
         bands.add(&text("此处显示前 100 行，可复制完整表格。"));
     }
@@ -526,6 +769,7 @@ fn table(
         .build();
     scroll.style_context().add_class("agent-table-scroll");
     if row > BAND_ROWS
+        && !defer
         && let Some(window) = window
     {
         window.group(&bands, 1);
@@ -848,7 +1092,7 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
     block.add(&actions);
 
     let socket = context.socket.clone();
-    let decoded = Rc::new(RefCell::new(None::<(gdk_pixbuf::Pixbuf, Rc<Vec<u8>>)>));
+    let decoded = Rc::new(RefCell::new(None::<Rc<Vec<u8>>>));
     let copy_source = decoded.clone();
     load.connect_clicked(glib::clone!(
         #[weak]
@@ -867,6 +1111,7 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
             load.set_sensitive(false);
             let target = target.clone();
             let socket = socket.clone();
+            let width = preview.allocated_width().clamp(180, 620);
             let load = load.downgrade();
             let preview = preview.downgrade();
             let status = status.downgrade();
@@ -875,10 +1120,13 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
             let save = save.downgrade();
             let decoded = decoded.clone();
             glib::MainContext::default().spawn_local(async move {
-                let result = gio::spawn_blocking(move || load_image(&target, socket.as_deref()))
-                    .await
-                    .unwrap_or_else(|_| Err("图片预览被中断。".into()))
-                    .and_then(|bytes| decode_image(&bytes).map(|image| (image, bytes)));
+                let result = gio::spawn_blocking(move || {
+                    let bytes = load_image(&target, socket.as_deref())?;
+                    let (thumbnail, dimensions) = image_thumbnail(&bytes, width)?;
+                    Ok::<_, String>((thumbnail, dimensions, bytes))
+                })
+                .await
+                .unwrap_or_else(|_| Err("图片预览被中断。".into()));
                 let (Some(load), Some(preview), Some(status), Some(copy), Some(expand), Some(save)) = (
                     load.upgrade(),
                     preview.upgrade(),
@@ -890,21 +1138,12 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
                     return;
                 };
                 match result {
-                    Ok((image, bytes)) => {
+                    Ok((thumbnail, (width, height), bytes)) => {
+                        preview.set_from_pixbuf(Some(&thumbnail.pixbuf()));
+                        status.set_text(&format!("{width} × {height}"));
+                        decoded.replace(Some(Rc::new(bytes)));
                         for button in [&copy, &expand, &save] { button.set_sensitive(true); }
                         load.hide();
-                        let width = preview.allocated_width().clamp(180, 620);
-                        let scale = (f64::from(width) / f64::from(image.width()))
-                            .min(340.0 / f64::from(image.height()))
-                            .min(1.0);
-                        let thumbnail = image.scale_simple(
-                            (f64::from(image.width()) * scale).max(1.0) as i32,
-                            (f64::from(image.height()) * scale).max(1.0) as i32,
-                            gdk_pixbuf::InterpType::Bilinear,
-                        );
-                        preview.set_from_pixbuf(thumbnail.as_ref().or(Some(&image)));
-                        status.set_text(&format!("{} × {}", image.width(), image.height()));
-                        decoded.replace(Some((image, Rc::new(bytes))));
                     }
                     Err(error) => {
                         status.set_text(&error);
@@ -914,19 +1153,33 @@ pub fn image(path: &str, alt: &str, context: &Context, automatic: bool) -> gtk::
             });
         }
     ));
-    copy.connect_clicked(move |_| {
-        if let Some((image, _)) = copy_source.borrow().as_ref() {
-            clipboard().set_image(image);
+    copy.connect_clicked(glib::clone!(
+        #[weak]
+        status,
+        move |_| {
+            if let Some(bytes) = copy_source.borrow().as_ref() {
+                match decode_image(bytes) {
+                    Ok(image) => clipboard().set_image(&image),
+                    Err(error) => status.set_text(&error),
+                }
+            }
         }
-    });
+    ));
     let expanded = decoded.clone();
-    expand.connect_clicked(move |button| {
-        if let Some((image, _)) = expanded.borrow().as_ref() {
-            asset_preview(button, image, "图片预览");
+    expand.connect_clicked(glib::clone!(
+        #[weak]
+        status,
+        move |button| {
+            if let Some(bytes) = expanded.borrow().as_ref() {
+                match decode_image(bytes) {
+                    Ok(image) => asset_preview(button, &image, "图片预览"),
+                    Err(error) => status.set_text(&error),
+                }
+            }
         }
-    });
+    ));
     save.connect_clicked(move |button| {
-        let Some((_, bytes)) = decoded.borrow().as_ref().cloned() else {
+        let Some(bytes) = decoded.borrow().as_ref().cloned() else {
             return;
         };
         let name = filename.as_deref().unwrap_or_else(|| {
@@ -1036,30 +1289,96 @@ fn load_image(path: &Path, socket: Option<&crate::ssh::Channel>) -> Result<Vec<u
     Ok(bytes)
 }
 
-pub(crate) fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
-    let kind = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "png"
+fn image_type(bytes: &[u8]) -> Result<&'static str, String> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Ok("png")
     } else if bytes.starts_with(b"\xff\xd8\xff") {
-        "jpeg"
+        Ok("jpeg")
     } else {
-        return Err("图片预览支持 PNG 和 JPEG。".into());
-    };
-    decode_pixbuf(bytes, kind)
+        Err("图片预览支持 PNG 和 JPEG。".into())
+    }
 }
 
-pub(crate) fn decode_pixbuf(bytes: &[u8], kind: &str) -> Result<gdk_pixbuf::Pixbuf, String> {
+pub struct ImagePixels {
+    data: glib::Bytes,
+    width: i32,
+    height: i32,
+    rowstride: i32,
+    has_alpha: bool,
+}
+
+impl ImagePixels {
+    fn from_pixbuf(image: &gdk_pixbuf::Pixbuf) -> Self {
+        Self {
+            data: image.read_pixel_bytes(),
+            width: image.width(),
+            height: image.height(),
+            rowstride: image.rowstride(),
+            has_alpha: image.has_alpha(),
+        }
+    }
+
+    pub fn pixbuf(self) -> gdk_pixbuf::Pixbuf {
+        gdk_pixbuf::Pixbuf::from_bytes(
+            &self.data,
+            gdk_pixbuf::Colorspace::Rgb,
+            self.has_alpha,
+            8,
+            self.width,
+            self.height,
+            self.rowstride,
+        )
+    }
+}
+
+fn image_thumbnail(bytes: &[u8], max_width: i32) -> Result<(ImagePixels, (i32, i32)), String> {
+    let dimensions = Rc::new(Cell::new((0, 0)));
+    let result_size = dimensions.clone();
+    let image = decode_sized_pixbuf(bytes, image_type(bytes)?, move |width, height| {
+        let size = fit_image(width, height, 1200, 900);
+        result_size.set(size);
+        fit_image(size.0, size.1, max_width, 340)
+    })?;
+    Ok((ImagePixels::from_pixbuf(&image), dimensions.get()))
+}
+
+fn fit_image(width: i32, height: i32, max_width: i32, max_height: i32) -> (i32, i32) {
+    let scale = (f64::from(max_width) / f64::from(width.max(1)))
+        .min(f64::from(max_height) / f64::from(height.max(1)))
+        .min(1.0);
+    (
+        (f64::from(width) * scale).max(1.0) as i32,
+        (f64::from(height) * scale).max(1.0) as i32,
+    )
+}
+
+fn decode_image(bytes: &[u8]) -> Result<gdk_pixbuf::Pixbuf, String> {
+    decode_pixbuf(bytes, image_type(bytes)?)
+}
+
+pub fn preview_pixels(bytes: &[u8], kind: &str) -> Result<ImagePixels, String> {
+    decode_pixbuf(bytes, kind).map(|image| ImagePixels::from_pixbuf(&image))
+}
+
+fn decode_pixbuf(bytes: &[u8], kind: &str) -> Result<gdk_pixbuf::Pixbuf, String> {
+    decode_sized_pixbuf(bytes, kind, |width, height| {
+        fit_image(width, height, 1200, 900)
+    })
+}
+
+fn decode_sized_pixbuf(
+    bytes: &[u8],
+    kind: &str,
+    size: impl Fn(i32, i32) -> (i32, i32) + 'static,
+) -> Result<gdk_pixbuf::Pixbuf, String> {
     let loader = gdk_pixbuf::PixbufLoader::with_type(kind).map_err(|e| e.to_string())?;
-    loader.connect_size_prepared(|loader, w, h| {
-        let scale = (1200.0 / f64::from(w.max(1)))
-            .min(900.0 / f64::from(h.max(1)))
-            .min(1.0);
-        loader.set_size(
-            (f64::from(w) * scale).max(1.0) as i32,
-            (f64::from(h) * scale).max(1.0) as i32,
-        );
+    loader.connect_size_prepared(move |loader, w, h| {
+        let (width, height) = size(w, h);
+        loader.set_size(width, height);
     });
-    loader.write(bytes).map_err(|e| e.to_string())?;
-    loader.close().map_err(|e| e.to_string())?;
+    let written = loader.write(bytes);
+    let closed = loader.close();
+    written.and(closed).map_err(|e| e.to_string())?;
     loader.pixbuf().ok_or_else(|| "无法解码图片。".to_owned())
 }
 

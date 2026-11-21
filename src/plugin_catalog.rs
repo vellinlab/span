@@ -73,62 +73,56 @@ pub enum Incoming {
 }
 
 pub fn decode(bytes: &[u8], pending_lists: &[u64]) -> serde_json::Result<Incoming> {
-    #[derive(Deserialize)]
-    struct Header {
-        id: u64,
-    }
     if !pending_lists.is_empty()
-        && let Ok(header) = serde_json::from_slice::<Header>(bytes)
-        && pending_lists.contains(&header.id)
+        && let Ok(reply) = serde_json::from_slice::<Reply>(bytes)
+        && pending_lists.contains(&reply.id)
     {
-        if let Ok(reply) = serde_json::from_slice::<Reply>(bytes) {
-            let mut items = Vec::new();
-            let featured: std::collections::HashMap<_, _> = reply
-                .result
-                .featured_plugin_ids
-                .into_iter()
-                .enumerate()
-                .map(|(index, id)| (id, index))
-                .collect();
-            for market in reply.result.marketplaces {
-                let Some(name) = market.name else { continue };
-                let source = market
-                    .interface
-                    .and_then(|v| v.display_name)
-                    .unwrap_or_else(|| name.clone());
-                for item in market.plugins {
-                    let (Some(id), Some(plugin_name)) = (item.id, item.name) else {
-                        continue;
-                    };
-                    let ui = item.interface.unwrap_or_default();
-                    items.push(agent_extensions::Plugin {
-                        featured: featured.get(&id).copied(),
-                        id,
-                        title: ui.display_name.unwrap_or_else(|| plugin_name.clone()),
-                        name: plugin_name,
-                        description: synopsis(ui.short_description.as_deref()),
-                        logo: ui.logo_url_dark.or(ui.logo_url).or(ui.composer_icon_url),
-                        source: source.clone(),
-                        path: market.path.clone(),
-                        marketplace: name.clone(),
-                        installed: item.installed.unwrap_or(false),
-                        enabled: item.enabled.unwrap_or(false),
-                        available: item.install_policy.as_deref() != Some("NOT_AVAILABLE")
-                            && item
-                                .availability
-                                .as_deref()
-                                .is_none_or(|s| s == "AVAILABLE"),
-                        review: item.must_show_installation_interstitial.unwrap_or(false),
-                    });
-                }
+        let mut items = Vec::new();
+        let featured: std::collections::HashMap<_, _> = reply
+            .result
+            .featured_plugin_ids
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| (id, index))
+            .collect();
+        for market in reply.result.marketplaces {
+            let Some(name) = market.name else { continue };
+            let source = market
+                .interface
+                .and_then(|v| v.display_name)
+                .unwrap_or_else(|| name.clone());
+            for item in market.plugins {
+                let (Some(id), Some(plugin_name)) = (item.id, item.name) else {
+                    continue;
+                };
+                let ui = item.interface.unwrap_or_default();
+                items.push(agent_extensions::Plugin {
+                    featured: featured.get(&id).copied(),
+                    id,
+                    title: ui.display_name.unwrap_or_else(|| plugin_name.clone()),
+                    name: plugin_name,
+                    description: synopsis(ui.short_description.as_deref()),
+                    logo: ui.logo_url_dark.or(ui.logo_url).or(ui.composer_icon_url),
+                    source: source.clone(),
+                    path: market.path.clone(),
+                    marketplace: name.clone(),
+                    installed: item.installed.unwrap_or(false),
+                    enabled: item.enabled.unwrap_or(false),
+                    available: item.install_policy.as_deref() != Some("NOT_AVAILABLE")
+                        && item
+                            .availability
+                            .as_deref()
+                            .is_none_or(|s| s == "AVAILABLE"),
+                    review: item.must_show_installation_interstitial.unwrap_or(false),
+                });
             }
-            items.sort_by_key(|p| (p.featured.unwrap_or(usize::MAX), !p.installed));
-            return Ok(Incoming::Plugins {
-                id: reply.id,
-                items,
-                failures: reply.result.marketplace_load_errors.len(),
-            });
         }
+        items.sort_by_key(|p| (p.featured.unwrap_or(usize::MAX), !p.installed));
+        return Ok(Incoming::Plugins {
+            id: reply.id,
+            items,
+            failures: reply.result.marketplace_load_errors.len(),
+        });
     }
     serde_json::from_slice(bytes).map(Incoming::Json)
 }

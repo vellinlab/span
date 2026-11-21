@@ -7,9 +7,17 @@ import socket
 import stat
 import sys
 import threading
+import time
 from pathlib import Path
 
-home = Path(os.environ["HOME"])
+if os.environ.get("SPAN_TEST_RPM_ALLOCATOR") == "1":
+    assert "G_SLICE" not in os.environ
+    assert "SPAN_INTERNAL_G_SLICE" not in os.environ
+
+if os.environ.get("SPAN_TEST_GDK_GL_DEFAULT") == "1":
+    assert "GDK_GL" not in os.environ
+
+home = Path(os.environ.get("SPAN_BENCH_FIXTURE_HOME", os.environ["HOME"]))
 control_socket = Path(os.environ.get("CODEX_HOME", home / ".codex")) / "app-server-control/app-server-control.sock"
 thread = "preview-thread"
 saved_thread = "stored-deployment"
@@ -221,8 +229,20 @@ for line in sys.stdin:
         started_thread = "new-slash-fixture" if shared else thread
         turns = []
         if os.environ.get("SPAN_BENCH_HISTORY") == "1":
+            label = "会话性能测量"
+            if os.environ.get("SPAN_BENCH_TABS") == "1":
+                for number in range(1, 4):
+                    try:
+                        (home / f"bench-tab-{number}").touch(exist_ok=False)
+                    except FileExistsError:
+                        continue
+                    label = f"会话 {number} 性能测量"
+                    started_thread = f"benchmark-thread-{number}"
+                    break
+                else:
+                    raise AssertionError("The multitab benchmark opened an unexpected session")
             for n in range(4):
-                paragraphs = [f"{n+1}.{i+1} 会话性能测量 · 项目进展。 "
+                paragraphs = [f"{n+1}.{i+1} {label} · 项目进展。 "
                               f"Workspace status for task {i}. [参考资料](https://example.invalid/{i}) "
                               + "保留中英文换行与选择。 " * 4 for i in range(80)]
                 turns.append({"id": f"turn-{n}", "status": "completed", "items": [
@@ -235,6 +255,20 @@ for line in sys.stdin:
                     for i in range(1, 97)]
             turns = [{"id": "table-turn", "status": "completed", "items": [
                 {"id": "table-reply", "type": "agentMessage", "text": "\n".join([header] + rows)}]}]
+        if os.environ.get("SPAN_BENCH_TOOLS") == "1":
+            for n in range(16):
+                items = [{"id": f"request-{n}", "type": "userMessage", "content": [
+                    {"type": "text", "text": f"任务 {n} · Check the workspace and report the results."}]}]
+                for tool in range(6):
+                    items.append({"id": f"exec-{n}-{tool}", "type": "commandExecution",
+                                  "command": f"check-task {n} {tool}", "status": "completed",
+                                  "exitCode": 0, "aggregatedOutput": "Task diagnostics and results\n" * 320})
+                    items.append({"id": f"change-{n}-{tool}", "type": "fileChange", "changes": [
+                        {"path": f"checks-{n}-{tool}.txt", "diff": diff}]})
+                items.append({"id": f"tool-reply-{n}", "type": "agentMessage",
+                              "text": f"## 工具执行记录 · Task {n}\n\n" +
+                                      "已完成检查。 Review the command output and diff above. " * 9})
+                turns.append({"id": f"tool-turn-{n}", "status": "completed", "items": items})
         send({"id": request_id, "result": {"thread": {"id": started_thread, "turns": turns},
                                           "cwd": str(home), "model": "gpt-base-fixture",
                                           "sandbox": {"type": "workspaceWrite", "networkAccess": False},
@@ -260,11 +294,27 @@ for line in sys.stdin:
             "secondary": {"usedPercent": 31, "windowDurationMins": 10080}}}})
     elif method == "thread/list":
         assert params["limit"] == 30 and params["sortKey"] == "updated_at"
+        if os.environ.get("SPAN_BENCH_CATALOG_PAGES") == "1" and not params["searchTerm"]:
+            page = int(params.get("cursor") or 0)
+            assert 0 <= page <= 8
+            first = page * 29
+            indices = list(range(first, first + 29))
+            if page:
+                indices.insert(0, first - 1)
+            results = [entry(f"catalog-{n}", f"Catalog entry #{n:03d}",
+                             f"Projects/Section {n % (3 if n >= 87 else 2) + 1}") for n in indices]
+            (home / f"catalog-page-{page}").touch()
+            send({"id": request_id, "result": {
+                "data": results, "nextCursor": str(page + 1) if page < 8 else None}})
+            continue
         with (home / "agent-catalog-requests").open("a") as requests:
             print(os.getpid(), file=requests)
         results = [entry(saved_thread, "Deployment rollout", "Projects/Operations"),
                    entry(thread, "Release checklist", "Projects/Operations"),
                    entry("archive-notes", "Build notes", "Projects/Platform")]
+        if os.environ.get("SPAN_BENCH_CATALOG") == "1":
+            results = [entry(f"benchmark-entry-{index}", f"{os.getpid()} · 事项 {index + 1}",
+                             f"Projects/Group {index // 10 + 1}") for index in range(30)]
         search = params["searchTerm"] or ""
         results = [entry for entry in results if search.lower() in entry["name"].lower()]
         send({"id": request_id, "result": {"data": results, "nextCursor": None}})
@@ -372,6 +422,112 @@ for line in sys.stdin:
         assert params["summary"] == "auto"
         assert params["clientUserMessageId"]
         message = params["input"][0]["text"]
+        if os.environ.get("SPAN_BENCH_TASK_IDLE") == "1":
+            assert message == "Wait for the test tool" and params["threadId"] == thread
+            identifier = "waiting-benchmark"
+            event = {"threadId": thread, "turnId": identifier}
+            send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
+            command = {"id": "test-tool", "type": "commandExecution", "command": "check build results"}
+            send({"method": "item/started", "params": {**event, "item": {
+                **command, "status": "inProgress"}}})
+            (home / "bench-tool-started").touch()
+            time.sleep(5)
+            send({"method": "item/completed", "params": {**event, "item": {
+                **command, "status": "completed", "exitCode": 0, "aggregatedOutput": "Build ready"}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": identifier, "status": "completed"}}})
+            (home / "bench-tool-finished").touch()
+            continue
+        stream = os.environ.get("SPAN_BENCH_STREAM")
+        if stream == "hidden-prose":
+            assert message == "Stream a reply in the background"
+            identifier = "hidden-prose-benchmark"
+            event = {"threadId": thread, "turnId": identifier}
+            send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
+            (home / "bench-hidden-started").touch()
+
+            def wait_for_bench(name):
+                for _ in range(750):
+                    if (home / name).exists():
+                        return
+                    time.sleep(0.02)
+                raise TimeoutError(name)
+
+            wait_for_bench("bench-hidden-unmapped")
+            offscreen = os.environ.get("SPAN_BENCH_OFFSCREEN_PROSE") == "1"
+            remap = os.environ.get("SPAN_BENCH_REMAP_PROSE") == "1"
+            finishing = os.environ.get("SPAN_BENCH_FINISH_PROSE") == "1"
+            interleaved = os.environ.get("SPAN_BENCH_INTERLEAVED_PROSE") == "1"
+            interval = 0.170 if offscreen and not (remap or finishing) else 0.045
+            paragraphs = []
+            for index in range(576):
+                delta = f"Long reply fragment {index + 1}. **Build output** and `preview` rows. "
+                if index % 6 == 5:
+                    delta += "\n\n"
+                if index == 575:
+                    if interleaved:
+                        prefix = "This long reply fragment appears before the reasoning activity in the conversation"
+                        delta += f"[{prefix}](https://example.invalid/first)\n"
+                    else:
+                        delta += "[The final fragment of the streamed reply](https://example.invalid/end)\n"
+                paragraphs.append(delta)
+                send({"method": "item/agentMessage/delta", "params": {
+                    **event, "itemId": "hidden-prose", "delta": delta}})
+                if index % 6 == 5:
+                    time.sleep(interval)
+            (home / "bench-hidden-buffered").touch()
+            wait_for_bench("bench-hidden-verified")
+            if finishing:
+                (home / "bench-completion-dispatched").touch()
+            if interleaved:
+                send({"method": "item/reasoning/summaryTextDelta", "params": {
+                    **event, "itemId": "interleaved-activity", "summaryIndex": 0,
+                    "delta": "Reviewing the next fragment"}})
+                suffix = "\n[The final fragment of the reply](https://example.invalid/end)\n"
+                paragraphs.append(suffix)
+                send({"method": "item/agentMessage/delta", "params": {
+                    **event, "itemId": "hidden-prose", "delta": suffix}})
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "hidden-prose", "type": "agentMessage", "text": "".join(paragraphs)}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": identifier, "status": "completed"}}})
+            (home / "bench-hidden-finished").touch()
+            continue
+        if stream in ("1", "scroll"):
+            assert message == "Summarize the stream" and params["threadId"] == thread
+            identifier = "reasoning-benchmark"
+            event = {"threadId": thread, "turnId": identifier}
+            send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
+            if stream == "scroll":
+                (home / "bench-stream-started").touch()
+            for index in range(576):
+                send({"method": "item/reasoning/summaryTextDelta", "params": {
+                    **event, "itemId": "reasoning", "summaryIndex": index // 72,
+                    "delta": "Review **build output** and `preview` rows. "}})
+                if index % 6 == 5:
+                    time.sleep(0.045 if stream == "scroll" else 0.008)
+            marker = home / "bench-stream-pending"
+            marker.write_text(str(time.monotonic()))
+            marker.replace(home / "bench-stream-done")
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "stream-reply", "type": "agentMessage", "text": "Reasoning stream finished."}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": identifier, "status": "completed"}}})
+            continue
+        if os.environ.get("SPAN_BENCH_IMAGES") == "1":
+            assert message == "Show the three image previews" and params["threadId"] == thread
+            image_turn = "image-benchmark-turn"
+            event = {"threadId": thread, "turnId": image_turn}
+            send({"id": request_id, "result": {"turn": {"id": image_turn, "status": "inProgress"}}})
+            # A dot directory permits inline Markdown images without opening
+            # the independent generated-artifact panel.
+            text = "\n\n".join(f"![Image {i}](.bench-images/preview-{i}.png)" for i in range(3))
+            send({"method": "item/completed", "params": {**event, "item": {
+                "id": "image-benchmark", "type": "agentMessage", "text": text}}})
+            send({"method": "turn/completed", "params": {
+                **event, "turn": {"id": image_turn, "status": "completed"}}})
+            (home / "bench-images-dispatched").touch()
+            continue
         if message in ("Plan this update", "Back to normal"):
             assert shared and params["threadId"] == saved_thread
             mode = "plan" if message == "Plan this update" else "default"

@@ -21,7 +21,19 @@ Obsoletes:      ssh-workbench < 0.6.4
 Open local shells and OpenSSH sessions in a tabbed GTK workspace.
 
 %install
-install -Dpm 0755 %{_sourcedir}/target/release/span %{buildroot}%{_bindir}/span
+install -Dpm 0755 %{_sourcedir}/target/release/span %{buildroot}%{_libexecdir}/span
+install -dm 0755 %{buildroot}%{_bindir}
+cat > %{buildroot}%{_bindir}/span <<'LAUNCHER'
+#!/bin/sh
+# Old GLib reads its allocation policy before the application enters main.
+if [ "${G_SLICE+x}" != x ]; then
+    export G_SLICE=always-malloc SPAN_INTERNAL_G_SLICE=1
+else
+    unset SPAN_INTERNAL_G_SLICE
+fi
+exec %{_libexecdir}/span "$@"
+LAUNCHER
+chmod 0755 %{buildroot}%{_bindir}/span
 ln -s span %{buildroot}%{_bindir}/ssh-workbench
 install -Dpm 0644 %{_sourcedir}/packaging/io.github.zyw02.SshWorkbench.desktop %{buildroot}%{_datadir}/applications/io.github.zyw02.SshWorkbench.desktop
 install -dm 0755 %{buildroot}%{_datadir}/icons
@@ -38,6 +50,7 @@ install -pm 0644 %{_sourcedir}/target/bundled-vte/COPYING.* %{buildroot}%{_licen
 %doc %{_docdir}/span/VTE-SOURCE
 %license %{_licensedir}/span/COPYING.*
 %{_bindir}/span
+%{_libexecdir}/span
 %{_bindir}/ssh-workbench
 %{_datadir}/applications/io.github.zyw02.SshWorkbench.desktop
 %{_datadir}/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg

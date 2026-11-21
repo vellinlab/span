@@ -1,10 +1,12 @@
 use crate::agent::{append_changes, limited};
-use crate::agent_diff::DiffCard;
+use crate::agent_diff::FoldedDiff;
 use crate::agent_render;
 use crate::icons::{self, Icon};
-use gtk::pango;
 use gtk::prelude::*;
+use gtk::{glib, pango};
 use serde_json::Value;
+use std::borrow::Cow;
+use std::time::Duration;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -30,7 +32,21 @@ struct Entry {
     icon: Rc<Cell<Icon>>,
     leading: gtk::DrawingArea,
     view: View,
-    summary: Vec<String>,
+    summary: Option<Rc<Summary>>,
+}
+
+#[derive(Default)]
+struct Summary {
+    parts: RefCell<Vec<String>>,
+    dirty: Cell<bool>,
+}
+
+impl Summary {
+    fn render(&self, label: &gtk::Label) {
+        if self.dirty.replace(false) {
+            agent_render::set_markdown(label, &summary_text(&self.parts.borrow()));
+        }
+    }
 }
 
 enum View {
@@ -40,23 +56,26 @@ enum View {
         source: gtk::LinkButton,
         domain: gtk::Label,
     },
-    Command(gtk::Box),
+    Command {
+        body: gtk::Box,
+        detail: FoldedDetail,
+    },
     Patch {
         files: gtk::Label,
-        diff: Rc<DiffCard>,
+        diff: FoldedDiff,
     },
 }
 
 pub struct Record<'a> {
-    id: &'a str,
+    id: Cow<'a, str>,
     title: String,
     detail: String,
-    kind: &'a str,
+    kind: Cow<'a, str>,
     icon: Icon,
-    status: Option<&'a str>,
+    status: Option<Cow<'a, str>>,
     patch: Option<String>,
     summary: Vec<String>,
-    web_url: Option<&'a str>,
+    web_url: Option<Cow<'a, str>>,
 }
 
 impl<'a> Record<'a> {
@@ -138,20 +157,34 @@ impl<'a> Record<'a> {
             _ => return None,
         };
         Some(Self {
-            id,
+            id: id.into(),
             title: with_status(title, status),
             detail,
-            kind,
+            kind: kind.into(),
             icon,
-            status,
+            status: status.map(Cow::Borrowed),
             patch: None,
             summary,
-            web_url,
+            web_url: web_url.map(Cow::Borrowed),
         })
     }
 
     pub fn id(&self) -> &str {
-        self.id
+        &self.id
+    }
+
+    fn into_owned(self) -> Record<'static> {
+        Record {
+            id: Cow::Owned(self.id.into_owned()),
+            title: self.title,
+            detail: self.detail,
+            kind: Cow::Owned(self.kind.into_owned()),
+            icon: self.icon,
+            status: self.status.map(|status| Cow::Owned(status.into_owned())),
+            patch: self.patch,
+            summary: self.summary,
+            web_url: self.web_url.map(|url| Cow::Owned(url.into_owned())),
+        }
     }
 
     pub fn patch(id: &'a str, changes: &Value, status: Option<&'a str>) -> Self {
@@ -173,12 +206,12 @@ impl<'a> Record<'a> {
         let mut patch = String::new();
         append_changes(changes, &mut patch);
         Self {
-            id,
+            id: id.into(),
             title: with_status(title, status),
             detail,
-            kind: "fileChange",
+            kind: Cow::Borrowed("fileChange"),
             icon: Icon::Edit,
-            status,
+            status: status.map(Cow::Borrowed),
             patch: (!patch.is_empty()).then_some(patch),
             summary: Vec::new(),
             web_url: None,
@@ -208,21 +241,60 @@ impl Activity {
         }
     }
 
+    pub fn archived(
+        quote: crate::quote::Action,
+        records: Vec<Record<'_>>,
+        status: Option<&str>,
+    ) -> gtk::Expander {
+        let activity = Self::new(quote.clone());
+        let count = records
+            .iter()
+            .map(Record::id)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        activity.set_finished_heading(status, count);
+        let records = RefCell::new(Some(
+            records
+                .into_iter()
+                .map(Record::into_owned)
+                .collect::<Vec<_>>(),
+        ));
+        let heading = activity.heading.downgrade();
+        let rows = activity.rows.downgrade();
+        activity.widget.connect_expanded_notify(move |widget| {
+            if !widget.is_expanded() {
+                return;
+            }
+            let (Some(heading), Some(rows), Some(records)) =
+                (heading.upgrade(), rows.upgrade(), records.take())
+            else {
+                return;
+            };
+            let mut activity = Self {
+                widget: widget.clone(),
+                heading,
+                rows,
+                entries: HashMap::new(),
+                progress: String::new(),
+                finished: true,
+                quote: quote.clone(),
+            };
+            for record in records {
+                activity.record(record);
+            }
+        });
+        activity.widget
+    }
+
     pub fn record(&mut self, record: Record<'_>) {
-        self.render_record(record, false);
-    }
-
-    pub fn record_history(&mut self, record: Record<'_>) {
-        self.render_record(record, true);
-    }
-
-    fn render_record(&mut self, record: Record<'_>, historical: bool) {
         let quote = self.quote.clone();
-        let entry = self.entry(record.id, record.kind, record.icon);
+        let entry = self.entry(&record.id, &record.kind, record.icon);
         set_title(&entry.row, &entry.title, &record.title);
         match &entry.view {
             View::Text(label) if record.kind == "reasoning" => {
-                entry.summary = record.summary;
+                let summary = entry.summary.get_or_insert_with(Rc::default);
+                summary.parts.replace(record.summary);
+                summary.dirty.set(false);
                 agent_render::set_markdown(label, &record.detail);
             }
             View::Text(label) => label.set_text(&record.detail),
@@ -234,7 +306,7 @@ impl Activity {
                 detail.set_text(&record.detail);
                 detail.set_visible(!record.detail.is_empty());
                 source.set_visible(record.web_url.is_some());
-                if let Some(url) = record.web_url {
+                if let Some(url) = record.web_url.as_deref() {
                     let host = url
                         .split_once("://")
                         .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
@@ -249,8 +321,8 @@ impl Activity {
                     }
                 }
             }
-            View::Command(body) => {
-                let status = match record.status {
+            View::Command { body, detail } => {
+                let status = match record.status.as_deref() {
                     Some("completed") => "成功",
                     Some("failed") => "失败",
                     Some("declined") => "已拒绝",
@@ -258,13 +330,13 @@ impl Activity {
                     _ => "",
                 };
                 let body = body.clone();
-                let detail = record.detail;
-                render_detail(&entry.row, historical, move || {
+                let output = record.detail;
+                detail.update(&entry.row, move || {
                     for child in body.children() {
                         body.remove(&child);
                     }
                     let card =
-                        agent_render::code_card("Shell", &detail, nonempty(Some(status)), &quote);
+                        agent_render::code_card("Shell", &output, nonempty(Some(status)), &quote);
                     body.add(&card);
                     card.show_all();
                 });
@@ -272,13 +344,7 @@ impl Activity {
             View::Patch { files, diff } => {
                 files.set_text(&record.detail);
                 if let Some(patch) = record.patch {
-                    let diff = diff.clone();
-                    let files = files.clone();
-                    render_detail(&entry.row, historical, move || {
-                        diff.update(&patch);
-                        diff.widget().show();
-                        files.hide();
-                    });
+                    diff.update(&entry.row, patch);
                 }
             }
         }
@@ -291,25 +357,37 @@ impl Activity {
     pub fn summary(&mut self, id: &str, index: usize, delta: &str) {
         let entry = self.entry(id, "reasoning", Icon::Activity);
         set_title(&entry.row, &entry.title, "推理摘要");
-        if entry.summary.len() <= index {
-            entry.summary.resize_with(index + 1, String::new);
+        let summary = entry.summary.get_or_insert_with(Rc::default);
+        let mut parts = summary.parts.borrow_mut();
+        if parts.len() <= index {
+            parts.resize_with(index + 1, String::new);
         }
-        let part = &mut entry.summary[index];
+        let part = &mut parts[index];
         if part.len() >= SUMMARY_LIMIT {
             return;
         }
         part.push_str(&limited(delta, SUMMARY_LIMIT - part.len()));
-        let detail = summary_text(&entry.summary);
-        if let View::Text(label) = &entry.view {
-            agent_render::set_markdown(label, &detail);
+        if let View::Text(label) = &entry.view
+            && !summary.dirty.replace(true)
+        {
+            let label = label.downgrade();
+            let summary = Rc::downgrade(summary);
+            glib::timeout_add_local_once(Duration::from_millis(33), move || {
+                if let (Some(label), Some(summary)) = (label.upgrade(), summary.upgrade()) {
+                    summary.render(&label);
+                }
+            });
         }
-        self.set_heading("进行中 · 推理摘要");
-        if let Some(headline) = detail
-            .lines()
+        let headline = parts
+            .iter()
+            .flat_map(|part| part.lines())
             .map(|line| line.trim().trim_matches('*'))
             .find(|line| !line.is_empty())
-        {
-            self.progress = limited(headline, 180);
+            .map(|headline| limited(headline, 180));
+        drop(parts);
+        self.set_heading("进行中 · 推理摘要");
+        if let Some(headline) = headline {
+            self.progress = headline;
         }
     }
 
@@ -318,7 +396,16 @@ impl Activity {
     }
 
     pub fn finish(&mut self, status: Option<&str>) {
+        for entry in self.entries.values() {
+            if let (Some(summary), View::Text(label)) = (&entry.summary, &entry.view) {
+                summary.render(label);
+            }
+        }
         self.finished = true;
+        self.set_finished_heading(status, self.entries.len());
+    }
+
+    fn set_finished_heading(&self, status: Option<&str>, count: usize) {
         let title = match status {
             Some("inProgress") => "进行中",
             Some("interrupted") => "已停止",
@@ -327,15 +414,20 @@ impl Activity {
             Some("steered") => "追加前的活动",
             _ => "已完成",
         };
-        self.set_heading(&format!("{title} · {} 项活动", self.entries.len()));
+        self.set_heading(&format!("{title} · {count} 项活动"));
     }
 
     pub fn extend_summary(&self, id: &str, parts: &mut Vec<String>) {
-        if let Some(entry) = self.entries.get(id) {
-            if parts.len() < entry.summary.len() {
-                parts.resize_with(entry.summary.len(), String::new);
+        if let Some(summary) = self
+            .entries
+            .get(id)
+            .and_then(|entry| entry.summary.as_ref())
+        {
+            let summary = summary.parts.borrow();
+            if parts.len() < summary.len() {
+                parts.resize_with(summary.len(), String::new);
             }
-            for (old, new) in parts.iter_mut().zip(&entry.summary) {
+            for (old, new) in parts.iter_mut().zip(summary.iter()) {
                 old.push_str(new);
             }
         }
@@ -361,17 +453,16 @@ impl Activity {
             let view = if kind == "commandExecution" {
                 let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 item.add(&body);
-                View::Command(body)
+                View::Command {
+                    body,
+                    detail: FoldedDetail::new(&item),
+                }
             } else if kind == "fileChange" {
                 let body = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 let files = agent_render::text("");
                 files.style_context().add_class("agent-activity-detail");
                 body.add(&files);
-                let diff = Rc::new(DiffCard::new("文件补丁"));
-                body.add(diff.widget());
-                diff.widget().show_all();
-                diff.widget().set_no_show_all(true);
-                diff.widget().hide();
+                let diff = FoldedDiff::new(&item, &body, "文件补丁", Some(&files));
                 item.add(&body);
                 View::Patch { files, diff }
             } else if kind == "webSearch" {
@@ -433,7 +524,7 @@ impl Activity {
                 icon: symbol,
                 leading,
                 view,
-                summary: Vec::new(),
+                summary: None,
             }
         });
         if entry.icon.replace(icon) != icon {
@@ -452,19 +543,34 @@ fn summary_text(parts: &[String]) -> String {
         .join("\n\n")
 }
 
-pub fn render_detail(row: &gtk::Expander, deferred: bool, render: impl FnOnce() + 'static) {
-    if !deferred || row.is_expanded() {
-        render();
-        return;
+type PendingDetail = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+
+pub struct FoldedDetail(PendingDetail);
+
+impl FoldedDetail {
+    pub fn new(row: &gtk::Expander) -> Self {
+        let pending: PendingDetail = Rc::default();
+        let on_expand = pending.clone();
+        row.connect_expanded_notify(move |row| {
+            if row.is_expanded()
+                && let Some(render) = on_expand.take()
+            {
+                render();
+            }
+        });
+        Self(pending)
     }
-    let render = RefCell::new(Some(render));
-    row.connect_expanded_notify(move |row| {
-        if row.is_expanded()
-            && let Some(render) = render.take()
-        {
+
+    pub fn update(&self, row: &gtk::Expander, render: impl FnOnce() + 'static) {
+        if row.is_expanded() {
+            self.0.take();
             render();
+        } else {
+            // File changes and command output are snapshots. Only the most recent
+            // snapshot is needed when the user opens this row.
+            self.0.replace(Some(Box::new(render)));
         }
-    });
+    }
 }
 
 pub fn summary_delta(params: &Value) -> Option<(&str, usize, &str)> {
@@ -563,6 +669,9 @@ fn set_title_widget(row: &gtk::Expander, title: &gtk::Label, leading: &gtk::Draw
 }
 
 fn set_title(row: &gtk::Expander, title: &gtk::Label, text: &str) {
+    if title.text().as_str() == text {
+        return;
+    }
     title.set_text(text);
     title.set_tooltip_text(Some(text));
     if let Some(accessible) = row.accessible() {

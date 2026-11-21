@@ -2,8 +2,9 @@ use crate::agent_render::clipboard;
 use crate::quote;
 use gtk::atk::prelude::{HyperlinkExt, HypertextExt};
 use gtk::prelude::*;
-use gtk::{gdk, glib, pango};
+use gtk::{cairo, gdk, glib, pango};
 use std::cell::{Cell, OnceCell, RefCell};
+use std::rc::Rc;
 
 pub fn vertical_delta(event: &gdk::EventScroll) -> Option<f64> {
     if event.state().contains(gdk::ModifierType::SHIFT_MASK) {
@@ -29,15 +30,9 @@ pub fn scroll_vertical(scroll: &gtk::ScrolledWindow, delta: f64) -> f64 {
     let lower = adjustment.lower();
     let upper = (adjustment.upper() - adjustment.page_size()).max(lower);
     let step = adjustment.page_size().powf(2.0 / 3.0).max(1.0);
-    let history = scroll.downcast_ref::<crate::history_window::HistoryScroll>();
-    let actual = adjustment.value();
-    let previous = history.map_or(actual, |view| view.wheel_position(actual));
+    let previous = adjustment.value();
     let next = (previous + step * delta).clamp(lower, upper);
-    if let Some(view) = history {
-        view.apply_wheel(&adjustment, next, next == lower || next == upper);
-    } else {
-        adjustment.set_value(next);
-    }
+    adjustment.set_value(next);
     let remaining = delta - (next - previous) / step;
     if delta < 0.0 && next == lower {
         scroll.emit_by_name::<()>("edge-overshot", &[&gtk::PositionType::Top]);
@@ -47,8 +42,16 @@ pub fn scroll_vertical(scroll: &gtk::ScrolledWindow, delta: f64) -> f64 {
 
 pub struct Part {
     pub widget: gtk::EventBox,
-    label: gtk::Label,
+    label: Label,
+    plain: Option<Rc<str>>,
     separator: &'static str,
+}
+
+pub type LabelSlot = Rc<glib::WeakRef<gtk::Label>>;
+
+enum Label {
+    Existing(gtk::Label),
+    Deferred(LabelSlot),
 }
 
 impl Part {
@@ -56,6 +59,31 @@ impl Part {
         let widget = Self::region();
         widget.add(label);
         Self::in_region(label, separator, &widget)
+    }
+
+    pub fn deferred(
+        label: &gtk::Label,
+        widget: &gtk::EventBox,
+        separator: &'static str,
+        plain: Rc<str>,
+    ) -> Self {
+        let mut part = Self::in_region(label, separator, widget);
+        part.plain = Some(plain);
+        part
+    }
+
+    pub fn deferred_in_region(
+        label: LabelSlot,
+        separator: &'static str,
+        widget: &gtk::EventBox,
+        plain: Rc<str>,
+    ) -> Self {
+        Self {
+            widget: widget.clone(),
+            label: Label::Deferred(label),
+            plain: Some(plain),
+            separator,
+        }
     }
 
     pub fn region() -> gtk::EventBox {
@@ -69,8 +97,16 @@ impl Part {
         label.set_selectable(false);
         Self {
             widget: widget.clone(),
-            label: label.clone(),
+            label: Label::Existing(label.clone()),
+            plain: None,
             separator,
+        }
+    }
+
+    fn label(&self) -> Option<gtk::Label> {
+        match &self.label {
+            Label::Existing(label) => Some(label.clone()),
+            Label::Deferred(slot) => slot.upgrade(),
         }
     }
 }
@@ -130,7 +166,15 @@ mod imp {
     }
 
     impl ObjectImpl for TextSelection {}
-    impl WidgetImpl for TextSelection {}
+    impl WidgetImpl for TextSelection {
+        fn draw(&self, cr: &cairo::Context) -> glib::Propagation {
+            let propagation = self.parent_draw(cr);
+            if let Some((start, end)) = self.range.get() {
+                self.obj().draw_selection(cr, start, end);
+            }
+            propagation
+        }
+    }
     impl ContainerImpl for TextSelection {}
     impl BinImpl for TextSelection {}
     impl EventBoxImpl for TextSelection {}
@@ -267,10 +311,10 @@ impl TextSelection {
                 && let Some(start) = drag.link_byte
                 && let Some((position, Some(end))) = view.hit(root, false)
                 && position.part == drag.start.part
+                && let Some(label) = view.parts()[position.part].label()
             {
-                let label = &view.parts()[position.part].label;
-                if let Some(uri) = link_at(label, start)
-                    .filter(|uri| start == end || link_at(label, end).as_ref() == Some(uri))
+                if let Some(uri) = link_at(&label, start)
+                    .filter(|uri| start == end || link_at(&label, end).as_ref() == Some(uri))
                 {
                     label.emit_by_name::<bool>("activate-link", &[&uri.as_str()]);
                 }
@@ -329,16 +373,16 @@ impl TextSelection {
         let mut closest = None;
         let mut distance = i32::MAX;
         for (index, part) in self.parts().iter().enumerate() {
-            if !part.label.is_mapped() {
+            let Some(label) = part.label().filter(|label| label.is_mapped()) else {
                 continue;
-            }
-            let Some((left, top)) = part.label.translate_coordinates(self, 0, 0) else {
+            };
+            let Some((left, top)) = label.translate_coordinates(self, 0, 0) else {
                 continue;
             };
             let local_x = x - left;
             let local_y = y - top;
-            let width = part.label.allocated_width();
-            let height = part.label.allocated_height();
+            let width = label.allocated_width();
+            let height = label.allocated_height();
             let dx = (-local_x).max(local_x - width + 1).max(0);
             let dy = (-local_y).max(local_y - height + 1).max(0);
             if dx == 0 && dy == 0 {
@@ -351,7 +395,7 @@ impl TextSelection {
             }
         }
         let (part, x, y) = closest?;
-        let label = &self.parts()[part].label;
+        let label = self.parts()[part].label()?;
         let (left, top) = label.layout_offsets();
         // Labels have no GDK window. GTK reports layout offsets in the
         // containing window, while x and y above are relative to the label.
@@ -385,27 +429,78 @@ impl TextSelection {
     }
 
     fn change_range(&self, range: Option<Range>) {
-        let old = self.imp().range.replace(range);
-        if old == range {
-            return;
+        if self.imp().range.replace(range) != range {
+            // The text, line breaks, and link ranges stay the same. Redraw
+            // only the selection instead of telling GTK to reshape the labels.
+            self.queue_draw();
         }
-        for (index, part) in self.parts().iter().enumerate() {
-            let before = bounds(old, index);
-            let after = bounds(range, index);
-            if before == after {
+    }
+
+    fn draw_selection(&self, cr: &cairo::Context, start: Position, end: Position) {
+        let Ok((_, clip_top, _, clip_bottom)) = cr.clip_extents() else {
+            return;
+        };
+        let _ = cr.save();
+        cr.new_path();
+        let units = f64::from(pango::SCALE);
+        let pixels = |position| f64::from(position) / units;
+        for index in start.part..=end.part {
+            let Some(label) = self.parts()[index]
+                .label()
+                .filter(|label| label.is_mapped())
+            else {
+                continue;
+            };
+            let Some((x, y)) = label.translate_coordinates(self, 0, 0) else {
+                continue;
+            };
+            if f64::from(y) >= clip_bottom || f64::from(y + label.allocated_height()) <= clip_top {
                 continue;
             }
-            if let Some((start, end)) = after {
-                let attributes = pango::AttrList::new();
-                let mut highlight = pango::AttrColor::new_background(0x3232, 0x5858, 0x8484);
-                highlight.set_start_index(start as u32);
-                highlight.set_end_index(end as u32);
-                attributes.insert(highlight);
-                part.label.set_attributes(Some(&attributes));
+            let Some(layout) = label.layout() else {
+                continue;
+            };
+            let allocation = label.allocation();
+            let (offset_x, offset_y) = label.layout_offsets();
+            let left = f64::from(x + offset_x - allocation.x());
+            let top = f64::from(y + offset_y - allocation.y());
+            let from = if index == start.part {
+                start.byte as i32
             } else {
-                part.label.set_attributes(None);
+                0
+            };
+            let to = if index == end.part {
+                end.byte as i32
+            } else {
+                i32::MAX
+            };
+            let mut lines = layout.iter();
+            while let Some(line) = lines.line_readonly() {
+                let first = from.max(line.start_index());
+                let last = to.min(line.start_index() + line.length());
+                if first < last {
+                    let (_, logical) = lines.line_extents();
+                    let y = top + pixels(logical.y());
+                    let height = pixels(logical.height());
+                    if y + height > clip_top && y < clip_bottom {
+                        for span in line.x_ranges(first, last).chunks_exact(2) {
+                            cr.rectangle(
+                                left + pixels(span[0]),
+                                y,
+                                pixels(span[1] - span[0]),
+                                height,
+                            );
+                        }
+                    }
+                }
+                if line.start_index() >= to || !lines.next_line() {
+                    break;
+                }
             }
         }
+        cr.set_source_rgba(0.26, 0.51, 0.82, 0.38);
+        let _ = cr.fill();
+        let _ = cr.restore();
     }
 
     fn selected_text(&self) -> Option<String> {
@@ -413,7 +508,12 @@ impl TextSelection {
         let mut text = String::new();
         for index in start.part..=end.part {
             let part = &self.parts()[index];
-            let value = part.label.text();
+            let label_text = part.label().map(|label| label.text());
+            let value = label_text
+                .as_deref()
+                .filter(|text| !text.is_empty())
+                .or(part.plain.as_deref())
+                .unwrap_or_default();
             let (from, to) = bounds(Some((start, end)), index)?;
             if index != start.part {
                 text.push_str(part.separator);

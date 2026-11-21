@@ -86,7 +86,31 @@ fn editor_color(color: (u8, u8, u8)) -> (u8, u8, u8) {
 }
 
 pub fn view(scroll: &gtk::ScrolledWindow, source: SourceText, quote: &quote::Action) -> gtk::Box {
+    // Attach the view after applying tags. TextView invalidates its layout
+    // when a tag changes, even during initial construction.
+    let buffer = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
+    buffer.set_text(&source.text);
+    let table = buffer
+        .tag_table()
+        .expect("source text buffer has a tag table");
+    let mut tags = HashMap::new();
+    for (start, end, color) in source.spans {
+        let tag = tags.entry(color).or_insert_with(|| {
+            let (r, g, b) = color;
+            let tag = gtk::TextTag::builder()
+                .foreground(format!("#{r:02x}{g:02x}{b:02x}"))
+                .build();
+            table.add(&tag);
+            tag
+        });
+        buffer.apply_tag(
+            tag,
+            &buffer.iter_at_offset(start),
+            &buffer.iter_at_offset(end),
+        );
+    }
     let view = gtk::TextView::builder()
+        .buffer(&buffer)
         .editable(false)
         .cursor_visible(false)
         .monospace(true)
@@ -101,26 +125,6 @@ pub fn view(scroll: &gtk::ScrolledWindow, source: SourceText, quote: &quote::Act
     view.style_context().add_class("agent-code-view");
     if let Some(accessible) = view.accessible() {
         accessible.set_name("文件内容");
-    }
-    let buffer = view.buffer().expect("GTK text view has a buffer");
-    buffer.set_text(&source.text);
-    let mut tags = HashMap::new();
-    for (start, end, color) in source.spans {
-        let tag = tags.entry(color).or_insert_with(|| {
-            let (r, g, b) = color;
-            let tag = gtk::TextTag::builder()
-                .foreground(format!("#{r:02x}{g:02x}{b:02x}"))
-                .build();
-            if let Some(table) = buffer.tag_table() {
-                table.add(&tag);
-            }
-            tag
-        });
-        buffer.apply_tag(
-            tag,
-            &buffer.iter_at_offset(start),
-            &buffer.iter_at_offset(end),
-        );
     }
     quote::bind_text(&view, quote);
 

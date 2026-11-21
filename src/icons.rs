@@ -1,7 +1,9 @@
 use gtk::prelude::*;
 use gtk::{cairo, gdk, gdk_pixbuf, glib};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     Terminal,
     Conversation,
@@ -39,6 +41,18 @@ pub enum Icon {
     Edit,
     Globe,
     Tool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct MaskKey {
+    icon: Icon,
+    size: i32,
+    scale: i32,
+    half_pixel: bool,
+}
+
+thread_local! {
+    static MASKS: RefCell<HashMap<MaskKey, cairo::ImageSurface>> = RefCell::default();
 }
 
 pub fn widget(icon: Icon, size: i32) -> gtk::DrawingArea {
@@ -92,10 +106,55 @@ fn drawing_widget(
             })
             .unwrap_or(available / 2.0)
             .clamp(0.0, available);
-        draw(cr, symbol(), size, y, &color);
+        let icon = symbol();
+        let key = MaskKey {
+            icon,
+            size,
+            scale: area.scale_factor(),
+            half_pixel: y.fract() != 0.0,
+        };
+        if let Some(mask) = icon_mask(key) {
+            let _ = cr.save();
+            cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
+            let _ = cr.mask_surface(&mask, 0.0, y.floor());
+            let _ = cr.restore();
+        } else {
+            draw(cr, icon, size, y, &color);
+        }
         glib::Propagation::Proceed
     });
     area
+}
+
+fn icon_mask(key: MaskKey) -> Option<cairo::ImageSurface> {
+    MASKS.with_borrow_mut(|masks| {
+        if let Some(mask) = masks.get(&key) {
+            return Some(mask.clone());
+        }
+        let MaskKey {
+            icon,
+            size,
+            scale,
+            half_pixel,
+        } = key;
+        let width = size * scale;
+        let height = width + scale;
+        if width > 128 || width <= 0 {
+            return None;
+        }
+        let mask = cairo::ImageSurface::create(cairo::Format::A8, width, height).ok()?;
+        mask.set_device_scale(f64::from(scale), f64::from(scale));
+        let cr = cairo::Context::new(&mask).ok()?;
+        // Icon positions align to whole or half logical pixels. Cache the
+        // coverage at the actual monitor scale and apply the live CSS color.
+        let phase = if half_pixel { 0.5 } else { 0.0 };
+        draw(&cr, icon, size, phase, &gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
+        if masks.len() >= 192 {
+            masks.clear();
+        }
+        masks.insert(key, mask.clone());
+        Some(mask)
+    })
 }
 
 pub fn pixbuf(icon: Icon, size: i32, color: &gdk::RGBA) -> Option<gdk_pixbuf::Pixbuf> {

@@ -46,9 +46,12 @@ cp "$topdir"/RPMS/x86_64/*.rpm dist/
 package=(dist/span-*.rpm)
 rpm -qp --requires "${package[0]}"
 bash packaging/test-package-upgrade.sh "${package[0]}" "$@"
-linked_vte="$(ldd /usr/bin/span | awk '$1 == "libvte-2.91.so.0" { print $3 }')"
+linked_vte="$(ldd /usr/libexec/span | awk '$1 == "libvte-2.91.so.0" { print $3 }')"
 test "$(realpath "$linked_vte")" = /usr/lib64/span/libvte-2.91.so.0
-dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/span target/verify-osc
+env -u G_SLICE SPAN_TEST_RPM_ALLOCATOR=1 TERM=dumb \
+    dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/span target/verify-osc
+GDK_GL= G_SLICE= SPAN_TEST_RPM_ALLOCATOR=1 TERM=dumb \
+    dbus-run-session -- bash packaging/smoke-test.sh /usr/bin/ssh-workbench
 
 # Exercise the two actual RPM executables against the target GTK and bundled VTE.
 if [[ -n ${SPAN_BENCH_RPM:-} ]]; then
@@ -57,10 +60,13 @@ if [[ -n ${SPAN_BENCH_RPM:-} ]]; then
         xdotool google-noto-sans-cjk-ttc-fonts cpio python39-pip
     bench="$(mktemp -d)"
     python3.9 -m pip install --disable-pip-version-check --target "$bench/python" python-xlib==0.33
-    mkdir -p "$bench/previous" "$bench/rc21" "$bench/rc22"
+    baseline_name="${SPAN_BENCH_RPM##*/}"
+    baseline_version="${baseline_name#span-}"
+    baseline_version="${baseline_version%-1.el8.x86_64.rpm}"
+    mkdir -p "$bench/previous" "$bench/$baseline_version" "$bench/candidate"
     (cd "$bench/previous" && rpm2cpio "$SPAN_BENCH_RPM" | cpio -id --quiet)
-    ln -s "$bench/previous/usr/bin/span" "$bench/rc21/span"
-    ln -s /usr/bin/span "$bench/rc22/span"
+    ln -s "$bench/previous/usr/bin/span" "$bench/$baseline_version/span"
+    ln -s /usr/bin/span "$bench/candidate/span"
     # The fixture uses the same Python as the benchmark on both launches.
     ln -s /usr/bin/python3.9 "$bench/python/python3"
     Xvfb :92 -screen 0 1600x980x24 -nolisten tcp &
@@ -68,6 +74,7 @@ if [[ -n ${SPAN_BENCH_RPM:-} ]]; then
     trap 'kill "$display_pid" 2>/dev/null || true' EXIT
     export DISPLAY=:92
     for attempt in {1..100}; do xdpyinfo >/dev/null 2>&1 && break; sleep 0.1; done
-    PATH="$bench/python:$PATH" PYTHONPATH="$bench/python" dbus-run-session -- python3.9 packaging/bench-interaction.py \
-        "$bench/rc21/span" "$bench/rc22/span" "$bench/rc22/span" "$bench/rc21/span"
+    env -u G_SLICE SPAN_TEST_RPM_ALLOCATOR=1 PATH="$bench/python:$PATH" PYTHONPATH="$bench/python" \
+        dbus-run-session -- python3.9 packaging/bench-interaction.py \
+        "$bench/$baseline_version/span" "$bench/candidate/span" "$bench/candidate/span" "$bench/$baseline_version/span"
 fi

@@ -649,29 +649,58 @@ mod tests {
         let result = exit.clone();
         terminal.connect_child_exited(move |_, code| result.set(Some(code)));
         let cancellable = gio::Cancellable::new();
+        let script = concat!(
+            "Write-Output 'SPAN_INPUT_READY'; ",
+            "$line = [Console]::ReadLine(); ",
+            "if ($line -ne 'span-pty-input') { exit 2 }; ",
+            "Write-Output 'SPAN_NATIVE_WINDOWS'; exit 0"
+        );
         terminal.spawn(
             None,
-            &["powershell.exe", "-NoLogo", "-NoProfile"],
+            &[
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
             &[],
             &cancellable,
             |result| {
                 result.expect("start Windows ConPTY");
             },
         );
-        terminal.write(
-            b"Write-Output ('SPAN_NATIVE_' + 'WINDOWS'); exit\r".to_vec(),
-            true,
-        );
         let context = glib::MainContext::default();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let output = || {
+            let grid = terminal.imp().grid.borrow();
+            let grid = grid.as_ref().unwrap().lock();
+            grid.grid()
+                .display_iter()
+                .map(|cell| cell.c)
+                .collect::<String>()
+        };
+        // Start writing after PowerShell has reached its input stage.
+        loop {
+            let screen = output();
+            if screen.contains("SPAN_INPUT_READY") {
+                break;
+            }
+            assert!(
+                exit.get().is_none() && std::time::Instant::now() < deadline,
+                "PowerShell did not reach its input stage: {screen:?}"
+            );
+            context.iteration(false);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        terminal.write(b"span-pty-input\r".to_vec(), true);
         while exit.get().is_none() && std::time::Instant::now() < deadline {
             context.iteration(false);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert_eq!(exit.get(), Some(0));
-        let grid = terminal.imp().grid.borrow();
-        let grid = grid.as_ref().unwrap().lock();
-        let output: String = grid.grid().display_iter().map(|cell| cell.c).collect();
+        let output = output();
+        assert_eq!(exit.get(), Some(0), "terminal output was {output:?}");
         assert!(
             output.contains("SPAN_NATIVE_WINDOWS"),
             "terminal output was {output:?}"

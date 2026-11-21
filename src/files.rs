@@ -184,6 +184,7 @@ impl Kind {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub struct Entry {
     pub name: OsString,
     pub kind: Kind,
@@ -198,6 +199,7 @@ impl Entry {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub struct Directory {
     pub path: PathBuf,
     pub entries: Vec<Entry>,

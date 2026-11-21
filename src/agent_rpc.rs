@@ -89,6 +89,9 @@ impl Rpc {
                 | gio::SubprocessFlags::STDOUT_PIPE
                 | gio::SubprocessFlags::STDERR_SILENCE,
         );
+        for variable in crate::process_environment::private_variables() {
+            launcher.unsetenv(variable);
+        }
         let process = launcher
             .spawn(&argv)
             .map_err(|e| format!("无法启动 Codex：{e}"))?;

@@ -2,7 +2,7 @@ use crate::agent_activity::{self, Activity, Record};
 use crate::agent_attachments::{Attachments, Prepared};
 use crate::agent_catalog::{self, Catalog, ThreadState};
 use crate::agent_commands::Commands;
-use crate::agent_diff::DiffCard;
+use crate::agent_diff::{DiffCard, FoldedDiff};
 use crate::agent_extensions::{
     self, Action as ExtensionAction, Extensions, Request as ExtensionRequest,
     Section as ExtensionSection,
@@ -32,6 +32,7 @@ mod slash;
 
 const INITIAL_TURNS: usize = 4;
 const OLDER_TURNS: usize = 12;
+const OLDER_RENDER_TURNS: usize = 3;
 const HISTORY_PREFETCH_DISTANCE: f64 = 64.0;
 const CATALOG_FRESHNESS: Duration = Duration::from_secs(20);
 
@@ -69,6 +70,7 @@ struct LiveMessage {
     id: String,
     text: RefCell<String>,
     dirty: Cell<bool>,
+    paint_queued: Cell<bool>,
     label: gtk::Label,
 }
 
@@ -80,10 +82,20 @@ impl LiveMessage {
     }
 }
 
+struct ArchivePage {
+    turns: std::vec::IntoIter<Value>,
+    result: Value,
+}
+
+struct ReplyPart {
+    text: Rc<String>,
+    widget: gtk::Widget,
+}
+
 struct TurnDiff {
     id: String,
     expander: gtk::Expander,
-    card: DiffCard,
+    card: FoldedDiff,
 }
 
 struct PendingMessage {
@@ -150,12 +162,13 @@ pub struct Agent {
     last_copy: RefCell<Option<Rc<String>>>,
     activity: RefCell<Option<(String, Activity)>>,
     past_activity: RefCell<Vec<Activity>>,
-    past_replies: RefCell<HashMap<String, Vec<Rc<LiveMessage>>>>,
+    past_replies: RefCell<HashMap<String, Vec<ReplyPart>>>,
     history: gtk::Box,
     history_window: Rc<crate::history_window::HistoryWindow>,
     older: gtk::Button,
     history_cursor: RefCell<Option<String>>,
     history_loading: Cell<bool>,
+    archive_page: RefCell<Option<ArchivePage>>,
     history_anchor: RefCell<Option<(gtk::Widget, i32)>>,
     history_generation: Cell<u64>,
     prepend_at: Cell<Option<i32>>,
@@ -280,14 +293,12 @@ impl Agent {
 
         let history = crate::reading_column::new(18);
         history.style_context().add_class("agent-history");
-        let scroll: gtk::ScrolledWindow =
-            glib::Object::builder::<crate::history_window::HistoryScroll>()
-                .property("hscrollbar-policy", gtk::PolicyType::Never)
-                .property("vscrollbar-policy", gtk::PolicyType::Automatic)
-                .property("overlay-scrolling", false)
-                .property("kinetic-scrolling", false)
-                .build()
-                .upcast();
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .overlay_scrolling(false)
+            .kinetic_scrolling(false)
+            .build();
         scroll.style_context().add_class("agent-scroll");
         scroll.connect_scroll_event(|scroll, event| {
             if let Some(delta) = crate::agent_selection::vertical_delta(event) {
@@ -488,11 +499,16 @@ impl Agent {
             activity: RefCell::new(None),
             past_activity: RefCell::new(Vec::new()),
             past_replies: RefCell::new(HashMap::new()),
-            history_window: crate::history_window::HistoryWindow::new(&history, &scroll),
+            history_window: crate::history_window::HistoryWindow::new(
+                &history,
+                &scroll,
+                follow_tail.clone(),
+            ),
             history,
             older,
             history_cursor: RefCell::new(None),
             history_loading: Cell::new(false),
+            archive_page: RefCell::new(None),
             history_anchor: RefCell::new(None),
             history_generation: Cell::new(0),
             prepend_at: Cell::new(None),
@@ -574,6 +590,14 @@ impl Agent {
                 && let Some(agent) = weak.upgrade()
             {
                 agent.load_older_history();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.scroll.vadjustment().connect_value_changed(move |_| {
+            if let Some(agent) = weak.upgrade()
+                && let Some(reply) = agent.live.borrow().as_ref()
+            {
+                agent.queue_live_paint(reply, false);
             }
         });
         let weak = Rc::downgrade(self);
@@ -1150,7 +1174,16 @@ impl Agent {
     }
 
     fn load_older_history(&self) {
-        if self.opening.get() || self.history_loading.get() || self.rpc.borrow().is_none() {
+        if self.opening.get()
+            || self.history_loading.get()
+            || self.history_anchor.borrow().is_some()
+            || self.rpc.borrow().is_none()
+        {
+            return;
+        }
+        let cached = self.archive_page.take();
+        if let Some(page) = cached {
+            self.prepend_history_slice(page);
             return;
         }
         if let Some(cursor) = self.history_cursor.borrow().clone() {
@@ -1192,7 +1225,38 @@ impl Agent {
     }
 
     fn load_turns(&self, data: &Value, newest_first: bool, prepend: bool) {
-        let Some(turns) = data.as_array() else { return };
+        if let Some(turns) = data.as_array() {
+            self.load_turn_slice(turns, newest_first, prepend);
+        }
+    }
+
+    fn prepend_history_page(&self, mut result: Value) {
+        let turns = match result.get_mut("data").map(Value::take) {
+            Some(Value::Array(turns)) => turns,
+            _ => Vec::new(),
+        };
+        self.prepend_history_slice(ArchivePage {
+            turns: turns.into_iter(),
+            result,
+        });
+    }
+
+    fn prepend_history_slice(&self, mut page: ArchivePage) {
+        // The server sends newest first. Keep the rest of the response until
+        // the user reaches this slice's top, without another SSH round trip.
+        let turns: Vec<_> = page.turns.by_ref().take(OLDER_RENDER_TURNS).collect();
+        self.load_turn_slice(&turns, true, true);
+        if page.turns.len() == 0 {
+            self.update_history_cursor(&page.result);
+        } else {
+            self.archive_page.replace(Some(page));
+            self.history_loading.set(false);
+            self.older.hide();
+        }
+        self.update_controls();
+    }
+
+    fn load_turn_slice(&self, turns: &[Value], newest_first: bool, prepend: bool) {
         let anchor = if prepend {
             self.prepend_at.set(Some(0));
             self.history.children().into_iter().next().map(|widget| {
@@ -1212,15 +1276,18 @@ impl Agent {
         for turn in turns {
             let mut changes = String::new();
             let mut activity: Option<Activity> = None;
+            let mut archived = Vec::new();
             let mut assistant_text = Vec::new();
             let status = turn["status"].as_str();
+            let live = status == Some("inProgress") && !prepend;
             for item in array(&turn["items"]) {
                 if let Some(record) = Record::from_item(item) {
-                    let activity = activity.get_or_insert_with(|| self.new_activity());
-                    if status == Some("inProgress") {
-                        activity.record(record);
+                    if live {
+                        activity
+                            .get_or_insert_with(|| self.new_activity())
+                            .record(record);
                     } else {
-                        activity.record_history(record);
+                        archived.push(record);
                     }
                 } else {
                     if matches!(
@@ -1233,12 +1300,13 @@ impl Agent {
                                 | "contextCompaction"
                                 | "imageGeneration"
                         )
-                    ) && let Some(mut previous) = activity.take()
-                    {
-                        previous.finish((item["type"] == "userMessage").then_some("steered"));
-                        if status == Some("inProgress") && !prepend {
+                    ) {
+                        let previous_status = (item["type"] == "userMessage").then_some("steered");
+                        if let Some(mut previous) = activity.take() {
+                            previous.finish(previous_status);
                             self.past_activity.borrow_mut().push(previous);
                         }
+                        self.append_archived_activity(&mut archived, previous_status);
                     }
                     self.completed_item(item, true);
                     if let Some(text) = response_text(item)
@@ -1249,8 +1317,9 @@ impl Agent {
                 }
                 append_file_changes(item, &mut changes);
             }
+            self.append_archived_activity(&mut archived, status);
             if !changes.is_empty() {
-                self.add_history_diff(changes);
+                self.add_diff(&changes);
             }
             if status == Some("completed") {
                 self.add_copy_actions(assistant_text);
@@ -1339,7 +1408,7 @@ impl Agent {
     }
 
     fn receive(self: &Rc<Self>, event: Result<crate::plugin_catalog::Incoming, String>) {
-        let event = match event {
+        let mut event = match event {
             Ok(crate::plugin_catalog::Incoming::Json(event)) => event,
             Ok(crate::plugin_catalog::Incoming::Plugins {
                 id,
@@ -1438,12 +1507,12 @@ impl Agent {
                     _ => {}
                 }
             } else {
-                self.response(request, &event["result"]);
+                self.response(request, &mut event["result"]);
             }
         }
     }
 
-    fn response(&self, request: Request, result: &Value) {
+    fn response(&self, request: Request, result: &mut Value) {
         match request {
             Request::Initialize { browse } => {
                 if let Some(rpc) = self.rpc.borrow().as_ref() {
@@ -1565,9 +1634,13 @@ impl Agent {
                 generation,
             } => {
                 if generation == self.history_generation.get() {
-                    self.load_turns(&result["data"], true, prepend || self.active.get());
-                    self.update_history_cursor(result);
-                    self.update_controls();
+                    if prepend {
+                        self.prepend_history_page(result.take());
+                    } else {
+                        self.load_turns(&result["data"], true, self.active.get());
+                        self.update_history_cursor(result);
+                        self.update_controls();
+                    }
                 }
             }
             Request::Unsubscribe => {}
@@ -1946,6 +2019,7 @@ impl Agent {
         self.questions.borrow_mut().clear();
         self.history_cursor.take();
         self.history_anchor.take();
+        self.archive_page.take();
         self.history_loading.set(false);
         self.client_messages.borrow_mut().clear();
         self.pasting.set(false);
@@ -1983,6 +2057,7 @@ impl Agent {
         self.older.hide();
         self.history_cursor.take();
         self.history_anchor.take();
+        self.archive_page.take();
         self.history_loading.set(false);
         self.thread.take();
         self.turn.take();
@@ -2003,7 +2078,7 @@ impl Agent {
         self.update_controls();
     }
 
-    fn notification(&self, method: &str, params: &Value) {
+    fn notification(self: &Rc<Self>, method: &str, params: &Value) {
         if let Some(id) = params["threadId"].as_str() {
             if self.thread.borrow().as_deref() != Some(id) {
                 return;
@@ -2084,7 +2159,7 @@ impl Agent {
                                 card,
                             });
                         } else if let Some(live) = live.as_ref() {
-                            live.card.update(diff);
+                            live.card.update(&live.expander, limited(diff, 256 * 1024));
                             live.expander.set_visible(!diff.is_empty());
                         }
                     }
@@ -2154,6 +2229,16 @@ impl Agent {
         }
     }
 
+    fn append_archived_activity(&self, records: &mut Vec<Record<'_>>, status: Option<&str>) {
+        if !records.is_empty() {
+            self.append(&Activity::archived(
+                self.quote_action(),
+                std::mem::take(records),
+                status,
+            ));
+        }
+    }
+
     fn new_activity(&self) -> Activity {
         let activity = Activity::new(self.quote_action());
         self.append(&activity.widget);
@@ -2219,12 +2304,52 @@ impl Agent {
 
     fn close_reply(&self) {
         if let Some(live) = self.live.take() {
-            live.render();
+            let part = self.settle_reply(&live);
             self.past_replies
                 .borrow_mut()
                 .entry(live.id.clone())
                 .or_default()
-                .push(live);
+                .push(part);
+        }
+    }
+
+    fn settle_reply(&self, live: &LiveMessage) -> ReplyPart {
+        let defer = live.dirty.get() && !self.can_paint_live(live);
+        if !defer {
+            live.render();
+            return ReplyPart {
+                text: Rc::new(live.text.take()),
+                widget: live.label.clone().upcast(),
+            };
+        }
+
+        let text = Rc::new(live.text.take());
+        let position = self.history.child_property::<i32>(&live.label, "position");
+        self.history.remove(&live.label);
+        let source = text.clone();
+        live.label
+            .connect_show(move |label| agent_render::set_markdown(label, &source));
+        let label = live.label.downgrade();
+        let columns = (self.history_window.reading_width() / 8) as usize;
+        let height = crate::history_window::wrapped_lines(&text, columns)
+            .saturating_mul(21)
+            .clamp(21, 48_000) as i32;
+        let slot = self.history_window.defer_content(
+            &self.history,
+            &live.label,
+            -1,
+            height,
+            move |visible| {
+                if !visible && let Some(label) = label.upgrade() {
+                    label.set_text("");
+                }
+            },
+        );
+        self.history.reorder_child(&slot, position);
+        slot.show();
+        ReplyPart {
+            text,
+            widget: slot.upcast(),
         }
     }
 
@@ -2258,7 +2383,7 @@ impl Agent {
         self.past_activity.borrow_mut().clear();
     }
 
-    fn delta(&self, id: &str, delta: &str) {
+    fn delta(self: &Rc<Self>, id: &str, delta: &str) {
         let same = self
             .live
             .borrow()
@@ -2270,13 +2395,24 @@ impl Agent {
             let label = agent_render::markdown_label();
             label.style_context().add_class("agent-prose");
             crate::quote::bind_label(&label, &self.quote_action());
-            self.append(&label);
-            self.live.replace(Some(Rc::new(LiveMessage {
+            let live = Rc::new(LiveMessage {
                 id: id.into(),
                 text: RefCell::new(String::new()),
                 dirty: Cell::new(false),
+                paint_queued: Cell::new(false),
                 label,
-            })));
+            });
+            let pending = Rc::downgrade(&live);
+            let agent = Rc::downgrade(self);
+            live.label.connect_map(move |_| {
+                if let (Some(live), Some(agent)) = (pending.upgrade(), agent.upgrade()) {
+                    // Mapping can precede allocation of a reply that arrived
+                    // while the tab was hidden. Check its position after layout.
+                    agent.queue_live_paint(&live, true);
+                }
+            });
+            self.append(&live.label);
+            self.live.replace(Some(live));
             self.update_task_status();
         }
         if let Some(live) = self.live.borrow().as_ref() {
@@ -2286,16 +2422,45 @@ impl Agent {
                 return;
             }
             text.push_str(&limited(delta, remaining));
-            if !live.dirty.replace(true) {
-                let live = Rc::downgrade(live);
-                glib::timeout_add_local_once(Duration::from_millis(33), move || {
-                    if let Some(live) = live.upgrade() {
-                        live.render();
-                    }
-                });
-            }
-            self.scroll_to_end();
+            drop(text);
+            live.dirty.set(true);
+            self.queue_live_paint(live, false);
         }
+    }
+
+    fn can_paint_live(&self, reply: &LiveMessage) -> bool {
+        // Keep the incoming Markdown unshaped while the reader is browsing
+        // older messages above this reply. A scroll back schedules its paint.
+        reply.label.is_mapped()
+            && (self.follow_tail.get()
+                || reply
+                    .label
+                    .translate_coordinates(&self.history, 0, 0)
+                    .is_none_or(|(_, top)| {
+                        let adjustment = self.scroll.vadjustment();
+                        f64::from(top) <= adjustment.value() + adjustment.page_size()
+                    }))
+    }
+
+    fn queue_live_paint(self: &Rc<Self>, reply: &Rc<LiveMessage>, after_map: bool) {
+        if !reply.dirty.get()
+            || reply.paint_queued.get()
+            || (!after_map && !self.can_paint_live(reply))
+        {
+            return;
+        }
+        reply.paint_queued.set(true);
+        let weak_reply = Rc::downgrade(reply);
+        let agent = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_millis(33), move || {
+            if let (Some(agent), Some(reply)) = (agent.upgrade(), weak_reply.upgrade()) {
+                reply.paint_queued.set(false);
+                if reply.dirty.get() && agent.can_paint_live(&reply) {
+                    agent.scroll_to_end();
+                    reply.render();
+                }
+            }
+        });
     }
 
     fn remove_live(&self) {
@@ -2386,26 +2551,31 @@ impl Agent {
         let mut parts = id
             .and_then(|id| self.past_replies.borrow_mut().remove(id))
             .unwrap_or_default();
-        if self
+        let current_matches = self
             .live
             .borrow()
             .as_ref()
-            .is_some_and(|live| Some(live.id.as_str()) == id)
-        {
-            parts.extend(self.live.take());
-        }
-        if let Some(last) = parts.pop() {
+            .is_some_and(|live| Some(live.id.as_str()) == id);
+        let live = if current_matches {
+            self.live.take()
+        } else {
+            None
+        };
+        let last = live
+            .as_ref()
+            .map(|live| live.label.clone().upcast())
+            .or_else(|| parts.pop().map(|part| part.widget));
+        if let Some(last) = last {
             let mut tail = text;
             for part in parts {
-                let prefix = part.text.borrow();
-                tail = tail.strip_prefix(prefix.as_str()).unwrap_or_default();
+                tail = tail.strip_prefix(part.text.as_str()).unwrap_or_default();
             }
             if !tail.trim().is_empty() {
-                let position = self.history.child_property::<i32>(&last.label, "position");
-                self.history.remove(&last.label);
+                let position = self.history.child_property::<i32>(&last, "position");
+                self.history.remove(&last);
                 self.add_agent(tail, false, Some(position));
-            } else {
-                last.render();
+            } else if let Some(live) = live {
+                self.settle_reply(&live);
             }
         } else if !text.trim().is_empty() {
             self.close_activity(None);
@@ -2493,28 +2663,15 @@ impl Agent {
         self.update_task_status();
     }
 
-    fn add_diff(&self, diff: &str) -> (gtk::Expander, DiffCard) {
+    fn add_diff(&self, diff: &str) -> (gtk::Expander, FoldedDiff) {
         let expander = self.diff_expander();
-        let card = DiffCard::new("本轮改动");
-        card.update(diff);
-        expander.add(card.widget());
+        let body = column(0);
+        expander.add(&body);
+        let card = FoldedDiff::new(&expander, &body, "本轮改动", None);
+        card.update(&expander, limited(diff, 256 * 1024));
         self.append(&expander);
         expander.set_visible(!diff.is_empty());
         (expander, card)
-    }
-
-    fn add_history_diff(&self, diff: String) {
-        let expander = self.diff_expander();
-        let weak = expander.downgrade();
-        agent_activity::render_detail(&expander, true, move || {
-            if let Some(expander) = weak.upgrade() {
-                let card = DiffCard::new("本轮改动");
-                card.update(&diff);
-                expander.add(card.widget());
-                card.widget().show_all();
-            }
-        });
-        self.append(&expander);
     }
 
     fn diff_expander(&self) -> gtk::Expander {
@@ -2561,7 +2718,13 @@ impl Agent {
         message.add(&agent_render::response(
             &text,
             &self.context.borrow(),
-            !loading_history,
+            if loading_history {
+                agent_render::ResponseMode::History
+            } else {
+                agent_render::ResponseMode::Completed {
+                    reading_earlier: !self.follow_tail.get() || !self.scroll.is_mapped(),
+                }
+            },
             Some(&self.history_window),
             &self.preview,
             &self.quote_action(),
@@ -2812,15 +2975,35 @@ fn array(value: &Value) -> impl Iterator<Item = &Value> {
 }
 
 pub(crate) fn limited(text: &str, max: usize) -> String {
-    let cleaned = text.replace('\0', "�");
-    if cleaned.len() <= max {
-        return cleaned;
+    // Replacement only expands the input. Bytes beyond this prefix cannot
+    // affect the displayed text, even when an output contains NULs.
+    let end = text.floor_char_boundary(max);
+    let mut cleaned = text[..end].replace('\0', "�");
+    if end < text.len() || cleaned.len() > max {
+        cleaned.truncate(cleaned.floor_char_boundary(max));
+        cleaned.push_str("\n…");
     }
-    let mut end = max;
-    while !cleaned.is_char_boundary(end) {
-        end -= 1;
+    cleaned
+}
+
+#[cfg(test)]
+mod tests {
+    use super::limited;
+
+    #[test]
+    fn display_limit_preserves_utf8_and_counts_nul_replacements() {
+        for text in ["", "Span", "中\0文", "é\0\0🖥️", "\0a\0"] {
+            let full = text.replace('\0', "�");
+            for max in 0..=full.len() + 1 {
+                let expected = if full.len() <= max {
+                    full.clone()
+                } else {
+                    format!("{}\n…", &full[..full.floor_char_boundary(max)])
+                };
+                assert_eq!(limited(text, max), expected);
+            }
+        }
     }
-    format!("{}\n…", &cleaned[..end])
 }
 
 fn response_text(item: &Value) -> Option<&str> {

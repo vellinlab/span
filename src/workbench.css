@@ -1165,7 +1165,7 @@ scrolledwindow.agent-table-scroll {
     border-bottom: 1px solid @line;
 }
 
-.agent-task-status spinner {
+.agent-task-status .agent-task-spinner {
     color: @accent;
 }
 

@@ -81,6 +81,9 @@ impl Picker {
         scroll.add(&list);
         scroll.show_all();
         let popover = gtk::Popover::new(Some(&button));
+        // MenuButton uses the animated popup API. Keep the rows at their
+        // final click coordinates as soon as the picker is shown.
+        popover.set_property("transitions-enabled", false);
         popover.style_context().add_class("agent-picker-menu");
         popover.add(&scroll);
         let focus_list = list.clone();
@@ -562,6 +565,9 @@ impl Options {
     }
 
     fn model_changed(&self) {
+        if let Some(accessible) = self.model.button.accessible() {
+            accessible.set_description(&self.model.label.text());
+        }
         let choice = self.model.active_id();
         let current = self.current.borrow();
         let catalog = self.catalog.borrow();
