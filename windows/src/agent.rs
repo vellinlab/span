@@ -6,7 +6,7 @@ use iced::widget::{
     Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor,
     stack, svg, text, text_editor, tooltip,
 };
-use iced::{Bottom, Center, Element, Fill, Task, Theme};
+use iced::{Center, Element, Fill, Task, Theme};
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::sync::{Arc, OnceLock};
@@ -1243,64 +1243,34 @@ impl Agent {
             composer = composer.push(attachments);
         }
         let running = self.in_flight;
-        let mut controls = row![].spacing(8).align_y(Center);
+        let mut controls = row![].spacing(7).align_y(Center);
         if let Some((used, limit)) = self.settings.context {
-            let percent = (used as f64 / limit as f64 * 100.0).min(100.0);
-            controls = controls.push(tooltip(
-                text(format!("Context {percent:.0}%"))
-                    .size(12)
-                    .color(theme::MUTED),
-                container(text(format!("{used} of {limit} context tokens")).size(12))
-                    .padding(6)
-                    .style(|_| theme::panel(theme::CHROME, 6.0)),
-                tooltip::Position::Top,
-            ));
+            controls = controls.push(theme::context_usage(used, limit));
         }
         if running {
-            controls = controls.push(action(
-                "Stop",
+            controls = controls.push(theme::ComposerIcon::Stop.button(
+                "Stop current response",
                 self.turn.is_some().then_some(Action::Interrupt),
-                false,
             ));
         }
-        controls = controls.push(action(
-            if running { "Follow up" } else { "Send" },
-            (self.can_send() && (!self.draft.is_empty() || !self.attachments.is_empty()))
-                .then_some(Action::Send),
-            true,
-        ));
-        static CLIP: OnceLock<svg::Handle> = OnceLock::new();
-        let clip = CLIP.get_or_init(|| {
-            svg::Handle::from_memory(
-                br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m20 11-7.5 7.5a4.2 4.2 0 0 1-6-6l8.2-8.2a2.8 2.8 0 0 1 4 4l-8.3 8.3a1.35 1.35 0 0 1-1.9-1.9l7.3-7.3" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>"#
-                    .as_slice(),
-            )
-        });
-        let attach = tooltip(
-            button(
-                svg(clip.clone())
-                    .width(15)
-                    .height(15)
-                    .style(|_, _| svg::Style {
-                        color: Some(theme::MUTED),
-                    }),
-            )
-            .padding([6, 7])
-            .style(|_, status| theme::button_status(false, status))
-            .on_press_maybe(
-                (self.can_attach() && self.preparing.is_none()).then_some(Action::AttachImage),
-            ),
-            container(
-                text(if self.preparing.is_some() {
-                    "Preparing attachment…"
+        controls = controls.push(
+            theme::ComposerIcon::Send.button(
+                if running {
+                    "Send follow-up · Enter"
                 } else {
-                    "Attach image"
-                })
-                .size(12),
-            )
-            .padding(6)
-            .style(|_| theme::panel(theme::CHROME, 6.0)),
-            tooltip::Position::Top,
+                    "Send message · Enter"
+                },
+                (self.can_send() && (!self.draft.is_empty() || !self.attachments.is_empty()))
+                    .then_some(Action::Send),
+            ),
+        );
+        let attach = theme::ComposerIcon::Attach.button(
+            if self.preparing.is_some() {
+                "Preparing attachment…"
+            } else {
+                "Attach image"
+            },
+            (self.can_attach() && self.preparing.is_none()).then_some(Action::AttachImage),
         );
         composer = composer.push(editor).push(
             row![
@@ -1309,7 +1279,7 @@ impl Agent {
                 controls,
             ]
             .spacing(10)
-            .align_y(Bottom),
+            .align_y(Center),
         );
         self.conversation(scroll, composer)
     }

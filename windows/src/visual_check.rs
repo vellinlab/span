@@ -138,7 +138,17 @@ impl Check {
                     assert!(view.absolute_offset().y < 1.0);
                     assert!(view.absolute_offset_reversed().y > 1_000.0);
                     self.step = Step::CaptureLatest;
-                    screenshot(Event::Latest)
+                    let usage = json!({
+                        "method": "thread/tokenUsage/updated",
+                        "params": { "threadId": THREAD, "tokenUsage": {
+                            "last": { "totalTokens": 224_000 }, "modelContextWindow": 800_000
+                        }}
+                    });
+                    Task::done(Message::Agent(
+                        tab.id,
+                        agent::Action::Event(codex_rpc::Event::Packet(usage)),
+                    ))
+                    .chain(screenshot(Event::Latest))
                 }
                 _ => Task::batch([
                     Task::done(Message::Agent(tab.id, agent::Action::Resume(THREAD.into()))),

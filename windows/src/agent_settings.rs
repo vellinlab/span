@@ -1,6 +1,6 @@
 use crate::agent_execution::{Model, PermissionMode};
 use crate::theme;
-use iced::widget::{button, container, pick_list, row, text, tooltip};
+use iced::widget::{container, pick_list, row, text};
 use iced::{Center, Element};
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -122,14 +122,21 @@ impl Settings {
         let models: Element<'_, Change> = if self.models.is_empty() {
             text(model_placeholder).size(13).color(theme::MUTED).into()
         } else {
-            pick_list(self.models.as_slice(), model, |model: Model| {
-                Change::Model(model.id)
-            })
-            .placeholder(model_placeholder)
-            .width(156)
-            .menu_height(226)
-            .padding([5, 8])
-            .text_size(13)
+            container(
+                pick_list(self.models.as_slice(), model, |model: Model| {
+                    Change::Model(model.id)
+                })
+                .placeholder(model_placeholder)
+                .menu_height(226)
+                .padding([5, 8])
+                .text_size(13)
+                .handle(pick_list::Handle::Arrow {
+                    size: Some(10.into()),
+                })
+                .style(theme::choice)
+                .menu_style(theme::choice_menu),
+            )
+            .max_width(156)
             .into()
         };
         let mut toolbar = row![
@@ -140,11 +147,15 @@ impl Settings {
                 Change::Permission
             )
             .placeholder("Session access")
-            .width(131)
             .padding([5, 8])
-            .text_size(13),
+            .text_size(13)
+            .handle(pick_list::Handle::Arrow {
+                size: Some(10.into())
+            })
+            .style(theme::choice)
+            .menu_style(theme::choice_menu),
         ]
-        .spacing(6)
+        .spacing(4)
         .align_y(Center);
         if let Some(model) = model.filter(|model| !model.efforts.is_empty()) {
             let effort = self
@@ -155,21 +166,23 @@ impl Settings {
             toolbar = toolbar.push(
                 pick_list(model.efforts.as_slice(), effort, Change::Effort)
                     .placeholder("Reasoning")
-                    .width(105)
                     .padding([5, 8])
-                    .text_size(13),
+                    .text_size(13)
+                    .handle(pick_list::Handle::Arrow {
+                        size: Some(10.into()),
+                    })
+                    .style(theme::choice)
+                    .menu_style(theme::choice_menu),
             );
         }
         if self.fast_available() {
-            toolbar = toolbar.push(tooltip(
-                button(text("Fast").size(13))
-                    .on_press(Change::Fast)
-                    .padding([5, 8])
-                    .style(|_, status| theme::button_status(self.fast, status)),
-                container(text("Fast processing from the next turn").size(12))
-                    .padding(6)
-                    .style(|_| theme::panel(theme::CHROME, 6.0)),
-                tooltip::Position::Top,
+            toolbar = toolbar.push(theme::ComposerIcon::Fast(self.fast).button(
+                if self.fast {
+                    "Fast on · applies to the next turn"
+                } else {
+                    "Fast off · click to enable"
+                },
+                Some(Change::Fast),
             ));
         }
         if running {
