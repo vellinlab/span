@@ -403,8 +403,8 @@ impl Panel {
             return Space::new().into();
         };
         let name = path.file_name().map(files::display).unwrap_or_default();
-        let image_width = (430.0 * self.zoom) as u16;
-        let image_height = (380.0 * self.zoom) as u16;
+        let image_width = 430.0 * self.zoom;
+        let image_height = 380.0 * self.zoom;
         let (content, can_zoom) = match preview {
             Preview::Image(handle) => (
                 scrollable(
