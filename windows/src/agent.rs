@@ -21,6 +21,8 @@ use uuid::Uuid;
 mod activity;
 #[path = "agent_scroll.rs"]
 mod agent_scroll;
+#[cfg(feature = "visual-check")]
+pub(crate) use agent_scroll::PaintedViewport;
 #[path = "agent_copy.rs"]
 mod copy;
 pub(crate) use copy::Format as CopyFormat;
@@ -37,8 +39,6 @@ pub enum Action {
     New,
     Resume(String),
     More(u64, String),
-    #[cfg(feature = "visual-check")]
-    Scrolled(u64, scrollable::Viewport),
     Draft(text_editor::Action),
     GoalSelect(goal::Command),
     GoalAdvance(i8),
@@ -140,8 +140,6 @@ pub struct Agent {
     transcript_id: iced::widget::Id,
     transcript_generation: u64,
     reading_position: agent_scroll::ReadingPosition,
-    #[cfg(feature = "visual-check")]
-    transcript_viewport: Option<scrollable::Viewport>,
     items: Vec<Item>,
     composer_id: iced::widget::Id,
     draft: text_editor::Content,
@@ -174,8 +172,6 @@ impl Agent {
             transcript_id: iced::widget::Id::unique(),
             transcript_generation: 0,
             reading_position: agent_scroll::ReadingPosition::default(),
-            #[cfg(feature = "visual-check")]
-            transcript_viewport: None,
             items: Vec::new(),
             composer_id: iced::widget::Id::unique(),
             draft: text_editor::Content::new(),
@@ -311,10 +307,6 @@ impl Agent {
                     && self.cursor.as_deref() == Some(cursor.as_str()) =>
             {
                 self.more_history();
-            }
-            #[cfg(feature = "visual-check")]
-            Action::Scrolled(generation, viewport) if generation == self.transcript_generation => {
-                self.transcript_viewport = Some(viewport);
             }
             Action::Draft(action) => self.edit_composer(action),
             Action::GoalSelect(command) => return self.select_goal(command),
@@ -629,10 +621,6 @@ impl Agent {
                 self.cursor = None;
                 self.transcript_generation += 1;
                 self.reading_position.clear();
-                #[cfg(feature = "visual-check")]
-                {
-                    self.transcript_viewport = None;
-                }
                 self.pending.retain(|_, request| {
                     !matches!(
                         request,
@@ -721,10 +709,10 @@ impl Agent {
     }
 
     #[cfg(feature = "visual-check")]
-    pub fn visual_probe(&self) -> Option<(iced::widget::Id, scrollable::Viewport, usize, bool)> {
+    pub fn visual_probe(&self) -> Option<(iced::widget::Id, PaintedViewport, usize, bool)> {
         Some((
             self.transcript_id.clone(),
-            self.transcript_viewport?,
+            self.reading_position.painted()?,
             self.items.len(),
             self.cursor.is_some(),
         ))
@@ -1152,8 +1140,6 @@ impl Agent {
                 .margin(2),
         ))
         .anchor_bottom();
-        #[cfg(feature = "visual-check")]
-        let scroll = scroll.on_scroll(move |viewport| Action::Scrolled(generation, viewport));
         let scroll = agent_scroll::TranscriptScroll::wrap(
             scroll.into(),
             &self.reading_position,

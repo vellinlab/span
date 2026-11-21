@@ -6,11 +6,41 @@ use iced::advanced::{
 };
 use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector};
 use std::cell::RefCell;
+#[cfg(feature = "visual-check")]
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 
 pub(super) const VERTICAL_PADDING: u16 = 20;
 
 #[derive(Default)]
-pub(super) struct ReadingPosition(RefCell<Option<Anchor>>);
+pub(super) struct ReadingPosition {
+    anchor: RefCell<Option<Anchor>>,
+    #[cfg(feature = "visual-check")]
+    paint: Cell<Option<PaintBounds>>,
+    #[cfg(feature = "visual-check")]
+    viewport: Cell<Option<PaintedViewport>>,
+}
+
+#[cfg(feature = "visual-check")]
+#[derive(Clone, Copy)]
+struct PaintBounds {
+    bounds: Rectangle,
+    content: Rectangle,
+    visible: Rectangle,
+}
+
+#[cfg(feature = "visual-check")]
+#[derive(Clone, Copy)]
+pub(crate) struct PaintedViewport {
+    pub bounds: Rectangle,
+    pub content: Rectangle,
+    pub from_top: f32,
+    pub from_bottom: f32,
+    pub paint_time: Duration,
+    pub paint_finished: Instant,
+}
 
 struct Anchor {
     item_id: String,
@@ -22,7 +52,9 @@ struct Anchor {
 
 impl ReadingPosition {
     pub(super) fn clear(&mut self) {
-        self.0.get_mut().take();
+        self.anchor.get_mut().take();
+        #[cfg(feature = "visual-check")]
+        self.viewport.set(None);
     }
 
     pub(super) fn capture(
@@ -32,7 +64,7 @@ impl ReadingPosition {
         viewport: &Rectangle,
         first: usize,
     ) {
-        let mut position = self.0.borrow_mut();
+        let mut position = self.anchor.borrow_mut();
         let bounds = layout.bounds();
         let from_bottom = (bounds.y + bounds.height + f32::from(VERTICAL_PADDING))
             - (viewport.y + viewport.height);
@@ -65,9 +97,32 @@ impl ReadingPosition {
 
     #[cfg(feature = "visual-check")]
     pub(super) fn probe(&self) -> Option<(String, f32)> {
-        let saved = self.0.borrow();
+        let saved = self.anchor.borrow();
         let anchor = saved.as_ref()?;
         Some((anchor.item_id.clone(), anchor.into_row))
+    }
+
+    #[cfg(feature = "visual-check")]
+    pub(super) fn painted(&self) -> Option<PaintedViewport> {
+        self.viewport.get()
+    }
+
+    #[cfg(feature = "visual-check")]
+    pub(super) fn record_paint(&self, viewport: &Rectangle, started: Instant) {
+        let Some(paint) = self.paint.get() else {
+            return;
+        };
+        let maximum = (paint.content.height - paint.bounds.height).max(0.0);
+        let from_top = (viewport.y - paint.visible.y).clamp(0.0, maximum);
+        let paint_finished = Instant::now();
+        self.viewport.set(Some(PaintedViewport {
+            bounds: paint.bounds,
+            content: paint.content,
+            from_top,
+            from_bottom: maximum - from_top,
+            paint_time: paint_finished - started,
+            paint_finished,
+        }));
     }
 }
 
@@ -91,7 +146,7 @@ impl<'a> TranscriptScroll<'a> {
     }
 
     fn restore(&self, layout: Layout<'_>) -> Option<Restore> {
-        let position = self.reading.0.borrow();
+        let position = self.reading.anchor.borrow();
         let anchor = position.as_ref()?;
         let index = if self
             .items
@@ -226,6 +281,17 @@ impl Widget<Action, Theme, Renderer> for TranscriptScroll<'_> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        #[cfg(feature = "visual-check")]
+        if crate::visual_check::enabled() {
+            let bounds = layout.bounds();
+            self.reading
+                .paint
+                .set(bounds.intersection(viewport).map(|visible| PaintBounds {
+                    bounds,
+                    content: layout.child(0).bounds(),
+                    visible,
+                }));
+        }
         self.scroll
             .as_widget()
             .draw(tree, renderer, theme, style, layout, cursor, viewport);

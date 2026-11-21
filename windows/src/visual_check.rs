@@ -33,7 +33,7 @@ pub enum Event {
     Latest(window::Screenshot),
     Earlier(window::Screenshot),
     Target(scroll::Target, f32),
-    Frame(Instant),
+    Frame { started: Instant, notified: Instant },
     ScrollResults(Value),
     Attachment(window::Screenshot),
     Goal(window::Screenshot),
@@ -127,9 +127,9 @@ impl Check {
                 self.benchmark = Some(benchmark);
                 return first;
             }
-            Event::Frame(started) => {
+            Event::Frame { started, notified } => {
                 if let (Some(benchmark), Some((_, view, _, _))) = (&mut self.benchmark, probe) {
-                    return benchmark.frame(started, view.absolute_offset().y);
+                    return benchmark.frame(started, notified, view);
                 }
                 return Task::none();
             }
@@ -146,8 +146,8 @@ impl Check {
         match (event, self.step) {
             (Event::Observe, Step::Open) => match probe {
                 Some((_, view, INITIAL_ITEMS, true)) => {
-                    assert!(view.absolute_offset().y < 1.0);
-                    assert!(view.absolute_offset_reversed().y > 1_000.0);
+                    assert!(view.from_bottom < 1.0);
+                    assert!(view.from_top > 1_000.0);
                     self.step = Step::CaptureLatest;
                     let usage = json!({
                         "method": "thread/tokenUsage/updated",
@@ -176,7 +176,7 @@ impl Check {
                 self.first_frame = self.save("latest.png", frame);
                 let (_, view, _, _) = probe.expect("latest viewport");
                 self.step = Step::WaitForRichCopy { scale };
-                click_copy(view.bounds(), scale, CopyFormat::RichText)
+                click_copy(view.bounds, scale, CopyFormat::RichText)
             }
             (Event::Observe, Step::WaitForRichCopy { scale }) => {
                 if !agent.visual_copied(CopyFormat::RichText) {
@@ -185,7 +185,7 @@ impl Check {
                 verify_copy(CopyFormat::RichText);
                 let (_, view, _, _) = probe.expect("copy viewport");
                 self.step = Step::WaitForMarkdownCopy;
-                click_copy(view.bounds(), scale, CopyFormat::Markdown)
+                click_copy(view.bounds, scale, CopyFormat::Markdown)
             }
             (Event::Observe, Step::WaitForMarkdownCopy) => {
                 if !agent.visual_copied(CopyFormat::Markdown) {
@@ -198,7 +198,7 @@ impl Check {
                 )
                 .expect("record Windows clipboard export test");
                 let (id, view, _, _) = probe.expect("latest viewport");
-                let end = view.absolute_offset_reversed().y - 45.0;
+                let end = view.from_top - 45.0;
                 self.step = Step::WaitForHistory { end };
                 scroll_to(
                     id,
@@ -211,8 +211,8 @@ impl Check {
             }
             (Event::Observe, Step::WaitForHistory { end }) => match probe {
                 Some((_, view, items, false)) if items == INITIAL_ITEMS + EARLIER_ITEMS => {
-                    let actual = view.absolute_offset().y;
-                    if view.absolute_offset_reversed().y < 200.0 {
+                    let actual = view.from_bottom;
+                    if view.from_top < 200.0 {
                         return observe();
                     }
                     assert!((actual - end).abs() <= 1.0, "history moved the reader");
@@ -237,7 +237,7 @@ impl Check {
                 )
                 .expect("write history metrics");
                 let (_, view, _, _) = probe.expect("earlier viewport");
-                let bounds = view.bounds();
+                let bounds = view.bounds;
                 let x = ((bounds.x + bounds.width * 0.46) * scale).round() as i32;
                 let y = ((bounds.y + bounds.height * 0.52) * scale).round() as i32;
                 window::latest().then(move |id| {
@@ -291,7 +291,7 @@ impl Check {
             }
             (Event::Goal(frame), Step::CaptureGoalMenu) => {
                 let (_, view, _, _) = probe.expect("goal menu viewport");
-                let bounds = view.bounds();
+                let bounds = view.bounds;
                 let width = (bounds.width - 48.0).min(760.0);
                 let x =
                     ((bounds.x + (bounds.width - width) / 2.0 + 108.0) * frame.scale_factor) as u32;
@@ -358,7 +358,7 @@ impl Check {
                 self.assert_reader(agent);
                 self.save(&format!("resize-{width}.png"), frame);
                 let (id, view, _, _) = probe.expect("resized viewport");
-                let content_height = view.content_bounds().height;
+                let content_height = view.content.height;
                 if width == 900 {
                     self.narrow_content_height = Some(content_height);
                     self.step = Step::WaitForResize(1320);
@@ -382,7 +382,7 @@ impl Check {
                 .chain(observe())
             }
             (Event::Observe, Step::FollowLatest) => {
-                if !probe.is_some_and(|(_, view, _, _)| view.absolute_offset().y < 1.0)
+                if !probe.is_some_and(|(_, view, _, _)| view.from_bottom < 1.0)
                     || agent.visual_reading_position().is_some()
                 {
                     return observe();
@@ -396,10 +396,7 @@ impl Check {
                 else {
                     return observe();
                 };
-                assert!(
-                    view.absolute_offset().y < 1.0,
-                    "latest reply did not stay visible"
-                );
+                assert!(view.from_bottom < 1.0, "latest reply did not stay visible");
                 assert!(agent.visual_reading_position().is_none());
                 let result = json!({
                     "kept_history_position_during_streaming": true,
@@ -425,7 +422,7 @@ impl Check {
             (Event::Activity(frame), Step::CaptureActivityIdle | Step::CaptureActivityHover) => {
                 let hovered = matches!(self.step, Step::CaptureActivityHover);
                 let (_, view, _, _) = probe.expect("activity viewport");
-                let bounds = view.bounds();
+                let bounds = view.bounds;
                 let (right, bottom) = activity_corner(bounds, frame.scale_factor);
                 let scale = frame.scale_factor;
                 let arrow = iced::Rectangle::new(
@@ -477,7 +474,7 @@ impl Check {
             }
             (Event::Activity(frame), Step::CaptureActivityExpanded) => {
                 let (_, view, _, _) = probe.expect("expanded activity viewport");
-                let logical = view.bounds();
+                let logical = view.bounds;
                 let scale = frame.scale_factor;
                 let bounds = iced::Rectangle::new(
                     iced::Point::new(logical.x * scale, logical.y * scale),

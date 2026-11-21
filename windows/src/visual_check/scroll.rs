@@ -1,4 +1,5 @@
 use super::{Event, Message};
+use crate::agent::PaintedViewport;
 use iced::window::raw_window_handle::RawWindowHandle;
 use iced::{Subscription, Task, window};
 use serde_json::{Value, json};
@@ -9,6 +10,7 @@ use std::time::{Duration, Instant};
 
 const WARMUP: usize = 8;
 const SAMPLES: usize = 128;
+const INPUT_DELAYS_MS: [u64; 4] = [7, 13, 19, 29];
 const WM_MOUSEMOVE: u32 = 0x0200;
 const WM_MOUSEWHEEL: u32 = 0x020a;
 static WAIT_FOR_FRAME: AtomicBool = AtomicBool::new(false);
@@ -18,7 +20,10 @@ pub fn frames() -> Subscription<Message> {
         iced::Event::Window(window::Event::RedrawRequested(started))
             if WAIT_FOR_FRAME.swap(false, Ordering::AcqRel) =>
         {
-            Some(Message::Visual(Event::Frame(started)))
+            Some(Message::Visual(Event::Frame {
+                started,
+                notified: Instant::now(),
+            }))
         }
         _ => None,
     })
@@ -63,8 +68,14 @@ pub struct Benchmark {
     sent: Arc<Mutex<Option<Instant>>>,
     offset: f32,
     completed: usize,
-    latencies: Vec<f64>,
+    latencies: Vec<Sample>,
     started: Option<(Instant, Resources)>,
+}
+
+struct Sample {
+    wait_ms: f64,
+    paint_ms: f64,
+    frame_ms: f64,
 }
 
 impl Benchmark {
@@ -87,7 +98,11 @@ impl Benchmark {
         } else {
             -120
         };
-        let wait = if self.completed == 0 { 85 } else { 16 };
+        let wait = if self.completed == 0 {
+            85
+        } else {
+            INPUT_DELAYS_MS[(self.completed / 2) % INPUT_DELAYS_MS.len()]
+        };
         Task::future(async move {
             tokio::time::sleep(Duration::from_millis(wait)).await;
             let mut mine = sent.lock().expect("wheel timestamp");
@@ -103,13 +118,18 @@ impl Benchmark {
         .discard()
     }
 
-    pub fn frame(&mut self, frame_started: Instant, offset: f32) -> Task<Message> {
+    pub fn frame(
+        &mut self,
+        frame_started: Instant,
+        notified: Instant,
+        view: PaintedViewport,
+    ) -> Task<Message> {
         let mut sent = self.sent.lock().expect("wheel timestamp");
-        let movement = offset - self.offset;
+        let movement = view.from_bottom - self.offset;
         let Some(posted) = *sent else {
             return Task::none();
         };
-        if frame_started < posted || movement.abs() < 1.0 {
+        if frame_started < posted || view.paint_finished < frame_started || movement.abs() < 1.0 {
             WAIT_FOR_FRAME.store(true, Ordering::Release);
             return Task::none();
         }
@@ -126,13 +146,16 @@ impl Benchmark {
         *sent = None;
         drop(sent);
 
-        self.offset = offset;
+        self.offset = view.from_bottom;
         self.completed += 1;
         if self.completed == WARMUP {
             self.started = Some((now, Resources::read()));
         } else if self.completed > WARMUP {
-            self.latencies
-                .push(now.duration_since(posted).as_secs_f64() * 1000.0);
+            self.latencies.push(Sample {
+                wait_ms: (frame_started - posted).as_secs_f64() * 1000.0,
+                paint_ms: view.paint_time.as_secs_f64() * 1000.0,
+                frame_ms: (notified.max(view.paint_finished) - posted).as_secs_f64() * 1000.0,
+            });
         }
         if self.latencies.len() < SAMPLES {
             return self.next_input();
@@ -141,14 +164,30 @@ impl Benchmark {
         let (start, baseline) = self.started.take().expect("scroll baseline");
         let end = Resources::read();
         let wall_ms = now.duration_since(start).as_secs_f64() * 1000.0;
-        self.latencies.sort_by(f64::total_cmp);
         let cpu_ms = (end.ticks - baseline.ticks) as f64 / 10_000.0;
+        let mut frame: Vec<_> = self
+            .latencies
+            .iter()
+            .map(|sample| sample.frame_ms)
+            .collect();
+        let mut wait: Vec<_> = self.latencies.iter().map(|sample| sample.wait_ms).collect();
+        let mut paint: Vec<_> = self
+            .latencies
+            .iter()
+            .map(|sample| sample.paint_ms)
+            .collect();
+        for samples in [&mut frame, &mut wait, &mut paint] {
+            samples.sort_by(f64::total_cmp);
+        }
         let results = json!({
             "samples": SAMPLES,
             "warmup": WARMUP,
-            "wheel_to_frame_p50_ms": self.percentile(50),
-            "wheel_to_frame_p95_ms": self.percentile(95),
-            "wheel_to_frame_max_ms": self.latencies.last(),
+            "input_delays_ms": INPUT_DELAYS_MS,
+            "wheel_to_frame_p50_ms": percentile(&frame, 50),
+            "wheel_to_frame_p95_ms": percentile(&frame, 95),
+            "wheel_to_frame_max_ms": frame.last(),
+            "wheel_to_redraw_start_p95_ms": percentile(&wait, 95),
+            "transcript_paint_p95_ms": percentile(&paint, 95),
             "cpu_ms": cpu_ms,
             "wall_ms": wall_ms,
             "working_set_start_bytes": baseline.working_set,
@@ -159,10 +198,10 @@ impl Benchmark {
         });
         Task::done(Message::Visual(Event::ScrollResults(results)))
     }
+}
 
-    fn percentile(&self, percentile: usize) -> f64 {
-        self.latencies[(self.latencies.len() * percentile).div_ceil(100) - 1]
-    }
+fn percentile(samples: &[f64], percentile: usize) -> f64 {
+    samples[(samples.len() * percentile).div_ceil(100) - 1]
 }
 
 pub fn save(path: &std::path::Path, results: &Value) {

@@ -290,6 +290,8 @@ impl Widget<Action, Theme, Renderer> for Transcript<'_> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        #[cfg(feature = "visual-check")]
+        let paint_started = std::time::Instant::now();
         self.reading
             .capture(self.items, layout, viewport, first_row(layout, viewport.y));
         let mut states = tree.state.downcast_ref::<RefCell<RowStates>>().borrow_mut();
@@ -308,6 +310,8 @@ impl Widget<Action, Theme, Renderer> for Transcript<'_> {
                 );
             }
         }
+        #[cfg(feature = "visual-check")]
+        self.reading.record_paint(viewport, paint_started);
     }
 
     fn mouse_interaction(
