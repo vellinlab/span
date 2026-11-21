@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn conpty_keeps_output_without_redrawing_hidden_terminal() {
-        let (session, mut receiver) = launch_powershell();
+        let (session, mut receiver) = launch(None);
         let mut terminal = Terminal::new(session);
         terminal.input("1..8 | ForEach-Object { Write-Output ('span-hidden-' + $_) }\r".into());
         wait_for_output(&mut terminal, &mut receiver, "span-hidden-8", false);
@@ -632,6 +632,22 @@ mod tests {
 
         terminal.set_visible(false);
         terminal.input("exit 7\r".into());
+        wait_for_exit(&mut terminal, &mut receiver);
+    }
+
+    #[test]
+    #[ignore = "requires the loopback SSH fixture"]
+    fn windows_ssh_terminal_round_trip_through_conpty() {
+        let (session, mut receiver) = launch(Some(crate::ssh_check::host("SPAN_TEST_SSH_HOST")));
+        let mut terminal = Terminal::new(session);
+        terminal.set_visible(true);
+        wait_for_output(&mut terminal, &mut receiver, "span-ssh-ready", true);
+        terminal.paste("span-ping\n".into());
+        wait_for_output(&mut terminal, &mut receiver, "span-ssh-pong", true);
+        wait_for_exit(&mut terminal, &mut receiver);
+    }
+
+    fn wait_for_exit(terminal: &mut Terminal, receiver: &mut mpsc::UnboundedReceiver<Notice>) {
         let deadline = Instant::now() + Duration::from_secs(15);
         while terminal.exit.is_none() && Instant::now() < deadline {
             while let Ok(Notice::Event(1, event)) = receiver.try_recv() {
@@ -642,7 +658,7 @@ mod tests {
         assert_eq!(
             terminal.exit,
             Some(7),
-            "hidden terminal did not report exit"
+            "terminal did not report the expected exit status"
         );
     }
 
@@ -678,22 +694,23 @@ mod tests {
             }
             assert!(
                 Instant::now() < deadline,
-                "missing terminal output {expected}"
+                "missing terminal output {expected}; screen: {}",
+                screen.trim()
             );
             std::thread::sleep(Duration::from_millis(20));
         }
     }
 
-    fn launch_powershell() -> (Arc<PtySession>, mpsc::UnboundedReceiver<Notice>) {
+    fn launch(host: Option<String>) -> (Arc<PtySession>, mpsc::UnboundedReceiver<Notice>) {
         let (sender, mut receiver) = mpsc::unbounded();
-        Terminal::launch(1, None, None, sender).expect("launch PowerShell worker");
+        Terminal::launch(1, host, None, sender).expect("launch terminal worker");
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             if let Ok(notice) = receiver.try_recv() {
                 let Notice::Ready(1, result) = notice else {
                     panic!("expected the terminal handover first");
                 };
-                return (result.expect("start PowerShell in ConPTY"), receiver);
+                return (result.expect("start program in ConPTY"), receiver);
             }
             assert!(Instant::now() < deadline, "PTY startup timed out");
             std::thread::sleep(Duration::from_millis(20));
@@ -702,7 +719,7 @@ mod tests {
 
     #[test]
     fn an_unclaimed_terminal_releases_its_pty() {
-        let (session, _receiver) = launch_powershell();
+        let (session, _receiver) = launch(None);
         let grid = Arc::downgrade(&session.term);
         drop(session);
         let deadline = Instant::now() + Duration::from_secs(15);

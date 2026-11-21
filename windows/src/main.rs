@@ -21,6 +21,8 @@ mod sftp;
 #[path = "../../src/ssh.rs"]
 #[allow(dead_code)]
 mod ssh;
+#[cfg(test)]
+mod ssh_check;
 mod ssh_destination;
 mod terminal;
 #[path = "../../src/terminal_theme.rs"]

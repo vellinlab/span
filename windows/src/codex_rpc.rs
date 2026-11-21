@@ -181,3 +181,56 @@ async fn deliver(bytes: &[u8], output: &mut mpsc::Sender<Event>) -> Result<(), S
         .await
         .map_err(|error| error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    #[ignore = "requires the loopback SSH fixture"]
+    fn windows_ssh_codex_exchanges_stdio_and_shared_websocket_packets() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                for (variable, route) in [
+                    ("SPAN_TEST_SSH_HOST", "stdio"),
+                    ("SPAN_TEST_SSH_SHARED_HOST", "shared"),
+                ] {
+                    let host = crate::ssh_check::host(variable);
+                    let (mut requests, input) = mpsc::channel(4);
+                    let (mut output, mut events) = mpsc::channel(4);
+                    let rpc = serve(Some(host), None, input, &mut output);
+                    let exchange = async move {
+                        for (id, method, result) in [
+                            (
+                                1,
+                                "initialize",
+                                json!({"userAgent":"span-ssh-fixture", "route":route}),
+                            ),
+                            (2, "thread/list", json!({"data":[{"id":"loopback-thread"}]})),
+                        ] {
+                            requests
+                                .send(json!({"id":id, "method":method, "params":{}}))
+                                .await
+                                .unwrap();
+                            let Some(Event::Packet(packet)) = events.next().await else {
+                                panic!("missing remote {route} Codex response to {method}");
+                            };
+                            assert_eq!(packet, json!({"id":id, "result":result}));
+                        }
+                    };
+                    let exchange = future::try_join(rpc, async {
+                        exchange.await;
+                        Ok(())
+                    });
+                    tokio::time::timeout(Duration::from_secs(20), exchange)
+                        .await
+                        .expect("remote Codex exchange timed out")
+                        .unwrap_or_else(|error| panic!("{route} Codex: {error}"));
+                }
+            });
+    }
+}
