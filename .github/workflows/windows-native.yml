@@ -73,6 +73,7 @@ jobs:
               }
               if ($span.MainWindowHandle -eq [IntPtr]::Zero) { throw "No window opened for $backend" }
               $startup = $timer.ElapsedMilliseconds
+              Write-Host "$backend window handle: $($span.MainWindowHandle)"
               Start-Sleep -Seconds 2
               $span.Refresh()
               if ($span.HasExited) { throw "Span exited after opening its $backend window" }
@@ -84,8 +85,12 @@ jobs:
               }
             } finally {
               if (!$span.HasExited) {
-                $null = $span.CloseMainWindow()
+                $closePosted = $span.CloseMainWindow()
                 if (!$span.WaitForExit(5000)) {
+                  $span.Refresh()
+                  Write-Host "Close posted: $closePosted. Backend: $backend. Remaining handle: $($span.MainWindowHandle). Responding: $($span.Responding)."
+                  Get-CimInstance Win32_Process -Filter "ParentProcessId=$($span.Id)" |
+                    Format-Table ProcessId, Name
                   Stop-Process -Id $span.Id
                   throw "Span did not close within five seconds"
                 }

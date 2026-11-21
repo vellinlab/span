@@ -31,10 +31,12 @@ fn main() -> iced::Result {
         .title("Span")
         .default_font(Font::with_name("Segoe UI"))
         .theme(Span::theme)
+        .subscription(|_| window::close_requests().map(Message::CloseWindow))
         .window(window::Settings {
             size: Size::new(1216.0, 780.0),
             min_size: Some(Size::new(760.0, 480.0)),
             icon,
+            exit_on_close_request: false,
             ..window::Settings::default()
         })
         .run()
@@ -72,6 +74,7 @@ enum Message {
     NewTerminal,
     Select(TerminalId),
     Close(TerminalId),
+    CloseWindow(window::Id),
     ShowConnect,
     ChangeHost(String),
     Connect,
@@ -152,6 +155,11 @@ impl Span {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::NewTerminal => self.open(None),
+            Message::CloseWindow(id) => {
+                self.terminals.clear();
+                self.events.close_channel();
+                return window::close(id);
+            }
             Message::Select(id) => {
                 self.active = Some(id);
             }
