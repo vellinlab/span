@@ -10,6 +10,7 @@ futures-channel = "0.3"
 futures-util = { version = "0.3", features = ["io", "sink"] }
 glob = "0.3"
 gtk = "0.19"
+htmd = "0.6"
 pangocairo = "0.22"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 serde = { version = "1", features = ["derive"] }
@@ -20,6 +21,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 alacritty_terminal = { version = "0.26", default-features = false }
+clipboard-win = "5"
 
 [profile.release]
 strip = "debuginfo"

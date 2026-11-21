@@ -99,7 +99,7 @@ struct TurnDiff {
 }
 
 struct PendingMessage {
-    label: gtk::Label,
+    label: gtk::Widget,
     id: String,
     text: String,
     quotes: usize,
@@ -1682,7 +1682,14 @@ impl Agent {
         }
         self.update_controls();
         let generation = self.history_generation.get();
+        #[cfg(windows)]
+        if let Some(markdown) = crate::clipboard_markup::from_windows() {
+            self.insert_pasted_markdown(&markdown);
+            return;
+        }
+
         let weak = Rc::downgrade(self);
+        let html = gtk::gdk::Atom::intern("text/html");
         agent_render::clipboard().request_contents(
             &gtk::gdk::Atom::intern("TARGETS"),
             move |clipboard, data| {
@@ -1691,30 +1698,70 @@ impl Agent {
                 }) else {
                     return;
                 };
-                if data.targets_include_image(false) {
-                    clipboard.request_image(move |_, image| {
+                let image = data.targets_include_image(false);
+                if data
+                    .targets()
+                    .is_some_and(|targets| targets.contains(&html))
+                {
+                    let weak = Rc::downgrade(&agent);
+                    clipboard.request_contents(&html, move |clipboard, selection| {
                         if let Some(agent) = weak.upgrade().filter(|agent| {
                             agent.pasting.get() && agent.history_generation.get() == generation
                         }) {
-                            agent.pasting.set(false);
-                            let result = image
-                                .ok_or_else(|| "无法读取剪贴板图片。".into())
-                                .and_then(|image| agent.attachments.paste_image(image));
-                            if let Err(error) = result {
-                                agent.show_status(&error);
+                            if let Some(markdown) = (selection.length() > 0)
+                                .then(|| crate::clipboard_markup::to_markdown(&selection.data()))
+                                .flatten()
+                            {
+                                agent.insert_pasted_markdown(&markdown);
+                            } else {
+                                agent.paste_fallback(clipboard, generation, image);
                             }
-                            agent.update_controls();
                         }
                     });
                 } else {
-                    agent.pasting.set(false);
-                    agent.update_controls();
-                    if let Some(buffer) = agent.input.buffer() {
-                        buffer.paste_clipboard(clipboard, None, agent.input.is_editable());
-                    }
+                    agent.paste_fallback(clipboard, generation, image);
                 }
             },
         );
+    }
+
+    fn insert_pasted_markdown(&self, markdown: &str) {
+        self.pasting.set(false);
+        self.update_controls();
+        if let Some(buffer) = self.input.buffer()
+            && self.input.is_editable()
+        {
+            buffer.begin_user_action();
+            buffer.delete_selection(true, true);
+            buffer.insert_at_cursor(markdown);
+            buffer.end_user_action();
+        }
+    }
+
+    fn paste_fallback(self: &Rc<Self>, clipboard: &gtk::Clipboard, generation: u64, image: bool) {
+        if image {
+            let weak = Rc::downgrade(self);
+            clipboard.request_image(move |_, image| {
+                if let Some(agent) = weak.upgrade().filter(|agent| {
+                    agent.pasting.get() && agent.history_generation.get() == generation
+                }) {
+                    agent.pasting.set(false);
+                    let result = image
+                        .ok_or_else(|| "无法读取剪贴板图片。".into())
+                        .and_then(|image| agent.attachments.paste_image(image));
+                    if let Err(error) = result {
+                        agent.show_status(&error);
+                    }
+                    agent.update_controls();
+                }
+            });
+        } else {
+            self.pasting.set(false);
+            self.update_controls();
+            if let Some(buffer) = self.input.buffer() {
+                buffer.paste_clipboard(clipboard, None, self.input.is_editable());
+            }
+        }
     }
 
     fn send(self: &Rc<Self>, command_prompt: Option<&str>) {
@@ -2702,13 +2749,35 @@ impl Agent {
         expander
     }
 
-    fn add_user(&self, text: &str) -> gtk::Label {
-        let label = agent_render::text(&limited(text, 256 * 1024));
-        label.set_halign(gtk::Align::End);
-        label.set_max_width_chars(52);
-        label.style_context().add_class("agent-user");
-        self.append(&label);
-        label
+    fn add_user(&self, text: &str) -> gtk::Widget {
+        let text = limited(text, 256 * 1024);
+        let bubble: gtk::Widget = if agent_render::has_block_markdown(&text) {
+            let content = agent_render::response(
+                &text,
+                &self.context.borrow(),
+                agent_render::ResponseMode::History,
+                Some(&self.history_window),
+                &self.preview,
+                &self.quote_action(),
+            );
+            let card = column(0);
+            card.add(&content);
+            card.upcast()
+        } else {
+            let label = if agent_render::has_inline_markdown(&text) {
+                let label = agent_render::markdown_label();
+                agent_render::set_markdown(&label, &text);
+                label
+            } else {
+                agent_render::text(&text)
+            };
+            label.set_max_width_chars(52);
+            label.upcast()
+        };
+        bubble.set_halign(gtk::Align::End);
+        bubble.style_context().add_class("agent-user");
+        self.append(&bubble);
+        bubble
     }
 
     fn add_agent(&self, text: &str, loading_history: bool, position: Option<i32>) {

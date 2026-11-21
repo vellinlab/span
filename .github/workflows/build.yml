@@ -1,4 +1,4 @@
-name: Build Linux
+name: Build and release EL8 and Windows
 
 on:
   push:
@@ -13,112 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-amd64:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install GTK, VTE and X11 test tools
-        run: |
-          # The regional EC2 mirror can stall while streaming the larger desktop dependencies.
-          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
-          fi
-          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
-          sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
-            build-essential pkg-config dpkg-dev libgtk-3-dev libvte-2.91-dev librsvg2-dev librsvg2-common \
-            dbus-daemon desktop-file-utils xvfb x11-utils xdotool imagemagick fontconfig fonts-wqy-microhei openssh-server \
-            at-spi2-core python3-pyatspi python3-xlib python3-websockets xclip
-
-      - name: Check formatting and build
-        run: |
-          rustup toolchain install 1.98.1 --profile minimal --component rustfmt
-          cargo +1.98.1 fmt --all -- --check
-          bash packaging/test-sftp.sh cargo +1.98.1 test --locked --release
-          cargo +1.98.1 build --locked --release
-
-      - name: Compare software-rendered X11 interaction with the released baseline
-        if: github.ref == 'refs/tags/v0.1.0-rc.22' || startsWith(github.ref, 'refs/heads/perf/')
-        run: |
-          bench_dir="$(mktemp -d)"
-          baseline_tag=v0.1.0-rc.26
-          if [[ "$GITHUB_REF" == refs/tags/v0.1.0-rc.22 ]]; then baseline_tag=v0.1.0-rc.21; fi
-          previous="span_${baseline_tag#v}_amd64.deb"
-          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
-            "https://github.com/$GITHUB_REPOSITORY/releases/download/$baseline_tag/$previous" \
-            --output "$bench_dir/$previous"
-          dpkg-deb -x "$bench_dir/$previous" "$bench_dir/old"
-          mkdir "$bench_dir/$baseline_tag" "$bench_dir/candidate"
-          ln -s "$bench_dir/old/usr/bin/span" "$bench_dir/$baseline_tag/span"
-          ln -s "$PWD/target/release/span" "$bench_dir/candidate/span"
-          xvfb-run -a -s '-screen 0 1600x980x24' dbus-run-session -- /usr/bin/python3 packaging/bench-interaction.py \
-            "$bench_dir/$baseline_tag/span" "$bench_dir/candidate/span" "$bench_dir/candidate/span" "$bench_dir/$baseline_tag/span"
-          xvfb-run -a -s '-screen 0 1600x980x24' dbus-run-session -- /usr/bin/python3 packaging/bench-catalog.py \
-            "$bench_dir/$baseline_tag/span" "$bench_dir/candidate/span" "$bench_dir/candidate/span" "$bench_dir/$baseline_tag/span"
-
-      - name: Package and test on X11
-        run: |
-          desktop-file-validate packaging/io.github.zyw02.SshWorkbench.desktop
-          bash packaging/package-deb.sh
-          package=(dist/span_*.deb)
-          dpkg-deb --info "${package[0]}"
-          bash packaging/test-package-upgrade.sh "${package[0]}"
-          WORKBENCH_PREVIEW="$PWD/dist/workbench.png" WORKBENCH_TEST_AGENT_SSH=1 \
-            bash packaging/test-sftp.sh dbus-run-session -- \
-            bash packaging/smoke-test.sh /usr/bin/span
-
-      - name: Upload Debian package
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: span-linux-amd64
-          path: dist/span_*.deb
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload desktop preview
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: workbench-preview
-          path: |
-            dist/workbench.png
-            dist/host-workbench.png
-            dist/agent.png
-            dist/agent-catalog.png
-            dist/agent-question.png
-            dist/agent-compose.png
-            dist/agent-model-picker.png
-            dist/agent-commands.png
-            dist/agent-extensions.png
-            dist/agent-effort-picker.png
-            dist/agent-permissions.png
-            dist/agent-usage.png
-            dist/agent-plan.png
-            dist/agent-workspace.png
-            dist/agent-workspace-compact.png
-            dist/agent-quote-preview.png
-            dist/agent-source-preview.png
-            dist/svg-preview-400.png
-            dist/agent-activity.png
-            dist/agent-activity-hover.png
-            dist/agent-paused.png
-            dist/agent-task-status.png
-            dist/agent-follow-up.png
-            dist/agent-table.png
-            dist/files-preview.png
-            dist/files-completion.png
-            dist/generated-preview.png
-            dist/remote-terminal-drawer.png
-            dist/quick-connect.png
-            dist/test-failure.png
-          if-no-files-found: ignore
-          retention-days: 30
-
   el8-x86_64:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -176,7 +70,7 @@ jobs:
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [linux-amd64, el8-x86_64, windows]
+    needs: [el8-x86_64, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -186,12 +80,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Download Debian package
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: span-linux-amd64
-          path: release
 
       - name: Download EL8 package
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -225,14 +113,11 @@ jobs:
           fi
           package_version="$(bash packaging/package-version.sh)"
           rpm_asset="release/span-$version-1.el8.x86_64.rpm"
-          deb_asset="release/span_${version}_amd64.deb"
           if [[ "$package_version" != "$version" ]]; then
             mv -- "release/span-$package_version-1.el8.x86_64.rpm" "$rpm_asset"
-            mv -- "release/span_${package_version}_amd64.deb" "$deb_asset"
           fi
           assets=(
             "$rpm_asset"
-            "$deb_asset"
             "release/span-$version-windows-x86_64.zip"
             "release/vte-0.64.2.tar.xz"
           )
