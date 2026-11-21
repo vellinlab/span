@@ -405,7 +405,7 @@ impl Panel {
         let name = path.file_name().map(files::display).unwrap_or_default();
         let image_width = 430.0 * self.zoom;
         let image_height = 380.0 * self.zoom;
-        let (content, can_zoom) = match preview {
+        let (content, can_zoom): (Element<'a, Action>, bool) = match preview {
             Preview::Image(handle) => (
                 scrollable(
                     image(handle.clone())
