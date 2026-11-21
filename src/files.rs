@@ -208,7 +208,7 @@ pub struct Directory {
 
 fn list_local(path: Option<&Path>) -> io::Result<Directory> {
     #[cfg(unix)]
-    let default_path = || Ok(glib::home_dir());
+    let default_path = || -> io::Result<PathBuf> { Ok(glib::home_dir()) };
     #[cfg(windows)]
     let default_path = || {
         std::env::home_dir()
