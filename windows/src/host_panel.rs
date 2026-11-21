@@ -268,11 +268,12 @@ impl Panel {
             if host.name != target {
                 title = title.push(text(target).size(12).color(theme::MUTED));
             }
+            let selected = current == Some(host.target.as_str());
             let connect = button(title.spacing(3))
                 .width(Fill)
                 .padding([7, 9])
                 .on_press(Action::Connect(host.clone()))
-                .style(move |_, status| theme::tab(current == Some(host.target.as_str()), status));
+                .style(move |_, status| theme::tab(selected, status));
             entries = entries.push(
                 row![
                     connect,
@@ -347,79 +348,80 @@ impl Panel {
     }
 
     pub fn dialog(&self) -> Option<Element<'_, Action>> {
-        let (title, content, confirm, enabled, index) = match self.dialog.as_ref()? {
-            Dialog::Edit {
-                index,
-                name,
-                target,
-            } => (
-                if index.is_some() {
-                    "编辑主机"
-                } else {
-                    "添加主机"
-                },
-                column![
-                    text("显示名称（可选）").size(13).color(theme::MUTED),
-                    text_input("例如 开发服务器", name)
-                        .padding(9)
-                        .on_input(Action::Name)
-                        .on_submit(Action::Confirm),
-                    text("SSH 目标").size(13).color(theme::MUTED),
-                    text_input("SSH 别名或 user@host:port", target)
-                        .id(self.target.clone())
-                        .padding(9)
-                        .on_input(Action::Target)
-                        .on_submit(Action::Confirm),
-                ]
-                .spacing(8)
-                .into(),
-                "保存",
-                ssh_destination::normalize(target).is_some(),
-                *index,
-            ),
-            Dialog::Delete(index) => (
-                "删除主机",
-                text(format!("删除保存的主机「{}」？", self.hosts[*index].name))
-                    .size(14)
+        let (title, content, confirm, enabled, index): (_, Element<'_, Action>, _, _, _) =
+            match self.dialog.as_ref()? {
+                Dialog::Edit {
+                    index,
+                    name,
+                    target,
+                } => (
+                    if index.is_some() {
+                        "编辑主机"
+                    } else {
+                        "添加主机"
+                    },
+                    column![
+                        text("显示名称（可选）").size(13).color(theme::MUTED),
+                        text_input("例如 开发服务器", name)
+                            .padding(9)
+                            .on_input(Action::Name)
+                            .on_submit(Action::Confirm),
+                        text("SSH 目标").size(13).color(theme::MUTED),
+                        text_input("SSH 别名或 user@host:port", target)
+                            .id(self.target.clone())
+                            .padding(9)
+                            .on_input(Action::Target)
+                            .on_submit(Action::Confirm),
+                    ]
+                    .spacing(8)
                     .into(),
-                "删除",
-                true,
-                None,
-            ),
-            Dialog::Reading(_) => (
-                "导入 SSH 配置",
-                text("正在读取本机 SSH 配置…").size(14).into(),
-                "导入",
-                false,
-                None,
-            ),
-            Dialog::Import(candidates) => {
-                let options = if candidates.is_empty() {
-                    text("没有新的 SSH 主机别名可导入。")
+                    "保存",
+                    ssh_destination::normalize(target).is_some(),
+                    *index,
+                ),
+                Dialog::Delete(index) => (
+                    "删除主机",
+                    text(format!("删除保存的主机「{}」？", self.hosts[*index].name))
                         .size(14)
-                        .color(theme::MUTED)
-                        .into()
-                } else {
-                    let choices = column(candidates.iter().enumerate().map(
-                        |(index, (host, checked))| {
-                            checkbox(*checked)
-                                .label(&host.target)
-                                .on_toggle(move |value| Action::SelectAlias(index, value))
-                                .into()
-                        },
-                    ))
-                    .spacing(8);
-                    scrollable(choices).height(iced::Length::Shrink).into()
-                };
-                (
-                    "导入 SSH 配置",
-                    container(options).max_height(240).into(),
-                    "导入",
-                    candidates.iter().any(|(_, checked)| *checked),
+                        .into(),
+                    "删除",
+                    true,
                     None,
-                )
-            }
-        };
+                ),
+                Dialog::Reading(_) => (
+                    "导入 SSH 配置",
+                    text("正在读取本机 SSH 配置…").size(14).into(),
+                    "导入",
+                    false,
+                    None,
+                ),
+                Dialog::Import(candidates) => {
+                    let options: Element<'_, Action> = if candidates.is_empty() {
+                        text("没有新的 SSH 主机别名可导入。")
+                            .size(14)
+                            .color(theme::MUTED)
+                            .into()
+                    } else {
+                        let choices = column(candidates.iter().enumerate().map(
+                            |(index, (host, checked))| {
+                                checkbox(*checked)
+                                    .label(&host.target)
+                                    .on_toggle(move |value| Action::SelectAlias(index, value))
+                                    .into()
+                            },
+                        ))
+                        .spacing(8);
+                        scrollable(choices).height(iced::Length::Shrink).into()
+                    };
+                    (
+                        "导入 SSH 配置",
+                        container(options).max_height(240).into(),
+                        "导入",
+                        candidates.iter().any(|(_, checked)| *checked),
+                        None,
+                    )
+                }
+            };
         let mut form = column![text(title).size(19).font(theme::SEMIBOLD), content].spacing(12);
         if let Some(error) = &self.error {
             form = form.push(text(error).size(13).color(theme::ERROR));
