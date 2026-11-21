@@ -1,3 +1,4 @@
+use crate::agent_execution::{Model, PermissionMode, supports_turn_speed};
 use crate::icons::{self, Icon};
 use gtk::pango;
 use gtk::prelude::*;
@@ -159,24 +160,7 @@ impl Picker {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum PermissionMode {
-    Workspace,
-    ReadOnly,
-    Full,
-}
-
 impl PermissionMode {
-    const ALL: [Self; 3] = [Self::Workspace, Self::ReadOnly, Self::Full];
-
-    fn id(self) -> &'static str {
-        match self {
-            Self::Workspace => "workspaceWrite",
-            Self::ReadOnly => "readOnly",
-            Self::Full => "dangerFullAccess",
-        }
-    }
-
     fn name(self) -> &'static str {
         match self {
             Self::Workspace => "工作区权限",
@@ -191,78 +175,6 @@ impl PermissionMode {
             Self::ReadOnly => "可读取文件，禁止写入或联网，且不允许通过审批提升权限。",
             Self::Full => "可按当前用户的权限访问文件和网络，命令无需逐次审批。",
         }
-    }
-
-    fn approval_policy(self) -> &'static str {
-        if self == Self::Workspace {
-            "on-request"
-        } else {
-            "never"
-        }
-    }
-
-    fn apply(self, params: &mut Value) {
-        params["sandboxPolicy"] = match self {
-            Self::Workspace => json!({
-                "type": self.id(),
-                "writableRoots": [],
-                "networkAccess": false,
-                "excludeTmpdirEnvVar": false,
-                "excludeSlashTmp": false,
-            }),
-            Self::ReadOnly => json!({"type": self.id(), "networkAccess": false}),
-            Self::Full => json!({"type": self.id()}),
-        };
-        params["approvalPolicy"] = json!(self.approval_policy());
-        params["approvalsReviewer"] = json!("user");
-    }
-}
-
-struct Model {
-    id: String,
-    name: String,
-    efforts: Vec<String>,
-    default_effort: Option<String>,
-    images: bool,
-    fast: bool,
-}
-
-impl Model {
-    fn parse(value: &Value) -> Option<Self> {
-        let id = value["model"].as_str().or_else(|| value["id"].as_str())?;
-        if id.is_empty() || id.contains('\0') || value["hidden"] == true {
-            return None;
-        }
-        let efforts = value["supportedReasoningEfforts"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|effort| {
-                let id = effort["reasoningEffort"].as_str()?.to_owned();
-                (!id.is_empty() && !id.contains('\0')).then_some(id)
-            })
-            .collect();
-        Some(Self {
-            id: id.to_owned(),
-            name: value["displayName"]
-                .as_str()
-                .unwrap_or(id)
-                .replace('\0', "�"),
-            efforts,
-            default_effort: value["defaultReasoningEffort"].as_str().map(str::to_owned),
-            images: value["inputModalities"]
-                .as_array()
-                .is_none_or(|items| items.is_empty() || items.iter().any(|item| item == "image")),
-            fast: value["serviceTiers"]
-                .as_array()
-                .filter(|tiers| !tiers.is_empty())
-                .map(|tiers| tiers.iter().any(|tier| tier["id"] == "priority"))
-                .unwrap_or_else(|| {
-                    value["additionalSpeedTiers"]
-                        .as_array()
-                        .is_some_and(|tiers| tiers.iter().any(|tier| tier == "fast"))
-                }),
-        })
     }
 }
 
@@ -464,31 +376,12 @@ impl Options {
     }
 
     pub fn server_ready(&self, result: &Value) {
-        // Codex reports the server version in the first user-agent token.
-        // 0.151 introduced per-turn speeds, which leave shared session defaults intact.
-        let supported = result["userAgent"]
-            .as_str()
-            .and_then(|agent| agent.split_ascii_whitespace().next())
-            .and_then(|product| product.rsplit_once('/'))
-            .is_some_and(|(_, version)| {
-                let mut parts = version.split('.');
-                let major = parts.next().and_then(|part| part.parse::<u32>().ok());
-                let minor = parts.next().and_then(|part| part.parse::<u32>().ok());
-                major
-                    .zip(minor)
-                    .is_some_and(|(major, minor)| major > 0 || minor >= 151)
-            });
-        self.turn_speed_supported.set(supported);
+        self.turn_speed_supported.set(supports_turn_speed(result));
     }
 
     pub fn open(&self, result: &Value) {
         self.fast.set_active(false);
-        let mode = PermissionMode::ALL.into_iter().find(|mode| {
-            result["sandbox"]["type"] == mode.id()
-                && result["approvalPolicy"] == mode.approval_policy()
-                && (*mode == PermissionMode::Full || result["sandbox"]["networkAccess"] != true)
-        });
-        self.render_permissions(mode);
+        self.render_permissions(PermissionMode::from_response(result));
         let model = result["model"]
             .as_str()
             .unwrap_or_default()

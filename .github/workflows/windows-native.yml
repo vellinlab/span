@@ -6,6 +6,7 @@ on:
       - platform/windows-native
     paths:
       - 'windows/**'
+      - 'src/agent_execution.rs'
       - 'src/terminal_theme.rs'
       - 'src/ssh.rs'
       - 'src/files.rs'
@@ -16,6 +17,7 @@ on:
   pull_request:
     paths:
       - 'windows/**'
+      - 'src/agent_execution.rs'
       - 'src/terminal_theme.rs'
       - 'src/ssh.rs'
       - 'src/files.rs'

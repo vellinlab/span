@@ -6,6 +6,7 @@ mod agent_attachments;
 mod agent_catalog;
 mod agent_commands;
 mod agent_diff;
+mod agent_execution;
 mod agent_extensions;
 mod agent_options;
 mod agent_question;

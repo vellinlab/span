@@ -1,7 +1,7 @@
-use crate::{codex_rpc, theme};
+use crate::{agent_execution, agent_settings, codex_rpc, theme};
 use futures::channel::mpsc;
 use iced::widget::{
-    Space, button, column, container, markdown, row, scrollable, text, text_editor,
+    Space, button, column, container, markdown, row, scrollable, text, text_editor, tooltip,
 };
 use iced::{Center, Element, Fill, Right, Task, Theme, clipboard};
 use serde_json::{Value, json};
@@ -19,6 +19,7 @@ pub enum Action {
     Pasted(Option<String>, Option<String>),
     Send,
     Interrupt,
+    Setting(agent_settings::Change),
     Copy(String),
     Link(String),
     Toggle(String),
@@ -32,7 +33,9 @@ enum Request {
     List,
     Open,
     History,
+    Models,
     Start,
+    Steer,
     Interrupt,
 }
 
@@ -78,6 +81,8 @@ pub struct Agent {
     in_flight: bool,
     turn: Option<String>,
     approval: Option<Approval>,
+    settings: agent_settings::Settings,
+    model_provider: Option<String>,
     status: Option<String>,
     copied: Option<String>,
 }
@@ -100,6 +105,8 @@ impl Agent {
             in_flight: false,
             turn: None,
             approval: None,
+            settings: agent_settings::Settings::default(),
+            model_provider: None,
             status: Some("Connecting to Codex…".into()),
             copied: None,
         };
@@ -149,6 +156,14 @@ impl Agent {
         );
     }
 
+    fn load_models(&mut self, cursor: Option<String>) {
+        let mut params = json!({"limit":50, "cursor":cursor});
+        if let Some(provider) = &self.model_provider {
+            params["modelProvider"] = json!(provider);
+        }
+        self.request(Request::Models, "model/list", params);
+    }
+
     fn can_open(&self) -> bool {
         self.connection.is_some()
             && !self.in_flight
@@ -167,6 +182,7 @@ impl Agent {
                 self.in_flight = false;
                 self.turn = None;
                 self.approval = None;
+                self.submitted_draft = None;
                 self.status = Some(reason);
             }
             Action::New if self.can_open() => {
@@ -217,6 +233,7 @@ impl Agent {
                     )));
             }
             Action::Send => self.send_draft(),
+            Action::Setting(change) => self.settings.change(change),
             Action::Interrupt if self.in_flight => {
                 if let (Some(thread), Some(turn)) = (&self.thread, &self.turn)
                     && !self
@@ -260,18 +277,24 @@ impl Agent {
         Task::none()
     }
 
+    fn can_send(&self) -> bool {
+        self.connection.is_some()
+            && self.thread.is_some()
+            && self.submitted_draft.is_none()
+            && (!self.in_flight || self.turn.is_some())
+            && !self
+                .pending
+                .values()
+                .any(|request| matches!(request, Request::Open | Request::Interrupt))
+    }
+
     fn send_draft(&mut self) {
+        if !self.can_send() {
+            return;
+        }
         let Some(thread) = self.thread.as_deref() else {
             return;
         };
-        if self.in_flight
-            || self
-                .pending
-                .values()
-                .any(|request| *request == Request::Open)
-        {
-            return;
-        }
         let message = self.draft.text();
         if message.trim().is_empty() {
             return;
@@ -280,14 +303,19 @@ impl Agent {
             self.status = Some("The message exceeds 256 KiB.".into());
             return;
         }
-        if self.request(
-            Request::Start,
-            "turn/start",
-            json!({
-                "threadId":thread,"summary":"auto",
-                "input":[{"type":"text","text":message,"text_elements":[]}]
-            }),
-        ) {
+        let mut params = json!({
+            "threadId":thread,
+            "input":[{"type":"text","text":message,"text_elements":[]}]
+        });
+        let (request, method) = if let Some(turn) = &self.turn {
+            params["expectedTurnId"] = json!(turn);
+            (Request::Steer, "turn/steer")
+        } else {
+            params["summary"] = json!("auto");
+            self.settings.apply(&mut params);
+            (Request::Start, "turn/start")
+        };
+        if self.request(request, method, params) {
             self.submitted_draft = Some(message);
             self.in_flight = true;
             self.status = None;
@@ -306,11 +334,15 @@ impl Agent {
             .and_then(|id| self.pending.remove(&id))
         {
             if let Some(error) = packet["error"]["message"].as_str() {
-                if request == Request::Start {
+                if matches!(request, Request::Start | Request::Steer) {
                     self.submitted_draft = None;
-                    self.in_flight = false;
+                    if request == Request::Start && self.turn.is_none() {
+                        self.in_flight = false;
+                    }
                 }
-                self.status = Some(error.into());
+                if request != Request::Models {
+                    self.status = Some(error.into());
+                }
                 return;
             }
             self.response(request, &packet["result"]);
@@ -321,6 +353,7 @@ impl Agent {
         match request {
             Request::Initialize => {
                 if self.send(json!({"method":"initialized"})) {
+                    self.settings.supports_fast = agent_execution::supports_turn_speed(result);
                     self.status = None;
                     self.load_catalog();
                 }
@@ -351,6 +384,11 @@ impl Agent {
                 self.copied = None;
                 self.items.clear();
                 self.cursor = None;
+                self.pending
+                    .retain(|_, request| !matches!(request, Request::History | Request::Models));
+                self.settings.open(result);
+                self.model_provider = result["modelProvider"].as_str().map(str::to_owned);
+                self.load_models(None);
                 if let Some(page) = result
                     .get("initialTurnsPage")
                     .filter(|page| page.is_object())
@@ -368,11 +406,21 @@ impl Agent {
                 }
             }
             Request::History => self.history(result),
-            Request::Start => {
+            Request::Models => {
+                if let Some(cursor) = self.settings.add_page(result) {
+                    self.load_models(Some(cursor));
+                }
+            }
+            Request::Start | Request::Steer => {
                 if self.submitted_draft.take().as_deref() == Some(&self.draft.text()) {
                     self.draft = text_editor::Content::new();
                 }
-                self.turn = result["turn"]["id"].as_str().map(str::to_owned);
+                if request == Request::Start
+                    && self.in_flight
+                    && let Some(id) = result["turn"]["id"].as_str()
+                {
+                    self.turn = Some(id.to_owned());
+                }
             }
             Request::Interrupt => {}
         }
@@ -424,6 +472,14 @@ impl Agent {
             return;
         }
         match method {
+            "thread/tokenUsage/updated" => {
+                let usage = &params["tokenUsage"];
+                self.settings.context = usage["last"]["totalTokens"].as_u64().zip(
+                    usage["modelContextWindow"]
+                        .as_u64()
+                        .filter(|size| *size > 0),
+                );
+            }
             "turn/started" => {
                 self.in_flight = true;
                 self.turn = params["turn"]["id"].as_str().map(str::to_owned);
@@ -768,28 +824,44 @@ impl Agent {
             composer = composer.push(text(status).size(13).color(theme::MUTED));
         }
         let running = self.in_flight;
-        composer = composer.push(editor).push(
-            row![
-                text(if running { "Working…" } else { "" })
-                    .size(13)
+        let mut controls = row![].spacing(8).align_y(Center);
+        if let Some((used, limit)) = self.settings.context {
+            let percent = (used as f64 / limit as f64 * 100.0).min(100.0);
+            controls = controls.push(tooltip(
+                text(format!("Context {percent:.0}%"))
+                    .size(12)
                     .color(theme::MUTED),
-                Space::new().width(Fill),
-                if running {
-                    action(
-                        "Stop",
-                        self.turn.is_some().then_some(Action::Interrupt),
-                        false,
-                    )
-                } else {
-                    action(
-                        "Send",
-                        self.connection.is_some().then_some(Action::Send),
-                        true,
-                    )
-                },
-            ]
-            .align_y(Center),
-        );
+                container(text(format!("{used} of {limit} context tokens")).size(12))
+                    .padding(6)
+                    .style(|_| theme::panel(theme::CHROME, 6.0)),
+                tooltip::Position::Top,
+            ));
+        }
+        if running {
+            controls = controls.push(action(
+                "Stop",
+                self.turn.is_some().then_some(Action::Interrupt),
+                false,
+            ));
+        }
+        controls = controls.push(action(
+            if running { "Follow up" } else { "Send" },
+            self.can_send().then_some(Action::Send),
+            true,
+        ));
+        composer = composer
+            .push(editor)
+            .push(self.settings.view(running).map(Action::Setting))
+            .push(
+                row![
+                    text(if running { "Working…" } else { "" })
+                        .size(13)
+                        .color(theme::MUTED),
+                    Space::new().width(Fill),
+                    controls,
+                ]
+                .align_y(Center),
+            );
         column![
             container(text(&self.title).size(16).font(theme::SEMIBOLD)).padding([10, 23]),
             scroll,
@@ -837,6 +909,55 @@ fn thread_title(thread: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_follow_up_does_not_apply_next_turn_settings() {
+        let (mut agent, _) = Agent::new(None, None);
+        let (sender, mut requests) = mpsc::channel(8);
+        agent.connection = Some(sender);
+        agent.pending.clear();
+        agent.thread = Some("fixture".into());
+        agent.turn = Some("running".into());
+        agent.in_flight = true;
+        agent.settings.supports_fast = true;
+        agent.settings.add_page(&json!({
+            "data":[{"model":"fixture-model","displayName":"Fixture",
+                "supportedReasoningEfforts":[{"reasoningEffort":"high"}],
+                "serviceTiers":[{"id":"priority"}]}]
+        }));
+        for change in [
+            agent_settings::Change::Model("fixture-model".into()),
+            agent_settings::Change::Effort("high".into()),
+            agent_settings::Change::Permission(agent_execution::PermissionMode::ReadOnly),
+            agent_settings::Change::Fast,
+        ] {
+            agent.settings.change(change);
+        }
+        agent.draft = text_editor::Content::with_text("Follow up");
+        agent.send_draft();
+        let steer = requests.try_recv().expect("active turn request");
+        assert_eq!(steer["method"], "turn/steer");
+        assert_eq!(steer["params"]["expectedTurnId"], "running");
+        for key in ["model", "effort", "sandboxPolicy", "serviceTierForTurn"] {
+            assert!(steer["params"].get(key).is_none());
+        }
+        agent.packet(json!({
+            "id":steer["id"],"error":{"message":"Turn closed before the follow-up"}
+        }));
+        assert_eq!(agent.draft.text().trim_end(), "Follow up");
+        agent.notification(
+            "turn/completed",
+            &json!({"threadId":"fixture","turn":{"id":"running"}}),
+        );
+        agent.send_draft();
+        let next = requests.try_recv().expect("next turn request");
+        assert_eq!(next["method"], "turn/start");
+        assert_eq!(next["params"]["model"], "fixture-model");
+        assert_eq!(next["params"]["effort"], "high");
+        assert_eq!(next["params"]["sandboxPolicy"]["type"], "readOnly");
+        assert_eq!(next["params"]["approvalPolicy"], "never");
+        assert_eq!(next["params"]["serviceTierForTurn"], "priority");
+    }
 
     #[test]
     fn resume_history_and_delta_completion_keep_item_order() {
