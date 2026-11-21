@@ -62,6 +62,7 @@ pub struct Check {
     items: usize,
     benchmark: Option<scroll::Benchmark>,
     reading: Option<(String, f32)>,
+    narrow_content_height: Option<f32>,
 }
 
 pub fn enabled() -> bool {
@@ -84,6 +85,7 @@ impl Check {
             items: 0,
             benchmark: None,
             reading: None,
+            narrow_content_height: None,
         })
     }
 
@@ -296,12 +298,20 @@ impl Check {
                 }
                 self.assert_reader(agent);
                 self.save(&format!("resize-{width}.png"), frame);
+                let (id, view, _, _) = probe.expect("resized viewport");
+                let content_height = view.content_bounds().height;
                 if width == 900 {
+                    self.narrow_content_height = Some(content_height);
                     self.step = Step::WaitForResize(1320);
                     return resize(1320);
                 }
+                assert!(
+                    self.narrow_content_height
+                        .expect("narrow transcript height")
+                        > content_height + 30.0,
+                    "the narrow fixture must wrap more lines"
+                );
 
-                let (id, _, _, _) = probe.expect("resized viewport");
                 self.step = Step::FollowLatest;
                 scroll_to(
                     id,
@@ -538,7 +548,7 @@ fn page(start: usize, end: usize, next: Option<&str>) -> Value {
                         "Check the lockfile, then compare the deployment logs with the previous build."
                     ]},
                     {"id":format!("reply-{turn}"),"type":"agentMessage","text":format!(
-                        "### Preview build {}\n\nThe **deployment** now reuses the same artifact on retry.\n\n- The validation stage completed successfully.\n- The preview stays available while a replacement is deployed.\n\n```powershell\nspan check --preview {}\n```",
+                        "### Preview build {}\n\nThe **deployment** now reuses the same artifact on retry.\n\n- The validation stage completed successfully.\n- The preview stays available while a replacement is deployed, so readers can finish their work while the new build goes through the checks.\n\n```powershell\nspan check --preview {}\n```",
                         turn + 1, turn + 1
                     )},
                 ],
