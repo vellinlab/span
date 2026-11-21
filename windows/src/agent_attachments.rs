@@ -1,7 +1,10 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clipboard_win::{Clipboard, formats, raw};
 use iced::widget::image::Handle;
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, codecs::bmp::BmpDecoder};
+use image::{
+    DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader, codecs::bmp::BmpDecoder,
+    codecs::png::PngEncoder,
+};
 use std::{
     fmt,
     fs::File,
@@ -126,11 +129,15 @@ fn from_dib(bytes: Vec<u8>) -> Result<Attachment, String> {
     let decoder = BmpDecoder::new_without_file_header(Cursor::new(bytes))
         .map_err(|_| "Could not read the clipboard bitmap.")?;
     let image = decode(decoder)?;
-    let mut encoded = Cursor::new(Vec::new());
-    image
-        .write_to(&mut encoded, ImageFormat::Png)
+    let mut bytes = Vec::new();
+    PngEncoder::new(&mut bytes)
+        .write_image(
+            image.as_bytes(),
+            image.width(),
+            image.height(),
+            image.color().into(),
+        )
         .map_err(|_| "Could not encode the clipboard bitmap.")?;
-    let bytes = encoded.into_inner();
     check_bytes(&bytes)?;
     Ok(attachment(
         "Screenshot.png".into(),
