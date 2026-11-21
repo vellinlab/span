@@ -489,7 +489,7 @@ impl Agent {
                     .collect::<Vec<_>>()
                     .join("\n");
                 if !message.trim().is_empty() {
-                    self.upsert(id, Kind::User, "", &message, false, false);
+                    self.upsert(id, Kind::User, "", &message, false, true);
                 }
             }
             Some("agentMessage" | "plan") => {
