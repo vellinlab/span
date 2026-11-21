@@ -96,6 +96,12 @@ impl<'a> Transcript<'a> {
 
     fn mount(&self, states: &mut RowStates, renderer: &Renderer, visible: Range<usize>) {
         let mut rows = self.rows.borrow_mut();
+        if states.len() == rows.len()
+            && rows.len() == visible.len()
+            && (visible.is_empty() || rows.contains_key(&visible.start))
+        {
+            return;
+        }
         rows.retain(|index, _| visible.contains(index));
         states.retain(|index, _| visible.contains(index));
         for index in visible {
@@ -117,6 +123,42 @@ impl<'a> Transcript<'a> {
                 Row { element, node }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn viewport_mounts_only_nearby_rows_even_with_one_very_tall_reply() {
+        let children = (0..320)
+            .map(|i| {
+                let height = if i == 319 { 5000.0 } else { 32.0 };
+                layout::Node::new(Size::new(760.0, height))
+                    .move_to(Point::new(0.0, i as f32 * 44.0))
+            })
+            .collect();
+        let layout = layout::Node::with_children(Size::new(760.0, 19_036.0), children)
+            .move_to(Point::new(100.0, 40.0));
+        let view = |y| Rectangle {
+            x: 100.0,
+            y,
+            width: 760.0,
+            height: 480.0,
+        };
+        assert_eq!(
+            Transcript::visible(Layout::new(&layout), &view(40.0)),
+            0..15
+        );
+        assert_eq!(
+            Transcript::visible(Layout::new(&layout), &view(17_100.0)),
+            319..320
+        );
+        assert_eq!(
+            Transcript::visible(Layout::new(&layout), &view(20_000.0)),
+            320..320
+        );
     }
 }
 
