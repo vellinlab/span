@@ -548,7 +548,7 @@ fn page(start: usize, end: usize, next: Option<&str>) -> Value {
                         "Check the lockfile, then compare the deployment logs with the previous build."
                     ]},
                     {"id":format!("reply-{turn}"),"type":"agentMessage","text":format!(
-                        "### Preview build {}\n\nThe **deployment** now reuses the same artifact on retry.\n\n- The validation stage completed successfully.\n- The preview stays available while a replacement is deployed, so readers can finish their work while the new build goes through the checks.\n\n```powershell\nspan check --preview {}\n```",
+                        "### Preview build {}\n\nThe **deployment** now reuses the same artifact on retry.\n\n- The validation stage completed successfully.\n- The preview stays available while a replacement is deployed, so readers can finish their work safely.\n\n```powershell\nspan check --preview {}\n```",
                         turn + 1, turn + 1
                     )},
                 ],
