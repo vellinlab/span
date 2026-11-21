@@ -19,8 +19,17 @@ pub fn to_markdown(bytes: &[u8]) -> Option<String> {
 
 #[cfg(windows)]
 pub fn from_windows() -> Option<String> {
+    let clipboard = clipboard_win::Clipboard::new_attempts(10).ok()?;
+    from_open_windows(&clipboard)
+}
+
+#[cfg(windows)]
+pub fn from_open_windows(_: &clipboard_win::Clipboard) -> Option<String> {
     let html = clipboard_win::formats::Html::new()?;
-    let bytes: Vec<u8> = clipboard_win::get_clipboard(html).ok()?;
+    if clipboard_win::raw::size(html.code())?.get() > MAX_HTML_BYTES {
+        return None;
+    }
+    let bytes: Vec<u8> = clipboard_win::get(html).ok()?;
     to_markdown(&bytes)
 }
 

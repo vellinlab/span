@@ -1,10 +1,12 @@
 #![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
 mod agent;
+mod agent_attachments;
 #[path = "../../src/agent_execution.rs"]
 mod agent_execution;
 mod agent_settings;
 #[path = "../../src/clipboard_markup.rs"]
+#[allow(dead_code)]
 mod clipboard_markup;
 mod codex_rpc;
 mod file_panel;

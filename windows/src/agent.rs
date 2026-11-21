@@ -1,8 +1,9 @@
+use crate::agent_attachments::{self, Attachment, Prepared};
 use crate::{agent_execution, agent_settings, codex_rpc, theme};
 use futures::channel::mpsc;
 use iced::widget::{
-    Space, button, column, container, keyed_column, markdown, row, scrollable, sensor, svg, text,
-    text_editor, tooltip,
+    Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor, svg,
+    text, text_editor, tooltip,
 };
 use iced::{Bottom, Center, Element, Fill, Right, Task, Theme, clipboard};
 use serde_json::{Value, json};
@@ -22,7 +23,9 @@ pub enum Action {
     Scrolled(u64, scrollable::Viewport),
     Draft(text_editor::Action),
     Paste,
-    Pasted(Option<String>, Option<String>),
+    AttachImage,
+    Prepared(u64, Result<Option<Prepared>, String>),
+    RemoveImage(usize),
     Send,
     Interrupt,
     Setting(agent_settings::Change),
@@ -113,6 +116,8 @@ pub struct Agent {
     items: Vec<Item>,
     draft: text_editor::Content,
     submitted_draft: Option<String>,
+    attachments: Vec<Attachment>,
+    preparing: bool,
     in_flight: bool,
     turn: Option<String>,
     approval: Option<Approval>,
@@ -141,6 +146,8 @@ impl Agent {
             items: Vec::new(),
             draft: text_editor::Content::new(),
             submitted_draft: None,
+            attachments: Vec::new(),
+            preparing: false,
             in_flight: false,
             turn: None,
             approval: None,
@@ -268,22 +275,30 @@ impl Agent {
                 self.transcript_viewport = Some(viewport);
             }
             Action::Draft(action) => self.draft.perform(action),
-            Action::Paste => {
-                if let Some(markdown) = crate::clipboard_markup::from_windows() {
-                    self.draft
-                        .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
-                            Arc::new(markdown),
-                        )));
-                } else {
-                    let thread = self.thread.clone();
-                    return clipboard::read().map(move |text| Action::Pasted(thread.clone(), text));
+            Action::Paste if !self.preparing => {
+                return self.prepare(agent_attachments::from_clipboard);
+            }
+            Action::AttachImage if self.can_attach() && !self.preparing => {
+                return self.prepare(agent_attachments::pick_file);
+            }
+            Action::Prepared(generation, result) if generation == self.transcript_generation => {
+                self.preparing = false;
+                match result {
+                    Ok(Some(Prepared::Text(text))) => {
+                        self.draft
+                            .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                                Arc::new(text),
+                            )));
+                    }
+                    Ok(Some(Prepared::Image(image))) => self.add_attachment(image),
+                    Ok(None) => {}
+                    Err(error) => self.status = Some(error),
                 }
             }
-            Action::Pasted(thread, Some(text)) if thread == self.thread => {
-                self.draft
-                    .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
-                        Arc::new(text),
-                    )));
+            Action::RemoveImage(index)
+                if self.submitted_draft.is_none() && index < self.attachments.len() =>
+            {
+                self.attachments.remove(index);
             }
             Action::Send => self.send_draft(),
             Action::Setting(change) => self.settings.change(change),
@@ -330,10 +345,67 @@ impl Agent {
         Task::none()
     }
 
+    fn prepare(&mut self, operation: fn() -> Result<Option<Prepared>, String>) -> Task<Action> {
+        self.preparing = true;
+        let generation = self.transcript_generation;
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(operation)
+                    .await
+                    .unwrap_or_else(|_| Err("Could not prepare the attachment.".into()))
+            },
+            move |result| Action::Prepared(generation, result),
+        )
+    }
+
+    fn can_attach(&self) -> bool {
+        self.thread.is_some()
+            && self.submitted_draft.is_none()
+            && self.attachments.len() < agent_attachments::MAX_IMAGES
+            && !self
+                .pending
+                .values()
+                .any(|request| *request == Request::Open)
+    }
+
+    fn add_attachment(&mut self, attachment: Attachment) {
+        if self.thread.is_none() {
+            self.status = Some("Open a Codex session before attaching an image.".into());
+            return;
+        }
+        if self.submitted_draft.is_some() {
+            self.status = Some("Wait for Codex to accept the current message.".into());
+            return;
+        }
+        if self
+            .pending
+            .values()
+            .any(|request| *request == Request::Open)
+        {
+            return;
+        }
+        if self.attachments.len() == agent_attachments::MAX_IMAGES {
+            self.status = Some("You can attach up to four images to one message.".into());
+            return;
+        }
+        let bytes = self
+            .attachments
+            .iter()
+            .map(|image| image.bytes)
+            .sum::<usize>();
+        if bytes + attachment.bytes > agent_attachments::MAX_BYTES {
+            self.status = Some("Image attachments are limited to 8 MiB per message.".into());
+            return;
+        }
+        self.attachments.push(attachment);
+        self.status = None;
+    }
+
     fn can_send(&self) -> bool {
         self.connection.is_some()
             && self.thread.is_some()
             && self.submitted_draft.is_none()
+            && !self.preparing
             && (!self.in_flight || self.turn.is_some())
             && !self
                 .pending
@@ -349,17 +421,23 @@ impl Agent {
             return;
         };
         let message = self.draft.text();
-        if message.trim().is_empty() {
+        if message.trim().is_empty() && self.attachments.is_empty() {
             return;
         }
         if message.len() > 256 * 1024 {
             self.status = Some("The message exceeds 256 KiB.".into());
             return;
         }
-        let mut params = json!({
-            "threadId":thread,
-            "input":[{"type":"text","text":message,"text_elements":[]}]
-        });
+        let mut input = Vec::with_capacity(self.attachments.len() + 1);
+        if !message.trim().is_empty() {
+            input.push(json!({"type":"text","text":message,"text_elements":[]}));
+        }
+        input.extend(
+            self.attachments
+                .iter()
+                .map(|image| json!({"type":"image","url":image.url.as_ref()})),
+        );
+        let mut params = json!({"threadId":thread,"input":input});
         let (request, method) = if let Some(turn) = &self.turn {
             params["expectedTurnId"] = json!(turn);
             (Request::Steer, "turn/steer")
@@ -436,6 +514,8 @@ impl Agent {
                 self.status = None;
                 self.copied = None;
                 self.items.clear();
+                self.attachments.clear();
+                self.preparing = false;
                 self.cursor = None;
                 self.transcript_generation += 1;
                 #[cfg(feature = "visual-check")]
@@ -471,8 +551,11 @@ impl Agent {
                 }
             }
             Request::Start | Request::Steer => {
-                if self.submitted_draft.take().as_deref() == Some(&self.draft.text()) {
-                    self.draft = text_editor::Content::new();
+                if let Some(submitted) = self.submitted_draft.take() {
+                    self.attachments.clear();
+                    if submitted == self.draft.text() {
+                        self.draft = text_editor::Content::new();
+                    }
                 }
                 if request == Request::Start
                     && self.in_flight
@@ -971,6 +1054,31 @@ impl Agent {
         if let Some(status) = &self.status {
             composer = composer.push(text(status).size(13).color(theme::MUTED));
         }
+        if !self.attachments.is_empty() {
+            let mut attachments = row![].spacing(6);
+            for (index, attachment) in self.attachments.iter().enumerate() {
+                let thumbnail = image(attachment.thumbnail.clone()).width(48).height(32);
+                let remove = action(
+                    "×",
+                    self.submitted_draft
+                        .is_none()
+                        .then_some(Action::RemoveImage(index)),
+                    false,
+                );
+                let card = row![thumbnail, remove].spacing(4).align_y(Center);
+                let card = container(card)
+                    .padding([3, 5])
+                    .style(|_| theme::panel(theme::INSET, 8.0));
+                attachments = attachments.push(tooltip(
+                    card,
+                    container(text(attachment.name.as_ref()).size(12))
+                        .padding(6)
+                        .style(|_| theme::panel(theme::CHROME, 6.0)),
+                    tooltip::Position::Top,
+                ));
+            }
+            composer = composer.push(attachments);
+        }
         let running = self.in_flight;
         let mut controls = row![].spacing(8).align_y(Center);
         if let Some((used, limit)) = self.settings.context {
@@ -994,11 +1102,47 @@ impl Agent {
         }
         controls = controls.push(action(
             if running { "Follow up" } else { "Send" },
-            (self.can_send() && !self.draft.is_empty()).then_some(Action::Send),
+            (self.can_send() && (!self.draft.is_empty() || !self.attachments.is_empty()))
+                .then_some(Action::Send),
             true,
         ));
+        static CLIP: OnceLock<svg::Handle> = OnceLock::new();
+        let clip = CLIP.get_or_init(|| {
+            svg::Handle::from_memory(
+                br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m20 11-7.5 7.5a4.2 4.2 0 0 1-6-6l8.2-8.2a2.8 2.8 0 0 1 4 4l-8.3 8.3a1.35 1.35 0 0 1-1.9-1.9l7.3-7.3" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>"#
+                    .as_slice(),
+            )
+        });
+        let attach = tooltip(
+            button(
+                svg(clip.clone())
+                    .width(15)
+                    .height(15)
+                    .style(|_, _| svg::Style {
+                        color: Some(theme::MUTED),
+                    }),
+            )
+            .padding([6, 7])
+            .style(|_, status| theme::button_status(false, status))
+            .on_press_maybe((self.can_attach() && !self.preparing).then_some(Action::AttachImage)),
+            container(
+                text(if self.preparing {
+                    "Preparing attachment…"
+                } else {
+                    "Attach image"
+                })
+                .size(12),
+            )
+            .padding(6)
+            .style(|_| theme::panel(theme::CHROME, 6.0)),
+            tooltip::Position::Top,
+        );
+        if self.preparing {
+            composer = composer.push(text("Preparing attachment…").size(12).color(theme::MUTED));
+        }
         composer = composer.push(editor).push(
             row![
+                attach,
                 container(self.settings.view(running).map(Action::Setting)).width(Fill),
                 controls,
             ]
@@ -1052,6 +1196,45 @@ fn thread_title(thread: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_only_draft_is_kept_on_error_and_released_on_acceptance() {
+        let (mut agent, _) = Agent::new(None, None);
+        let (sender, mut requests) = mpsc::channel(8);
+        agent.connection = Some(sender);
+        agent.pending.clear();
+        agent.thread = Some("fixture".into());
+        let url = "data:image/png;base64,AAAA";
+        let screenshot = Attachment {
+            name: "Screenshot.png".into(),
+            url: url.into(),
+            thumbnail: image::Handle::from_rgba(1, 1, vec![255; 4]),
+            bytes: 3,
+        };
+        agent.add_attachment(screenshot.clone());
+        agent.send_draft();
+        let rejected = requests.try_recv().expect("image-only request");
+        assert_eq!(rejected["method"], "turn/start");
+        assert_eq!(
+            rejected["params"]["input"],
+            json!([{"type":"image","url":url}])
+        );
+        agent.packet(json!({
+            "id":rejected["id"],"error":{"message":"Try again"}
+        }));
+        assert_eq!(agent.attachments.len(), 1);
+        agent.send_draft();
+        let accepted = requests.try_recv().expect("image-only retry");
+        agent.draft = text_editor::Content::with_text("Next draft");
+        agent.packet(json!({"id":accepted["id"],"result":{"turn":{"id":"running"}}}));
+        assert!(agent.attachments.is_empty());
+        assert_eq!(agent.draft.text().trim_end(), "Next draft");
+        let _ = agent.update(Action::Prepared(
+            agent.transcript_generation + 1,
+            Ok(Some(Prepared::Image(screenshot))),
+        ));
+        assert!(agent.attachments.is_empty());
+    }
 
     #[test]
     fn active_follow_up_does_not_apply_next_turn_settings() {
