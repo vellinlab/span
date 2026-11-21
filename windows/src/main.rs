@@ -19,6 +19,7 @@ mod sftp;
 #[path = "../../src/ssh.rs"]
 #[allow(dead_code)]
 mod ssh;
+mod ssh_destination;
 mod terminal;
 #[path = "../../src/terminal_theme.rs"]
 #[allow(dead_code)]
@@ -32,6 +33,7 @@ use iced::widget::{
     Space, button, canvas, column, container, row, rule, scrollable, svg, text, text_input,
 };
 use iced::{Center, Element, Fill, Font, Size, Task, Theme, clipboard, window};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use terminal::{Clipboard, Notice, Terminal, TerminalId};
 
@@ -98,7 +100,9 @@ enum TerminalState {
 
 impl Tab {
     fn name(&self) -> &str {
-        self.host.as_deref().unwrap_or("PowerShell")
+        self.host
+            .as_deref()
+            .map_or("PowerShell", ssh_destination::label)
     }
 
     fn shown_agent(&self) -> Option<&agent::Agent> {
@@ -147,11 +151,17 @@ impl Span {
         let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
         let hosts_path = std::env::var_os("LOCALAPPDATA")
             .map(|path| PathBuf::from(path).join("Span").join("recent-hosts.json"));
+        let mut seen = HashSet::new();
         let recent = hosts_path
             .as_ref()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|data| serde_json::from_slice::<Vec<String>>(&data).ok())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|host| ssh_destination::normalize(&host))
+            .filter(|host| seen.insert(host.clone()))
+            .take(12)
+            .collect();
         let mut span = Self {
             theme: theme::make(),
             logo: svg::Handle::from_memory(LOGO),
@@ -213,12 +223,11 @@ impl Span {
     }
 
     fn connect(&mut self, value: &str) {
-        let host = value.trim();
-        if !valid_host(host) {
-            self.error = Some("Enter an SSH alias, a hostname or user@host.".into());
+        let Some(host) = ssh_destination::normalize(value) else {
+            self.error = Some("Enter an SSH alias or a destination like user@host:2222.".into());
             return;
-        }
-        self.open(Some(host.into()));
+        };
+        self.open(Some(host));
         self.connecting = false;
         self.host.clear();
     }
@@ -433,7 +442,10 @@ impl Span {
                 self.connecting = !self.connecting;
                 self.error = None;
             }
-            Message::ChangeHost(host) => self.host = host,
+            Message::ChangeHost(host) => {
+                self.host = host;
+                self.error = None;
+            }
             Message::Connect => self.connect(&self.host.clone()),
             Message::ConnectRecent(host) => self.connect(&host),
             Message::Terminal(notice) => self.terminal_notice(notice),
@@ -559,24 +571,26 @@ impl Span {
             let mut connect = button(text("Connect").size(14))
                 .padding([7, 11])
                 .style(|_, status| theme::button_status(true, status));
-            if valid_host(self.host.trim()) {
+            if ssh_destination::normalize(&self.host).is_some() {
                 connect = connect.on_press(Message::Connect);
             }
+            let mut form = column![
+                text("SSH destination").size(13).color(theme::MUTED),
+                text_input("alias or user@host:port", &self.host)
+                    .on_input(Message::ChangeHost)
+                    .on_submit(Message::Connect)
+                    .padding(9)
+                    .size(14),
+                connect,
+            ]
+            .spacing(8);
+            if let Some(error) = &self.error {
+                form = form.push(text(error).size(13).color(theme::ERROR));
+            }
             contents = contents.push(
-                container(
-                    column![
-                        text("SSH destination").size(13).color(theme::MUTED),
-                        text_input("alias or user@host", &self.host)
-                            .on_input(Message::ChangeHost)
-                            .on_submit(Message::Connect)
-                            .padding(9)
-                            .size(14),
-                        connect,
-                    ]
-                    .spacing(8),
-                )
-                .padding(10)
-                .style(|_| theme::panel(theme::INSET, 10.0)),
+                container(form)
+                    .padding(10)
+                    .style(|_| theme::panel(theme::INSET, 10.0)),
             );
         }
         if !self.recent.is_empty() {
@@ -587,7 +601,7 @@ impl Span {
                     .iter()
                     .any(|tab| Some(tab.id) == self.active && tab.host.as_ref() == Some(host));
                 contents = contents.push(theme::nav(
-                    host,
+                    ssh_destination::label(host),
                     Message::ConnectRecent(host.clone()),
                     active,
                 ));
@@ -740,7 +754,9 @@ impl Span {
             ]
         };
         let mut work = column![header, rule::horizontal(1).style(theme::rule)];
-        if let Some(error) = &self.error {
+        if !self.connecting
+            && let Some(error) = &self.error
+        {
             work = work.push(container(text(error).size(13).color(theme::ERROR)).padding([8, 14]));
         }
         work.push(content.width(Fill).height(Fill))
@@ -757,12 +773,6 @@ fn start_agent(tab: &mut Tab, home: Option<PathBuf>) -> Task<Message> {
     events.map(move |action| Message::Agent(id, action))
 }
 
-fn valid_host(host: &str) -> bool {
-    !host.is_empty()
-        && !host.starts_with('-')
-        && !host.chars().any(|c| c.is_whitespace() || c.is_control())
-}
-
 fn save_recent(path: &Path, recent: &[String]) -> std::io::Result<()> {
     std::fs::create_dir_all(path.parent().expect("configuration parent"))?;
     let pending = path.with_extension(format!("{}.tmp", std::process::id()));
@@ -772,17 +782,4 @@ fn save_recent(path: &Path, recent: &[String]) -> std::io::Result<()> {
         return Err(error);
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::valid_host;
-
-    #[test]
-    fn ssh_destinations_do_not_accept_options() {
-        assert!(valid_host("user@build"));
-        assert!(valid_host("::1"));
-        assert!(!valid_host("-oProxyCommand"));
-        assert!(!valid_host("example other"));
-    }
 }
