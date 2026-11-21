@@ -1,12 +1,16 @@
 use crate::{agent_execution, agent_settings, codex_rpc, theme};
 use futures::channel::mpsc;
 use iced::widget::{
-    Space, button, column, container, markdown, row, scrollable, text, text_editor, tooltip,
+    Space, button, column, container, keyed_column, markdown, row, scrollable, text, text_editor,
+    tooltip,
 };
 use iced::{Center, Element, Fill, Right, Task, Theme, clipboard};
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -14,6 +18,7 @@ pub enum Action {
     New,
     Resume(String),
     More,
+    Scrolled(u64, scrollable::Viewport),
     Draft(text_editor::Action),
     Paste,
     Pasted(Option<String>, Option<String>),
@@ -75,6 +80,9 @@ pub struct Agent {
     title: String,
     cwd: Option<PathBuf>,
     cursor: Option<String>,
+    transcript_id: iced::widget::Id,
+    transcript_generation: u64,
+    transcript_viewport: Option<scrollable::Viewport>,
     items: Vec<Item>,
     draft: text_editor::Content,
     submitted_draft: Option<String>,
@@ -99,6 +107,9 @@ impl Agent {
             title: String::new(),
             cwd: cwd.clone(),
             cursor: None,
+            transcript_id: iced::widget::Id::unique(),
+            transcript_generation: 0,
+            transcript_viewport: None,
             items: Vec::new(),
             draft: text_editor::Content::new(),
             submitted_draft: None,
@@ -173,6 +184,22 @@ impl Agent {
                 .any(|request| matches!(request, Request::Initialize | Request::Open))
     }
 
+    fn loading_history(&self) -> bool {
+        self.pending
+            .values()
+            .any(|request| matches!(request, Request::History | Request::Open))
+    }
+
+    fn more_history(&mut self) {
+        if let (Some(thread), Some(cursor)) = (&self.thread, &self.cursor)
+            && !self.loading_history()
+        {
+            self.request(Request::History, "thread/turns/list", json!({
+                "threadId":thread,"cursor":cursor,"limit":8,"sortDirection":"desc","itemsView":"full"
+            }));
+        }
+    }
+
     pub fn update(&mut self, action: Action) -> Task<Action> {
         match action {
             Action::Event(codex_rpc::Event::Packet(packet)) => self.packet(packet),
@@ -202,16 +229,15 @@ impl Agent {
                     );
                 }
             }
-            Action::More => {
-                if let (Some(thread), Some(cursor)) = (&self.thread, &self.cursor)
-                    && !self
-                        .pending
-                        .values()
-                        .any(|request| matches!(request, Request::History | Request::Open))
-                {
-                    self.request(Request::History, "thread/turns/list", json!({
-                        "threadId":thread,"cursor":cursor,"limit":8,"sortDirection":"desc","itemsView":"full"
-                    }));
+            Action::More => self.more_history(),
+            Action::Scrolled(generation, viewport) if generation == self.transcript_generation => {
+                let offset = viewport.absolute_offset().y;
+                let previous = self
+                    .transcript_viewport
+                    .replace(viewport)
+                    .map_or(0.0, |previous| previous.absolute_offset().y);
+                if offset > previous + 0.5 && viewport.absolute_offset_reversed().y <= 150.0 {
+                    self.more_history();
                 }
             }
             Action::Draft(action) => self.draft.perform(action),
@@ -384,6 +410,8 @@ impl Agent {
                 self.copied = None;
                 self.items.clear();
                 self.cursor = None;
+                self.transcript_generation += 1;
+                self.transcript_viewport = None;
                 self.pending
                     .retain(|_, request| !matches!(request, Request::History | Request::Models));
                 self.settings.open(result);
@@ -395,8 +423,9 @@ impl Agent {
                 {
                     self.history(page);
                 } else {
+                    let existing = HashSet::new();
                     for turn in values(&thread["turns"]) {
-                        self.history_turn(turn);
+                        self.history_turn(turn, true, &existing);
                     }
                     if !self.in_flight && thread["turns"].as_array().is_none_or(Vec::is_empty) {
                         self.request(Request::History, "thread/turns/list", json!({
@@ -427,24 +456,41 @@ impl Agent {
     }
 
     fn history(&mut self, page: &Value) {
-        self.cursor = page["nextCursor"].as_str().map(str::to_owned);
+        let is_older = self.cursor.is_some();
+        self.cursor = page["nextCursor"]
+            .as_str()
+            .filter(|next| !next.is_empty() && self.cursor.as_deref() != Some(*next))
+            .map(str::to_owned);
         let recent = std::mem::take(&mut self.items);
         if let Some(turns) = page["data"].as_array() {
+            let existing: HashSet<_> = recent.iter().map(|item| item.id.as_str()).collect();
             for turn in turns.iter().rev() {
-                self.history_turn(turn);
+                self.history_turn(turn, !is_older && self.turn.is_none(), &existing);
             }
         }
         self.items.extend(recent);
     }
 
-    fn history_turn(&mut self, turn: &Value) {
-        if turn["status"] == "inProgress" {
+    fn history_turn(&mut self, turn: &Value, restore_active: bool, existing: &HashSet<&str>) {
+        if restore_active && turn["status"] == "inProgress" {
             self.turn = turn["id"].as_str().map(str::to_owned);
             self.in_flight = true;
         }
         for item in values(&turn["items"]) {
-            self.item(item, true);
+            if item["id"].as_str().is_some_and(|id| !existing.contains(id)) {
+                self.item(item, true);
+            }
         }
+    }
+
+    #[cfg(feature = "visual-check")]
+    pub fn visual_probe(&self) -> Option<(iced::widget::Id, scrollable::Viewport, usize, bool)> {
+        Some((
+            self.transcript_id.clone(),
+            self.transcript_viewport?,
+            self.items.len(),
+            self.cursor.is_some(),
+        ))
     }
 
     fn server_request(&mut self, method: &str, params: &Value, id: &Value) {
@@ -705,8 +751,16 @@ impl Agent {
         }
         let mut transcript = column![].spacing(14).width(Fill);
         if self.cursor.is_some() {
-            transcript =
-                transcript.push(action("Load earlier messages", Some(Action::More), false));
+            let loading = self.loading_history();
+            transcript = transcript.push(action(
+                if loading {
+                    "Loading history…"
+                } else {
+                    "Load earlier messages"
+                },
+                (!loading).then_some(Action::More),
+                false,
+            ));
         }
         for item in &self.items {
             let entry = match item.kind {
@@ -771,6 +825,7 @@ impl Agent {
             };
             transcript = transcript.push(entry);
         }
+        let generation = self.transcript_generation;
         let scroll = scrollable(
             container(container(transcript).width(Fill).max_width(760))
                 .padding([20, 24])
@@ -778,7 +833,10 @@ impl Agent {
         )
         .height(Fill)
         .width(Fill)
-        .anchor_bottom();
+        .id(self.transcript_id.clone())
+        .anchor_bottom()
+        .on_scroll(move |viewport| Action::Scrolled(generation, viewport));
+        let scroll = keyed_column([(generation, scroll.into())]).height(Fill);
         let editor = text_editor(&self.draft)
             .placeholder("Message Codex")
             .on_action(Action::Draft)

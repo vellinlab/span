@@ -27,6 +27,11 @@ pub enum Event {
 pub fn connect(host: Option<String>, cwd: Option<PathBuf>) -> (mpsc::Sender<Value>, Task<Event>) {
     let (requests, receiver) = mpsc::channel(32);
     let events = stream::channel(32, move |mut output| async move {
+        #[cfg(feature = "visual-check")]
+        if crate::visual_check::enabled() {
+            crate::visual_check::serve(receiver, &mut output).await;
+            return;
+        }
         let reason = serve(host, cwd, receiver, &mut output)
             .await
             .err()

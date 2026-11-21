@@ -24,6 +24,8 @@ mod terminal;
 #[allow(dead_code)]
 mod terminal_theme;
 mod theme;
+#[cfg(feature = "visual-check")]
+mod visual_check;
 
 use alacritty_terminal::event::Event;
 use futures::channel::mpsc;
@@ -76,6 +78,8 @@ struct Span {
     recent: Vec<String>,
     home: Option<PathBuf>,
     hosts_path: Option<PathBuf>,
+    #[cfg(feature = "visual-check")]
+    visual_check: Option<visual_check::Check>,
 }
 
 struct Tab {
@@ -111,6 +115,8 @@ enum Message {
     Pty((TerminalId, Event)),
     Clipboard(Clipboard),
     Pasted(TerminalId, Option<String>),
+    #[cfg(feature = "visual-check")]
+    Visual(visual_check::Event),
 }
 
 impl Span {
@@ -139,9 +145,23 @@ impl Span {
             recent,
             home,
             hosts_path,
+            #[cfg(feature = "visual-check")]
+            visual_check: visual_check::Check::from_env(),
         };
         span.open(None);
-        (span, Task::run(receiver, Message::Pty))
+        let terminal_events = Task::run(receiver, Message::Pty);
+        #[cfg(feature = "visual-check")]
+        if span.visual_check.is_some() {
+            return (
+                span,
+                Task::batch([
+                    terminal_events,
+                    Task::done(Message::ShowAgent),
+                    visual_check::observe(),
+                ]),
+            );
+        }
+        (span, terminal_events)
     }
 
     fn theme(&self) -> Theme {
@@ -194,6 +214,16 @@ impl Span {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            #[cfg(feature = "visual-check")]
+            Message::Visual(event) => {
+                if let Some(check) = &mut self.visual_check {
+                    let active = self
+                        .terminals
+                        .iter()
+                        .find(|tab| self.active == Some(tab.id));
+                    return check.update(event, active);
+                }
+            }
             Message::NewTerminal => self.open(None),
             Message::ShowTerminal => {
                 self.sessions = false;
