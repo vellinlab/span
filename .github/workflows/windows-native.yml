@@ -1,0 +1,110 @@
+name: Build native Windows frontend
+
+on:
+  push:
+    branches:
+      - platform/windows-native
+    paths:
+      - 'windows/**'
+      - 'src/terminal_theme.rs'
+      - 'packaging/icons/**'
+      - '.github/workflows/windows-native.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'src/terminal_theme.rs'
+      - 'packaging/icons/**'
+      - '.github/workflows/windows-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        shell: pwsh
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Build and test ConPTY
+        shell: pwsh
+        run: |
+          cargo +1.98.1 test --locked --release --manifest-path windows/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo +1.98.1 build --locked --release --manifest-path windows/Cargo.toml
+
+      - name: Package and verify window startup
+        shell: pwsh
+        run: |
+          $portable = Join-Path $env:RUNNER_TEMP 'Span Native'
+          New-Item -ItemType Directory -Path $portable | Out-Null
+          Copy-Item windows/target/release/span.exe (Join-Path $portable 'Span.exe')
+          $env:Path = @(
+            "$env:SystemRoot\System32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:SystemRoot\System32\OpenSSH"
+          ) -join ';'
+          $metrics = foreach ($backend in 'auto', 'tiny-skia') {
+            if ($backend -eq 'auto') {
+              Remove-Item Env:ICED_BACKEND -ErrorAction SilentlyContinue
+            } else {
+              $env:ICED_BACKEND = $backend
+            }
+            $timer = [Diagnostics.Stopwatch]::StartNew()
+            $span = Start-Process (Join-Path $portable 'Span.exe') -WorkingDirectory $env:RUNNER_TEMP -PassThru
+            try {
+              for ($i = 0; $i -lt 120; $i++) {
+                $span.Refresh()
+                if ($span.HasExited) { throw "Span exited during $backend startup with code $($span.ExitCode)" }
+                if ($span.MainWindowHandle -ne [IntPtr]::Zero) { break }
+                Start-Sleep -Milliseconds 100
+              }
+              if ($span.MainWindowHandle -eq [IntPtr]::Zero) { throw "No window opened for $backend" }
+              $startup = $timer.ElapsedMilliseconds
+              Start-Sleep -Seconds 2
+              $span.Refresh()
+              if ($span.HasExited) { throw "Span exited after opening its $backend window" }
+              [PSCustomObject]@{
+                Renderer = $backend
+                WindowMs = $startup
+                PrivateBytes = $span.PrivateMemorySize64
+                WorkingSetBytes = $span.WorkingSet64
+              }
+            } finally {
+              if (!$span.HasExited) {
+                $null = $span.CloseMainWindow()
+                if (!$span.WaitForExit(5000)) {
+                  Stop-Process -Id $span.Id
+                  throw "Span did not close within five seconds"
+                }
+              }
+            }
+          }
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $metrics | ConvertTo-Json | Set-Content dist/windows-native-startup.json
+          $metrics | Format-Table
+          Compress-Archive -Path $portable -DestinationPath dist/span-native-windows-x86_64.zip
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: dist/span-native-windows-x86_64.zip
+          archive: false
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: dist/windows-native-startup.json
+          archive: false
+          if-no-files-found: error
