@@ -1,26 +1,38 @@
 use crate::Message;
 use iced::widget::{
-    button, container, overlay::menu, pick_list, rule, svg, text, text_editor, tooltip,
+    button, column, container, markdown, overlay::menu, pick_list, rich_text, rule, scrollable,
+    svg, text, text_editor, tooltip,
 };
 use iced::{Background, Border, Color, Element, Fill, Font, Shadow, Theme, Vector, font, theme};
 use std::sync::OnceLock;
 
-pub const CHROME: Color = hex(0x1b202a);
-pub const SIDE: Color = hex(0x131820);
-pub const WORK: Color = hex(0x171b24);
-pub const INSET: Color = hex(0x111620);
+pub const CHROME: Color = hex(0x222223);
+pub const SIDE: Color = hex(0x202020);
+pub const WORK: Color = hex(0x1a1a19);
+pub const INSET: Color = hex(0x151514);
+pub const PANEL: Color = hex(0x252524);
+pub const COMPOSER: Color = hex(0x2b2b29);
 pub const TERMINAL: Color = hex(crate::terminal_theme::BACKGROUND);
-pub const LINE: Color = hex(0x2b3444);
-pub const INK: Color = hex(0xe9edf5);
-pub const MUTED: Color = hex(0xa2adbf);
-pub const BLUE: Color = hex(0xa5bbff);
-pub const GREEN: Color = hex(0x86d8b5);
-pub const ERROR: Color = hex(0xf79ba4);
-pub const HIGHLIGHT: Color = hex(0x29354d);
+pub const LINE: Color = hex(0x323231);
+pub const INK: Color = hex(0xf0efec);
+pub const MUTED: Color = hex(0xaaa9a4);
+pub const ACTIVITY: Color = hex(0x989892);
+pub const BLUE: Color = hex(0x8cbafb);
+pub const GREEN: Color = hex(0x8ad4ae);
+pub const ERROR: Color = hex(0xf49d9c);
+pub const HIGHLIGHT: Color = hex(0x333331);
+pub const SELECTED: Color = hex(0x303133);
+pub const BUBBLE: Color = hex(0x2b3748);
+const PRIMARY: Color = hex(0x2f65b6);
+const PRIMARY_HOVER: Color = hex(0x3876cd);
 
+pub const UI_FONT: Font = Font::with_name("Segoe UI");
+pub const CODE_FONT: Font = Font::with_name("Consolas");
+pub const BODY_SIZE: u32 = 15;
+pub const BODY_LEADING: f32 = 1.48;
 pub const SEMIBOLD: Font = Font {
     weight: font::Weight::Semibold,
-    ..Font::with_name("Segoe UI")
+    ..UI_FONT
 };
 
 pub const fn hex(rgb: u32) -> Color {
@@ -58,6 +70,10 @@ pub fn panel(color: Color, radius: f32) -> container::Style {
     surface(color).border(Border::default().color(LINE).width(1).rounded(radius))
 }
 
+pub fn composer() -> container::Style {
+    surface(COMPOSER).border(Border::default().color(hex(0x3b3b38)).width(1).rounded(18))
+}
+
 pub fn rule(theme: &Theme) -> rule::Style {
     rule::Style {
         color: LINE,
@@ -71,7 +87,7 @@ pub fn editor(_: &Theme, _: text_editor::Status) -> text_editor::Style {
         border: Border::default(),
         placeholder: MUTED,
         value: INK,
-        selection: hex(0x394d76),
+        selection: hex(0x3c5374),
     }
 }
 
@@ -93,16 +109,102 @@ pub fn choice(_: &Theme, status: pick_list::Status) -> pick_list::Style {
 
 pub fn choice_menu(_: &Theme) -> menu::Style {
     menu::Style {
-        background: hex(0x232b39).into(),
+        background: PANEL.into(),
         border: Border::default().color(LINE).width(1).rounded(9),
         text_color: INK,
         selected_text_color: INK,
-        selected_background: hex(0x354364).into(),
+        selected_background: HIGHLIGHT.into(),
         shadow: Shadow {
             color: Color::BLACK.scale_alpha(0.3),
             offset: Vector::new(0.0, 4.0),
             blur_radius: 12.0,
         },
+    }
+}
+
+pub fn reading_markdown<'a>(
+    items: impl IntoIterator<Item = &'a markdown::Item>,
+    size: u32,
+    color: Color,
+    theme: &Theme,
+) -> Element<'a, markdown::Uri> {
+    let mut style = markdown::Style::from(theme);
+    style.font = UI_FONT;
+    style.inline_code_font = CODE_FONT;
+    style.code_block_font = CODE_FONT;
+    style.inline_code_highlight.background = hex(0x373735).into();
+    style.inline_code_color = INK;
+    let mut settings = markdown::Settings::with_text_size(size, style);
+    settings.h1_size = 24.0.into();
+    settings.h2_size = 21.0.into();
+    settings.h3_size = 18.0.into();
+    settings.h4_size = 16.0.into();
+    settings.code_size = 13.0.into();
+    settings.spacing = 11.0.into();
+    container(markdown::view_with(items, settings, &ReadingMarkdown))
+        .style(move |_| container::Style::default().color(color))
+        .into()
+}
+
+struct ReadingMarkdown;
+
+impl<'a> markdown::Viewer<'a, markdown::Uri> for ReadingMarkdown {
+    fn on_link_click(url: markdown::Uri) -> markdown::Uri {
+        url
+    }
+
+    fn paragraph(
+        &self,
+        settings: markdown::Settings,
+        text: &markdown::Text,
+    ) -> Element<'a, markdown::Uri> {
+        rich_text(text.spans(settings.style))
+            .size(settings.text_size)
+            .line_height(BODY_LEADING)
+            .on_link_click(Self::on_link_click)
+            .into()
+    }
+
+    fn code_block(
+        &self,
+        settings: markdown::Settings,
+        language: Option<&'a str>,
+        _code: &'a str,
+        lines: &'a [markdown::Text],
+    ) -> Element<'a, markdown::Uri> {
+        let mut code = column![].width(Fill);
+        if let Some(language) = language.filter(|language| !language.is_empty()) {
+            code = code.push(
+                container(text(language).size(12).font(SEMIBOLD).color(MUTED))
+                    .padding([7, 12])
+                    .width(Fill)
+                    .style(|_| surface(PANEL)),
+            );
+        }
+        let mut style = settings.style;
+        style.font = CODE_FONT;
+        let lines = column(lines.iter().map(|line| {
+            rich_text(line.spans(style))
+                .font(CODE_FONT)
+                .size(settings.code_size)
+                .line_height(1.4)
+                .wrapping(text::Wrapping::None)
+                .on_link_click(Self::on_link_click)
+                .into()
+        }));
+        container(
+            code.push(
+                scrollable(container(lines).padding([10, 12]))
+                    .width(Fill)
+                    .direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::new().width(6).scroller_width(4),
+                    )),
+            ),
+        )
+        .width(Fill)
+        .clip(true)
+        .style(|_| panel(INSET, 9.0))
+        .into()
     }
 }
 
@@ -148,7 +250,7 @@ impl ComposerIcon {
         ).into_bytes()));
         let enabled = message.is_some();
         let color = match self {
-            Self::Send if enabled => INSET,
+            Self::Send if enabled => Color::WHITE,
             Self::Fast(true) => BLUE,
             _ if !enabled => MUTED.scale_alpha(0.72),
             Self::Fast(false) | Self::Attach => MUTED,
@@ -166,11 +268,16 @@ impl ComposerIcon {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             let (background, border, radius) = match self {
                 Self::Send if enabled => (
-                    if hovered { hex(0xc5d3ff) } else { BLUE },
+                    if hovered { PRIMARY_HOVER } else { PRIMARY },
                     Color::TRANSPARENT,
                     16.0,
                 ),
-                Self::Stop | Self::Send => (if hovered { HIGHLIGHT } else { WORK }, LINE, 16.0),
+                Self::Stop => (
+                    if hovered { PRIMARY_HOVER } else { PRIMARY },
+                    Color::TRANSPARENT,
+                    16.0,
+                ),
+                Self::Send => (COMPOSER, hex(0x4a4a46), 16.0),
                 Self::Attach | Self::Fast(false) => (
                     if hovered {
                         HIGHLIGHT
@@ -181,7 +288,7 @@ impl ComposerIcon {
                     7.0,
                 ),
                 Self::Fast(true) => (
-                    if hovered { hex(0x354364) } else { HIGHLIGHT },
+                    if hovered { BUBBLE } else { HIGHLIGHT },
                     Color::TRANSPARENT,
                     7.0,
                 ),
@@ -205,11 +312,11 @@ pub fn context_usage<'a, Message: 'a>(used: u64, limit: u64) -> Element<'a, Mess
         .round() as usize;
     let ring = RINGS[percent].get_or_init(|| {
         let mut graphic = String::from(
-            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="#465167" stroke-width="2.5"/>"##,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="#545450" stroke-width="2.5"/>"##,
         );
         if percent > 0 {
             let progress = std::f64::consts::TAU * 8.0 * percent as f64 / 100.0;
-            let color = if percent >= 90 { "#e7bf80" } else { "#a5bbff" };
+            let color = if percent >= 90 { "#e7bf80" } else { "#d5d4ce" };
             write!(graphic, r#"<circle cx="12" cy="12" r="8" fill="none" stroke="{color}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="{progress} 51" transform="rotate(-90 12 12)"/>"#).expect("write context gauge SVG");
         }
         graphic.push_str("</svg>");
@@ -255,9 +362,9 @@ pub fn button_status(accent: bool, status: button::Status) -> button::Style {
     use button::Status::*;
     let (background, text_color) = match (accent, status) {
         (_, Disabled) => (INSET, MUTED),
-        (true, Hovered) => (hex(0xc1d0ff), INSET),
-        (true, Pressed) => (hex(0x8aabfb), INSET),
-        (true, Active) => (BLUE, INSET),
+        (true, Hovered) => (PRIMARY_HOVER, Color::WHITE),
+        (true, Pressed) => (hex(0x275798), Color::WHITE),
+        (true, Active) => (PRIMARY, Color::WHITE),
         (false, Hovered | Pressed) => (HIGHLIGHT, INK),
         (false, Active) => (WORK, INK),
     };
@@ -278,7 +385,7 @@ pub fn tab(selected: bool, status: button::Status) -> button::Style {
         background: (hover || selected).then_some(Background::Color(if hover {
             HIGHLIGHT
         } else {
-            hex(0x242d3e)
+            SELECTED
         })),
         text_color: if hover || selected { INK } else { MUTED },
         border: Border::default().rounded(7),

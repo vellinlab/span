@@ -139,24 +139,7 @@ impl Settings {
             .max_width(156)
             .into()
         };
-        let mut toolbar = row![
-            models,
-            pick_list(
-                PermissionMode::ALL.as_slice(),
-                self.permission.or(self.current_permission),
-                Change::Permission
-            )
-            .placeholder("Session access")
-            .padding([6, 7])
-            .text_size(13)
-            .handle(pick_list::Handle::Arrow {
-                size: Some(10.into())
-            })
-            .style(theme::choice)
-            .menu_style(theme::choice_menu),
-        ]
-        .spacing(4)
-        .align_y(Center);
+        let mut toolbar = row![models].spacing(4).align_y(Center);
         if let Some(model) = model.filter(|model| !model.efforts.is_empty()) {
             let effort = self
                 .effort
@@ -186,6 +169,23 @@ impl Settings {
             ));
         }
         toolbar.wrap().vertical_spacing(5).into()
+    }
+
+    pub fn access_control(&self) -> Element<'_, Change> {
+        pick_list(
+            PermissionMode::ALL.as_slice(),
+            self.permission.or(self.current_permission),
+            Change::Permission,
+        )
+        .placeholder("Session access")
+        .padding([6, 7])
+        .text_size(13)
+        .handle(pick_list::Handle::Arrow {
+            size: Some(10.into()),
+        })
+        .style(theme::choice)
+        .menu_style(theme::choice_menu)
+        .into()
     }
 }
 

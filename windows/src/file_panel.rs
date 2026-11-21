@@ -634,11 +634,13 @@ impl Panel {
             Preview::Source(content, language) => (
                 text_editor(content)
                     .height(Fill)
-                    .font(iced::Font::with_name("Consolas"))
+                    .font(theme::CODE_FONT)
                     .size(13)
+                    .line_height(1.55)
                     .padding(12)
                     .on_action(Action::SelectText)
                     .wrapping(iced::widget::text::Wrapping::None)
+                    .style(theme::editor)
                     .highlight(language, iced::highlighter::Theme::Base16Ocean)
                     .into(),
                 false,
@@ -646,9 +648,11 @@ impl Panel {
             Preview::Markdown(document) => (
                 scrollable(
                     container(
-                        markdown::view(
+                        theme::reading_markdown(
                             document.items(),
-                            markdown::Settings::with_text_size(15, theme),
+                            theme::BODY_SIZE,
+                            theme::INK,
+                            theme,
                         )
                         .map(Action::Link),
                     )
@@ -684,7 +688,7 @@ impl Panel {
         )
         .width(Fill)
         .height(Fill)
-        .style(|_| theme::surface(theme::SIDE))
+        .style(|_| theme::surface(theme::WORK))
         .into()
     }
 }

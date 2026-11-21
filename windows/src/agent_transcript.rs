@@ -4,14 +4,14 @@ use iced::advanced::{
     Clipboard, Layout, Shell, Widget, layout, mouse, overlay, renderer,
     widget::{Operation, Tree, tree},
 };
-use iced::widget::{button, column, container, markdown, row, svg, text, tooltip};
+use iced::widget::{button, column, container, row, svg, text, tooltip};
 use iced::{Element, Event, Fill, Length, Point, Rectangle, Renderer, Right, Size, Theme, Vector};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::OnceLock;
 
-const SPACING: f32 = 12.0;
+const SPACING: f32 = 14.0;
 const OVERSCAN: f32 = 160.0;
 
 #[derive(Clone, Copy)]
@@ -371,30 +371,30 @@ fn entry<'a>(
     let body: Element<'a, Action> = match item.kind {
         Kind::User => container(
             container(if let Some(parsed) = &item.parsed {
-                markdown::view(
-                    parsed.items(),
-                    markdown::Settings::with_text_size(15, theme),
-                )
-                .map(Action::Link)
+                theme::reading_markdown(parsed.items(), theme::BODY_SIZE, theme::INK, theme)
+                    .map(Action::Link)
             } else {
-                text(&item.value).size(15).into()
+                text(&item.value)
+                    .size(theme::BODY_SIZE)
+                    .line_height(theme::BODY_LEADING)
+                    .into()
             })
-            .padding([10, 14])
-            .max_width(580)
-            .style(|_| theme::rounded(theme::HIGHLIGHT, 14.0)),
+            .padding([9, 14])
+            .max_width(538)
+            .style(|_| theme::rounded(theme::BUBBLE, 14.0)),
         )
         .width(Fill)
         .align_x(Right)
         .into(),
         Kind::Reply => {
             let response = if let Some(parsed) = &item.parsed {
-                markdown::view(
-                    parsed.items(),
-                    markdown::Settings::with_text_size(15, theme),
-                )
-                .map(Action::Link)
+                theme::reading_markdown(parsed.items(), theme::BODY_SIZE, theme::INK, theme)
+                    .map(Action::Link)
             } else {
-                text(&item.value).size(15).into()
+                text(&item.value)
+                    .size(theme::BODY_SIZE)
+                    .line_height(theme::BODY_LEADING)
+                    .into()
             };
             container(response).into()
         }

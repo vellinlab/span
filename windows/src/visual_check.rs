@@ -168,6 +168,11 @@ impl Check {
             },
             (Event::Latest(frame), Step::CaptureLatest) => {
                 let scale = frame.scale_factor;
+                std::fs::write(
+                    self.directory.join("typography.json"),
+                    verify_typography().to_string(),
+                )
+                .expect("record resolved Windows typefaces");
                 self.first_frame = self.save("latest.png", frame);
                 let (_, view, _, _) = probe.expect("latest viewport");
                 self.step = Step::WaitForRichCopy { scale };
@@ -292,10 +297,11 @@ impl Check {
                     ((bounds.x + (bounds.width - width) / 2.0 + 108.0) * frame.scale_factor) as u32;
                 let bottom = ((bounds.y + bounds.height) * frame.scale_factor) as u32;
                 let above = (112.0 * frame.scale_factor) as u32;
+                let selection = crate::theme::SELECTED.into_rgba8();
                 let y = (bottom.saturating_sub(above)..bottom.min(frame.size.height))
                     .find(|y| {
                         let offset = ((y * frame.size.width + x) * 4) as usize;
-                        frame.rgba.get(offset..offset + 3) == Some(&[0x24, 0x2d, 0x3e])
+                        frame.rgba.get(offset..offset + 3) == Some(&selection[..3])
                     })
                     .expect("painted Set goal menu row");
                 let y = y + (8.0 * frame.scale_factor) as u32;
@@ -550,9 +556,10 @@ impl Check {
                 let x = (180.0 * scale) as u32;
                 let top = (120.0 * scale) as u32;
                 let bottom = (210.0 * scale) as u32;
+                let suggestion_card = crate::theme::CHROME.into_rgba8();
                 let y = (top..bottom).find(|y| {
                     let offset = ((y * frame.size.width + x) * 4) as usize;
-                    frame.rgba.get(offset..offset + 3) == Some(&[0x1b, 0x20, 0x2a])
+                    frame.rgba.get(offset..offset + 3) == Some(&suggestion_card[..3])
                 });
                 self.save("file-suggestions.png", frame);
                 let y = y.expect("painted directory suggestion card") + (16.0 * scale) as u32;
@@ -635,6 +642,40 @@ fn activity_corner(bounds: iced::Rectangle, scale: f32) -> (f32, f32) {
         (bounds.x + (bounds.width + reading_width) / 2.0) * scale,
         (bounds.y + bounds.height) * scale,
     )
+}
+
+fn verify_typography() -> serde_json::Value {
+    use iced::advanced::graphics::text::{
+        cosmic_text::{Attrs, Buffer, Family, Metrics, Shaping},
+        font_system,
+    };
+
+    let mut fonts = font_system().write().expect("Iced font system");
+    let fonts = fonts.raw();
+    let mut buffer = Buffer::new_empty(Metrics::new(15.0, 22.0));
+    let mut resolve = |sample: &str, family: &str| {
+        buffer.set_text(
+            fonts,
+            sample,
+            &Attrs::new().family(Family::Name(family)),
+            Shaping::Advanced,
+            None,
+        );
+        let glyph = buffer
+            .layout_runs()
+            .next()
+            .and_then(|run| run.glyphs.first())
+            .expect("shaped sample");
+        assert_ne!(glyph.glyph_id, 0, "substitute glyph for {sample}");
+        let face = fonts.db().face(glyph.font_id).expect("resolved font face");
+        face.families[0].0.clone()
+    };
+    let latin = resolve("Span", "Segoe UI");
+    let chinese = resolve("简体中文", "Segoe UI");
+    let code = resolve("fn", "Consolas");
+    assert_eq!(latin, "Segoe UI");
+    assert_eq!(code, "Consolas");
+    json!({"latin": latin, "simplifiedChinese": chinese, "code": code})
 }
 
 fn pixels_where(

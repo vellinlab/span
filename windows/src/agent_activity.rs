@@ -1,10 +1,9 @@
 use super::{Action, Activity, Item};
 use crate::theme;
 use crate::unified_diff::{self, Kind};
-use iced::widget::{button, column, container, markdown, row, rule, scrollable, svg, text};
-use iced::{Center, Color, Element, Fill, Font, Theme};
+use iced::widget::{button, column, container, row, rule, scrollable, svg, text};
+use iced::{Center, Color, Element, Fill, Theme};
 
-const MONOSPACE: Font = Font::with_name("Consolas");
 const MAX_PREVIEW_LINES: usize = 160;
 const MAX_PREVIEW_BYTES: usize = 16 * 1024;
 
@@ -20,9 +19,9 @@ pub(super) fn view<'a>(item: &'a Item, kind: Activity, theme: &'a Theme) -> Elem
                 .width(14)
                 .height(14)
                 .style(|_, _| svg::Style {
-                    color: Some(theme::MUTED),
+                    color: Some(theme::ACTIVITY),
                 }),
-            text(title).color(theme::MUTED).size(13).width(Fill),
+            text(title).color(theme::ACTIVITY).size(13).width(Fill),
             // The arrow inherits the button's foreground. Its slot stays fixed on hover.
             text(if item.expanded { "⌄" } else { "›" })
                 .size(15)
@@ -52,13 +51,9 @@ pub(super) fn view<'a>(item: &'a Item, kind: Activity, theme: &'a Theme) -> Elem
     }
     let detail = match kind {
         Activity::Reasoning => item.parsed.as_ref().map_or_else(
-            || text(&item.value).size(14).into(),
+            || text(&item.value).color(theme::MUTED).size(14).into(),
             |document| {
-                markdown::view(
-                    document.items(),
-                    markdown::Settings::with_text_size(14, theme),
-                )
-                .map(Action::Link)
+                theme::reading_markdown(document.items(), 14, theme::MUTED, theme).map(Action::Link)
             },
         ),
         Activity::Command | Activity::Changes => output_card(item, kind),
@@ -94,7 +89,7 @@ fn output_card<'a>(item: &'a Item, kind: Activity) -> Element<'a, Action> {
             } else {
                 preview
             })
-            .font(MONOSPACE)
+            .font(theme::CODE_FONT)
             .size(13)
             .wrapping(text::Wrapping::WordOrGlyph),
         )
@@ -107,7 +102,8 @@ fn output_card<'a>(item: &'a Item, kind: Activity) -> Element<'a, Action> {
         .padding([4, 8]);
     let header =
         container(row![text(label).size(12).color(theme::MUTED).width(Fill), copy].align_y(Center))
-            .padding([3, 6]);
+            .padding([3, 6])
+            .style(|_| theme::surface(theme::PANEL));
     let mut card = column![
         header,
         rule::horizontal(1).style(theme::rule),
@@ -143,7 +139,7 @@ fn diff_view(source: &str) -> Element<'_, Action> {
             [line.old, line.new].map(|number| number.map_or_else(String::new, |n| n.to_string()));
         let gutter = row(numbers.into_iter().map(|number| {
             text(number)
-                .font(MONOSPACE)
+                .font(theme::CODE_FONT)
                 .size(12)
                 .width(42)
                 .align_x(iced::Right)
@@ -156,7 +152,7 @@ fn diff_view(source: &str) -> Element<'_, Action> {
                 row![
                     gutter,
                     text(line.text.trim_end_matches(['\r', '\n']))
-                        .font(MONOSPACE)
+                        .font(theme::CODE_FONT)
                         .size(13)
                         .color(ink)
                         .width(Fill)

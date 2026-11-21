@@ -38,7 +38,7 @@ use futures::channel::mpsc;
 use iced::widget::{
     Space, button, canvas, column, container, row, rule, scrollable, svg, text, text_input,
 };
-use iced::{Center, Element, Fill, Font, Size, Task, Theme, clipboard, window};
+use iced::{Center, Element, Fill, Size, Task, Theme, clipboard, window};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use terminal::{Clipboard, Notice, Terminal, TerminalId};
@@ -57,7 +57,11 @@ fn main() -> iced::Result {
             });
     iced::application(Span::boot, Span::update, Span::view)
         .title("Span")
-        .default_font(Font::with_name("Segoe UI"))
+        .settings(iced::Settings {
+            default_font: theme::UI_FONT,
+            default_text_size: 14.0.into(),
+            ..iced::Settings::default()
+        })
         .theme(Span::theme)
         .subscription(Span::subscription)
         .window(window::Settings {
@@ -497,9 +501,9 @@ impl Span {
     fn view(&self) -> Element<'_, Message> {
         let chrome = container(
             row![
-                svg(self.logo.clone()).width(31).height(31),
+                svg(self.logo.clone()).width(28).height(28),
                 text("Span")
-                    .size(20)
+                    .size(17)
                     .font(theme::SEMIBOLD)
                     .color(theme::INK),
                 Space::new().width(14),
@@ -511,12 +515,12 @@ impl Span {
                 theme::mode("Codex", Message::ShowAgent, self.sessions),
                 theme::mode("Files", Message::ShowFiles, self.show_files),
                 Space::new().width(Fill),
-                theme::action("Connect SSH", Message::ShowConnect, true),
+                theme::action("Connect SSH", Message::ShowConnect, false),
             ]
             .align_y(Center)
             .spacing(8),
         )
-        .padding([9, 18])
+        .padding([8, 15])
         .width(Fill)
         .style(|_| theme::surface(theme::CHROME));
         let mut body = row![self.sidebar(), rule::vertical(1).style(theme::rule)].height(Fill);
@@ -584,7 +588,7 @@ impl Span {
             .into();
         }
         let mut contents = column![
-            text("Connections").size(16).font(theme::SEMIBOLD),
+            text("Connections").size(14).font(theme::SEMIBOLD),
             theme::nav("Local PowerShell", Message::NewTerminal, false),
         ]
         .spacing(10);
@@ -650,8 +654,8 @@ impl Span {
                 button(
                     row![
                         container(Space::new().width(7).height(7))
-                            .style(move |_| theme::rounded(state_color, 5.0)),
-                        text(tab.name()).size(14),
+                            .style(move |_| theme::rounded(state_color, 4.0)),
+                        text(tab.name()).size(13),
                     ]
                     .spacing(8)
                     .align_y(Center)
@@ -666,14 +670,7 @@ impl Span {
             ]
             .align_y(Center);
             tabs = tabs.push(container(tab_control).style(move |_| {
-                theme::rounded(
-                    if active {
-                        theme::HIGHLIGHT
-                    } else {
-                        theme::WORK
-                    },
-                    8.0,
-                )
+                theme::rounded(if active { theme::SELECTED } else { theme::WORK }, 8.0)
             }));
         }
         let header = container(

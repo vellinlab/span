@@ -6,7 +6,7 @@ use iced::widget::{
     Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor,
     stack, svg, text, text_editor, tooltip,
 };
-use iced::{Center, Element, Fill, Task, Theme, Top};
+use iced::{Center, Element, Fill, Task, Theme};
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::sync::{Arc, OnceLock};
@@ -1052,7 +1052,7 @@ impl Agent {
     }
 
     pub fn catalog(&self) -> Element<'_, Action> {
-        let mut list = column![].spacing(4);
+        let mut list = column![].spacing(3);
         for entry in &self.catalog {
             let current = self.thread.as_deref() == Some(&entry.id);
             let mut item = button(
@@ -1068,7 +1068,7 @@ impl Agent {
                 .spacing(3),
             )
             .width(Fill)
-            .padding([8, 9])
+            .padding([8, 10])
             .style(move |_, status| theme::tab(current, status));
             if self.can_open() {
                 item = item.on_press(Action::Resume(entry.id.clone()));
@@ -1076,12 +1076,12 @@ impl Agent {
             list = list.push(item);
         }
         let header = if self.connection.is_some() {
-            action("New session", self.can_open().then_some(Action::New), true)
+            action("New session", self.can_open().then_some(Action::New), false)
         } else {
             action("Reconnect", Some(Action::Retry), true)
         };
         column![
-            text("Codex sessions").size(16).font(theme::SEMIBOLD),
+            text("Codex sessions").size(14).font(theme::SEMIBOLD),
             header,
             scrollable(list).height(Fill),
         ]
@@ -1176,9 +1176,10 @@ impl Agent {
                 "Message Codex"
             })
             .on_action(Action::Draft)
-            .height(63)
-            .padding([9, 10])
-            .size(15)
+            .height(56)
+            .padding([8, 9])
+            .size(theme::BODY_SIZE)
+            .line_height(theme::BODY_LEADING)
             .style(theme::editor)
             .key_binding(move |press| {
                 let shift = press.modifiers.shift();
@@ -1312,12 +1313,16 @@ impl Agent {
         );
         composer = composer.push(editor).push(
             row![
-                attach,
-                container(self.settings.view().map(Action::Setting)).width(Fill),
+                row![attach, self.settings.access_control().map(Action::Setting)]
+                    .spacing(3)
+                    .align_y(Center),
+                container(self.settings.view().map(Action::Setting))
+                    .width(Fill)
+                    .align_x(iced::Right),
                 controls,
             ]
             .spacing(7)
-            .align_y(Top),
+            .align_y(Center),
         );
         self.conversation(scroll, composer)
     }
@@ -1328,16 +1333,19 @@ impl Agent {
         composer: iced::widget::Column<'a, Action>,
     ) -> Element<'a, Action> {
         column![
-            container(text(&self.title).size(16).font(theme::SEMIBOLD)).padding([10, 23]),
+            container(text(&self.title).size(14).font(theme::SEMIBOLD))
+                .padding([8, 15])
+                .width(Fill)
+                .style(|_| theme::surface(theme::WORK)),
             scroll,
             container(
                 container(composer)
                     .padding(11)
                     .width(Fill)
                     .max_width(760)
-                    .style(|_| theme::panel(theme::CHROME, 14.0))
+                    .style(|_| theme::composer())
             )
-            .padding([8, 24])
+            .padding([10, 24])
             .center_x(Fill),
         ]
         .height(Fill)
