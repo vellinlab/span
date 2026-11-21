@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 #[path = "agent_goal.rs"]
 mod goal;
+#[cfg(feature = "visual-check")]
+pub(crate) use goal::VisualGoal;
 
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -36,7 +38,6 @@ pub enum Action {
     RemoveImage(usize),
     Send,
     Interrupt,
-    Goal(goal::Pending),
     Setting(agent_settings::Change),
     Copy(String),
     Link(String),
@@ -55,6 +56,7 @@ enum Request {
     Start,
     Steer,
     Interrupt,
+    Goal(goal::Pending),
 }
 
 struct Entry {
@@ -456,14 +458,13 @@ impl Agent {
                 .any(|request| matches!(request, Request::Open | Request::Interrupt))
     }
 
-    fn send_draft(&mut self) {
+    fn send_draft(&mut self, message: String) {
         if !self.can_send() {
             return;
         }
         let Some(thread) = self.thread.as_deref() else {
             return;
         };
-        let message = self.draft.text();
         if message.trim().is_empty() && self.attachments.is_empty() {
             return;
         }
@@ -1073,8 +1074,7 @@ impl Agent {
         let scroll = scroll.on_scroll(move |viewport| Action::Scrolled(generation, viewport));
         let scroll = keyed_column([(generation, scroll.into())]).height(Fill);
         let drafting_goal = self.goals.draft.as_ref();
-        let menu_open =
-            drafting_goal.is_none() && self.can_use_goal() && !self.goals.suggestions.is_empty();
+        let menu_open = self.goal_menu_open();
         let scroll: Element<'_, Action> = if menu_open {
             stack![scroll, self.goals.palette()].into()
         } else {
@@ -1333,7 +1333,7 @@ mod tests {
             bytes: 3,
         };
         agent.add_attachment(screenshot.clone());
-        agent.send_draft();
+        let _ = agent.update(Action::Send);
         let rejected = requests.try_recv().expect("image-only request");
         assert_eq!(rejected["method"], "turn/start");
         assert_eq!(
@@ -1344,7 +1344,7 @@ mod tests {
             "id":rejected["id"],"error":{"message":"Try again"}
         }));
         assert_eq!(agent.attachments.len(), 1);
-        agent.send_draft();
+        let _ = agent.update(Action::Send);
         let accepted = requests.try_recv().expect("image-only retry");
         agent.draft = text_editor::Content::with_text("Next draft");
         agent.packet(json!({"id":accepted["id"],"result":{"turn":{"id":"running"}}}));
@@ -1381,7 +1381,7 @@ mod tests {
             agent.settings.change(change);
         }
         agent.draft = text_editor::Content::with_text("Follow up");
-        agent.send_draft();
+        let _ = agent.update(Action::Send);
         let steer = requests.try_recv().expect("active turn request");
         assert_eq!(steer["method"], "turn/steer");
         assert_eq!(steer["params"]["expectedTurnId"], "running");
@@ -1396,7 +1396,7 @@ mod tests {
             "turn/completed",
             &json!({"threadId":"fixture","turn":{"id":"running"}}),
         );
-        agent.send_draft();
+        let _ = agent.update(Action::Send);
         let next = requests.try_recv().expect("next turn request");
         assert_eq!(next["method"], "turn/start");
         assert_eq!(next["params"]["model"], "fixture-model");

@@ -49,6 +49,13 @@ impl Target {
             screen_point: packed_point(screen.x, screen.y),
         }
     }
+
+    pub fn click(window: &dyn window::Window, x: i32, y: i32) {
+        let target = Self::locate(window, x, y);
+        let point = packed_point(x, y);
+        post(target.hwnd, 0x0201, 1, point); // WM_LBUTTONDOWN, MK_LBUTTON
+        post(target.hwnd, 0x0202, 0, point); // WM_LBUTTONUP
+    }
 }
 
 pub struct Benchmark {

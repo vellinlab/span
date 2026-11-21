@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 const PREFIX: &str = "/goal";
 const MAX_OBJECTIVE: usize = 4_000;
+const MAX_COMMAND_LENGTH: usize = "/goal resume".len();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -111,7 +112,7 @@ impl State {
     pub fn refresh_suggestions(&mut self, content: &text_editor::Content) {
         self.suggestions.clear();
         self.selected = 0;
-        if content.line_count() != 1 {
+        if content.line_count() != 1 || content.cursor().position.column > MAX_COMMAND_LENGTH {
             return;
         }
         if let Some(line) = content.line(0) {
@@ -224,6 +225,10 @@ impl State {
 }
 
 impl Agent {
+    pub(super) fn goal_menu_open(&self) -> bool {
+        self.goals.draft.is_none() && self.can_use_goal() && !self.goals.suggestions.is_empty()
+    }
+
     pub(super) fn goal_pending(&self) -> bool {
         self.pending.values().any(|request| {
             matches!(request, Request::Goal(pending) if pending.operation != Operation::Refresh)
@@ -383,25 +388,23 @@ impl Agent {
         if let Some(command) = self.goals.suggestions.get(self.goals.selected).copied() {
             return self.select_goal(command);
         }
-        if !self.draft.is_empty() {
-            let draft = self.draft.text();
-            if let Some(objective) = arguments(&draft) {
-                if !self.can_use_goal() {
-                    if self.thread.is_none() {
-                        self.status = Some("Open a Codex session to set a goal.".into());
-                    }
-                    return Task::none();
+        let draft = self.draft.text();
+        if let Some(objective) = arguments(&draft) {
+            if !self.can_use_goal() {
+                if self.thread.is_none() {
+                    self.status = Some("Open a Codex session to set a goal.".into());
                 }
-                if let Some(command) = Command::ALL
-                    .into_iter()
-                    .find(|command| command.name() == draft.trim())
-                {
-                    return self.select_goal(command);
-                }
-                return self.begin_goal_draft(objective.trim().to_owned(), true);
+                return Task::none();
             }
+            if let Some(command) = Command::ALL
+                .into_iter()
+                .find(|command| command.name() == draft.trim())
+            {
+                return self.select_goal(command);
+            }
+            return self.begin_goal_draft(objective.trim().to_owned(), true);
         }
-        self.send_draft();
+        self.send_draft(draft);
         Task::none()
     }
 
@@ -420,6 +423,34 @@ impl Agent {
         ]
         .align_y(Center)
         .into()
+    }
+}
+
+#[cfg(feature = "visual-check")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VisualGoal {
+    Menu,
+    EmptyDraft,
+    FilledDraft,
+    Saved,
+}
+
+#[cfg(feature = "visual-check")]
+impl Agent {
+    pub(crate) fn visual_goal(&self) -> Option<VisualGoal> {
+        if self.goal_menu_open() {
+            Some(VisualGoal::Menu)
+        } else if let Some(draft) = &self.goals.draft {
+            if draft.content.is_empty() {
+                Some(VisualGoal::EmptyDraft)
+            } else {
+                Some(VisualGoal::FilledDraft)
+            }
+        } else if self.goals.current.is_some() {
+            Some(VisualGoal::Saved)
+        } else {
+            None
+        }
     }
 }
 

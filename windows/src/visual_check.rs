@@ -1,19 +1,22 @@
-use crate::{Message, Tab, agent, codex_rpc};
+use crate::{Message, Tab, agent, agent::VisualGoal, codex_rpc};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt};
 use iced::widget::operation::{AbsoluteOffset, scroll_to};
+use iced::widget::text_editor;
 use iced::{Task, window};
 use serde_json::{Value, json};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Cursor;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod scroll;
 pub use scroll::frames;
 const DIRECTORY: &str = "SPAN_VISUAL_CHECK_DIR";
 const THREAD: &str = "visual-check";
+const OBJECTIVE: &str = "Reduce response latency for long Windows sessions.";
 const INITIAL_ITEMS: usize = 320;
 const EARLIER_ITEMS: usize = 32;
 
@@ -26,6 +29,7 @@ pub enum Event {
     Frame(Instant),
     ScrollResults(Value),
     Attachment(window::Screenshot),
+    Goal(window::Screenshot),
 }
 
 #[derive(Clone, Copy)]
@@ -37,6 +41,13 @@ enum Step {
     WaitForAttachment,
     CaptureAttachment,
     WaitForAttachmentReply,
+    WaitForGoalMenu,
+    CaptureGoalMenu,
+    WaitForGoalDraft,
+    WaitForGoalText,
+    CaptureGoalDraft,
+    WaitForGoalSave,
+    CaptureSavedGoal,
 }
 
 pub struct Check {
@@ -189,11 +200,83 @@ impl Check {
                         br#"{"clipboard":"CF_DIB","input":"inline PNG","accepted":true}"#,
                     )
                     .expect("record Windows clipboard attachment test");
-                    Task::done(Message::CloseWindow)
+                    self.step = Step::WaitForGoalMenu;
+                    paste(tab, "/goal").chain(observe())
                 } else {
                     observe()
                 }
             }
+            (Event::Observe, Step::WaitForGoalMenu)
+                if agent.visual_goal() == Some(VisualGoal::Menu) =>
+            {
+                self.step = Step::CaptureGoalMenu;
+                screenshot(Event::Goal)
+            }
+            (Event::Goal(frame), Step::CaptureGoalMenu) => {
+                let (_, view, _, _) = probe.expect("goal menu viewport");
+                let bounds = view.bounds();
+                let width = (bounds.width - 48.0).min(760.0);
+                let x =
+                    ((bounds.x + (bounds.width - width) / 2.0 + 108.0) * frame.scale_factor) as u32;
+                let bottom = ((bounds.y + bounds.height) * frame.scale_factor) as u32;
+                let above = (112.0 * frame.scale_factor) as u32;
+                let y = (bottom.saturating_sub(above)..bottom.min(frame.size.height))
+                    .find(|y| {
+                        let offset = ((y * frame.size.width + x) * 4) as usize;
+                        frame.rgba.get(offset..offset + 3) == Some(&[0x24, 0x2d, 0x3e])
+                    })
+                    .expect("painted Set goal menu row");
+                let y = y + (8.0 * frame.scale_factor) as u32;
+                self.save("goal-menu.png", frame);
+                self.step = Step::WaitForGoalDraft;
+                window::latest()
+                    .then(move |id| {
+                        window::run(id.expect("active Span window"), move |window| {
+                            scroll::Target::click(window, x as i32, y as i32);
+                        })
+                        .discard()
+                    })
+                    .chain(observe())
+            }
+            (Event::Observe, Step::WaitForGoalDraft)
+                if agent.visual_goal() == Some(VisualGoal::EmptyDraft) =>
+            {
+                self.step = Step::WaitForGoalText;
+                paste(tab, OBJECTIVE).chain(observe())
+            }
+            (Event::Observe, Step::WaitForGoalText)
+                if agent.visual_goal() == Some(VisualGoal::FilledDraft) =>
+            {
+                self.step = Step::CaptureGoalDraft;
+                screenshot(Event::Goal)
+            }
+            (Event::Goal(frame), Step::CaptureGoalDraft) => {
+                self.save("goal-edit.png", frame);
+                self.step = Step::WaitForGoalSave;
+                Task::done(Message::Agent(tab.id, agent::Action::Send)).chain(observe())
+            }
+            (Event::Observe, Step::WaitForGoalSave)
+                if agent.visual_goal() == Some(VisualGoal::Saved) =>
+            {
+                self.step = Step::CaptureSavedGoal;
+                screenshot(Event::Goal)
+            }
+            (Event::Goal(frame), Step::CaptureSavedGoal) => {
+                self.save("goal-active.png", frame);
+                std::fs::write(
+                    self.directory.join("goal.json"),
+                    br#"{"selectedWithMouse":true,"method":"thread/goal/set","saved":true}"#,
+                )
+                .expect("record native goal workflow");
+                Task::done(Message::CloseWindow)
+            }
+            (
+                Event::Observe,
+                Step::WaitForGoalMenu
+                | Step::WaitForGoalDraft
+                | Step::WaitForGoalText
+                | Step::WaitForGoalSave,
+            ) => observe(),
             _ => Task::none(),
         }
     }
@@ -213,6 +296,15 @@ impl Check {
         .expect("save native window screenshot");
         hash.finish()
     }
+}
+
+fn paste(tab: &Tab, value: &str) -> Task<Message> {
+    Task::done(Message::Agent(
+        tab.id,
+        agent::Action::Draft(text_editor::Action::Edit(text_editor::Edit::Paste(
+            Arc::new(value.into()),
+        ))),
+    ))
 }
 
 fn screenshot(event: fn(window::Screenshot) -> Event) -> Task<Message> {
@@ -244,6 +336,7 @@ pub async fn serve(mut input: mpsc::Receiver<Value>, output: &mut mpsc::Sender<c
         "name": "Make preview deployments repeatable",
         "cwd": r"C:\workspace\release-tools",
     });
+    let mut goal = Value::Null;
     while let Some(request) = input.next().await {
         let Some(id) = request.get("id") else {
             continue;
@@ -260,6 +353,17 @@ pub async fn serve(mut input: mpsc::Receiver<Value>, output: &mut mpsc::Sender<c
                 "initialTurnsPage":page(EARLIER_ITEMS, EARLIER_ITEMS + INITIAL_ITEMS, Some("older")),
             }),
             Some("thread/turns/list") => page(0, EARLIER_ITEMS, None),
+            Some("thread/goal/get") => json!({"goal":goal}),
+            Some("thread/goal/set") => {
+                assert_eq!(
+                    request["params"],
+                    json!({
+                        "threadId":THREAD, "origin":"user", "objective":OBJECTIVE, "status":"active"
+                    })
+                );
+                goal = json!({"threadId":THREAD,"objective":OBJECTIVE,"status":"active"});
+                json!({"goal":goal})
+            }
             Some("model/list") => json!({"data":[{
                 "model":"fixture",
                 "displayName":"Codex · Fixture",
