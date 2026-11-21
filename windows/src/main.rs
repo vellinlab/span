@@ -1,5 +1,7 @@
 #![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
+mod agent;
+mod codex_rpc;
 mod terminal;
 #[path = "../../src/terminal_theme.rs"]
 #[allow(dead_code)]
@@ -47,6 +49,7 @@ struct Span {
     logo: svg::Handle,
     terminals: Vec<Tab>,
     active: Option<TerminalId>,
+    sessions: bool,
     next_id: TerminalId,
     events: mpsc::UnboundedSender<(TerminalId, Event)>,
     connecting: bool,
@@ -61,6 +64,8 @@ struct Tab {
     id: TerminalId,
     host: Option<String>,
     terminal: Terminal,
+    agent: Option<agent::Agent>,
+    show_agent: bool,
 }
 
 impl Tab {
@@ -72,6 +77,9 @@ impl Tab {
 #[derive(Debug, Clone)]
 enum Message {
     NewTerminal,
+    ShowTerminal,
+    ShowAgent,
+    Agent(TerminalId, agent::Action),
     Select(TerminalId),
     Close(TerminalId),
     CloseWindow(window::Id),
@@ -100,6 +108,7 @@ impl Span {
             logo: svg::Handle::from_memory(LOGO),
             terminals: Vec::new(),
             active: None,
+            sessions: false,
             next_id: 0,
             events,
             connecting: false,
@@ -125,7 +134,14 @@ impl Span {
             Ok(terminal) => {
                 self.error = None;
                 self.active = Some(id);
-                self.terminals.push(Tab { id, host, terminal });
+                self.terminals.push(Tab {
+                    id,
+                    host,
+                    terminal,
+                    agent: None,
+                    show_agent: false,
+                });
+                self.sessions = false;
             }
             Err(error) => self.error = Some(error),
         }
@@ -155,6 +171,44 @@ impl Span {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::NewTerminal => self.open(None),
+            Message::ShowTerminal => {
+                self.sessions = false;
+                if let Some(tab) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|tab| Some(tab.id) == self.active)
+                {
+                    tab.show_agent = false;
+                }
+            }
+            Message::ShowAgent => {
+                let Some(tab) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|tab| Some(tab.id) == self.active)
+                else {
+                    return Task::none();
+                };
+                self.sessions = true;
+                tab.show_agent = true;
+                self.connecting = false;
+                if tab.agent.is_none() {
+                    return start_agent(tab, self.home.clone());
+                }
+            }
+            Message::Agent(id, action) => {
+                let Some(tab) = self.terminals.iter_mut().find(|tab| tab.id == id) else {
+                    return Task::none();
+                };
+                if matches!(action, agent::Action::Retry) {
+                    return start_agent(tab, self.home.clone());
+                }
+                if let Some(agent) = tab.agent.as_mut() {
+                    return agent
+                        .update(action)
+                        .map(move |action| Message::Agent(id, action));
+                }
+            }
             Message::CloseWindow(id) => {
                 self.terminals.clear();
                 self.events.close_channel();
@@ -162,6 +216,10 @@ impl Span {
             }
             Message::Select(id) => {
                 self.active = Some(id);
+                self.sessions = self
+                    .terminals
+                    .iter()
+                    .any(|tab| tab.id == id && tab.show_agent);
             }
             Message::Close(id) => {
                 if let Some(position) = self.terminals.iter().position(|tab| tab.id == id) {
@@ -172,10 +230,15 @@ impl Span {
                             .get(position)
                             .or_else(|| self.terminals.last())
                             .map(|tab| tab.id);
+                        self.sessions = self
+                            .terminals
+                            .iter()
+                            .any(|tab| Some(tab.id) == self.active && tab.show_agent);
                     }
                 }
             }
             Message::ShowConnect => {
+                self.sessions = false;
                 self.connecting = !self.connecting;
                 self.error = None;
             }
@@ -220,6 +283,8 @@ impl Span {
                     .font(theme::SEMIBOLD)
                     .color(theme::INK),
                 Space::new().width(Fill),
+                theme::action("Terminal", Message::ShowTerminal, false),
+                theme::action("Codex", Message::ShowAgent, false),
                 theme::action("＋  New terminal", Message::NewTerminal, false),
                 theme::action("Connect SSH", Message::ShowConnect, true),
             ]
@@ -239,6 +304,25 @@ impl Span {
     }
 
     fn sidebar(&self) -> Element<'_, Message> {
+        if self.sessions
+            && let Some(tab) = self
+                .terminals
+                .iter()
+                .find(|tab| Some(tab.id) == self.active)
+            && let Some(agent) = &tab.agent
+        {
+            let id = tab.id;
+            return container(
+                agent
+                    .catalog()
+                    .map(move |action| Message::Agent(id, action)),
+            )
+            .width(238)
+            .height(Fill)
+            .padding([18, 13])
+            .style(|_| theme::surface(theme::SIDE))
+            .into();
+        }
         let mut contents = column![
             text("Connections").size(16).font(theme::SEMIBOLD),
             theme::nav("Local PowerShell", Message::NewTerminal, false),
@@ -348,6 +432,21 @@ impl Span {
             .active
             .and_then(|id| self.terminals.iter().find(|tab| tab.id == id));
         let content = if let Some(tab) = selected {
+            if tab.show_agent
+                && let Some(agent) = &tab.agent
+            {
+                let id = tab.id;
+                return column![
+                    header,
+                    rule::horizontal(1).style(theme::rule),
+                    agent
+                        .view(&self.theme)
+                        .map(move |action| Message::Agent(id, action))
+                ]
+                .width(Fill)
+                .height(Fill)
+                .into();
+            }
             let footer = tab.terminal.exit.map_or_else(
                 || match tab.host {
                     Some(_) => "SSH · OpenSSH".into(),
@@ -391,6 +490,13 @@ impl Span {
             .width(Fill)
             .into()
     }
+}
+
+fn start_agent(tab: &mut Tab, home: Option<PathBuf>) -> Task<Message> {
+    let id = tab.id;
+    let (agent, events) = agent::Agent::new(tab.host.clone(), home);
+    tab.agent = Some(agent);
+    events.map(move |action| Message::Agent(id, action))
 }
 
 fn valid_host(host: &str) -> bool {
