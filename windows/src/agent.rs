@@ -6,8 +6,9 @@ use iced::widget::{
     Space, button, column, container, image, keyed_column, markdown, row, scrollable, sensor,
     stack, svg, text, text_editor, tooltip,
 };
-use iced::{Bottom, Center, Element, Fill, Right, Task, Theme, clipboard};
+use iced::{Bottom, Center, Element, Fill, Task, Theme, clipboard};
 use serde_json::{Value, json};
+use std::cell::Cell;
 use std::sync::{Arc, OnceLock};
 use std::{
     collections::{HashMap, HashSet},
@@ -17,6 +18,8 @@ use uuid::Uuid;
 
 #[path = "agent_goal.rs"]
 mod goal;
+#[path = "agent_transcript.rs"]
+mod transcript;
 #[cfg(feature = "visual-check")]
 pub(crate) use goal::VisualGoal;
 
@@ -104,6 +107,7 @@ struct Item {
     value: String,
     parsed: Option<markdown::Content>,
     expanded: bool,
+    measurement: Cell<Option<transcript::Measurement>>,
 }
 
 struct Approval {
@@ -360,6 +364,7 @@ impl Agent {
             Action::Toggle(id) => {
                 if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
                     item.expanded = !item.expanded;
+                    item.measurement.set(None);
                 }
             }
             Action::Link(uri) => {
@@ -837,6 +842,7 @@ impl Agent {
                     value: String::new(),
                     parsed: None,
                     expanded: false,
+                    measurement: Cell::new(None),
                 });
                 self.items.len() - 1
             });
@@ -851,6 +857,7 @@ impl Agent {
         item.value
             .push_str(&value[..value.floor_char_boundary(remaining.min(value.len()))]);
         item.parsed = parse.then(|| markdown::Content::parse(&item.value));
+        item.measurement.set(None);
     }
 
     pub fn artifact_path(&self, action: &Action) -> Option<PathBuf> {
@@ -967,93 +974,13 @@ impl Agent {
                     .on_show(move |_| Action::More(generation, cursor.clone())),
             );
         }
-        for item in &self.items {
-            let entry = match item.kind {
-                Kind::User => container(
-                    container(if let Some(parsed) = &item.parsed {
-                        markdown::view(
-                            parsed.items(),
-                            markdown::Settings::with_text_size(15, theme),
-                        )
-                        .map(Action::Link)
-                    } else {
-                        text(&item.value).size(15).into()
-                    })
-                    .padding([10, 14])
-                    .max_width(580)
-                    .style(|_| theme::rounded(theme::HIGHLIGHT, 14.0)),
-                )
-                .width(Fill)
-                .align_x(Right),
-                Kind::Reply => {
-                    let response = if let Some(parsed) = &item.parsed {
-                        markdown::view(
-                            parsed.items(),
-                            markdown::Settings::with_text_size(15, theme),
-                        )
-                        .map(Action::Link)
-                    } else {
-                        text(&item.value).size(15).into()
-                    };
-                    let mut body = column![response].spacing(4);
-                    if !self.in_flight && item.parsed.is_some() {
-                        let label = if self.copied.as_deref() == Some(&item.id) {
-                            "Copied"
-                        } else {
-                            "Copy"
-                        };
-                        body = body.push(
-                            container(action(label, Some(Action::Copy(item.id.clone())), false))
-                                .width(Fill)
-                                .align_x(Right),
-                        );
-                    }
-                    container(body)
-                }
-                Kind::Activity(kind) => {
-                    let toggle = button(
-                        row![
-                            svg(kind.icon())
-                                .width(15)
-                                .height(15)
-                                .style(|_, _| svg::Style {
-                                    color: Some(theme::MUTED),
-                                }),
-                            text(&item.title).size(13),
-                            Space::new().width(Fill),
-                            text(if item.expanded { "⌃" } else { "⌄" }).size(15),
-                        ]
-                        .spacing(8)
-                        .align_y(Center),
-                    )
-                    .on_press(Action::Toggle(item.id.clone()))
-                    .width(Fill)
-                    .padding([4, 7])
-                    .style(move |_, status| theme::tab(item.expanded, status));
-                    let mut activity = column![toggle].spacing(5);
-                    if item.expanded {
-                        let detail: Element<'_, Action> = match kind {
-                            Activity::Reasoning => item.parsed.as_ref().map_or_else(
-                                || text(&item.value).size(14).into(),
-                                |document| {
-                                    markdown::view(
-                                        document.items(),
-                                        markdown::Settings::with_text_size(14, theme),
-                                    )
-                                    .map(Action::Link)
-                                },
-                            ),
-                            _ => text(&item.value)
-                                .size(13)
-                                .font(iced::Font::MONOSPACE)
-                                .into(),
-                        };
-                        activity = activity.push(container(detail).padding([7, 14]));
-                    }
-                    container(activity).width(Fill)
-                }
-            };
-            transcript = transcript.push(entry);
+        if !self.items.is_empty() {
+            transcript = transcript.push(Element::new(transcript::Transcript::new(
+                &self.items,
+                theme,
+                self.in_flight,
+                self.copied.as_deref(),
+            )));
         }
         let scroll = scrollable(
             container(container(transcript).width(Fill).max_width(760))
