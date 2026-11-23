@@ -136,7 +136,6 @@ impl<'a> Record<'a> {
             icon: self.icon,
             status: self.status.map(|status| Cow::Owned(status.into_owned())),
             patch: self.patch,
-            summary: self.summary,
             web_url: self.web_url.map(|url| Cow::Owned(url.into_owned())),
         }
     }

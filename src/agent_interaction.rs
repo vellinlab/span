@@ -113,10 +113,11 @@ impl Reasoning {
         let Some(id) = item["id"].as_str() else {
             return;
         };
-        if let Some((index, text)) = item["summary"]
-            .as_array()
-            .into_iter()
-            .flatten()
+        let Some(parts) = item["summary"].as_array() else {
+            return;
+        };
+        if let Some((index, text)) = parts
+            .iter()
             .enumerate()
             .rev()
             .find_map(|(index, value)| Some((index, headline(value.as_str()?)?)))
