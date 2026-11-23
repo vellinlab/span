@@ -17,8 +17,8 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       fontFamily: 'Cascadia Mono, Consolas, Liberation Mono, monospace',
       fontSize: 13,
       theme: {
-        background: '#13151a', foreground: '#d2d9e5',
-        cursor: '#9abaff', selectionBackground: '#375584',
+        background: '#151617', foreground: '#dedede',
+        cursor: '#bdd8c6', selectionBackground: '#43554b',
       },
     });
     const fit = new FitAddon();

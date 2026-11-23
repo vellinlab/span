@@ -27,3 +27,10 @@ app="$target/resources/app"
 mkdir -p "$app/bin"
 cp -R prototype/dist prototype/desktop prototype/sample prototype/package.json "$app"
 cp "$binary" "$app/bin/"
+if [ "$platform" = win32 ]; then
+    cp windows/span.ico "$app/"
+    editor="$runtime/rcedit-x64.exe"
+    curl -fLsS --retry 3 https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe -o "$editor"
+    printf '%s  %s\n' 3e7801db1a5edbec91b49a24a094aad776cb4515488ea5a4ca2289c400eade2a "$editor" | sha256sum --check
+    "$editor" "$(cygpath -w "$target/span-preview.exe")" --set-icon "$(cygpath -w windows/span.ico)"
+fi

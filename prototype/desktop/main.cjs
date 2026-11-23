@@ -13,6 +13,7 @@ const allowed = new Set([
 ]);
 
 app.setName('Span Workbench Preview');
+if (process.platform === 'win32') app.commandLine.appendSwitch('disable-lcd-text');
 if (process.env.SPAN_PREVIEW_PROFILE) {
   app.setPath('userData', path.resolve(process.env.SPAN_PREVIEW_PROFILE));
 }
@@ -114,9 +115,10 @@ app.whenReady().then(() => {
     minWidth: 740,
     minHeight: 520,
     autoHideMenuBar: true,
-    backgroundColor: '#18191d',
+    backgroundColor: '#181818',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#1e2026', symbolColor: '#c3c8d2', height: 40 },
+    titleBarOverlay: { color: '#181818', symbolColor: '#ededed', height: 44 },
+    ...(process.platform === 'win32' && { icon: path.join(root, 'span.ico') }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,

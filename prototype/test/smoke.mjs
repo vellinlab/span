@@ -21,6 +21,24 @@ const app = await electron.launch({
   ],
   env: { ...process.env, SPAN_PREVIEW_PROFILE: profile },
 });
+
+async function checkAlignment(page) {
+  const { reading, composer, brand, sidebar, controls, send, pageWidth } = await page.evaluate(() => {
+    const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+    return {
+      reading: rect('.timeline .reading-column'), composer: rect('.composer'),
+      brand: rect('.brand'), sidebar: rect('.sidebar'), controls: rect('.titlebar-content'),
+      send: rect('.send'), pageWidth: document.documentElement.scrollWidth,
+    };
+  });
+  const close = (a, b) => Math.abs(a - b) <= 1;
+  assert.ok(close(reading.left, composer.left) && close(reading.right, composer.right),
+    `Reading column [${reading.left}, ${reading.right}] and composer [${composer.left}, ${composer.right}] must align`);
+  assert.ok(close(brand.right, sidebar.right), 'Title bar and sidebar edges must align');
+  assert.ok(close(controls.left, sidebar.right), 'Title bar controls must start in the workspace column');
+  assert.ok(send.right <= composer.right && composer.right <= pageWidth, 'Composer must fit within the window');
+}
+
 try {
   const page = await app.firstWindow();
   page.on('pageerror', error => console.error(error));
@@ -36,6 +54,14 @@ try {
     return region.width > 0 && region.width < innerWidth && region.height > 0
       && terminal.left >= region.left && terminal.right <= region.right;
   });
+  await checkAlignment(page);
+  await page.getByRole('button', { name: '搜索' }).click();
+  const search = page.getByRole('textbox', { name: '搜索会话' });
+  await search.fill('没有对应的会话名称');
+  await page.getByText('没有匹配的会话', { exact: true }).waitFor();
+  await search.press('Escape');
+  await page.getByRole('button', { name: '收起侧栏' }).click();
+  await page.getByRole('button', { name: '展开侧栏' }).click();
   const windowId = linux && await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));
   const grip = page.getByRole('separator', { name: '调整侧栏宽度' });
@@ -50,6 +76,7 @@ try {
   await page.mouse.up();
   await page.waitForFunction(expected =>
     document.getElementById('workbench-sidebar').offsetWidth === expected, original + 72);
+  await checkAlignment(page);
   if (verifySandbox) {
     await page.reload();
     await page.getByText('第 160 项', { exact: false }).waitFor();
@@ -94,6 +121,16 @@ try {
   await page.getByRole('button', { name: '文件', exact: true }).click();
   await page.getByRole('button', { name: 'README.md' }).click();
   await page.locator('.preview .prose').waitFor();
+  await checkAlignment(page);
+  if (!linux) {
+    const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(800, 640));
+    await page.waitForFunction(() => innerWidth <= 850);
+    await checkAlignment(page);
+    await app.evaluate(({ BrowserWindow }, [width, height]) =>
+      BrowserWindow.getAllWindows()[0].setContentSize(width, height), size);
+    await page.waitForFunction(width => innerWidth === width, size[0]);
+  }
   await page.getByRole('button', { name: '关闭预览' }).click();
 
   await page.getByRole('button', { name: '切换终端' }).click();
@@ -147,9 +184,14 @@ try {
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
   if (screenshot) {
-    await page.getByRole('button', { name: '滚到最新消息' }).click();
+    const latest = page.getByRole('button', { name: '滚到最新消息' });
+    if (await latest.isVisible()) await latest.click();
     if (linux) execFileSync('import', ['-window', String(windowId), screenshot]);
-    else await page.screenshot({ path: screenshot });
+    else {
+      await page.getByRole('button', { name: '切换终端' }).click();
+      await checkAlignment(page);
+      await page.screenshot({ path: screenshot });
+    }
   }
   console.log('Verified history paging, file preview, PTY, streaming and interrupt.');
 } finally {
