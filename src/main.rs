@@ -3,6 +3,7 @@
 mod agent;
 mod agent_activity;
 mod agent_attachments;
+mod agent_backend;
 mod agent_catalog;
 mod agent_commands;
 mod agent_diff;

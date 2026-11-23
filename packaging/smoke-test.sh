@@ -65,6 +65,7 @@ SSH_CONFIG
         export SPAN_TEST_GDK_GL_DEFAULT=1
     fi
     install -Dm0755 packaging/test-agent.py "$HOME/bin/codex"
+    install -Dm0755 packaging/test-agent.py "$HOME/bin/clue"
     mkdir -p "$XDG_DATA_HOME/applications"
     cat > "$HOME/bin/span-test-open-link" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -528,6 +529,14 @@ SVG
     wait_until "opening another session while the first is waiting for an answer" test -f "$HOME/agent-new-during-question"
     widget click '复制会话 ID'
     xclip -out -selection clipboard | grep -qx 'new-during-question'
+    xdotool key --clearmodifiers ctrl+shift+w
+    widget contains 'Which deployment environment?'
+    widget mouse '会话后端 · Clue'
+    widget contains 'Clue fixture thread'
+    widget not-contains 'Deployment rollout'
+    widget mouse '新建'
+    widget click '复制会话 ID'
+    xclip -out -selection clipboard | grep -qx 'clue-preview-thread'
     xdotool key --clearmodifiers ctrl+shift+w
     widget contains 'Which deployment environment?'
     timeline_wheel 5 8

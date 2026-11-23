@@ -1,3 +1,4 @@
+use crate::agent_backend::Backend;
 use crate::agent_extensions::Section as ExtensionSection;
 use crate::browser::Browser;
 use crate::host_dialog;
@@ -344,19 +345,33 @@ impl Workbench {
     }
 
     fn open_session(self: &Rc<Self>, launch: Launch, quick_connect: bool) {
-        self.add_session(launch, quick_connect, None);
+        self.add_session(launch, quick_connect, None, Backend::default(), false);
     }
 
-    fn add_session(self: &Rc<Self>, launch: Launch, quick_connect: bool, parent: Option<&Session>) {
+    fn add_session(
+        self: &Rc<Self>,
+        launch: Launch,
+        quick_connect: bool,
+        parent: Option<&Session>,
+        backend: Backend,
+        start_thread: bool,
+    ) {
         let workbench = Rc::downgrade(self);
         let session = Session::new(
             launch,
             Rc::downgrade(&self.preview),
             quick_connect,
             parent,
-            move |parent| {
+            backend,
+            move |parent, backend, start| {
                 if let Some(workbench) = workbench.upgrade() {
-                    workbench.add_session(parent.launch.clone(), false, Some(parent));
+                    workbench.add_session(
+                        parent.launch.clone(),
+                        false,
+                        Some(parent),
+                        backend,
+                        start,
+                    );
                 }
             },
         );
@@ -430,7 +445,9 @@ impl Workbench {
         self.start(&session);
         if parent.is_some() {
             session.show_agent();
-            session.agent().start_new();
+            if start_thread {
+                session.agent().start_new();
+            }
         } else {
             session.terminal.grab_focus();
         }

@@ -1393,3 +1393,13 @@ tooltip label {
 .workbench scrollbar slider {
     transition: none;
 }
+
+.workbench .agent-backend-picker button.quiet-button {
+    padding: 4px 8px;
+    border-radius: 7px;
+}
+
+.workbench .agent-backend-picker button.selected {
+    color: @foreground;
+    background-color: @selection;
+}

@@ -1,5 +1,6 @@
 use crate::agent_activity::{Activity, Record};
 use crate::agent_attachments::{Attachments, Prepared};
+use crate::agent_backend::Backend;
 use crate::agent_catalog::{self, Catalog, ThreadState};
 use crate::agent_commands::Commands;
 use crate::agent_diff::{DiffCard, FoldedDiff};
@@ -147,7 +148,9 @@ pub struct Agent {
     pub panel: gtk::Box,
     connection: Box<dyn Fn() -> Result<Option<crate::ssh::ChannelBuf>, String>>,
     reveal: Box<dyn Fn()>,
-    new_tab: Box<dyn Fn()>,
+    new_tab: Box<dyn Fn(Backend, bool)>,
+    backend: Cell<Backend>,
+    backend_title: gtk::Label,
     start_requested: Cell<bool>,
     preview: Offer,
     rpc: RefCell<Option<Rc<Rpc>>>,
@@ -229,11 +232,12 @@ pub struct Agent {
 impl Agent {
     pub fn new(
         host: &str,
+        backend: Backend,
         initial_directory: Option<&std::path::Path>,
         connection: impl Fn() -> Result<Option<crate::ssh::ChannelBuf>, String> + 'static,
         toggle_terminal: impl Fn() + 'static,
         reveal: impl Fn() + 'static,
-        new_tab: impl Fn() + 'static,
+        new_tab: impl Fn(Backend, bool) + 'static,
         preview: Offer,
     ) -> Rc<Self> {
         let panel = column(0);
@@ -241,7 +245,7 @@ impl Agent {
 
         let toolbar = row(6);
         toolbar.style_context().add_class("agent-toolbar");
-        let title = gtk::Label::new(Some("Codex"));
+        let title = gtk::Label::new(Some(backend.label()));
         title.style_context().add_class("agent-toolbar-title");
         toolbar.pack_start(&title, false, false, 0);
         let host_label = gtk::Label::builder()
@@ -258,7 +262,7 @@ impl Agent {
         );
         terminal.connect_clicked(move |_| toggle_terminal());
         toolbar.pack_end(&terminal, false, false, 0);
-        let catalog = Catalog::new(host);
+        let catalog = Catalog::new(host, backend);
         let extensions = Extensions::new(host);
         let copy_id = icons::button(Icon::Copy, "复制会话 ID", "复制会话 ID");
         copy_id.set_no_show_all(true);
@@ -519,6 +523,8 @@ impl Agent {
             connection: Box::new(connection),
             reveal: Box::new(reveal),
             new_tab: Box::new(new_tab),
+            backend: Cell::new(backend),
+            backend_title: title,
             start_requested: Cell::new(false),
             preview,
             rpc: RefCell::new(None),
@@ -857,6 +863,15 @@ impl Agent {
     }
 
     fn bind_catalog(self: &Rc<Self>) {
+        for (backend, button) in &self.catalog.backends {
+            let backend = *backend;
+            let weak = Rc::downgrade(self);
+            button.connect_clicked(move |_| {
+                if let Some(agent) = weak.upgrade() {
+                    agent.select_backend(backend);
+                }
+            });
+        }
         let weak = Rc::downgrade(self);
         self.catalog.search.connect_search_changed(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -914,13 +929,32 @@ impl Agent {
         self.catalog.new_thread.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
                 if agent.thread.borrow().is_some() {
-                    (agent.new_tab)();
+                    (agent.new_tab)(agent.backend.get(), true);
                 } else {
                     (agent.reveal)();
                     agent.start_new();
                 }
             }
         });
+    }
+
+    fn select_backend(self: &Rc<Self>, backend: Backend) {
+        if self.backend.get() == backend {
+            return;
+        }
+        if self.thread.borrow().is_some()
+            || self.last_thread.borrow().is_some()
+            || self.opening.get()
+        {
+            (self.new_tab)(backend, false);
+            return;
+        }
+        self.backend.set(backend);
+        self.backend_title.set_text(backend.label());
+        self.catalog.set_backend(backend);
+        self.disconnect("正在连接会话后端…");
+        self.catalog.loading(true);
+        self.show_catalog(false);
     }
 
     pub fn working_directory(&self) -> Option<PathBuf> {
@@ -1166,7 +1200,7 @@ impl Agent {
             }
         };
         let weak = Rc::downgrade(self);
-        let rpc = match Rpc::start(socket.as_deref(), move |result| {
+        let rpc = match Rpc::start(socket.as_deref(), self.backend.get(), move |result| {
             if let Some(agent) = weak.upgrade() {
                 agent.receive(result);
             }
@@ -1181,7 +1215,7 @@ impl Agent {
         };
         self.context.borrow_mut().socket = socket;
         self.rpc.replace(Some(rpc));
-        self.show_status("正在连接 Codex…");
+        self.show_status(&format!("正在连接 {}…", self.backend.get().label()));
         self.update_controls();
         self.request(Request::Initialize { browse }, "initialize", json!({
             "clientInfo":{"name":env!("CARGO_PKG_NAME"),"title":crate::APP_NAME,"version":env!("CARGO_PKG_VERSION")},

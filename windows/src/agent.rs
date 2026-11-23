@@ -1,4 +1,5 @@
 use crate::agent_attachments::{self, Attachment, Prepared};
+use crate::agent_backend::Backend;
 use crate::agent_interaction::Reasoning;
 use crate::{agent_execution, agent_settings, codex_rpc, theme};
 use futures::channel::mpsc;
@@ -40,6 +41,7 @@ pub(crate) use goal::VisualGoal;
 pub enum Action {
     Event(codex_rpc::Event),
     New,
+    Backend(Backend),
     Resume(String),
     More(u64, String),
     Draft(text_editor::Action),
@@ -140,6 +142,7 @@ struct Approval {
 
 pub struct Agent {
     connection: Option<mpsc::Sender<Value>>,
+    backend: Backend,
     pending: HashMap<u64, Request>,
     request_id: u64,
     catalog: Vec<Entry>,
@@ -172,10 +175,15 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new(host: Option<String>, cwd: Option<PathBuf>) -> (Self, Task<Action>) {
-        let (connection, events) = codex_rpc::connect(host, cwd.clone());
+    pub fn new(
+        host: Option<String>,
+        cwd: Option<PathBuf>,
+        backend: Backend,
+    ) -> (Self, Task<Action>) {
+        let (connection, events) = codex_rpc::connect(host, cwd.clone(), backend);
         let mut agent = Self {
             connection: Some(connection),
+            backend,
             pending: HashMap::new(),
             request_id: 0,
             catalog: Vec::new(),
@@ -202,7 +210,7 @@ impl Agent {
             start_requested: false,
             settings: agent_settings::Settings::default(),
             model_provider: None,
-            status: Some("Connecting to Codex…".into()),
+            status: Some(format!("Connecting to {}…", backend.label())),
             copied: None,
             copy_request: None,
         };
@@ -258,6 +266,10 @@ impl Agent {
             params["modelProvider"] = json!(provider);
         }
         self.request(Request::Models, "model/list", params);
+    }
+
+    pub fn backend(&self) -> Backend {
+        self.backend
     }
 
     pub fn has_thread(&self) -> bool {
@@ -1175,8 +1187,19 @@ impl Agent {
         } else {
             action("Reconnect", Some(Action::Retry), true)
         };
+        let mut backends = row![].spacing(5);
+        for backend in Backend::ALL {
+            backends = backends.push(
+                button(text(backend.label()).size(13))
+                    .on_press(Action::Backend(backend))
+                    .width(Fill)
+                    .padding([6, 10])
+                    .style(move |_, status| theme::tab(self.backend == backend, status)),
+            );
+        }
         column![
-            text("Codex sessions").size(14).font(theme::SEMIBOLD),
+            text("会话后端").size(13).color(theme::MUTED),
+            backends,
             header,
             scrollable(list).height(Fill),
         ]
@@ -1192,10 +1215,10 @@ impl Agent {
                 .as_deref()
                 .unwrap_or("Start a session or open one from the sidebar.");
             return column![
-                self.header("Codex", drawer),
+                self.header(self.backend.label(), drawer),
                 container(
                     column![
-                        text("Codex").size(28).font(theme::SEMIBOLD),
+                        text(self.backend.label()).size(28).font(theme::SEMIBOLD),
                         text(hint).size(15).color(theme::MUTED)
                     ]
                     .spacing(12)
@@ -1270,7 +1293,7 @@ impl Agent {
             .placeholder(if drafting_goal.is_some() {
                 "What should this session accomplish?"
             } else {
-                "Message Codex"
+                "输入消息，或添加附件"
             })
             .on_action(Action::Draft)
             .height(56)
@@ -1521,7 +1544,7 @@ mod tests {
 
     #[test]
     fn image_only_draft_is_kept_on_error_and_released_on_acceptance() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         let (sender, mut requests) = mpsc::channel(8);
         agent.connection = Some(sender);
         agent.pending.clear();
@@ -1560,7 +1583,7 @@ mod tests {
 
     #[test]
     fn active_follow_up_does_not_apply_next_turn_settings() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         let (sender, mut requests) = mpsc::channel(8);
         agent.connection = Some(sender);
         agent.pending.clear();
@@ -1609,7 +1632,7 @@ mod tests {
 
     #[test]
     fn command_output_streams_into_one_row_and_keeps_the_final_snapshot() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         agent.thread = Some("fixture".into());
         for chunk in ["working\n", "finished\n"] {
             agent.notification(
@@ -1640,7 +1663,7 @@ mod tests {
 
     #[test]
     fn resume_history_and_delta_completion_keep_item_order() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         agent.response(
             Request::Open,
             &json!({

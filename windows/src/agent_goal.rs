@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn goal_palette_saves_to_the_thread_and_preserves_a_rejected_draft() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Default::default());
         let (sender, mut requests) = mpsc::channel(8);
         agent.connection = Some(sender);
         agent.pending.clear();

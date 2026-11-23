@@ -1,4 +1,5 @@
 use crate::agent::Agent;
+use crate::agent_backend::Backend;
 use crate::files::{ControlSocket, Source};
 use crate::hosts::Host;
 use crate::icons::{self, Icon};
@@ -77,7 +78,8 @@ pub struct Session {
     cancellable: gio::Cancellable,
     control: RefCell<Option<Rc<ControlSocket>>>,
     linked: Cell<bool>,
-    new_tab: Box<dyn Fn(&Rc<Self>)>,
+    new_tab: Box<dyn Fn(&Rc<Self>, Backend, bool)>,
+    backend: Backend,
     agent: RefCell<Option<Rc<Agent>>>,
     preview: Weak<Panel>,
     quick_connect: bool,
@@ -107,7 +109,8 @@ impl Session {
         preview: Weak<Panel>,
         quick_connect: bool,
         parent: Option<&Session>,
-        new_tab: impl Fn(&Rc<Self>) + 'static,
+        backend: Backend,
+        new_tab: impl Fn(&Rc<Self>, Backend, bool) + 'static,
     ) -> Rc<Self> {
         let (terminal, scroll) = terminal_widget();
         let page = gtk::Stack::new();
@@ -147,6 +150,7 @@ impl Session {
             control: RefCell::new(control),
             linked: Cell::new(linked),
             new_tab: Box::new(new_tab),
+            backend,
             agent: RefCell::new(None),
             preview,
             quick_connect,
@@ -200,6 +204,7 @@ impl Session {
             let preview_session = weak.clone();
             let agent = Agent::new(
                 self.launch.label(),
+                self.backend,
                 self.directory.borrow().as_deref(),
                 move || {
                     let session = weak.upgrade().ok_or("终端标签已关闭。")?;
@@ -221,9 +226,9 @@ impl Session {
                         session.show_agent();
                     }
                 },
-                move || {
+                move |backend, start| {
                     if let Some(session) = new_session.upgrade() {
-                        (session.new_tab)(&session);
+                        (session.new_tab)(&session, backend, start);
                     }
                 },
                 Rc::new(move |artifact, automatic| {

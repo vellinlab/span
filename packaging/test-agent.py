@@ -18,8 +18,10 @@ if os.environ.get("SPAN_TEST_GDK_GL_DEFAULT") == "1":
     assert "GDK_GL" not in os.environ
 
 home = Path(os.environ.get("SPAN_BENCH_FIXTURE_HOME", os.environ["HOME"]))
-control_socket = Path(os.environ.get("CODEX_HOME", home / ".codex")) / "app-server-control/app-server-control.sock"
-thread = "preview-thread"
+clue = Path(sys.argv[0]).name == "clue"
+home_key, default_dir = ("CLUE_HOME", ".clue") if clue else ("CODEX_HOME", ".codex")
+control_socket = Path(os.environ.get(home_key, home / default_dir)) / "app-server-control/app-server-control.sock"
+thread = "clue-preview-thread" if clue else "preview-thread"
 saved_thread = "stored-deployment"
 turn = "preview-turn"
 item = "preview-message"
@@ -235,7 +237,7 @@ for line in sys.stdin:
         assert params["sandbox"] == "workspace-write"
         assert params["approvalPolicy"] == "on-request"
         started_thread = "new-slash-fixture" if shared else thread
-        if not shared and (home / "agent-replied").exists() and not (home / "agent-answered").exists():
+        if not clue and not shared and (home / "agent-replied").exists() and not (home / "agent-answered").exists():
             started_thread = "new-during-question"
             (home / "agent-new-during-question").touch()
         turns = []
@@ -304,6 +306,9 @@ for line in sys.stdin:
             "primary": {"usedPercent": 17, "windowDurationMins": 300},
             "secondary": {"usedPercent": 31, "windowDurationMins": 10080}}}})
     elif method == "thread/list":
+        if clue:
+            send({"id": request_id, "result": {"data": [entry(thread, "Clue fixture thread", "Projects/Clue")]}})
+            continue
         assert params["limit"] == 30 and params["sortKey"] == "updated_at"
         if os.environ.get("SPAN_BENCH_CATALOG_PAGES") == "1" and not params["searchTerm"]:
             page = int(params.get("cursor") or 0)

@@ -1,4 +1,4 @@
-use crate::plugin_catalog::Incoming;
+use crate::agent_backend::Backend;
 use async_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use futures_channel::mpsc;
 use futures_util::{
@@ -14,15 +14,6 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 const MAX_EVENT_BYTES: usize = 64 * 1024 * 1024;
-const SERVER_COMMAND: &str = r#"
-if [ -S "${CODEX_HOME:-$HOME/.codex}/app-server-control/app-server-control.sock" ]; then
-    printf "span-codex-shared\n"
-    exec codex app-server proxy
-fi
-printf "span-codex-stdio\n"
-exec codex app-server
-"#;
-
 #[cfg(windows)]
 #[path = "windows_pipe.rs"]
 mod windows_pipe;
@@ -38,9 +29,11 @@ pub struct Rpc {
 impl Rpc {
     pub fn start(
         socket: Option<&crate::ssh::Channel>,
+        backend: Backend,
         receive: impl Fn(Result<Incoming, String>) + 'static,
     ) -> Result<Rc<Self>, String> {
-        let remote_command = format!("bash -lc '{SERVER_COMMAND}'");
+        let script = backend.server_script();
+        let remote_command = format!("bash -lc '{script}'");
         let mut argv: Vec<&OsStr> = Vec::new();
         #[cfg(unix)]
         {
@@ -63,7 +56,7 @@ impl Rpc {
                 argv.push(socket.as_os_str());
                 argv.extend(["--", "localhost", &remote_command].map(OsStr::new));
             } else {
-                argv.extend(["/bin/bash", "-c", SERVER_COMMAND].map(OsStr::new));
+                argv.extend(["/bin/bash", "-c", script.as_str()].map(OsStr::new));
             }
         }
         #[cfg(windows)]
@@ -71,16 +64,20 @@ impl Rpc {
         #[cfg(unix)]
         let route_startup = true;
         #[cfg(windows)]
-        let codex = glib::find_program_in_path("codex.exe");
+        let executable = glib::find_program_in_path(backend.executable());
         #[cfg(windows)]
         if let Some(host) = socket {
             argv.push(OsStr::new(crate::ssh::PROGRAM));
             argv.extend(crate::ssh::BACKGROUND.iter().map(OsStr::new));
             argv.extend(["--", host, &remote_command].map(OsStr::new));
         } else {
-            let path = codex
-                .as_ref()
-                .ok_or("请安装 Windows Codex CLI，并将 codex.exe 加入 PATH。")?;
+            let path = executable.as_ref().ok_or_else(|| {
+                format!(
+                    "请安装 {}，并将 {} 加入 PATH。",
+                    backend.label(),
+                    backend.executable()
+                )
+            })?;
             argv.extend([path.as_os_str(), OsStr::new("app-server")]);
         }
 
@@ -94,7 +91,7 @@ impl Rpc {
         }
         let process = launcher
             .spawn(&argv)
-            .map_err(|e| format!("无法启动 Codex：{e}"))?;
+            .map_err(|e| format!("无法启动 {}：{e}", backend.label()))?;
         let stdin = process.stdin_pipe().expect("Codex stdin pipe");
         let stdout = process.stdout_pipe().expect("Codex stdout pipe");
         #[cfg(unix)]
@@ -147,7 +144,10 @@ impl Rpc {
             .await;
             if let Some(rpc) = weak.upgrade() {
                 let message = result.err().unwrap_or_else(|| {
-                    "Codex 已退出。请检查该主机上的 Codex CLI 和登录状态。".into()
+                    format!(
+                        "{} 已退出。请检查此主机上的程序、PATH 和登录状态。",
+                        backend.label()
+                    )
                 });
                 (rpc.receive)(Err(message));
             }

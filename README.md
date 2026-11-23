@@ -70,6 +70,17 @@ Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会�
 
 运行 Agent 的主机需要安装具备 App Server 的 Codex CLI。使用 SSH 时，Span 通过已认证的连接启动远端 App Server，并将所选工作目录交给它。使用 OpenAI 后端时，先在运行 Agent 的主机上完成对应的模型登录。
 
+### 选择会话后端
+
+在左侧「会话」里选 **Codex** 或 **Clue**。列表和「新建」使用当前选择的后端。
+已有会话仍由创建它的后端继续运行。在已有会话时选另一后端会打开新标签。
+
+Clue 是基于 Codex 的独立 fork。将 Clue 包的 `bin` 加入运行 Agent 的机器的
+`PATH`，再选 Clue。SSH 会话需要在远端安装。Clue 使用
+`~/.clue/config.toml`（可通过现有目录 `CLUE_HOME` 指定），其配置和会话存储
+与 Codex 分开。配置 Responses 网关时可使用下方相同的 TOML 格式。
+[Clue 源码与构建说明](https://github.com/zyw02/codex/blob/span-backend/CLUE.md)
+
 ### 使用获准的 OpenAI 兼容网关
 
 在**运行 App Server 的机器**配置 `~/.codex/config.toml`。本地标签读取本机配置，SSH 标签读取远端用户配置。若已设置 `CODEX_HOME`，使用其中的 `config.toml`。
