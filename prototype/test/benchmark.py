@@ -113,10 +113,10 @@ def benchmark(name, binary):
                      "--pid", str(app.pid), "--name", title], text=True).splitlines()[0])
                 win = screen.create_resource_object("window", wid)
                 xdo("windowactivate", "--sync", wid, "windowmove", wid, 60, 50,
-                    "windowsize", wid, 1100, 800)
+                    "windowsize", wid, 1180, 800)
                 time.sleep(.6)
                 if candidate:
-                    xdo("mousemove", "--window", wid, 1070, 26, "click", 1)
+                    xdo("mousemove", "--window", wid, win.get_geometry().width - 30, 26, "click", 1)
                 else:
                     xdo("key", "ctrl+shift+a")
                     widget("click", "打开会话")
@@ -167,8 +167,6 @@ def benchmark(name, binary):
                 width = win.get_geometry().width
                 x, y = pos.x + width - 20, pos.y + 395
                 pointer(x, y)
-                mouse(1, True)
-                screen.sync()
                 root.send_event(protocol.event.ClientMessage(
                     window=win,
                     client_type=screen.intern_atom("_NET_WM_MOVERESIZE"),
@@ -176,6 +174,8 @@ def benchmark(name, binary):
                 ), event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
                 screen.sync()
                 time.sleep(.12)
+                mouse(1, True)
+                screen.sync()
                 resize_error = None
                 try:
                     for index in range(28):
@@ -207,7 +207,7 @@ def benchmark(name, binary):
                           "cpu_tree_ms": end["tree_cpu_ms"] - start_stats["tree_cpu_ms"],
                           "cpu_main_ms": end["main_cpu_ms"] - start_stats["main_cpu_ms"],
                           "scroll": sample(scroll), "scroll_no_pixel_change": timeouts,
-                           "resize_geometry": sample(geometry), "resize_visible": sample(drag),
+                          "resize_geometry": sample(geometry), "resize_visible": sample(drag),
                           "resize_error": resize_error}
                 print(json.dumps(record), flush=True)
                 return record
