@@ -6,15 +6,11 @@ use gtk::prelude::*;
 use gtk::{glib, pango};
 use serde_json::Value;
 use std::borrow::Cow;
-use std::time::Duration;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
 };
-
-const SUMMARY_LIMIT: usize = 8 * 1024;
-const SUMMARY_PARTS: usize = 24;
 
 pub struct Activity {
     pub widget: gtk::Expander,
@@ -32,21 +28,6 @@ struct Entry {
     icon: Rc<Cell<Icon>>,
     leading: gtk::DrawingArea,
     view: View,
-    summary: Option<Rc<Summary>>,
-}
-
-#[derive(Default)]
-struct Summary {
-    parts: RefCell<Vec<String>>,
-    dirty: Cell<bool>,
-}
-
-impl Summary {
-    fn render(&self, label: &gtk::Label) {
-        if self.dirty.replace(false) {
-            agent_render::set_markdown(label, &summary_text(&self.parts.borrow()));
-        }
-    }
 }
 
 enum View {
@@ -74,45 +55,19 @@ pub struct Record<'a> {
     icon: Icon,
     status: Option<Cow<'a, str>>,
     patch: Option<String>,
-    summary: Vec<String>,
     web_url: Option<Cow<'a, str>>,
 }
 
 impl<'a> Record<'a> {
     pub fn from_item(item: &'a Value) -> Option<Self> {
-        Self::after(item, &[])
-    }
-
-    pub fn after(item: &'a Value, earlier: &[String]) -> Option<Self> {
         let id = item["id"].as_str()?;
         let kind = item["type"].as_str()?;
         let status = item["status"].as_str();
         if kind == "fileChange" {
             return Some(Self::patch(id, &item["changes"], status));
         }
-        let mut summary = Vec::new();
         let mut web_url = None;
         let (title, detail, icon) = match kind {
-            "reasoning" => {
-                summary = item["summary"]
-                    .as_array()?
-                    .iter()
-                    .take(SUMMARY_PARTS)
-                    .enumerate()
-                    .map(|(index, part)| {
-                        let part = part.as_str().unwrap_or_default();
-                        let tail = earlier.get(index).map_or(part, |prefix| {
-                            part.strip_prefix(prefix.as_str()).unwrap_or("")
-                        });
-                        limited(tail, SUMMARY_LIMIT)
-                    })
-                    .collect();
-                let detail = summary_text(&summary);
-                if detail.is_empty() {
-                    return None;
-                }
-                ("推理摘要".into(), detail, Icon::Activity)
-            }
             "commandExecution" => command(item),
             "webSearch" => {
                 let action = &item["action"];
@@ -164,7 +119,6 @@ impl<'a> Record<'a> {
             icon,
             status: status.map(Cow::Borrowed),
             patch: None,
-            summary,
             web_url: web_url.map(Cow::Borrowed),
         })
     }
@@ -213,7 +167,6 @@ impl<'a> Record<'a> {
             icon: Icon::Edit,
             status: status.map(Cow::Borrowed),
             patch: (!patch.is_empty()).then_some(patch),
-            summary: Vec::new(),
             web_url: None,
         }
     }
@@ -291,12 +244,6 @@ impl Activity {
         let entry = self.entry(&record.id, &record.kind, record.icon);
         set_title(&entry.row, &entry.title, &record.title);
         match &entry.view {
-            View::Text(label) if record.kind == "reasoning" => {
-                let summary = entry.summary.get_or_insert_with(Rc::default);
-                summary.parts.replace(record.summary);
-                summary.dirty.set(false);
-                agent_render::set_markdown(label, &record.detail);
-            }
             View::Text(label) => label.set_text(&record.detail),
             View::Web {
                 detail,
@@ -354,53 +301,11 @@ impl Activity {
         }
     }
 
-    pub fn summary(&mut self, id: &str, index: usize, delta: &str) {
-        let entry = self.entry(id, "reasoning", Icon::Activity);
-        set_title(&entry.row, &entry.title, "推理摘要");
-        let summary = entry.summary.get_or_insert_with(Rc::default);
-        let mut parts = summary.parts.borrow_mut();
-        if parts.len() <= index {
-            parts.resize_with(index + 1, String::new);
-        }
-        let part = &mut parts[index];
-        if part.len() >= SUMMARY_LIMIT {
-            return;
-        }
-        part.push_str(&limited(delta, SUMMARY_LIMIT - part.len()));
-        if let View::Text(label) = &entry.view
-            && !summary.dirty.replace(true)
-        {
-            let label = label.downgrade();
-            let summary = Rc::downgrade(summary);
-            glib::timeout_add_local_once(Duration::from_millis(33), move || {
-                if let (Some(label), Some(summary)) = (label.upgrade(), summary.upgrade()) {
-                    summary.render(&label);
-                }
-            });
-        }
-        let headline = parts
-            .iter()
-            .flat_map(|part| part.lines())
-            .map(|line| line.trim().trim_matches('*'))
-            .find(|line| !line.is_empty())
-            .map(|headline| limited(headline, 180));
-        drop(parts);
-        self.set_heading("进行中 · 推理摘要");
-        if let Some(headline) = headline {
-            self.progress = headline;
-        }
-    }
-
     pub fn progress(&self) -> &str {
         &self.progress
     }
 
     pub fn finish(&mut self, status: Option<&str>) {
-        for entry in self.entries.values() {
-            if let (Some(summary), View::Text(label)) = (&entry.summary, &entry.view) {
-                summary.render(label);
-            }
-        }
         self.finished = true;
         self.set_finished_heading(status, self.entries.len());
     }
@@ -415,22 +320,6 @@ impl Activity {
             _ => "已完成",
         };
         self.set_heading(&format!("{title} · {count} 项活动"));
-    }
-
-    pub fn extend_summary(&self, id: &str, parts: &mut Vec<String>) {
-        if let Some(summary) = self
-            .entries
-            .get(id)
-            .and_then(|entry| entry.summary.as_ref())
-        {
-            let summary = summary.parts.borrow();
-            if parts.len() < summary.len() {
-                parts.resize_with(summary.len(), String::new);
-            }
-            for (old, new) in parts.iter_mut().zip(summary.iter()) {
-                old.push_str(new);
-            }
-        }
     }
 
     pub fn has_item(&self, id: &str) -> bool {
@@ -502,11 +391,7 @@ impl Activity {
                     domain,
                 }
             } else {
-                let detail = if kind == "reasoning" {
-                    agent_render::markdown_label()
-                } else {
-                    agent_render::text("")
-                };
+                let detail = agent_render::text("");
                 detail.style_context().add_class("agent-activity-detail");
                 crate::quote::bind_label(&detail, &self.quote);
                 item.add(&detail);
@@ -515,7 +400,6 @@ impl Activity {
             if let Some(content) = item.child() {
                 content.style_context().add_class("agent-activity-content");
             }
-            item.set_expanded(kind == "reasoning");
             self.rows.add(&item);
             item.show_all();
             Entry {
@@ -524,7 +408,6 @@ impl Activity {
                 icon: symbol,
                 leading,
                 view,
-                summary: None,
             }
         });
         if entry.icon.replace(icon) != icon {
@@ -532,15 +415,6 @@ impl Activity {
         }
         entry
     }
-}
-
-fn summary_text(parts: &[String]) -> String {
-    parts
-        .iter()
-        .map(String::as_str)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }
 
 type PendingDetail = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
@@ -571,13 +445,6 @@ impl FoldedDetail {
             self.0.replace(Some(Box::new(render)));
         }
     }
-}
-
-pub fn summary_delta(params: &Value) -> Option<(&str, usize, &str)> {
-    let id = params["itemId"].as_str()?;
-    let index = usize::try_from(params["summaryIndex"].as_u64()?).ok()?;
-    let delta = nonempty(params["delta"].as_str())?;
-    (index < SUMMARY_PARTS).then_some((id, index, delta))
 }
 
 fn command(item: &Value) -> (String, String, Icon) {

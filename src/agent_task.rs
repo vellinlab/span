@@ -165,17 +165,9 @@ fn task_spinner() -> gtk::DrawingArea {
 fn update_elapsed(label: &gtk::Label, clock: &Cell<Option<(Instant, u64)>>) {
     if let Some((start, already_elapsed)) = clock.get() {
         let seconds = already_elapsed.saturating_add(start.elapsed().as_secs());
-        let minutes = seconds / 60;
-        let text = if minutes < 60 {
-            format!("已运行 {minutes}:{:02}", seconds % 60)
-        } else {
-            format!(
-                "已运行 {}:{:02}:{:02}",
-                minutes / 60,
-                minutes % 60,
-                seconds % 60
-            )
-        };
-        label.set_text(&text);
+        label.set_text(&format!(
+            "已运行 {}",
+            crate::agent_interaction::elapsed(seconds)
+        ));
     }
 }

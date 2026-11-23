@@ -70,6 +70,7 @@ struct Goal {
     objective: String,
     preview: String,
     status: String,
+    elapsed: Option<String>,
 }
 
 pub(super) struct Draft {
@@ -105,6 +106,9 @@ impl State {
                 objective,
                 preview,
                 status: value["status"].as_str().unwrap_or_default().into(),
+                elapsed: value["timeUsedSeconds"]
+                    .as_u64()
+                    .map(crate::agent_interaction::elapsed),
             }
         });
     }
@@ -202,6 +206,9 @@ impl State {
                             .size(13)
                             .wrapping(text::Wrapping::WordOrGlyph)
                             .width(Fill),
+                        text(goal.elapsed.as_deref().unwrap_or_default())
+                            .size(12)
+                            .color(theme::MUTED),
                     ]
                     .spacing(8)
                     .align_y(Center),

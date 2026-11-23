@@ -1057,12 +1057,35 @@ scrolledwindow.agent-table-scroll {
 }
 
 .agent-goal {
-    margin: 2px 5px 0;
-    padding: 6px 8px;
-    border-radius: 6px;
-    background-color: @selection;
+    padding: 6px 10px;
+    border: 1px solid @line;
+    border-radius: 9px;
+    background-color: @sidebar;
     color: @foreground;
     font-size: 13px;
+}
+
+.agent-question {
+    padding: 10px;
+    border: 1px solid @line;
+    border-radius: 10px;
+    background-color: @sidebar;
+}
+
+.agent-question-option {
+    padding: 4px 7px;
+    border-radius: 6px;
+}
+
+.agent-question-option:hover,
+.agent-question-option:checked {
+    background-color: @selection;
+}
+
+.agent-question-detail {
+    margin: 0 8px 3px 29px;
+    color: @muted;
+    font-size: 12px;
 }
 
 .agent-goal-mode {
@@ -1162,7 +1185,6 @@ scrolledwindow.agent-table-scroll {
     padding: 5px 3px;
     color: @muted;
     font-size: 12px;
-    border-bottom: 1px solid @line;
 }
 
 .agent-task-status .agent-task-spinner {

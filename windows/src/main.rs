@@ -4,6 +4,8 @@ mod agent;
 mod agent_attachments;
 #[path = "../../src/agent_execution.rs"]
 mod agent_execution;
+#[path = "../../src/agent_interaction.rs"]
+mod agent_interaction;
 mod agent_settings;
 #[path = "../../src/clipboard_markup.rs"]
 #[allow(dead_code)]
@@ -544,6 +546,23 @@ impl Span {
                     return panel
                         .update(action)
                         .map(move |action| Message::Files(id, action));
+                }
+            }
+            Message::Agent(id, agent::Action::New)
+                if self.terminals.iter().any(|tab| {
+                    tab.id == id && tab.agent.as_ref().is_some_and(agent::Agent::has_thread)
+                }) =>
+            {
+                if let Some(tab) = self.terminals.iter().find(|tab| tab.id == id) {
+                    self.open(tab.host.clone(), tab.host_name.clone());
+                }
+                if let Some(tab) = self.terminals.last_mut() {
+                    tab.show_agent = true;
+                    let task = start_agent(tab, self.home.clone());
+                    if let Some(agent) = tab.agent.as_mut() {
+                        let _ = agent.update(agent::Action::New);
+                    }
+                    return task;
                 }
             }
             Message::Agent(id, action) => {

@@ -8,6 +8,7 @@ mod agent_commands;
 mod agent_diff;
 mod agent_execution;
 mod agent_extensions;
+mod agent_interaction;
 mod agent_options;
 mod agent_question;
 mod agent_render;

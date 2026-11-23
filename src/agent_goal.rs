@@ -149,7 +149,7 @@ impl Agent {
             Action::Command { edit, draft } => {
                 self.goal_pending.set(false);
                 if result.get("cleared").is_some() {
-                    self.goal.hide();
+                    self.goal_card.hide();
                     self.show_status("已清除会话目标");
                 } else {
                     self.render_goal(&result["goal"]);
@@ -183,7 +183,7 @@ impl Agent {
 
     fn render_goal(&self, goal: &Value) {
         let Some(objective) = goal["objective"].as_str() else {
-            self.goal.hide();
+            self.goal_card.hide();
             return;
         };
         let status = match goal["status"].as_str() {
@@ -194,10 +194,19 @@ impl Agent {
             Some("budgetLimited" | "usageLimited") => "达到用量上限",
             _ => "会话目标",
         };
-        let text = format!("目标 · {status}\n{}", limited(objective, MAX_OBJECTIVE));
+        let text = format!(
+            "目标 · {status}\n{}",
+            limited(&crate::agent_interaction::display(objective), MAX_OBJECTIVE)
+        );
         self.goal.set_tooltip_text(Some(&text));
         self.goal.set_text(&text);
-        self.goal.show();
+        let elapsed = goal["timeUsedSeconds"]
+            .as_u64()
+            .map(|seconds| format!("已执行 {}", crate::agent_interaction::elapsed(seconds)))
+            .unwrap_or_default();
+        self.goal_elapsed.set_text(&elapsed);
+        self.goal_elapsed.set_visible(!elapsed.is_empty());
+        self.goal_card.show();
     }
 }
 

@@ -20,6 +20,7 @@ const LOCAL_LABEL: &str = "本地 Bash";
 #[cfg(windows)]
 const LOCAL_LABEL: &str = "本地 PowerShell";
 
+#[derive(Clone)]
 pub enum Launch {
     Local,
     Ssh(Host),
@@ -74,7 +75,9 @@ pub struct Session {
     pub state: Cell<State>,
     pub directory: RefCell<Option<PathBuf>>,
     cancellable: gio::Cancellable,
-    control: RefCell<Option<ControlSocket>>,
+    control: RefCell<Option<Rc<ControlSocket>>>,
+    linked: Cell<bool>,
+    new_tab: Box<dyn Fn(&Rc<Self>)>,
     agent: RefCell<Option<Rc<Agent>>>,
     preview: Weak<Panel>,
     quick_connect: bool,
@@ -99,7 +102,13 @@ struct Shell {
 }
 
 impl Session {
-    pub fn new(launch: Launch, preview: Weak<Panel>, quick_connect: bool) -> Rc<Self> {
+    pub fn new(
+        launch: Launch,
+        preview: Weak<Panel>,
+        quick_connect: bool,
+        parent: Option<&Session>,
+        new_tab: impl Fn(&Rc<Self>) + 'static,
+    ) -> Rc<Self> {
         let (terminal, scroll) = terminal_widget();
         let page = gtk::Stack::new();
         page.set_homogeneous(false);
@@ -115,7 +124,17 @@ impl Session {
             accessible.set_name("终端状态");
             accessible.set_description("正在启动");
         }
-        let control = new_control_socket(&launch);
+        let inherited = parent.and_then(|parent| parent.control.borrow().clone());
+        let linked = inherited.is_some();
+        let control = inherited.or_else(|| new_control_socket(&launch).map(Rc::new));
+        let directory = parent.and_then(|parent| {
+            parent
+                .agent
+                .borrow()
+                .as_ref()
+                .and_then(|agent| agent.working_directory())
+                .or_else(|| parent.directory.borrow().clone())
+        });
         Rc::new(Self {
             launch,
             page,
@@ -123,9 +142,11 @@ impl Session {
             terminal,
             indicator,
             state: Cell::new(State::Starting),
-            directory: RefCell::new(None),
+            directory: RefCell::new(directory),
             cancellable: gio::Cancellable::new(),
             control: RefCell::new(control),
+            linked: Cell::new(linked),
+            new_tab: Box::new(new_tab),
             agent: RefCell::new(None),
             preview,
             quick_connect,
@@ -152,7 +173,7 @@ impl Session {
         self.show_agent();
     }
 
-    fn show_agent(self: &Rc<Self>) {
+    pub fn show_agent(self: &Rc<Self>) {
         let agent = self.agent();
         self.page.set_visible_child_name("agent");
         agent.focus();
@@ -175,6 +196,7 @@ impl Session {
             let weak = Rc::downgrade(self);
             let drawer_session = weak.clone();
             let reveal_session = weak.clone();
+            let new_session = weak.clone();
             let preview_session = weak.clone();
             let agent = Agent::new(
                 self.launch.label(),
@@ -197,6 +219,11 @@ impl Session {
                 move || {
                     if let Some(session) = reveal_session.upgrade() {
                         session.show_agent();
+                    }
+                },
+                move || {
+                    if let Some(session) = new_session.upgrade() {
+                        (session.new_tab)(&session);
                     }
                 },
                 Rc::new(move |artifact, automatic| {
@@ -468,7 +495,9 @@ impl Session {
     pub fn start(self: &Rc<Self>, changed: impl Fn() + 'static) {
         let home = glib::home_dir();
         if self.control.borrow().is_none() {
-            self.control.replace(new_control_socket(&self.launch));
+            self.control
+                .replace(new_control_socket(&self.launch).map(Rc::new));
+            self.linked.set(false);
         }
         let socket_path = self
             .control
@@ -483,7 +512,11 @@ impl Session {
                     argv.push("-Y");
                 }
                 if let Some(path) = socket_path.as_deref().and_then(|path| path.to_str()) {
-                    argv.extend(["-M", "-o", "ControlPersist=no", "-S", path]);
+                    if self.linked.get() {
+                        argv.extend(["-t", "-o", "ControlMaster=no", "-S", path]);
+                    } else {
+                        argv.extend(["-M", "-o", "ControlPersist=no", "-S", path]);
+                    }
                 } else if cfg!(unix) && host.trusted_x11 {
                     argv.extend(["-S", "none"]);
                 }

@@ -417,6 +417,10 @@ SVG
     widget state '发送目标' sensitive
     widget mouse '取消目标草稿'
     set_goal 'Finish the fixture'
+    widget contains '已执行 1:02:03'
+    read -r _ goal_y _ goal_height <<< "$(widget bounds '已执行 1:02:03')"
+    read -r _ editor_y _ _ <<< "$(widget bounds '消息输入框')"
+    ((goal_y + goal_height <= editor_y))
     slash '/goal pause'
     widget contains '目标 · 已暂停'
     slash '/goal edit'
@@ -496,8 +500,8 @@ SVG
     widget not-contains 'fixture duplicate prompt sentinel'
     sleep 0.15
     timeline_wheel 4 16
-    widget mouse '已完成 · 4 项活动'
-    widget contains 'Checking the build before publishing.'
+    widget mouse '已完成 · 3 项活动'
+    widget not-contains 'Checking the build before publishing.'
     widget not-contains '**Checking the build'
     widget not-contains 'fixture raw reasoning sentinel'
     widget mouse '读取文件 · checks.txt'
@@ -516,13 +520,20 @@ SVG
     xdotool mousemove 12 12
     sleep 0.12
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-activity.png"
-    widget mouse '已完成 · 4 项活动'
+    widget mouse '已完成 · 3 项活动'
     timeline_wheel 5 16
+    widget contains 'Which deployment environment?'
+    xdotool key --clearmodifiers ctrl+shift+h
+    widget mouse '新建'
+    wait_until "opening another session while the first is waiting for an answer" test -f "$HOME/agent-new-during-question"
+    widget click '复制会话 ID'
+    xclip -out -selection clipboard | grep -qx 'new-during-question'
+    xdotool key --clearmodifiers ctrl+shift+w
     widget contains 'Which deployment environment?'
     timeline_wheel 5 8
     sleep 0.25
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-question.png"
-    widget fill-card 'Which deployment environment?' Staging
+    widget mouse 'Staging'
     widget click '提交答案'
     wait_until "the structured answer" test -f "$HOME/agent-answered"
     widget contains 'Generated workspace page'
@@ -743,7 +754,7 @@ SVG
     widget click '发送'
     widget contains 'Preparing the comparison table.'
     widget not-contains '**Preparing the comparison table.**'
-    widget contains '正在生成回复'
+    widget contains 'Thinking after the progress update.'
     widget state '会话权限' sensitive
     widget bounds '下一轮' >/dev/null
     widget mouse '会话权限'
@@ -759,14 +770,12 @@ SVG
     widget mouse '中'
     widget mouse 'Fast 模式'
     widget state 'Fast 模式' checked
-    widget mouse '已完成 · 2 项活动'
-    timeline_wheel 5 2
     widget contains 'Thinking after the progress update.'
-    read -r _ progress_y _ _ <<< "$(widget bounds 'I found the comparison data.')"
-    read -r _ after_progress_y _ _ <<< "$(widget bounds 'Thinking after the progress update.')"
+    widget not-contains 'Reasoning before the follow-up.'
+    read -r _ status_y _ _ <<< "$(widget bounds 'Thinking after the progress update.')"
     read -r _ draft_y _ _ <<< "$(widget bounds 'Preparing the comparison table.')"
-    ((progress_y < after_progress_y && after_progress_y < draft_y))
-    printf '%s\n' 'Fresh reasoning and commands follow an Agent progress message in the timeline.'
+    ((draft_y < status_y))
+    printf '%s\n' 'Reasoning updates one status row below the timeline while tool output stays in sequence.'
     widget contains 'Esc 中断'
     widget contains '已运行 0:'
     sleep 1.2
@@ -783,11 +792,10 @@ SVG
     wait_until "the follow-up on the original turn" test -f "$HOME/agent-steered"
     widget contains '已追加'
     widget not-contains 'fixture duplicate steer sentinel'
-    widget mouse '进行中 · 推理摘要'
-    timeline_wheel 5 3
-    widget contains 'Reasoning continues below the follow-up.'
+    widget contains 'Reasoning continues after the follow-up.'
+    widget not-contains 'Thinking after the progress update.'
     read -r _ follow_up_y _ _ <<< "$(widget bounds 'Focus on X11')"
-    read -r _ reasoning_y _ _ <<< "$(widget bounds 'Reasoning continues below the follow-up.')"
+    read -r _ reasoning_y _ _ <<< "$(widget bounds 'Reasoning continues after the follow-up.')"
     ((reasoning_y > follow_up_y))
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-follow-up.png"
     printf '%s\n' 'Active-turn messages preserve the draft on rejection and retry on the same turn.'
@@ -796,7 +804,7 @@ SVG
     xdotool key --clearmodifiers Escape
     read -r pause_x pause_y _ < <(widget bounds '继续推理')
     ((stop_x == pause_x && stop_y == pause_y))
-    widget bounds '已停止 · 1 项活动' >/dev/null
+    widget not-contains 'Reasoning continues after the follow-up.'
     widget contains 'Preparing the comparison table.'
     import -window "$window" "$(dirname "$WORKBENCH_PREVIEW")/agent-paused.png"
     widget mouse '输入消息，或添加附件'
@@ -857,8 +865,8 @@ SVG
     timeline_wheel 4 1
     wait_until "loading an older page by scrolling" test -f "$HOME/agent-older-page"
     widget contains 'Earlier deployment notes'
-    widget mouse '已完成 · 3 项活动'
-    widget contains 'Checked the saved deployment plan.'
+    widget mouse '已完成 · 2 项活动'
+    widget not-contains 'Checked the saved deployment plan.'
     widget not-contains 'fixture raw reasoning sentinel'
     widget mouse '运行命令 · printf archived'
     widget expanded-contains '运行命令 · printf archived' 'Historical command output'
@@ -1119,6 +1127,8 @@ PY
         slash '/copy'
         xclip -out -selection clipboard | grep -Fx 'Native review completed.'
         slash '/compact'
+        widget contains '正在压缩上下文…'
+        touch "$WORKBENCH_SSH_FIXTURE/slash-compact-observed"
         wait_until "manual context compaction on the remote server" test -f "$WORKBENCH_SSH_FIXTURE/slash-compact"
         widget contains '上下文已压缩'
         slash '/plan Plan this update'
