@@ -25,12 +25,32 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, onClo
     terminal.loadAddon(fit);
     terminal.open(host);
     fit.fit();
+    let closed = false;
+    host.dataset.renderer = 'dom';
+    import('@xterm/addon-webgl').then(({ WebglAddon }) => {
+      if (closed) return;
+      const webgl = new WebglAddon();
+      try {
+        terminal.loadAddon(webgl);
+      } catch {
+        webgl.dispose();
+        return;
+      }
+      host.dataset.renderer = 'webgl';
+      fit.fit();
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+        host.dataset.renderer = 'dom';
+        fit.fit();
+      });
+    }).catch(() => {
+      // The DOM renderer is already active if the optional addon cannot load.
+    });
     const update = (method, params) => window.span.request('terminal.' + method, {
       ...params, generation: source,
     }).catch(error => {
       if (!closed) setError(error.message);
     });
-    let closed = false;
     const unsubscribe = window.span.onEvent(packet => {
       if (packet.generation !== source) return;
       if (packet.event === 'terminal') {

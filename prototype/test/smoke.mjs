@@ -4,12 +4,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 
-const [binary, screenshot] = process.argv.slice(2);
+const [binary, screenshot, renderer] = process.argv.slice(2);
+const exerciseWebgl = renderer === 'webgl';
 const profile = await mkdtemp(join(tmpdir(), 'span-preview-'));
 const linux = process.platform === 'linux';
 const app = await electron.launch({
   executablePath: binary,
-  args: ['--demo', ...(linux ? ['--no-sandbox', '--disable-gpu'] : [])],
+  args: [
+    '--demo',
+    ...(linux ? ['--no-sandbox'] : []),
+    ...(exerciseWebgl ? ['--use-gl=angle', '--use-angle=swiftshader'] : ['--disable-webgl']),
+  ],
   env: { ...process.env, SPAN_PREVIEW_PROFILE: profile },
 });
 try {
@@ -39,6 +44,23 @@ try {
   await terminal.focus();
   await page.keyboard.type(linux ? 'printf "span_%s_%s\\n" local pty' : 'echo span_local_pty');
   await page.keyboard.press('Enter');
+  if (exerciseWebgl) {
+    const accelerated = page.locator('.terminal-canvas[data-renderer="webgl"]');
+    await accelerated.waitFor();
+    assert.equal(await accelerated.locator('.xterm-rows').count(), 0);
+    assert.ok(await accelerated.evaluate(host => {
+      for (const canvas of host.querySelectorAll('.xterm-screen canvas')) {
+        const extension = canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context');
+        if (extension) {
+          extension.loseContext();
+          return true;
+        }
+      }
+      return false;
+    }));
+    await page.locator('.terminal-canvas[data-renderer="dom"] .xterm-rows').waitFor();
+    console.log('Verified the terminal returned to DOM rendering after WebGL context loss.');
+  }
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
     .some(line => line.textContent.trim() === 'span_local_pty'), null, { timeout: 10_000 });
 

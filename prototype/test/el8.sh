@@ -62,6 +62,7 @@ done
 
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 SPAN_TEST_SSH_ALIAS=span-ci-ssh
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
+SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview "" webgl
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 
 widget_socket="$fixture/widgets.sock"

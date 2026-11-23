@@ -102,7 +102,7 @@ def benchmark(name, binary):
                    GTK_THEME="Adwaita:dark", GDK_BACKEND="x11",
                    SPAN_PREVIEW_PROFILE=str(workspace / "profile"),
                    PATH=f"{tmp}:{os.environ['PATH']}")
-        args = ["--demo", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0",
+        args = ["--demo", "--no-sandbox", "--disable-gpu", "--disable-webgl", "--remote-debugging-port=0",
                 f"--user-data-dir={workspace / 'profile'}"] if candidate else []
         command = ('touch "$HOME/span-terminal-ready"; n=0; while :; do '
                    'printf \'span-bench-%04d\\n\' "$n"; n=$((n+1)); sleep .055; done')
