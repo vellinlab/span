@@ -283,6 +283,12 @@ impl Agent {
             .placeholder_text("会话 ID（留空新建）")
             .width_chars(12)
             .build();
+        if let Some(accessible) = cwd.accessible() {
+            accessible.set_name("工作目录");
+        }
+        if let Some(accessible) = resume.accessible() {
+            accessible.set_name("会话 ID");
+        }
         let connect = button("打开会话", true);
         settings.pack_start(&cwd, true, true, 0);
         settings.pack_start(&resume, true, true, 0);
@@ -3019,21 +3025,42 @@ fn append_file_changes(item: &Value, out: &mut String) {
 }
 
 pub(crate) fn append_changes(changes: &Value, out: &mut String) {
+    const LIMIT: usize = 256 * 1024;
     for change in array(changes) {
-        if out.len() >= 256 * 1024 {
+        if out.len() >= LIMIT {
             break;
         }
         if let Some(diff) = change["diff"].as_str().filter(|diff| !diff.is_empty()) {
+            let kind = change["kind"]["type"].as_str();
+            let whole_file = matches!(kind, Some("add" | "delete"));
             if let Some(path) = change["path"]
                 .as_str()
-                .filter(|_| !diff.starts_with("diff --git "))
+                .filter(|_| whole_file || !diff.starts_with("diff --git "))
             {
                 out.push_str(&format!("diff --git {path}\n"));
             }
-            out.push_str(&limited(
-                diff,
-                (256 * 1024 - out.len().min(256 * 1024)).max(1),
-            ));
+            let diff = limited(diff, LIMIT.saturating_sub(out.len()).max(1));
+            if whole_file {
+                // App Server sends whole-file contents for additions and deletions.
+                let line_count = diff.lines().count();
+                let prefix = if kind == Some("add") {
+                    out.push_str(&format!("@@ -0,0 +1,{line_count} @@\n"));
+                    '+'
+                } else {
+                    out.push_str(&format!("@@ -1,{line_count} +0,0 @@\n"));
+                    '-'
+                };
+                for line in diff.split_inclusive('\n') {
+                    if out.len() >= LIMIT {
+                        break;
+                    }
+                    out.push(prefix);
+                    let end = line.floor_char_boundary(LIMIT - out.len());
+                    out.push_str(&line[..end]);
+                }
+            } else {
+                out.push_str(&diff);
+            }
             out.push('\n');
         }
     }

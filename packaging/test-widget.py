@@ -101,6 +101,9 @@ def exercise(arguments, dialog):
                     state = getattr(pyatspi, "STATE_" + values[0].upper())
                     if node.getState().contains(state) == (operation == "state"):
                         sys.exit(0)
+                if operation == "set-text" and "EditableText" in node.get_interfaces():
+                    node.queryEditableText().setTextContents(values[0])
+                    sys.exit(0)
                 if operation == "scroll-value":
                     for child in node:
                         if (child.getRole() == pyatspi.ROLE_SCROLL_BAR
@@ -109,6 +112,9 @@ def exercise(arguments, dialog):
                             sys.exit(0)
                 if operation == "click" and "Action" in node.get_interfaces():
                     if node.queryAction().doAction(0):
+                        sys.exit(0)
+                if operation == "expand" and node.getState().contains(pyatspi.STATE_EXPANDABLE):
+                    if node.getState().contains(pyatspi.STATE_EXPANDED) or node.queryAction().doAction(0):
                         sys.exit(0)
                 if operation in ("bounds", "mouse") and "Component" in node.get_interfaces():
                     bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)

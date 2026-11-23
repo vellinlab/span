@@ -56,6 +56,27 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Verify EL8 Span with a real App Server and local model gateway
+        run: |
+          read -r backend_tag backend_sha < packaging/app-server-baseline
+          backend_archive=codex-package-x86_64-unknown-linux-musl.tar.gz
+          backend_dir="$RUNNER_TEMP/span-app-server"
+          mkdir -p "$backend_dir"
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            "https://github.com/openai/codex/releases/download/$backend_tag/$backend_archive" \
+            --output "$backend_dir/$backend_archive"
+          printf '%s  %s\n' "$backend_sha" "$backend_dir/$backend_archive" | sha256sum --check -
+          tar -xzf "$backend_dir/$backend_archive" -C "$backend_dir"
+          docker run --rm --volume "$PWD:/work:ro" --workdir /work \
+            --volume "$backend_dir:/span-app-server:ro" almalinux:8 bash -eu -c '
+              dnf --setopt=install_weak_deps=False -y install epel-release
+              dnf -y install /work/dist/span-*.rpm python39 python3-pyatspi git \
+                dbus-daemon xorg-x11-server-Xvfb xdotool xclip
+              backend=$(find /span-app-server -type f -name codex -print -quit)
+              test -x "$backend"
+              dbus-run-session -- bash packaging/test-real-app-server.sh /usr/bin/span "$backend"
+            '
+
       - name: Upload corresponding VTE source
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

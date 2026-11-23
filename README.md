@@ -68,7 +68,26 @@ Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会�
 - 鼠标选中回复、推理摘要或文件预览中的文字后，点击「引用」把选区加入输入框上方的引用卡片。每条可单独移除，发送时与正文一同交给 Codex。
 - 点击「附件」选择本机文件，或在输入框按 `Ctrl+V` 粘贴剪贴板图片。发送前可移除，每条消息最多 6 个、合计 16 MiB。SSH 会话通过当前连接的 SFTP 将附件放入远端私有临时目录。支持视觉输入的模型会直接收到 PNG、JPEG、GIF 和 WebP 图片，其余附件按文件路径交给 Agent 读取。
 
-运行 Agent 的主机需要安装支持 App Server 的 Codex CLI，并完成登录。如果使用 SSH，先在终端完成登录。Span 会通过已认证的 SSH 连接访问该主机上的 Codex，并使用所选工作目录。
+运行 Agent 的主机需要安装具备 App Server 的 Codex CLI。使用 SSH 时，Span 通过已认证的连接启动远端 App Server，并将所选工作目录交给它。使用 OpenAI 后端时，先在运行 Agent 的主机上完成对应的模型登录。
+
+### 使用获准的 OpenAI 兼容网关
+
+在**运行 App Server 的机器**配置 `~/.codex/config.toml`。本地标签读取本机配置，SSH 标签读取远端用户配置。若已设置 `CODEX_HOME`，使用其中的 `config.toml`。
+
+```toml
+model = "your-model-id"
+model_provider = "internal_gateway"
+
+[model_providers.internal_gateway]
+name = "内部模型网关"
+base_url = "https://gateway.example.invalid/v1"
+wire_api = "responses"
+env_key = "SPAN_GATEWAY_API_KEY"
+```
+
+按部署环境填写网关地址和实际支持的模型 ID。需要 Bearer 鉴权时，让运行 App Server 的进程从批准的凭据来源继承 `SPAN_GATEWAY_API_KEY`。无需把密钥写入 Span 主机配置或 Git 仓库。使用新配置后重新打开 Agent 标签。
+
+网关需要提供 `POST /v1/responses` 并支持流式输出，以及工具调用和工具结果的往返。模型、图片、Fast 和额度显示取决于后端能力。CI 用真实 App Server 和本机模拟网关检查 EL8 RPM 的打开会话、审批、文件 diff 和续聊。基线固定在 `packaging/app-server-baseline`，Actions 的「Review App Server upstream」会给出稳定版更新清单。
 
 使用 ChatGPT App 接续时，先在运行 Codex 的主机上配置并启动 Codex 远程控制，再在 Span 中打开会话。Span 会自动接入同一用户、同一 `CODEX_HOME` 下正在运行的共享后台，保留原会话 ID，接收其他客户端的会话更新。关闭 Span 标签只会断开该标签的连接。未运行共享后台时，Span 使用独立的 App Server，可在关闭该会话标签后从其他客户端接续。
 
