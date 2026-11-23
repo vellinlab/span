@@ -2,13 +2,13 @@
 set -euo pipefail
 
 fixture="$1"
-mkdir -p "$fixture/bin" "$fixture/codex-state"
+mkdir -p "$fixture/backend" "$fixture/bin" "$fixture/codex-state"
 read -r tag sha < packaging/app-server-baseline
 archive=codex-package-x86_64-unknown-linux-musl.tar.gz
 curl -fLsS --retry 3 "https://github.com/openai/codex/releases/download/$tag/$archive" -o "$fixture/$archive"
 printf '%s  %s\n' "$sha" "$fixture/$archive" | sha256sum --check -
-tar -xzf "$fixture/$archive" -C "$fixture"
-backend="$(find "$fixture" -type f -name codex -print -quit)"
+tar -xzf "$fixture/$archive" -C "$fixture/backend"
+backend="$(find "$fixture/backend" -type f -name codex -print -quit)"
 test -x "$backend"
 ln -s "$backend" "$fixture/bin/codex"
 

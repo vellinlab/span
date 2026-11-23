@@ -5,7 +5,7 @@ if [[ ${1:-} != desktop ]]; then
     dnf -y install /artifacts/span-0.1.0-1.el8.x86_64.rpm \
         curl nss alsa-lib cups-libs mesa-libgbm libXScrnSaver libXtst libxkbcommon \
         python39 python39-pip python3-pyatspi xorg-x11-server-Xvfb xdotool \
-        dbus-daemon openbox google-noto-sans-cjk-ttc-fonts
+        dbus-daemon openbox openssh-server google-noto-sans-cjk-ttc-fonts
     python3.9 -m pip install --disable-pip-version-check python-xlib==0.33
     getconf GNU_LIBC_VERSION
     test "$(getconf GNU_LIBC_VERSION)" = 'glibc 2.28'
@@ -22,12 +22,52 @@ export DISPLAY=":$(cat "$fixture/display")"
 openbox --sm-disable >"$fixture/wm.log" 2>&1 &
 for _ in {1..50}; do wmctrl_state="$(xdotool getwindowfocus 2>/dev/null || true)"; [[ -n "$wmctrl_state" ]] && break; sleep 0.1; done
 
-export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ssh-keygen -q -t ed25519 -N '' -f "$fixture/host-key"
+ssh-keygen -q -t ed25519 -N '' -f "$fixture/client-key"
+install -d -m 0700 /root/.ssh
+printf '[127.0.0.1]:24222 %s\n' "$(cut -d ' ' -f 1,2 "$fixture/host-key.pub")" > "$fixture/known_hosts"
+cat > /root/.ssh/config <<CONFIG
+Host span-ci-ssh
+    HostName 127.0.0.1
+    Port 24222
+    User root
+    IdentityFile $fixture/client-key
+    UserKnownHostsFile $fixture/known_hosts
+    IdentitiesOnly yes
+    StrictHostKeyChecking yes
+CONFIG
+cat > "$fixture/remote-shell" <<'SCRIPT'
+#!/bin/bash
+printf 'span_ssh_connected\n'
+exec /bin/bash --noprofile --norc -i
+SCRIPT
+chmod +x "$fixture/remote-shell"
+cat > "$fixture/sshd_config" <<CONFIG
+ListenAddress 127.0.0.1:24222
+HostKey $fixture/host-key
+AuthorizedKeysFile $fixture/client-key.pub
+StrictModes no
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM yes
+ForceCommand $fixture/remote-shell
+CONFIG
+install -d -m 0755 /run/sshd
+/usr/sbin/sshd -D -e -f "$fixture/sshd_config" &
+for _ in {1..30}; do
+    if ssh -n -o BatchMode=yes span-ci-ssh 2>/dev/null | grep -q span_ssh_connected; then break; fi
+    sleep 0.2
+done
+
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 SPAN_TEST_SSH_ALIAS=span-ci-ssh
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &
 for _ in {1..50}; do [[ -S "$widget_socket" ]] && break; sleep 0.1; done
-bash prototype/test/backend.sh "$fixture"
-python3.9 prototype/test/benchmark.py "$widget_socket" /artifacts/benchmark.json
+result=0
+python3.9 prototype/test/benchmark.py "$widget_socket" /artifacts/benchmark.json || result=$?
+bash prototype/test/backend.sh "$fixture" || result=$?
+exit "$result"

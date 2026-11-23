@@ -52,6 +52,8 @@ try {
     await page.getByRole('button', { name: '主机', exact: true }).click();
     await page.getByLabel('SSH 目标').fill(process.env.SPAN_TEST_SSH_ALIAS);
     await page.getByRole('button', { name: '连接 SSH' }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
+      .some(line => line.textContent.trim() === 'span_ssh_connected'));
     await terminal.focus();
     await page.keyboard.type('printf "span_%s_%s\\n" remote pty');
     await page.keyboard.press('Enter');
@@ -65,7 +67,10 @@ try {
   await page.getByRole('button', { name: '停止', exact: true }).click();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
-  if (screenshot) await page.screenshot({ path: screenshot });
+  if (screenshot) {
+    await page.getByRole('button', { name: '滚到最新消息' }).click();
+    await page.screenshot({ path: screenshot });
+  }
   console.log('Verified history paging, file preview, PTY, streaming and interrupt.');
 } finally {
   await app.close();
