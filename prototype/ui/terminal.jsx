@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 
 let generation = 0;
 
-export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, onClose }) {
+export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, onClose }) {
   const element = useRef(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -27,25 +27,27 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, onClo
     fit.fit();
     let closed = false;
     host.dataset.renderer = 'dom';
-    import('@xterm/addon-webgl').then(({ WebglAddon }) => {
-      if (closed) return;
-      const webgl = new WebglAddon();
-      try {
-        terminal.loadAddon(webgl);
-      } catch {
-        webgl.dispose();
-        return;
-      }
-      host.dataset.renderer = 'webgl';
-      fit.fit();
-      webgl.onContextLoss(() => {
-        webgl.dispose();
-        host.dataset.renderer = 'dom';
+    if (renderer !== 'dom') {
+      import('@xterm/addon-webgl').then(({ WebglAddon }) => {
+        if (closed) return;
+        const webgl = new WebglAddon();
+        try {
+          terminal.loadAddon(webgl);
+        } catch {
+          webgl.dispose();
+          return;
+        }
+        host.dataset.renderer = 'webgl';
         fit.fit();
+        webgl.onContextLoss(() => {
+          webgl.dispose();
+          host.dataset.renderer = 'dom';
+          fit.fit();
+        });
+      }).catch(() => {
+        // The DOM renderer is already active if the optional addon cannot load.
       });
-    }).catch(() => {
-      // The DOM renderer is already active if the optional addon cannot load.
-    });
+    }
     const update = (method, params) => window.span.request('terminal.' + method, {
       ...params, generation: source,
     }).catch(error => {
@@ -78,7 +80,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, onClo
       terminal.dispose();
       update('close', {});
     };
-  }, [workspace, ssh]);
+  }, [workspace, ssh, renderer]);
   return <section className="terminal-panel" aria-label="终端">
     <header><SquareTerminal size={16} /> <strong>终端</strong><span>{ssh || '本地'}</span>
       <button className="icon-button right" title="关闭终端" onClick={onClose}><X size={16} /></button>

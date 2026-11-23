@@ -94,6 +94,7 @@ ipcMain.handle('span:workspace', (event, choose) => {
   if (!choose) return {
     cwd: demo ? path.join(root, 'sample') : app.getPath('home'),
     demo,
+    terminalRenderer: app.commandLine.getSwitchValue('terminal-renderer') === 'dom' ? 'dom' : 'auto',
   };
   return dialog.showOpenDialog(window, { properties: ['openDirectory'] })
     .then(result => result.filePaths[0] ?? null);

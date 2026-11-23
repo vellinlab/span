@@ -467,7 +467,7 @@ function App() {
           </form>
         </div>
         {terminal && config && <Suspense fallback={<div className="terminal-panel">正在打开终端…</div>}>
-          <TerminalPanel workspace={config.cwd} ssh={config.ssh} onClose={closeTerminal} />
+          <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer} onClose={closeTerminal} />
         </Suspense>}
       </main>
       {preview && <aside className="preview">
