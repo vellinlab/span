@@ -28,10 +28,10 @@ def xdo(*args):
 
 
 def widget(*args):
-    subprocess.run(
+    return subprocess.check_output(
         ["/usr/libexec/platform-python", "packaging/test-widget.py", "--request",
-         WIDGET_SOCKET, *args], check=True,
-    )
+         WIDGET_SOCKET, *args], text=True,
+    ).strip()
 
 
 def stats(pid):
@@ -118,6 +118,10 @@ def benchmark(name, binary):
                 else:
                     xdo("key", "ctrl+shift+a")
                     widget("click", "打开会话")
+                    widget("contains", "第 141 项")
+                    hx, hy, hw, hh = map(int, widget("bounds", "对话记录").split())
+                    xdo("mousemove", hx + hw // 2, hy + hh // 2,
+                        "click", "--repeat", 40, "--delay", 20, 5)
                     widget("contains", "第 160 项")
                     widget("click", "会话页终端面板")
                 time.sleep(.9)
