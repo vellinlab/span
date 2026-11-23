@@ -1,4 +1,5 @@
 use crate::agent_backend::Backend;
+use crate::plugin_catalog::Incoming;
 use async_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use futures_channel::mpsc;
 use futures_util::{

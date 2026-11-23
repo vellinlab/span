@@ -1543,6 +1543,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn answer_options_are_replied_to_the_original_request() {
+        let (mut agent, _) = Agent::new(None, None, Backend::Clue);
+        let (sender, mut receiver) = mpsc::channel(4);
+        agent.connection = Some(sender);
+        agent.thread = Some("clue-fixture".into());
+        let id = json!("question");
+        agent.server_request(
+            "item/tool/requestUserInput",
+            &json!({
+                "threadId":"clue-fixture",
+                "questions":[{
+                    "id":"environment", "header":"Deploy", "question":"Which environment?",
+                    "options":[{"label":"Staging", "description":"Use the test environment"}],
+                    "isOther":true
+                }]
+            }),
+            &id,
+        );
+        assert_eq!(agent.questions.len(), 1);
+        let _ = agent.update(Action::QuestionSubmit(id.clone()));
+        assert!(receiver.try_recv().is_err());
+        let _ = agent.update(Action::QuestionChoice(id.clone(), 0, 0));
+        let _ = agent.update(Action::QuestionSubmit(id.clone()));
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            json!({
+                "id":id, "result":{"answers":{"environment":{"answers":["Staging"]}}}
+            })
+        );
+        assert!(agent.questions.is_empty());
+    }
+
+    #[test]
+    fn reasoning_and_compaction_status_stay_outside_the_tool_timeline() {
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
+        agent.thread = Some("fixture".into());
+        agent.notification(
+            "turn/started",
+            &json!({"threadId":"fixture","turn":{"id":"turn"}}),
+        );
+        for (index, title) in ["First summary", "Latest summary"].into_iter().enumerate() {
+            agent.notification(
+                "item/reasoning/summaryTextDelta",
+                &json!({
+                    "threadId":"fixture","turnId":"turn","itemId":"reason",
+                    "summaryIndex":index,"delta":format!("**{title}**")
+                }),
+            );
+        }
+        assert_eq!(agent.reasoning.current(), Some("Latest summary"));
+        assert!(agent.items.is_empty());
+        let params = json!({"threadId":"fixture","turnId":"turn",
+            "item":{"id":"compact","type":"contextCompaction"}});
+        agent.notification("item/started", &params);
+        assert!(agent.compactions.contains("compact"));
+        assert!(agent.items.is_empty());
+        agent.notification("item/completed", &params);
+        assert!(agent.compactions.is_empty());
+        assert_eq!(agent.items[0].title, "Context compacted");
+    }
+
+    #[test]
     fn image_only_draft_is_kept_on_error_and_released_on_acceptance() {
         let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         let (sender, mut requests) = mpsc::channel(8);
