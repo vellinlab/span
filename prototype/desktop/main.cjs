@@ -114,7 +114,9 @@ app.whenReady().then(() => {
     minWidth: 740,
     minHeight: 520,
     autoHideMenuBar: true,
-    backgroundColor: '#16181d',
+    backgroundColor: '#18191d',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#1e2026', symbolColor: '#c3c8d2', height: 40 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,

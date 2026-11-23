@@ -1,4 +1,5 @@
 import { _electron as electron } from 'playwright';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +28,16 @@ try {
     if (message.type() === 'error') console.error(message.text());
   });
   await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 20_000 });
+  await page.waitForFunction(() => {
+    const overlay = navigator.windowControlsOverlay;
+    if (!overlay?.visible) return false;
+    const region = overlay.getTitlebarAreaRect();
+    const terminal = document.querySelector('.topbar .terminal-toggle').getBoundingClientRect();
+    return region.width > 0 && region.width < innerWidth && region.height > 0
+      && terminal.left >= region.left && terminal.right <= region.right;
+  });
+  const windowId = linux && await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));
   if (verifySandbox) {
     const rendererPid = await app.evaluate(({ app, BrowserWindow }) => {
       if (app.commandLine.hasSwitch('no-sandbox')) throw new Error('The sandbox was disabled.');
@@ -34,6 +45,22 @@ try {
     });
     assert.match(await readFile(`/proc/${rendererPid}/status`, 'utf8'), /^Seccomp:\s+2$/m);
     console.log('Verified the installed preview as a regular user with the renderer sandbox enabled.');
+    const position = await page.evaluate(() => ({ x: screenX, y: screenY }));
+    const dragPoint = await page.evaluate(() => {
+      const region = navigator.windowControlsOverlay.getTitlebarAreaRect();
+      return [region.x + Math.floor(region.width / 2), region.y + Math.floor(region.height / 2)];
+    });
+    execFileSync('xdotool', ['mousemove', '--window', String(windowId), ...dragPoint.map(String),
+      'mousedown', '1', 'sleep', '0.08', 'mousemove_relative', '24', '18',
+      'sleep', '0.08', 'mousemove_relative', '24', '18', 'sleep', '0.08', 'mouseup', '1']);
+    await page.waitForFunction(({ x, y }) => screenX !== x || screenY !== y, position, { timeout: 5000 });
+    const doubleClickTitlebar = () => execFileSync('xdotool', ['mousemove', '--window', String(windowId),
+      ...dragPoint.map(String), 'click', '--repeat', '2', '--delay', '100', '1']);
+    doubleClickTitlebar();
+    await page.waitForFunction(() => outerWidth >= screen.availWidth - 2, null, { timeout: 5000 });
+    doubleClickTitlebar();
+    await page.waitForFunction(() => outerWidth < screen.availWidth - 2, null, { timeout: 5000 });
+    console.log('Verified moving, maximizing and restoring the window using the integrated title bar.');
   }
   const transcript = page.getByTestId('transcript');
   assert.equal(Number(await transcript.getAttribute('data-items')), 21);
@@ -101,7 +128,8 @@ try {
   assert.equal(await page.getByRole('alert').count(), 0);
   if (screenshot) {
     await page.getByRole('button', { name: '滚到最新消息' }).click();
-    await page.screenshot({ path: screenshot });
+    if (linux) execFileSync('import', ['-window', String(windowId), screenshot]);
+    else await page.screenshot({ path: screenshot });
   }
   console.log('Verified history paging, file preview, PTY, streaming and interrupt.');
 } finally {

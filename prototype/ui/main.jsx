@@ -367,11 +367,12 @@ function App() {
 
   return <div className="workbench">
     <header className="topbar">
-      <div className="brand"><img src="./span.svg" alt="" /><strong>Span</strong></div>
-      <span className="product">工作台预览</span>
-      <span className="connection"><i className={connection} />{config?.ssh || '本机'}</span>
-      <button className="icon-button terminal-toggle" aria-label="切换终端" title="切换终端"
-        aria-pressed={terminal} onClick={() => setTerminal(value => !value)}><SquareTerminal size={19} /></button>
+      <div className="titlebar-content">
+        <div className="brand"><img src="./span.svg" alt="" /><strong>Span</strong></div>
+        <span className="connection"><i className={connection} /><span>{config?.ssh || '本机'}</span></span>
+        <button className="icon-button terminal-toggle" aria-label="切换终端" title="切换终端"
+          aria-pressed={terminal} onClick={() => setTerminal(value => !value)}><SquareTerminal size={17} /></button>
+      </div>
     </header>
     <div className="layout">
       <aside className="sidebar">

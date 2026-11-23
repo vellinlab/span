@@ -6,7 +6,7 @@
 
 Name:           span-web-preview
 Version:        0.1.0
-Release:        0.1.preview%{?dist}
+Release:        0.2.preview%{?dist}
 Summary:        Span Web Workbench preview
 License:        MIT and BSD and LGPL
 URL:            https://github.com/vellinlab/span
