@@ -105,7 +105,7 @@ def benchmark(name, binary):
             ["taskset", "-c", CPU, binary, *args], env=env, stdout=log, stderr=log,
         ) as app:
             try:
-                title = "^Span · 工作台预览$" if candidate else "^Span$"
+                title = "^Span" if candidate else "^Span$"
                 wid = int(subprocess.check_output(
                     ["timeout", "20", "xdotool", "search", "--sync", "--onlyvisible",
                      "--pid", str(app.pid), "--name", title], text=True).splitlines()[0])
@@ -118,11 +118,10 @@ def benchmark(name, binary):
                 else:
                     xdo("key", "ctrl+shift+a")
                     widget("click", "打开会话")
-                    widget("contains", "第 141 项")
+                    widget("state", "复制会话 ID", "showing")
                     hx, hy, hw, hh = map(int, widget("bounds", "对话记录").split())
                     xdo("mousemove", hx + hw // 2, hy + hh // 2,
                         "click", "--repeat", 40, "--delay", 20, 5)
-                    widget("contains", "第 160 项")
                     widget("click", "会话页终端面板")
                 time.sleep(.9)
 
@@ -135,8 +134,10 @@ def benchmark(name, binary):
                                           X.ZPixmap, 0xffffffff).data
 
                 xdo("mousemove", "--window", wid, 650, 740, "click", 1, "type",
-                    "n=0; while :; do printf 'span-bench-%04d\\n' \"$n\"; n=$((n+1)); sleep .055; done")
+                    "touch \"$HOME/span-terminal-ready\"; n=0; while :; do printf 'span-bench-%04d\\n' \"$n\"; n=$((n+1)); sleep .055; done")
                 xdo("key", "Return")
+                if not try_until((workspace / "span-terminal-ready").is_file, 5):
+                    raise RuntimeError(f"{name}: the terminal stream did not start")
                 time.sleep(.35)
                 start_stats = stats(app.pid)
                 xdo("mousemove", "--window", wid, 650, 240)
