@@ -1,0 +1,13 @@
+[package]
+name = "span-workbench-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+portable-pty = "0.9"
+serde_json = "1"
+
+[profile.release]
+strip = "debuginfo"

@@ -1,0 +1,94 @@
+name: Span web workbench experiment
+
+on:
+  push:
+    branches: [prototype/web-workbench]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: span-web-workbench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  el8:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build renderer
+        working-directory: prototype
+        run: |
+          npm ci --no-audit --no-fund
+          npm run check
+          npm run build
+      - name: Build EL8 service and unpack the runtime
+        run: |
+          mkdir -p /tmp/span-workbench-artifacts
+          cp "$(command -v node)" /tmp/span-workbench-artifacts/node
+          docker run --rm -v "$PWD:/work" -v /tmp/span-workbench-artifacts:/artifacts -w /work almalinux:8 bash -eu -c '
+            dnf -y install gcc binutils curl ca-certificates
+            curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/rustup.sh
+            bash /tmp/rustup.sh -y --profile minimal --default-toolchain 1.98.1 --component rustfmt
+            export PATH="$HOME/.cargo/bin:$PATH"
+            cargo fmt --manifest-path prototype/core/Cargo.toml -- --check
+            cargo build --locked --release --manifest-path prototype/core/Cargo.toml
+            binary=prototype/core/target/release/span-workbench-core
+            readelf --version-info "$binary" | grep -oE "GLIBC_[0-9]+(\.[0-9]+)+" | sort -Vu > /artifacts/glibc-service.txt
+            test "$(tail -1 /artifacts/glibc-service.txt | cat - <(echo GLIBC_2.28) | sort -V | tail -1)" = GLIBC_2.28
+          '
+          bash prototype/test/package.sh linux prototype/core/target/release/span-workbench-core /tmp/span-workbench-artifacts/linux
+      - name: Verify on AlmaLinux 8 and compare with Span 0.1.0
+        run: |
+          baseline=span-0.1.0-1.el8.x86_64.rpm
+          curl -fLsS --retry 3 "https://github.com/${GITHUB_REPOSITORY}/releases/download/v0.1.0/$baseline"             -o "/tmp/span-workbench-artifacts/$baseline"
+          printf 'f395c1d3f4679173cc314574d902311ea82ced8b736883e2f5ed44556c220148  %s\n'             "/tmp/span-workbench-artifacts/$baseline" | sha256sum --check -
+          docker run --rm --shm-size=1g -v "$PWD:/work:ro" -v /tmp/span-workbench-artifacts:/artifacts -w /work             almalinux:8 bash prototype/test/el8.sh
+      - name: Publish preview and benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: span-web-el8-preview
+          path: |
+            /tmp/span-workbench-artifacts/*.tar.gz
+            /tmp/span-workbench-artifacts/*.png
+            /tmp/span-workbench-artifacts/*.json
+            /tmp/span-workbench-artifacts/glibc-service.txt
+          if-no-files-found: warn
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build renderer and Windows service
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          cargo +1.98.1 build --locked --release --manifest-path prototype/core/Cargo.toml
+          cd prototype
+          npm ci --no-audit --no-fund
+          npm run check
+          npm run build
+      - name: Verify Electron and native ConPTY
+        run: |
+          bash prototype/test/package.sh win32 prototype/core/target/release/span-workbench-core.exe preview
+          node prototype/test/smoke.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench.png"
+          powershell.exe -NoProfile -Command 'Compress-Archive -Path preview -DestinationPath span-web-windows-x86_64.zip'
+      - name: Publish Windows preview and screenshot
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: span-web-windows-preview
+          path: |
+            span-web-windows-x86_64.zip
+            windows-workbench.png
+          if-no-files-found: warn
