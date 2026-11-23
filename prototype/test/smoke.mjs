@@ -38,6 +38,26 @@ try {
   });
   const windowId = linux && await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].getNativeWindowHandle().readUInt32LE(0));
+  const grip = page.getByRole('separator', { name: '调整侧栏宽度' });
+  const sidebar = page.locator('#workbench-sidebar');
+  const original = Math.round((await sidebar.boundingBox()).width);
+  const handle = await grip.boundingBox();
+  const x = handle.x + handle.width / 2;
+  const y = handle.y + handle.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 72, y, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForFunction(expected =>
+    document.getElementById('workbench-sidebar').offsetWidth === expected, original + 72);
+  if (verifySandbox) {
+    await page.reload();
+    await page.getByText('第 160 项', { exact: false }).waitFor();
+    assert.equal(Math.round((await sidebar.boundingBox()).width), original + 72);
+  }
+  await grip.dblclick();
+  assert.equal(Math.round((await sidebar.boundingBox()).width), original);
+  console.log('Verified sidebar drag and double-click reset.');
   if (verifySandbox) {
     const rendererPid = await app.evaluate(({ app, BrowserWindow }) => {
       if (app.commandLine.hasSwitch('no-sandbox')) throw new Error('The sandbox was disabled.');

@@ -51,8 +51,10 @@ pre, code { font-family: var(--mono); }
 .topbar .icon-button { width: 28px; height: 28px; app-region: no-drag; }
 .terminal-toggle[aria-pressed="true"] { color: var(--accent); background: #29344c; }
 .right { margin-left: auto; }
-.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: clamp(205px, 20vw, 270px) minmax(0, 1fr) auto; }
-.sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 13px 11px 9px; display: flex; min-height: 0; flex-direction: column; }
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+.sidebar { position: relative; background: var(--panel); border-right: 1px solid var(--line); padding: 13px 11px 9px; display: flex; min-height: 0; flex-direction: column; }
+.sidebar-grip { position: absolute; inset: 0 -5px 0 auto; width: 10px; z-index: 1; cursor: col-resize; touch-action: none; user-select: none; outline: none; }
+.sidebar-grip:is(:hover, :focus-visible, [data-dragging="true"])::after { content: ""; position: absolute; inset: 0 4px; background: var(--accent); }
 .sidebar nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; gap: 2px; background: #181a20; border: 1px solid #2c2f38; border-radius: 9px; }
 .sidebar nav button { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 5px 2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .sidebar nav button[aria-pressed="true"] { background: #303541; border-color: #424857; color: #f0f2fb; }

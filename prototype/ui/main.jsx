@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { connectAgent, historyRows, toRow } from './agent.js';
 import { Markdown } from './markdown.jsx';
+import { Sidebar } from './sidebar.jsx';
 import './workbench.css';
 
 const TerminalPanel = lazy(() => import('./terminal.jsx').then(module => ({ default: module.TerminalPanel })));
@@ -375,7 +376,7 @@ function App() {
       </div>
     </header>
     <div className="layout">
-      <aside className="sidebar">
+      <Sidebar>
         <nav aria-label="工作台">
           {tabs.map(([id, label, Icon]) => <button key={id} aria-pressed={tab === id}
             onClick={() => setTab(id)}><Icon size={15} />{label}</button>)}
@@ -419,7 +420,7 @@ function App() {
             </button>)}
           </div>
         </>}
-      </aside>
+      </Sidebar>
       <main className="main">
         <header className="session-header"><MessageSquare size={17} /><strong>{session?.name || session?.preview || '新会话'}</strong>
           <span>{config?.backend === 'clue' ? 'Clue' : 'Codex'}</span>
