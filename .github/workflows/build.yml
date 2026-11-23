@@ -48,6 +48,14 @@ jobs:
             --volume "$upgrade_dir:/span-upgrade:ro" \
             almalinux:8 bash packaging/build-el8.sh "${baseline[@]}"
 
+      - name: Upload RPM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: span-el8-x86_64
+          path: dist/span-*.rpm
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Verify EL8 Span with a real App Server and local model gateway
         run: |
           read -r backend_tag backend_sha < packaging/app-server-baseline
@@ -68,14 +76,6 @@ jobs:
               test -x "$backend"
               dbus-run-session -- bash packaging/test-real-app-server.sh /usr/bin/span "$backend"
             '
-
-      - name: Upload RPM
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: span-el8-x86_64
-          path: dist/span-*.rpm
-          if-no-files-found: error
-          retention-days: 30
 
       - name: Upload corresponding VTE source
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

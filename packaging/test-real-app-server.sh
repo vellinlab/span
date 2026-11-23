@@ -42,7 +42,7 @@ wait_for() {
         if "$check" "$@"; then return; fi
         sleep 0.1
     done
-    printf 'Timed out waiting for %s.\n' "$*" >&2
+    printf 'Timed out waiting for %s %s.\n' "$check" "$*" >&2
     exit 1
 }
 
@@ -94,7 +94,23 @@ widget contains '命令执行审批'
 test ! -e "$fixture/workspace/span-ci-approval.txt"
 test ! -e "$fixture/workspace/span-ci-result.txt"
 widget click '允许一次'
+
+patch_started() {
+    [[ -f "$fixture/workspace/span-ci-result.txt" ]] ||
+        [[ "$(widget count '文件变更审批')" -eq 1 ]]
+}
+wait_for patch_started 'file change or sandbox retry'
+if [[ ! -e "$fixture/workspace/span-ci-result.txt" ]]; then
+    # Default Docker policy can prevent bubblewrap from starting. The backend
+    # must ask before retrying the change, and the test grants only that retry.
+    widget contains '文件变更审批'
+    widget contains 'command failed; retry without sandbox?'
+    test ! -e "$fixture/workspace/span-ci-result.txt"
+    widget click '允许一次'
+    printf '%s\n' 'The container required an explicit file-change approval for the sandbox retry.'
+fi
 widget contains 'Fixture file created.'
+widget bounds '复制本轮 Markdown' >/dev/null
 grep -qx 'approved' "$fixture/workspace/span-ci-approval.txt"
 grep -qx 'Patched by the App Server.' "$fixture/workspace/span-ci-result.txt"
 widget mouse '本轮变更 · 查看 diff'
