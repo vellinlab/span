@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 
-from Xlib import X, display
+from Xlib import X, display, protocol
 from Xlib.ext import xtest
 
 screen = display.Display()
@@ -75,6 +75,8 @@ def try_until(check, timeout=3):
 
 
 def sample(values):
+    if not values:
+        return None
     return {"median_ms": round(statistics.median(values), 2),
             "p95_ms": round(sorted(values)[math.ceil(.95 * len(values)) - 1], 2),
             "samples": len(values), "max_ms": round(max(values), 2)}
@@ -159,17 +161,22 @@ def benchmark(name, binary):
 
                 drag = []
                 geometry = []
-                # Openbox's client Alt+right mouse binding holds a real resize
-                # grab. Two motions resize the same corner in each measurement.
+                # Request Openbox's normal interactive right-edge resize.
+                # Subsequent positions are real pointer motions, not ConfigureWindow.
                 pos = origin()
                 width = win.get_geometry().width
-                x, y = pos.x + width - 2, pos.y + 395
+                x, y = pos.x + width - 20, pos.y + 395
                 pointer(x, y)
-                alt = 64
-                xtest.fake_input(screen, X.KeyPress, alt)
-                mouse(3, True)
+                mouse(1, True)
                 screen.sync()
-                time.sleep(.08)
+                root.send_event(protocol.event.ClientMessage(
+                    window=win,
+                    client_type=screen.intern_atom("_NET_WM_MOVERESIZE"),
+                    data=(32, [x, y, 3, 1, 2]),
+                ), event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+                screen.sync()
+                time.sleep(.12)
+                resize_error = None
                 try:
                     for index in range(28):
                         old_width = win.get_geometry().width
@@ -179,9 +186,10 @@ def benchmark(name, binary):
                         xtest.fake_input(screen, X.MotionNotify,
                                          x=x + (-82 if direction < 0 else 0), y=y)
                         screen.flush()
-                        resized = try_until(lambda: (win.get_geometry().width - old_width) * direction > 50)
+                        resized = try_until(lambda: (win.get_geometry().width - old_width) * direction > 50, 1)
                         if not resized:
-                            raise RuntimeError(f"{name}: window manager did not resize the client")
+                            resize_error = f"Interactive resize did not reach the target width ({old_width} → {win.get_geometry().width})."
+                            break
                         now = time.monotonic()
                         painted = try_until(lambda: pixels() != before, .65)
                         if index >= 4:
@@ -190,8 +198,7 @@ def benchmark(name, binary):
                                 drag.append((time.monotonic() - start) * 1000)
                         time.sleep(.045)
                 finally:
-                    mouse(3, False)
-                    xtest.fake_input(screen, X.KeyRelease, alt)
+                    mouse(1, False)
                     screen.sync()
 
                 end = stats(app.pid)
@@ -200,7 +207,8 @@ def benchmark(name, binary):
                           "cpu_tree_ms": end["tree_cpu_ms"] - start_stats["tree_cpu_ms"],
                           "cpu_main_ms": end["main_cpu_ms"] - start_stats["main_cpu_ms"],
                           "scroll": sample(scroll), "scroll_no_pixel_change": timeouts,
-                          "resize_geometry": sample(geometry), "resize_visible": sample(drag)}
+                           "resize_geometry": sample(geometry), "resize_visible": sample(drag),
+                          "resize_error": resize_error}
                 print(json.dumps(record), flush=True)
                 return record
             except Exception:
@@ -220,3 +228,5 @@ report = {"runner": "AlmaLinux 8 / Xvfb 1440×960 / Openbox / one constrained CP
 for target in (BASE, NEXT, NEXT, BASE):
     report["runs"].append(benchmark(*target))
     Path(OUTPUT).write_text(json.dumps(report, indent=2) + "\n")
+if any(run["resize_error"] or not run["resize_visible"] or not run["scroll"] for run in report["runs"]):
+    raise SystemExit("One or more interactive runs did not reach their expected resize or paint.")
