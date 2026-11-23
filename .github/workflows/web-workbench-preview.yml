@@ -47,7 +47,16 @@ jobs:
           baseline=span-0.1.0-1.el8.x86_64.rpm
           curl -fLsS --retry 3 "https://github.com/${GITHUB_REPOSITORY}/releases/download/v0.1.0/$baseline"             -o "/tmp/span-workbench-artifacts/$baseline"
           printf 'f395c1d3f4679173cc314574d902311ea82ced8b736883e2f5ed44556c220148  %s\n'             "/tmp/span-workbench-artifacts/$baseline" | sha256sum --check -
-          docker run --rm --shm-size=1g -v "$PWD:/work:ro" -v /tmp/span-workbench-artifacts:/artifacts -w /work             almalinux:8 bash prototype/test/el8.sh
+          docker run --rm --shm-size=1g --cap-add SYS_ADMIN \
+            --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -v "$PWD:/work:ro" -v /tmp/span-workbench-artifacts:/artifacts -w /work \
+            almalinux:8 bash prototype/test/el8.sh
+      - name: Publish the verified EL8 preview RPM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: /tmp/span-workbench-artifacts/span-web-preview-*.rpm
+          archive: false
+          if-no-files-found: error
       - name: Publish preview and benchmark artifacts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

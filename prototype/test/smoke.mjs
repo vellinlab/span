@@ -1,5 +1,5 @@
 import { _electron as electron } from 'playwright';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -8,11 +8,13 @@ const [binary, screenshot, renderer] = process.argv.slice(2);
 const exerciseWebgl = renderer === 'webgl';
 const profile = await mkdtemp(join(tmpdir(), 'span-preview-'));
 const linux = process.platform === 'linux';
+const verifySandbox = process.env.SPAN_TEST_SANDBOX === '1';
 const app = await electron.launch({
   executablePath: binary,
+  chromiumSandbox: verifySandbox,
   args: [
     '--demo',
-    ...(linux ? ['--no-sandbox'] : []),
+    ...(linux && !verifySandbox ? ['--no-sandbox'] : []),
     ...(exerciseWebgl ? ['--use-gl=angle', '--use-angle=swiftshader']
       : [linux ? '--disable-webgl' : '--terminal-renderer=dom']),
   ],
@@ -25,6 +27,14 @@ try {
     if (message.type() === 'error') console.error(message.text());
   });
   await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 20_000 });
+  if (verifySandbox) {
+    const rendererPid = await app.evaluate(({ app, BrowserWindow }) => {
+      if (app.commandLine.hasSwitch('no-sandbox')) throw new Error('The sandbox was disabled.');
+      return BrowserWindow.getAllWindows()[0].webContents.getOSProcessId();
+    });
+    assert.match(await readFile(`/proc/${rendererPid}/status`, 'utf8'), /^Seccomp:\s+2$/m);
+    console.log('Verified the installed preview as a regular user with the renderer sandbox enabled.');
+  }
   const transcript = page.getByTestId('transcript');
   assert.equal(Number(await transcript.getAttribute('data-items')), 21);
   const area = await transcript.boundingBox();

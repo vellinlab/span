@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ ${1:-} != desktop ]]; then
-    dnf -y install epel-release
-    dnf -y install /artifacts/span-0.1.0-1.el8.x86_64.rpm \
+    dnf -y install epel-release rpm-build
+    rpmbuild -bb --define '_topdir /tmp/span-preview-rpmbuild' \
+        --define 'preview_runtime /artifacts/linux' --define 'dist .el8' \
+        --define '_binary_payload w6.gzdio' prototype/test/span-web-preview.spec
+    cp /tmp/span-preview-rpmbuild/RPMS/x86_64/span-web-preview-*.rpm /artifacts/
+    dnf -y install /artifacts/span-0.1.0-1.el8.x86_64.rpm /artifacts/span-web-preview-*.rpm \
         curl nss alsa-lib cups-libs mesa-libgbm libXScrnSaver libXtst libxkbcommon \
         python39 python39-pip python3-pyatspi xorg-x11-server-Xvfb xdotool \
         dbus-daemon openbox openssh-server google-noto-sans-cjk-ttc-fonts
@@ -64,6 +68,11 @@ export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 SPAN_TEST_SSH_ALIAS=span-ci-ssh
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
 SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview "" webgl
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
+
+test "$(stat -c '%U:%G:%a' /usr/libexec/span-web-preview/chrome-sandbox)" = root:root:4755
+useradd --create-home span-preview-ci
+runuser -u span-preview-ci -- env -u SPAN_TEST_SSH_ALIAS SPAN_TEST_SANDBOX=1 \
+    dbus-run-session -- /artifacts/node prototype/test/smoke.mjs /usr/bin/span-web-preview
 
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &
