@@ -102,7 +102,10 @@ def benchmark(name, binary):
                    GTK_THEME="Adwaita:dark", GDK_BACKEND="x11",
                    SPAN_PREVIEW_PROFILE=str(workspace / "profile"),
                    PATH=f"{tmp}:{os.environ['PATH']}")
-        args = ["--demo", "--no-sandbox", "--disable-gpu"] if candidate else []
+        args = ["--demo", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0",
+                f"--user-data-dir={workspace / 'profile'}"] if candidate else []
+        command = ('touch "$HOME/span-terminal-ready"; n=0; while :; do '
+                   'printf \'span-bench-%04d\\n\' "$n"; n=$((n+1)); sleep .055; done')
         with open(workspace / "app.log", "w+") as log, subprocess.Popen(
             ["taskset", "-c", CPU, binary, *args], env=env, stdout=log, stderr=log,
         ) as app:
@@ -116,7 +119,12 @@ def benchmark(name, binary):
                     "windowsize", wid, 1180, 800)
                 time.sleep(.6)
                 if candidate:
-                    xdo("mousemove", "--window", wid, win.get_geometry().width - 30, 26, "click", 1)
+                    port_file = workspace / "profile" / "DevToolsActivePort"
+                    if not try_until(port_file.is_file, 12):
+                        raise RuntimeError("Could not open the benchmark automation port")
+                    port = port_file.read_text().splitlines()[0]
+                    subprocess.run(["/artifacts/node", "prototype/test/prepare-benchmark.mjs",
+                                    port, command], check=True, timeout=28)
                 else:
                     xdo("key", "ctrl+shift+a")
                     widget("click", "打开会话")
@@ -135,9 +143,9 @@ def benchmark(name, binary):
                     return root.get_image(pos.x + 365, pos.y + 105, 450, 220,
                                           X.ZPixmap, 0xffffffff).data
 
-                xdo("mousemove", "--window", wid, 650, 740, "click", 1, "type",
-                    "touch \"$HOME/span-terminal-ready\"; n=0; while :; do printf 'span-bench-%04d\\n' \"$n\"; n=$((n+1)); sleep .055; done")
-                xdo("key", "Return")
+                if not candidate:
+                    xdo("mousemove", "--window", wid, 650, 740, "click", 1, "type", command)
+                    xdo("key", "Return")
                 if not try_until((workspace / "span-terminal-ready").is_file, 5):
                     raise RuntimeError(f"{name}: the terminal stream did not start")
                 time.sleep(.35)
