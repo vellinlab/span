@@ -283,6 +283,12 @@ impl Agent {
             .placeholder_text("会话 ID（留空新建）")
             .width_chars(12)
             .build();
+        if let Some(accessible) = cwd.accessible() {
+            accessible.set_name("工作目录");
+        }
+        if let Some(accessible) = resume.accessible() {
+            accessible.set_name("会话 ID");
+        }
         let connect = button("打开会话", true);
         settings.pack_start(&cwd, true, true, 0);
         settings.pack_start(&resume, true, true, 0);

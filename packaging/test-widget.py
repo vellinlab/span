@@ -101,6 +101,9 @@ def exercise(arguments, dialog):
                     state = getattr(pyatspi, "STATE_" + values[0].upper())
                     if node.getState().contains(state) == (operation == "state"):
                         sys.exit(0)
+                if operation == "set-text" and "EditableText" in node.get_interfaces():
+                    node.queryEditableText().setTextContents(values[0])
+                    sys.exit(0)
                 if operation == "scroll-value":
                     for child in node:
                         if (child.getRole() == pyatspi.ROLE_SCROLL_BAR
