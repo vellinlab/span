@@ -86,14 +86,14 @@ open_span
 widget set-text '工作目录' "$fixture/workspace"
 widget click '打开会话'
 widget state '选择模型' sensitive
-widget mouse '会话权限'
-widget mouse '只读'
-widget description '会话权限' '只读'
+widget description '会话权限' '工作区权限'
 send 'Create the fixture file.'
-widget contains '文件变更审批'
+widget contains '命令执行审批'
+test ! -e "$fixture/workspace/span-ci-approval.txt"
 test ! -e "$fixture/workspace/span-ci-result.txt"
 widget click '允许一次'
 widget contains 'Fixture file created.'
+grep -qx 'approved' "$fixture/workspace/span-ci-approval.txt"
 grep -qx 'Patched by the App Server.' "$fixture/workspace/span-ci-result.txt"
 widget mouse '本轮变更 · 查看 diff'
 widget contains '+Patched by the App Server.'
@@ -111,4 +111,4 @@ widget click '打开会话'
 widget contains 'Fixture file created.'
 send 'Continue the existing fixture session.'
 widget contains 'Fixture session continued.'
-printf '%s\n' 'The EL8 Span RPM opened, approved a file change, displayed its diff, and resumed the same session with a real App Server.'
+printf '%s\n' 'The EL8 Span RPM opened, handled command approval, displayed a file diff, and resumed the same session with a real App Server.'

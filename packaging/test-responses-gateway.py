@@ -50,25 +50,24 @@ class Responses(BaseHTTPRequestHandler):
                 raise ValueError("The resumed request lost its previous assistant message")
             item = self.message("second-message", SECOND_REPLY)
         elif latest_prompt == FIRST_PROMPT:
-            output = next(
-                (
-                    item
-                    for item in inputs
-                    if item.get("call_id") == "span-patch"
-                    and item.get("type") == "function_call_output"
-                ),
-                None,
-            )
-            if output is None:
-                item = {
-                    "type": "function_call",
-                    "call_id": "span-patch",
-                    "name": "exec_command",
-                    "arguments": json.dumps({"cmd": f"apply_patch <<'EOF'\n{PATCH}\nEOF\n"}),
-                }
+            outputs = {
+                item["call_id"]: json.dumps(item)
+                for item in inputs
+                if item.get("type") == "function_call_output"
+            }
+            if "span-approval" not in outputs:
+                item = self.command("span-approval", {
+                    "cmd": "printf '%s\\n' approved > span-ci-approval.txt; cat span-ci-approval.txt",
+                    "sandbox_permissions": "require_escalated",
+                    "justification": "Write the approval marker in the test workspace.",
+                })
+            elif "approved" not in outputs["span-approval"]:
+                raise ValueError("The approved command result was not sent back to the model")
+            elif "span-patch" not in outputs:
+                item = self.command("span-patch", {"cmd": f"apply_patch <<'EOF'\n{PATCH}\nEOF\n"})
+            elif "span-ci-result.txt" not in outputs["span-patch"]:
+                raise ValueError("The patch result was not sent back to the model")
             else:
-                if "span-ci-result.txt" not in json.dumps(output):
-                    raise ValueError("The patch result was not sent back to the model")
                 item = self.message("first-message", FIRST_REPLY)
         else:
             raise ValueError("Unexpected prompt in request")
@@ -80,6 +79,15 @@ class Responses(BaseHTTPRequestHandler):
             {"type": "response.output_item.done", "item": item},
             {"type": "response.completed", "response": {"id": response_id, "usage": usage}},
         ]
+
+    @staticmethod
+    def command(call_id, arguments):
+        return {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": "exec_command",
+            "arguments": json.dumps(arguments),
+        }
 
     @staticmethod
     def message(message_id, text):

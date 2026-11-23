@@ -50,9 +50,8 @@ jobs:
 
       - name: Verify EL8 Span with a real App Server and local model gateway
         run: |
-          backend_tag=rust-v0.171.0
+          read -r backend_tag backend_sha < packaging/app-server-baseline
           backend_archive=codex-package-x86_64-unknown-linux-musl.tar.gz
-          backend_sha=8391d67757496bfd14893eca6cbf0c96994bf2627566ff1f018f70600c9ef6b3
           backend_dir="$RUNNER_TEMP/span-app-server"
           mkdir -p "$backend_dir"
           curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
