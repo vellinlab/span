@@ -113,7 +113,8 @@ widget contains 'Fixture file created.'
 widget bounds '复制本轮 Markdown' >/dev/null
 grep -qx 'approved' "$fixture/workspace/span-ci-approval.txt"
 grep -qx 'Patched by the App Server.' "$fixture/workspace/span-ci-result.txt"
-widget mouse '本轮变更 · 查看 diff'
+widget click '关闭预览'
+widget mouse "修改文件 · $fixture/workspace/span-ci-result.txt"
 widget contains '+Patched by the App Server.'
 widget click '复制会话 ID'
 session="$(xclip -out -selection clipboard)"
