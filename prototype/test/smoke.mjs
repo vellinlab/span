@@ -46,6 +46,7 @@ try {
     if (message.type() === 'error') console.error(message.text());
   });
   await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 20_000 });
+  await page.locator('.branch').getByText('prototype/web-workbench', { exact: true }).waitFor();
   await page.waitForFunction(() => {
     const overlay = navigator.windowControlsOverlay;
     if (!overlay?.visible) return false;
@@ -193,6 +194,9 @@ try {
       await page.screenshot({ path: screenshot });
     }
   }
+  await page.getByRole('button', { name: /新会话/ }).click();
+  await page.getByRole('heading', { name: '开始新会话' }).waitFor();
+  assert.ok(await page.getByRole('textbox', { name: '消息' }).evaluate(element => document.activeElement === element));
   console.log('Verified history paging, file preview, PTY, streaming and interrupt.');
 } finally {
   await app.close();

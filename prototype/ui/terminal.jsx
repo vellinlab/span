@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import { SquareTerminal, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 
-let generation = 0;
+let generation = Math.trunc(performance.timeOrigin * 1_000);
 
 export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, onClose }) {
   const element = useRef(null);

@@ -13,7 +13,8 @@ import './workbench.css';
 
 const TerminalPanel = lazy(() => import('./terminal.jsx').then(module => ({ default: module.TerminalPanel })));
 const PAGE_SIZE = 20;
-let generation = 0;
+// Ignore Agent events that arrive from the renderer's previous page load.
+let generation = Math.trunc(performance.timeOrigin * 1_000);
 
 function directoryName(path) {
   return path?.split(/[\\/]/).filter(Boolean).at(-1) || path;
@@ -532,68 +533,68 @@ function App() {
             <Transcript rows={rows} cursor={cursor} loadOlder={loadOlder} loading={loading}
               follow={follow} prepend={prepend} scroll={scroll} onScrollPosition={setShowLatest} />
             <div className="composer-wrap reading-column">
-                {!rows.length && !session && !loading && !error && <div className="welcome">
-                  <span>{workspace}</span><h1>开始新会话</h1>
-                </div>}
-                {error && <div className="error">
-                  <div className="error-message" role="alert">
-                    {connectionError ? <>
-                      <strong>{!config?.ssh && /program not found|os error 2|ENOENT/i.test(error)
-                        ? `本机找不到 ${backendName} CLI` : '无法连接到 Agent'}</strong>
-                      <details><summary>技术详情</summary><p>{error}</p></details>
-                    </> : error}
-                  </div>
-                  {connectionError && <button type="button" className="retry" onClick={() => {
-                    if (config) setConfig({ ...config });
-                  }}>重新连接</button>}
-                  <button className="icon-button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={16} /></button>
-                </div>}
-                {running && <div className="live" role="status"><i />{status.split('\n').at(-1)?.replace(/\*\*/g, '') || '正在处理'}</div>}
-                {question && <div className="approval">
-                  <strong>{question.method.endsWith('requestApproval') ? '需要你的确认' : 'Agent 请求输入'}</strong>
-                  <span>{question.params.command || question.params.reason}</span>
-                  {question.method.endsWith('requestApproval') ? <div>
-                    <button className="primary" onClick={() => answer({ decision: 'accept' })}>允许一次</button>
-                    <button onClick={() => answer({ decision: 'decline' })}>拒绝</button>
-                  </div> : question.method === 'item/tool/requestUserInput' ? <form onSubmit={event => {
-                    event.preventDefault();
-                    const data = new FormData(event.currentTarget);
-                    answer({ answers: Object.fromEntries(question.params.questions.map(({ id }) => [id, { answers: [data.get(id)] }])) });
-                  }}>
-                    {question.params.questions.map(item => <label key={item.id}>{item.question}
-                      {item.options?.length ? <select name={item.id}>{item.options.map(option =>
-                        <option key={option.label}>{option.label}</option>)}</select> : <input required name={item.id} />}
-                    </label>)}<button className="primary">提交回答</button>
-                  </form> : <button onClick={() => agent.current.send({ id: question.id,
-                    error: { code: -32601, message: 'Unsupported request' } }).then(() => setQuestion(null)).catch(report)}>关闭请求</button>}
-                </div>}
-                <form className="composer" onSubmit={event => { event.preventDefault(); send(); }}>
-                  <textarea ref={input} rows={2} placeholder={session ? '继续这个会话…' : '向工作台发送消息…'} aria-label="消息"
-                    value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => {
-                      if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                        event.preventDefault();
-                        send();
-                      }
-                    }} />
-                  <div className="composer-bar">
-                    <button type="button" className="connection" title={`${host} · ${connectionLabel}`} onClick={() => showTab('hosts')}>
-                      <i className={connection} /><span>{host}</span><ChevronDown size={12} />
-                    </button>
-                    <span className="composer-status" role="status">{connection !== 'ready' && connectionLabel}</span>
-                    {showLatest && rows.length > 0 && <button type="button" className="icon-button jump-latest" title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
-                      follow.current = true;
-                      const element = scroll.current;
-                      element.scrollTop = element.scrollHeight;
-                    }}><ArrowDown size={16} /></button>}
-                    <button type="button" className="composer-agent" title="切换 Agent 后端" onClick={() => showTab('hosts')}>
-                      {backendName}<ChevronDown size={12} />
-                    </button>
-                    {running ? <button type="button" className="send stop" aria-label="停止" disabled={!interruptible}
-                      onClick={() => agent.current.request('turn/interrupt', { threadId: thread.current, turnId: turn.current }).catch(report)}><Square size={15} fill="currentColor" /></button>
-                      : <button className="send" type="submit" aria-label="发送" disabled={!draft.trim() || connection !== 'ready' || loading}><ArrowUp size={16} /></button>}
-                  </div>
-                </form>
-                {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
+              {!rows.length && !session && !loading && !error && <div className="welcome">
+                <span>{workspace}</span><h1>开始新会话</h1>
+              </div>}
+              {error && <div className="error">
+                <div className="error-message" role="alert">
+                  {connectionError ? <>
+                    <strong>{!config?.ssh && /program not found|os error 2|ENOENT/i.test(error)
+                      ? `本机找不到 ${backendName} CLI` : '无法连接到 Agent'}</strong>
+                    <details><summary>技术详情</summary><p>{error}</p></details>
+                  </> : error}
+                </div>
+                {connectionError && <button type="button" className="retry" onClick={() => {
+                  if (config) setConfig({ ...config });
+                }}>重新连接</button>}
+                <button className="icon-button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={16} /></button>
+              </div>}
+              {running && <div className="live" role="status"><i />{status.split('\n').at(-1)?.replace(/\*\*/g, '') || '正在处理'}</div>}
+              {question && <div className="approval">
+                <strong>{question.method.endsWith('requestApproval') ? '需要你的确认' : 'Agent 请求输入'}</strong>
+                <span>{question.params.command || question.params.reason}</span>
+                {question.method.endsWith('requestApproval') ? <div>
+                  <button className="primary" onClick={() => answer({ decision: 'accept' })}>允许一次</button>
+                  <button onClick={() => answer({ decision: 'decline' })}>拒绝</button>
+                </div> : question.method === 'item/tool/requestUserInput' ? <form onSubmit={event => {
+                  event.preventDefault();
+                  const data = new FormData(event.currentTarget);
+                  answer({ answers: Object.fromEntries(question.params.questions.map(({ id }) => [id, { answers: [data.get(id)] }])) });
+                }}>
+                  {question.params.questions.map(item => <label key={item.id}>{item.question}
+                    {item.options?.length ? <select name={item.id}>{item.options.map(option =>
+                      <option key={option.label}>{option.label}</option>)}</select> : <input required name={item.id} />}
+                  </label>)}<button className="primary">提交回答</button>
+                </form> : <button onClick={() => agent.current.send({ id: question.id,
+                  error: { code: -32601, message: 'Unsupported request' } }).then(() => setQuestion(null)).catch(report)}>关闭请求</button>}
+              </div>}
+              <form className="composer" onSubmit={event => { event.preventDefault(); send(); }}>
+                <textarea ref={input} rows={2} placeholder={session ? '继续这个会话…' : '向工作台发送消息…'} aria-label="消息"
+                  value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => {
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      send();
+                    }
+                  }} />
+                <div className="composer-bar">
+                  <button type="button" className="connection" title={`${host} · ${connectionLabel}`} onClick={() => showTab('hosts')}>
+                    <i className={connection} /><span>{host}</span><ChevronDown size={12} />
+                  </button>
+                  <span className="composer-status" role="status">{connection !== 'ready' && connectionLabel}</span>
+                  {showLatest && rows.length > 0 && <button type="button" className="icon-button jump-latest" title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
+                    follow.current = true;
+                    const element = scroll.current;
+                    element.scrollTop = element.scrollHeight;
+                  }}><ArrowDown size={16} /></button>}
+                  <button type="button" className="composer-agent" title="切换 Agent 后端" onClick={() => showTab('hosts')}>
+                    {backendName}<ChevronDown size={12} />
+                  </button>
+                  {running ? <button type="button" className="send stop" aria-label="停止" disabled={!interruptible}
+                    onClick={() => agent.current.request('turn/interrupt', { threadId: thread.current, turnId: turn.current }).catch(report)}><Square size={15} fill="currentColor" /></button>
+                    : <button className="send" type="submit" aria-label="发送" disabled={!draft.trim() || connection !== 'ready' || loading}><ArrowUp size={16} /></button>}
+                </div>
+              </form>
+              {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
             </div>
           </div>
           {terminal && config && <Suspense fallback={<div className="terminal-panel">正在打开终端…</div>}>

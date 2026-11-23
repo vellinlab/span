@@ -68,7 +68,8 @@ pub fn run() -> Result<()> {
         let result = match packet["method"].as_str().unwrap_or_default() {
             "initialize" => json!({"userAgent":"Span preview fixture"}),
             "thread/list" => {
-                json!({"data":[{"id":THREAD,"name":TITLE,"cwd":cwd,"preview":TITLE}],"nextCursor":null})
+                json!({"data":[{"id":THREAD,"name":TITLE,"cwd":cwd,"preview":TITLE,
+                    "gitInfo":{"branch":"prototype/web-workbench"}}],"nextCursor":null})
             }
             "thread/start" | "thread/resume" => {
                 let turns = if params["excludeTurns"] == true {

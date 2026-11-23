@@ -192,7 +192,7 @@ p { margin-block: 0 12px; }
   margin-top: auto;
   padding-top: 8px;
 }
-.sidebar nav.sidebar-tools button { gap: 5px; padding-inline: 5px; color: var(--muted); font-size: 12px; }
+.sidebar nav.sidebar-tools button { gap: 4px; padding-inline: 4px; color: var(--muted); font-size: 12px; }
 .sidebar-tools button[aria-pressed="true"] { background: var(--selected); color: #ededed; }
 .path { margin: 4px 8px 7px; color: var(--muted); font: 12px/18px var(--mono); }
 .host-form, .approval form { display: grid; gap: 12px; margin: 12px 0; }
