@@ -13,6 +13,10 @@ cleanup() {
         for log in "$fixture"/{span,gateway}.log; do
             if [[ -f "$log" ]]; then cat "$log" >&2; fi
         done
+        if [[ -f "$fixture/wire.log" ]]; then
+            grep -E '"type":"fileChange"|"method":"turn/diff/updated"' \
+                "$fixture/wire.log" | tail -n 12 >&2 || true
+        fi
         if [[ -d "$CODEX_HOME/log" ]]; then
             find "$CODEX_HOME/log" -type f -exec tail -n 50 {} \; >&2
         fi
@@ -29,11 +33,18 @@ trap 'cleanup "$?"' EXIT
 
 export HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/config" XDG_DATA_HOME="$fixture/data"
 export CODEX_HOME="$fixture/codex" TMPDIR="$fixture/tmp" GDK_BACKEND=x11
-export PATH="$(dirname "$codex"):$PATH"
 export GTK_IM_MODULE=gtk-im-context-simple
 unset NO_AT_BRIDGE
-mkdir -p "$HOME" "$CODEX_HOME" "$TMPDIR" "$fixture/workspace"
+mkdir -p "$HOME" "$CODEX_HOME" "$TMPDIR" "$fixture/workspace" "$fixture/bin"
 git init --quiet "$fixture/workspace"
+export SPAN_TEST_CODEX="$codex" SPAN_TEST_WIRE_LOG="$fixture/wire.log"
+export PATH="$fixture/bin:$PATH"
+cat > "$fixture/bin/codex" <<'SCRIPT'
+#!/bin/bash
+set -o pipefail
+"$SPAN_TEST_CODEX" "$@" | tee -a "$SPAN_TEST_WIRE_LOG"
+SCRIPT
+chmod +x "$fixture/bin/codex"
 
 wait_for() {
     local check="$1"
