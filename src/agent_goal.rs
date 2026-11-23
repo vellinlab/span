@@ -143,16 +143,16 @@ impl Agent {
         match action {
             Action::Refresh(revision) => {
                 if revision == self.goal_revision.get() {
-                    self.render_goal(&result["goal"]);
+                    self.render_goal(&result["goal"], true);
                 }
             }
             Action::Command { edit, draft } => {
                 self.goal_pending.set(false);
                 if result.get("cleared").is_some() {
-                    self.goal_card.hide();
+                    self.render_goal(&Value::Null, false);
                     self.show_status("已清除会话目标");
                 } else {
-                    self.render_goal(&result["goal"]);
+                    self.show_goal(&result["goal"]);
                     if result["goal"].is_null() {
                         self.show_status("当前会话没有目标。");
                     }
@@ -168,7 +168,7 @@ impl Agent {
             }
             Action::Save => {
                 self.goal_pending.set(false);
-                self.render_goal(&result["goal"]);
+                self.show_goal(&result["goal"]);
                 self.replace_command(&self.editor_text(), "");
                 self.set_goal_mode(false);
             }
@@ -178,10 +178,21 @@ impl Agent {
     pub(super) fn goal_updated(&self, goal: &Value) {
         self.goal_revision
             .set(self.goal_revision.get().wrapping_add(1));
-        self.render_goal(goal);
+        self.render_goal(goal, false);
     }
 
-    fn render_goal(&self, goal: &Value) {
+    fn show_goal(&self, goal: &Value) {
+        self.render_goal(goal, false);
+        self.goal_visibility.borrow_mut().reveal();
+        self.goal_card
+            .set_visible(self.goal_visibility.borrow().is_visible());
+    }
+
+    fn render_goal(&self, goal: &Value, restored: bool) {
+        let mut visibility = self.goal_visibility.borrow_mut();
+        visibility.read(goal, restored);
+        let visible = visibility.is_visible();
+        drop(visibility);
         let Some(objective) = goal["objective"].as_str() else {
             self.goal_card.hide();
             return;
@@ -206,7 +217,7 @@ impl Agent {
             .unwrap_or_default();
         self.goal_elapsed.set_text(&elapsed);
         self.goal_elapsed.set_visible(!elapsed.is_empty());
-        self.goal_card.show();
+        self.goal_card.set_visible(visible);
     }
 }
 

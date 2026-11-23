@@ -8,7 +8,7 @@ use crate::agent_extensions::{
     self, Action as ExtensionAction, Extensions, Request as ExtensionRequest,
     Section as ExtensionSection,
 };
-use crate::agent_interaction::Reasoning;
+use crate::agent_interaction::{GoalVisibility, Reasoning};
 use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
@@ -207,6 +207,7 @@ pub struct Agent {
     special_turn: Cell<bool>,
     goal: gtk::Label,
     goal_card: gtk::Box,
+    goal_visibility: RefCell<GoalVisibility>,
     goal_elapsed: gtk::Label,
     goal_mode: Cell<bool>,
     goal_mode_bar: gtk::Box,
@@ -376,6 +377,10 @@ impl Agent {
         goal_card.set_no_show_all(true);
         goal_card.style_context().add_class("agent-goal");
         goal_card.pack_start(&goal, true, true, 0);
+        let dismiss_goal = icons::button(Icon::Close, "收起目标卡片", "收起目标卡片");
+        dismiss_goal.set_focus_on_click(false);
+        dismiss_goal.show();
+        goal_card.pack_end(&dismiss_goal, false, false, 0);
         let goal_elapsed = gtk::Label::new(None);
         goal_elapsed.style_context().add_class("agent-status");
         goal_card.pack_end(&goal_elapsed, false, false, 0);
@@ -588,6 +593,7 @@ impl Agent {
             special_turn: Cell::new(false),
             goal,
             goal_card,
+            goal_visibility: RefCell::new(GoalVisibility::default()),
             goal_elapsed,
             goal_mode: Cell::new(false),
             goal_mode_bar,
@@ -615,6 +621,13 @@ impl Agent {
                 && agent.cancel_goal_draft()
             {
                 agent.input.grab_focus();
+            }
+        });
+        let weak = Rc::downgrade(&agent);
+        dismiss_goal.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                agent.goal_visibility.borrow_mut().dismiss();
+                agent.goal_card.hide();
             }
         });
         agent.bind();
@@ -2145,6 +2158,7 @@ impl Agent {
         self.reset_slash_state();
         self.goal_pending.set(false);
         self.goal_card.hide();
+        self.goal_visibility.replace(GoalVisibility::default());
         self.follow_tail.set(true);
         self.turn_copy.borrow_mut().clear();
         self.past_activity.borrow_mut().clear();

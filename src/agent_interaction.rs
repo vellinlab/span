@@ -141,6 +141,37 @@ fn headline(text: &str) -> Option<String> {
     })
 }
 
+// Presentation state only. Dismissing a card leaves the server's goal intact.
+#[derive(Default)]
+pub struct GoalVisibility {
+    key: Option<(Option<i64>, String)>,
+    dismissed: bool,
+}
+
+impl GoalVisibility {
+    pub fn read(&mut self, goal: &Value, restored: bool) {
+        let key = goal["objective"]
+            .as_str()
+            .map(|objective| (goal["createdAt"].as_i64(), objective.to_owned()));
+        if key != self.key {
+            self.key = key;
+            self.dismissed = restored && goal["status"].as_str() == Some("complete");
+        }
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.key.is_some() && !self.dismissed
+    }
+
+    pub fn dismiss(&mut self) {
+        self.dismissed = true;
+    }
+
+    pub fn reveal(&mut self) {
+        self.dismissed = false;
+    }
+}
+
 pub fn elapsed(seconds: u64) -> String {
     let minutes = seconds / 60;
     if minutes < 60 {

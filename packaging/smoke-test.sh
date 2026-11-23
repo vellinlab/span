@@ -431,6 +431,14 @@ SVG
     xdotool key --clearmodifiers Escape
     slash '/goal resume'
     widget contains '目标 · 进行中'
+    touch "$HOME/agent-complete-goal"
+    slash '/goal status'
+    widget contains '目标 · 已完成'
+    widget mouse '收起目标卡片'
+    widget not-contains '目标 · 已完成'
+    test -s "$HOME/goal-preview-thread.json"
+    slash '/goal status'
+    widget contains '目标 · 已完成'
     slash '/goal clear'
     widget contains '已清除会话目标'
     slash '/plugins'

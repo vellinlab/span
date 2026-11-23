@@ -48,6 +48,7 @@ pub enum Action {
     GoalSelect(goal::Command),
     GoalAdvance(i8),
     GoalDismiss,
+    GoalDismissCard,
     Paste,
     AttachImage,
     Prepared(Uuid, Result<Option<Prepared>, String>),
@@ -368,6 +369,7 @@ impl Agent {
             Action::GoalSelect(command) => return self.select_goal(command),
             Action::GoalAdvance(delta) => self.goals.advance(delta),
             Action::GoalDismiss => return self.dismiss_goal(),
+            Action::GoalDismissCard => self.goals.dismiss_card(),
             Action::Paste
                 if self.preparing.is_none()
                     && !(self.goals.draft.is_some() && self.goal_pending()) =>

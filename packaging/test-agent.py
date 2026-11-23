@@ -227,6 +227,10 @@ for line in sys.stdin:
             goal = {"objective": params.get("objective") or goal["objective"], "status": params["status"],
                     "timeUsedSeconds": 3723}
             goal_file.write_text(json.dumps(goal))
+        if method == "thread/goal/get" and goal and (home / "agent-complete-goal").exists():
+            (home / "agent-complete-goal").unlink()
+            goal["status"] = "complete"
+            goal_file.write_text(json.dumps(goal))
         if method == "thread/goal/clear":
             assert params["origin"] == "user" and goal
             goal_file.unlink()
