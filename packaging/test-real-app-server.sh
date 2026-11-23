@@ -10,7 +10,9 @@ display_pid=
 gateway_pid=
 cleanup() {
     if [[ $1 != 0 ]]; then
-        cat "$fixture"/{span,gateway}.log >&2
+        for log in "$fixture"/{span,gateway}.log; do
+            if [[ -f "$log" ]]; then cat "$log" >&2; fi
+        done
         if [[ -d "$CODEX_HOME/log" ]]; then
             find "$CODEX_HOME/log" -type f -exec tail -n 50 {} \; >&2
         fi
@@ -66,10 +68,10 @@ wait_for test -s "$fixture/display"
 export DISPLAY=":$(cat "$fixture/display")"
 
 widget_socket="$fixture/widgets.sock"
-/usr/bin/python3 packaging/test-widget.py --serve "$widget_socket" &
+/usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &
 widget_pid=$!
 wait_for test -S "$widget_socket"
-widget() { /usr/bin/python3 packaging/test-widget.py --request "$widget_socket" "$@"; }
+widget() { /usr/libexec/platform-python packaging/test-widget.py --request "$widget_socket" "$@"; }
 
 open_span() {
     "$span" >>"$fixture/span.log" 2>&1 &
@@ -85,7 +87,7 @@ send() {
 open_span
 widget set-text '工作目录' "$fixture/workspace"
 widget click '打开会话'
-widget state '选择模型' sensitive
+widget description '选择模型' 'span-ci-model'
 widget description '会话权限' '工作区权限'
 send 'Create the fixture file.'
 widget contains '命令执行审批'
