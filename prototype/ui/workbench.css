@@ -92,7 +92,7 @@ pre, code { font-family: var(--mono); }
 .send.stop { background: #424b61; color: #edf1ff; }
 .live { display: flex; align-items: center; gap: 7px; color: #b8c6f1; font-size: 12px; min-height: 26px; padding-left: 8px; }
 .approval { display: grid; gap: 6px; margin-bottom: 7px; padding: 9px 12px; background: #252933; border: 1px solid #404658; border-radius: 9px; }
-.terminal-panel { flex: 0 0 clamp(160px, 29vh, 300px); display: flex; flex-direction: column; min-width: 0; background: #13151a; border-top: 1px solid #373b46; }
+.terminal-panel { flex: 0 0 clamp(160px, 29vh, 300px); display: flex; flex-direction: column; min-height: 0; min-width: 0; background: #13151a; border-top: 1px solid #373b46; }
 .terminal-panel header { min-height: 33px; background: #1d2027; }
 .terminal-panel header strong { font-size: 12px; }
 .terminal-canvas { flex: 1; min-height: 0; overflow: hidden; padding: 5px 8px 3px; }

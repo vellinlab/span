@@ -69,6 +69,8 @@ class Responses(BaseHTTPRequestHandler):
                 raise ValueError("The patch result was not sent back to the model")
             else:
                 item = self.message("first-message", FIRST_REPLY)
+        elif latest_prompt == "Check the preview connection.":
+            item = self.message("preview-message", "Span preview is connected.")
         else:
             raise ValueError("Unexpected prompt in request")
         response_id = f"fixture-{self.server.responses + 1}"

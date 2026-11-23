@@ -117,7 +117,6 @@ def benchmark(name, binary):
                     xdo("mousemove", "--window", wid, 1070, 26, "click", 1)
                 else:
                     xdo("key", "ctrl+shift+a")
-                    widget("set-text", "会话 ID", "workspace-review")
                     widget("click", "打开会话")
                     widget("contains", "第 160 项")
                     widget("click", "会话页终端面板")

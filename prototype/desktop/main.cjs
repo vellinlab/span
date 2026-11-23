@@ -91,7 +91,10 @@ ipcMain.handle('span:request', (event, method, params) => {
 
 ipcMain.handle('span:workspace', (event, choose) => {
   if (!trusted(event)) throw new Error('无效的工作台请求。');
-  if (!choose) return demo ? path.join(root, 'sample') : app.getPath('home');
+  if (!choose) return {
+    cwd: demo ? path.join(root, 'sample') : app.getPath('home'),
+    demo,
+  };
   return dialog.showOpenDialog(window, { properties: ['openDirectory'] })
     .then(result => result.filePaths[0] ?? null);
 });

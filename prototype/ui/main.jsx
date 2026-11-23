@@ -45,22 +45,28 @@ const Transcript = memo(function Transcript({ rows, cursor, loadOlder, loading, 
     if (follow.current && rows.length) virtual.scrollToIndex(rows.length - 1, { align: 'end' });
   }, [rows, virtual, follow, prepend]);
 
-  function onWheel(event) {
+  function onScroll() {
     const element = scroll.current;
-    if (event.deltaY < 0) {
-      follow.current = false;
-      if (element.scrollTop < 160 && cursor && !loading) {
-        const first = virtualRows.find(item => item.end > element.scrollTop);
-        if (first) prepend.current = { key: first.key, distance: element.scrollTop - first.start };
-        loadOlder();
-      }
-    } else if (event.deltaY > 0 && element.scrollHeight - element.clientHeight - element.scrollTop < 60) {
-      follow.current = true;
+    const atBottom = element.scrollHeight - element.clientHeight - element.scrollTop < 40;
+    if (!follow.current && element.scrollTop < 160 && cursor && !loading && !prepend.current) {
+      const first = virtualRows.find(item => item.end > element.scrollTop);
+      if (first) prepend.current = { key: first.key, distance: element.scrollTop - first.start };
+      loadOlder();
     }
+    if (atBottom) follow.current = true;
   }
 
   return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
-    data-items={rows.length} onWheel={onWheel}>
+    data-items={rows.length} onScroll={onScroll}
+    onWheel={event => {
+      if (event.deltaY < 0) {
+        follow.current = false;
+        if (scroll.current.scrollTop < 160) onScroll();
+      }
+    }}
+    onPointerDown={event => {
+      if (event.clientX >= event.currentTarget.getBoundingClientRect().right - 13) follow.current = false;
+    }}>
     {rows.length ? <div className="reading-column rail" style={{ height: virtual.getTotalSize() }}>
       {virtualRows.map(item => <div className="message" key={item.key} data-index={item.index}
         ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)` }}>
@@ -83,6 +89,7 @@ function App() {
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
+  const [interruptible, setInterruptible] = useState(false);
   const [status, setStatus] = useState('');
   const [question, setQuestion] = useState(null);
   const [draft, setDraft] = useState('');
@@ -120,6 +127,7 @@ function App() {
     setRows([]);
     setCursor(null);
     setRunning(false);
+    setInterruptible(false);
     setStatus('');
     setSession(null);
     setQuestion(null);
@@ -131,7 +139,8 @@ function App() {
       .then(result => {
         if (scope !== requestScope.current) return;
         const older = historyRows([...(result.data ?? [])].reverse());
-        setRows(current => [...older, ...current.filter(row => !older.some(previous => previous.id === row.id))]);
+        const olderIds = new Set(older.map(row => row.id));
+        setRows(current => [...older, ...current.filter(row => !olderIds.has(row.id))]);
         setCursor(result.nextCursor ?? null);
       });
   }
@@ -212,12 +221,14 @@ function App() {
       setStatus(previous => (previous.startsWith(key + '\n') ? previous : key + '\n') + params.delta);
     } else if (method === 'turn/started') {
       turn.current = params.turn.id;
+      setInterruptible(true);
       busy.current = true;
       setRunning(true);
     } else if (method === 'turn/completed') {
       turn.current = null;
       busy.current = false;
       setRunning(false);
+      setInterruptible(false);
       setStatus('');
       setQuestion(null);
       if (params.turn.error?.message) setError(params.turn.error.message);
@@ -225,7 +236,7 @@ function App() {
   }
 
   useEffect(() => {
-    window.span.workspace(false).then(cwd => setConfig({ cwd, backend: 'codex', ssh: '' })).catch(report);
+    window.span.workspace(false).then(settings => setConfig({ ...settings, backend: 'codex', ssh: '' })).catch(report);
     return window.span.onEvent(packet => {
       if (packet.event === 'core-error') setError(packet.data);
     });
@@ -244,6 +255,7 @@ function App() {
       busy.current = false;
       turn.current = null;
       setRunning(false);
+      setInterruptible(false);
       setStatus('');
       setQuestion(null);
       setConnection('offline');
@@ -260,7 +272,7 @@ function App() {
       if (disposed) return;
       setConnection('ready');
       setSessions(result.data ?? []);
-      if (result.data?.length) await openSession(api, result.data[0]);
+      if (config.demo && result.data?.length) await openSession(api, result.data[0]);
     }
     start().catch(error => {
       if (disposed) return;
@@ -335,12 +347,16 @@ function App() {
       const result = await api.request('turn/start', {
         threadId: thread.current, input: [{ type: 'text', text, text_elements: [] }], summary: 'auto',
       });
-      if (scope === requestScope.current && busy.current) turn.current = result.turn.id;
+      if (scope === requestScope.current && busy.current) {
+        turn.current = result.turn.id;
+        setInterruptible(true);
+      }
     } catch (error) {
       if (scope !== requestScope.current) return;
       busy.current = false;
       turn.current = null;
       setRunning(false);
+      setInterruptible(false);
       report(error);
     }
   }
@@ -444,7 +460,7 @@ function App() {
                 const element = document.querySelector('[data-testid=transcript]');
                 element.scrollTop = element.scrollHeight;
               }}><ArrowDown size={16} /></button>
-              {running ? <button type="button" className="send stop" aria-label="停止" disabled={!turn.current}
+              {running ? <button type="button" className="send stop" aria-label="停止" disabled={!interruptible}
                 onClick={() => agent.current.request('turn/interrupt', { threadId: thread.current, turnId: turn.current }).catch(report)}><Square size={15} fill="currentColor" /></button>
                 : <button className="send" type="submit" aria-label="发送" disabled={!draft.trim() || connection !== 'ready' || loading}><ArrowUp size={19} /></button>}
             </div>

@@ -18,9 +18,21 @@ fn history() -> Vec<Value> {
     (1..=160)
         .map(|number| {
             let reply = match number % 8 {
-                0 => format!("**第 {number:03} 项 · 工作区响应检查**\n\n                    | 项目 | 状态 |\n| --- | --- |\n| 会话回放 | 已验证 |\n| 终端输出 | 持续接收 |\n\n                    本次检查覆盖输入焦点、长行换行和滚动位置。"),
-                1 => format!("**第 {number:03} 项 · 终端与会话**\n\n                    ```sh\nprintf '%s\\n' 'terminal ready'\n```\n\n                    终端进程独立运行，会话仅跟随可见内容更新。"),
-                _ => format!("**第 {number:03} 项 · 工作区记录**\n\n                    已复核会话记录、文件选择与窗口缩放。进度由 Agent 事件驱动，                    中英文保持自然换行，连续滚动时会保留当前阅读位置。"),
+                0 => format!(
+                    "**第 {number:03} 项 · 工作区响应检查**\n\n\
+                    | 项目 | 状态 |\n| --- | --- |\n| 会话回放 | 已验证 |\n| 终端输出 | 持续接收 |\n\n\
+                    本次检查覆盖输入焦点、长行换行和滚动位置。"
+                ),
+                1 => format!(
+                    "**第 {number:03} 项 · 终端与会话**\n\n\
+                    ```sh\nprintf '%s\\n' 'terminal ready'\n```\n\n\
+                    终端进程独立运行，会话仅跟随可见内容更新。"
+                ),
+                _ => format!(
+                    "**第 {number:03} 项 · 工作区记录**\n\n\
+                    已复核会话记录、文件选择与窗口缩放。进度由 Agent 事件驱动，\
+                    中英文保持自然换行，连续滚动时会保留当前阅读位置。"
+                ),
             };
             let items = if number == 1 || number == 160 {
                 vec![
@@ -64,7 +76,9 @@ pub fn run() -> Result<()> {
                 } else {
                     &history
                 };
+                let page = history.iter().rev().take(20).collect::<Vec<_>>();
                 json!({"thread":{"id":THREAD,"name":TITLE,"cwd":cwd,"turns":turns},
+                    "initialTurnsPage":{"data":page,"nextCursor":(history.len()-20).to_string()},
                     "cwd":cwd,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
             }
             "thread/turns/list" => {

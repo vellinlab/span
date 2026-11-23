@@ -30,6 +30,7 @@ fn event(output: &Output, kind: &str, generation: u64, payload: Value) -> io::Re
 }
 
 struct Agent {
+    generation: u64,
     child: process::Child,
     input: ChildStdin,
 }
@@ -42,6 +43,7 @@ impl Drop for Agent {
 }
 
 struct Terminal {
+    generation: u64,
     child: Box<dyn Child + Send + Sync>,
     master: Box<dyn MasterPty + Send>,
     input: Box<dyn Write + Send>,
@@ -97,7 +99,9 @@ fn agent_start(params: &Value, output: &Output, generation: u64) -> Result<Agent
         command
     } else {
         let mut command = Command::new(backend);
-        command.current_dir(workspace(params)?).arg("app-server");
+        command
+            .current_dir(process_directory(params)?)
+            .arg("app-server");
         command
     };
     #[cfg(windows)]
@@ -126,7 +130,11 @@ fn agent_start(params: &Value, output: &Output, generation: u64) -> Result<Agent
         }
         let _ = event(&output, "agent-closed", generation, Value::Null);
     });
-    Ok(Agent { child, input })
+    Ok(Agent {
+        generation,
+        child,
+        input,
+    })
 }
 
 fn dimensions(params: &Value) -> PtySize {
@@ -151,7 +159,7 @@ fn terminal_start(params: &Value, output: &Output, generation: u64) -> Result<Te
             env::var_os("SHELL").unwrap_or_else(|| "/bin/bash".into())
         };
         command = CommandBuilder::new(shell);
-        command.cwd(workspace(params)?);
+        command.cwd(process_directory(params)?);
     }
     command.env("TERM", "xterm-256color");
     let mut reader = pair.master.try_clone_reader()?;
@@ -173,6 +181,7 @@ fn terminal_start(params: &Value, output: &Output, generation: u64) -> Result<Te
         let _ = event(&output, "terminal-closed", generation, Value::Null);
     });
     Ok(Terminal {
+        generation,
         child,
         master: pair.master,
         input,
@@ -189,6 +198,14 @@ fn workspace(params: &Value) -> Result<PathBuf> {
         return Err("工作区必须是目录。".into());
     }
     Ok(cwd)
+}
+
+fn process_directory(params: &Value) -> Result<PathBuf> {
+    let _ = workspace(params)?;
+    // Windows canonical paths carry a verbatim prefix that cmd.exe treats as UNC.
+    Ok(PathBuf::from(
+        params["cwd"].as_str().expect("validated workspace"),
+    ))
 }
 
 fn entry_path(params: &Value) -> Result<PathBuf> {
@@ -276,10 +293,20 @@ impl Service {
                 self.agent = Some(agent_start(params, output, generation)?);
             }
             "agent.close" => {
-                self.agent.take();
+                if self
+                    .agent
+                    .as_ref()
+                    .is_some_and(|agent| agent.generation == generation)
+                {
+                    self.agent.take();
+                }
             }
             "agent.send" => {
-                let agent = self.agent.as_mut().ok_or("Agent 尚未连接。")?;
+                let agent = self
+                    .agent
+                    .as_mut()
+                    .filter(|agent| agent.generation == generation)
+                    .ok_or("Agent 尚未连接。")?;
                 serde_json::to_writer(&mut agent.input, &params["packet"])?;
                 agent.input.write_all(b"\n")?;
                 agent.input.flush()?;
@@ -289,16 +316,30 @@ impl Service {
                 self.terminal = Some(terminal_start(params, output, generation)?);
             }
             "terminal.close" => {
-                self.terminal.take();
+                if self
+                    .terminal
+                    .as_ref()
+                    .is_some_and(|terminal| terminal.generation == generation)
+                {
+                    self.terminal.take();
+                }
             }
             "terminal.write" => {
-                let terminal = self.terminal.as_mut().ok_or("终端尚未连接。")?;
+                let terminal = self
+                    .terminal
+                    .as_mut()
+                    .filter(|terminal| terminal.generation == generation)
+                    .ok_or("终端尚未连接。")?;
                 let input = params["data"].as_str().ok_or("无效的终端输入。")?;
                 terminal.input.write_all(input.as_bytes())?;
                 terminal.input.flush()?;
             }
             "terminal.resize" => {
-                let terminal = self.terminal.as_ref().ok_or("终端尚未连接。")?;
+                let terminal = self
+                    .terminal
+                    .as_ref()
+                    .filter(|terminal| terminal.generation == generation)
+                    .ok_or("终端尚未连接。")?;
                 terminal.master.resize(dimensions(params))?;
             }
             "files.list" => return files(params),

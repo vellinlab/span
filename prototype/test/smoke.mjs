@@ -40,7 +40,13 @@ try {
   await page.keyboard.type(linux ? 'printf "span_%s_%s\\n" local pty' : 'echo span_local_pty');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
-    .some(line => line.textContent.trim() === 'span_local_pty'), { timeout: 10_000 });
+    .some(line => line.textContent.trim() === 'span_local_pty'), null, { timeout: 10_000 });
+
+  if (!linux) {
+    await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
+      .some(line => /app\\sample>/i.test(line.textContent)));
+    assert.equal(await page.locator('.xterm-rows').getByText('UNC paths are not supported.', { exact: false }).count(), 0);
+  }
 
   if (process.env.SPAN_TEST_SSH_ALIAS) {
     await page.getByRole('button', { name: '主机', exact: true }).click();

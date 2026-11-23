@@ -3,7 +3,7 @@ set -euo pipefail
 if [[ ${1:-} != desktop ]]; then
     dnf -y install epel-release
     dnf -y install /artifacts/span-0.1.0-1.el8.x86_64.rpm \
-        nss alsa-lib cups-libs mesa-libgbm libXScrnSaver libXtst libxkbcommon \
+        curl nss alsa-lib cups-libs mesa-libgbm libXScrnSaver libXtst libxkbcommon \
         python39 python39-pip python3-pyatspi xorg-x11-server-Xvfb xdotool \
         dbus-daemon openbox google-noto-sans-cjk-ttc-fonts
     python3.9 -m pip install --disable-pip-version-check python-xlib==0.33
@@ -29,4 +29,5 @@ tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &
 for _ in {1..50}; do [[ -S "$widget_socket" ]] && break; sleep 0.1; done
+bash prototype/test/backend.sh "$fixture"
 python3.9 prototype/test/benchmark.py "$widget_socket" /artifacts/benchmark.json
