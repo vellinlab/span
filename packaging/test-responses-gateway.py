@@ -56,7 +56,7 @@ class Responses(BaseHTTPRequestHandler):
                 if item.get("type") == "function_call_output"
             }
             if "span-approval" not in outputs:
-                item = self.command("span-approval", {
+                item = self.tool_call("span-approval", {
                     "cmd": "printf '%s\\n' approved > span-ci-approval.txt; cat span-ci-approval.txt",
                     "sandbox_permissions": "require_escalated",
                     "justification": "Write the approval marker in the test workspace.",
@@ -64,7 +64,7 @@ class Responses(BaseHTTPRequestHandler):
             elif "approved" not in outputs["span-approval"]:
                 raise ValueError("The approved command result was not sent back to the model")
             elif "span-patch" not in outputs:
-                item = self.command("span-patch", {"cmd": f"apply_patch <<'EOF'\n{PATCH}\nEOF\n"})
+                item = self.tool_call("span-patch", {"cmd": f"apply_patch <<'EOF'\n{PATCH}\nEOF\n"})
             elif "span-ci-result.txt" not in outputs["span-patch"]:
                 raise ValueError("The patch result was not sent back to the model")
             else:
@@ -81,7 +81,7 @@ class Responses(BaseHTTPRequestHandler):
         ]
 
     @staticmethod
-    def command(call_id, arguments):
+    def tool_call(call_id, arguments):
         return {
             "type": "function_call",
             "call_id": call_id,
