@@ -115,7 +115,7 @@ grep -qx 'approved' "$fixture/workspace/span-ci-approval.txt"
 grep -qx 'Patched by the App Server.' "$fixture/workspace/span-ci-result.txt"
 widget click '关闭预览'
 widget mouse "修改文件 · $fixture/workspace/span-ci-result.txt"
-widget contains '+Patched by the App Server.'
+widget expanded-contains "修改文件 · $fixture/workspace/span-ci-result.txt" '+Patched by the App Server.'
 widget click '复制会话 ID'
 session="$(xclip -out -selection clipboard)"
 [[ "$session" =~ ^[[:xdigit:]-]+$ ]]
