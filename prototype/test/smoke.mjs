@@ -255,7 +255,8 @@ try {
   }
   await composer.fill('验证审批与表单。');
   await composer.press('Enter');
-  await page.getByText('验证审批与表单。', { exact: true }).waitFor();
+  await transcript.getByText('验证审批与表单。', { exact: true }).waitFor();
+  await page.locator('.send.stop:enabled').waitFor();
   await transcript.evaluate(element => { element.scrollTop = 300; });
   const latest = page.getByRole('button', { name: '滚到最新消息' });
   await latest.waitFor();
@@ -280,6 +281,23 @@ try {
   await composer.press('Escape');
   await page.getByRole('region', { name: '用量' }).waitFor({ state: 'detached' });
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
+  const windowSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+  const terminalToggle = page.getByRole('button', { name: '切换终端' });
+  const wasTerminalOpen = await terminalToggle.getAttribute('aria-pressed') === 'true';
+  if (!wasTerminalOpen) await terminalToggle.click();
+  await page.locator('section.terminal-panel').waitFor();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
+  assert.ok(await page.evaluate(() => {
+    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    return rect('.timeline').height > 0 && rect('.approval-actions').bottom <= rect('.composer').top &&
+      rect('.composer').bottom <= rect('.terminal-panel').top;
+  }), 'History, approval actions and the composer fit above the terminal at the minimum window size');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval-compact.png') });
+  await app.evaluate(({ BrowserWindow }, [width, height]) =>
+    BrowserWindow.getAllWindows()[0].setContentSize(width, height), windowSize);
+  await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);
+  if (!wasTerminalOpen) await terminalToggle.click();
   await approval.getByRole('button', { name: '拒绝' }).press('Enter');
   const question = page.getByRole('region', { name: 'Agent 请求输入' });
   await question.waitFor();

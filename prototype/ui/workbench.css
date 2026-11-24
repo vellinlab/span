@@ -234,7 +234,7 @@ p { margin-block: 0 12px; }
   min-height: 0;
 }
 .main, .conversation { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
-.conversation { overflow: hidden; }
+.conversation { overflow: hidden; container-type: size; }
 .conversation-empty { justify-content: safe center; overflow: auto; }
 .conversation-empty .timeline { flex: 0 0 0; }
 .timeline {
@@ -457,7 +457,8 @@ p { margin-block: 0 12px; }
 .approval {
   display: flex;
   flex-direction: column;
-  max-height: min(36vh, 300px);
+  /* Leave room for the composer, goal and a line of history above them. */
+  max-height: clamp(96px, calc(100cqh - 218px), min(36vh, 300px));
   border-color: #b3a37455;
   font-size: 13px;
   overflow-wrap: anywhere;
