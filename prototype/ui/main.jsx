@@ -329,7 +329,7 @@ function App() {
         const final = rows.findLast(row => row.kind === 'message' && row.final && (!row.phase || row.phase === 'final'));
         if (!final) throw new Error('当前会话没有可复制的完整回复。');
         const parts = rows.filter(row => row.turnId === final.turnId && row.id === final.id && row.kind === 'message');
-        await navigator.clipboard.writeText(parts.map(row => row.text).join(''));
+        await window.span.copyText(parts.map(row => row.text).join(''));
         return true;
       }
       case '/goal': {

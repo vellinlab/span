@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const path = require('node:path');
@@ -12,6 +12,7 @@ const allowed = new Set([
   'files.list', 'files.preview',
 ]);
 const terminalEvents = new Set(['terminal', 'terminal-error', 'terminal-closed']);
+const maxClipboardLength = 64 * 1024 * 1024;
 
 app.setName('Span Workbench Preview');
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-lcd-text');
@@ -125,6 +126,13 @@ ipcMain.handle('span:link', (event, url) => {
   if (!trusted(event) || typeof url !== 'string' || url.length > 8192) return;
   const link = new URL(url);
   if (link.protocol === 'https:' || link.protocol === 'http:') return shell.openExternal(link.href);
+});
+
+ipcMain.handle('span:copy-text', (event, text) => {
+  if (!trusted(event) || typeof text !== 'string' || text.length > maxClipboardLength) {
+    throw new Error('无效的剪贴板文本。');
+  }
+  clipboard.writeText(text);
 });
 
 app.whenReady().then(() => {

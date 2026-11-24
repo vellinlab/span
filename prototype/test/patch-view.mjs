@@ -7,6 +7,7 @@ import { _electron as electron } from 'playwright';
 const [candidate, screenshot, baseline] = process.argv.slice(2);
 const mainFile = 'prototype/ui/workbench.css';
 const lastLine = '+    include(record_5000, "new workbench rule");';
+const reply = '已记录文件变更。\n\n```text\npatch preview ready\n```';
 
 async function check(binary, legacy, screenshot) {
   const profile = await mkdtemp(join(tmpdir(), 'span-patch-'));
@@ -94,12 +95,24 @@ async function check(binary, legacy, screenshot) {
 
     const copy = patch.getByRole('button', { name: '复制差异' });
     await copy.click();
-    await patch.locator('[title="已复制差异"]').waitFor();
-    const raw = (await app.evaluate(({ clipboard }) => clipboard.readText())).replaceAll('\r\n', '\n');
+    await patch.locator('[title="已复制差异"]').waitFor({ timeout: 5000 });
+    const readClipboard = async () => (await app.evaluate(({ clipboard }) => clipboard.readText())).replaceAll('\r\n', '\n');
+    const raw = await readClipboard();
     assert.ok(raw.startsWith('--- a/' + mainFile) && raw.endsWith(lastLine + '\n'));
     assert.equal(raw.split('\n').length, 10006);
     await summary.click();
     await patch.locator('.diff-scroll').waitFor({ state: 'detached' });
+    await page.locator('.code-card').filter({ hasText: 'patch preview ready' }).getByRole('button', { name: '复制代码' }).click();
+    for (let retry = 0; retry < 80 && (await readClipboard()).trim() !== 'patch preview ready'; retry++) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.equal((await readClipboard()).trim(), 'patch preview ready');
+    await composer.fill('/copy');
+    await composer.press('Enter');
+    await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
+    assert.equal(await readClipboard(), reply);
+    await assert.rejects(page.evaluate(() => window.span.copyText({ text: '无效测试文本' })), /无效的剪贴板文本/);
+    assert.equal(await readClipboard(), reply);
     return { mountedAtStart, mountedAtEnd, rawLines: 10005 };
   } finally {
     await app?.close();

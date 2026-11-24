@@ -14,7 +14,7 @@ const components = {
     return <div className="code-card">
       <div className="code-heading"><Terminal size={14} />{language}
         <button className="icon-button right" title="复制代码"
-          onClick={() => navigator.clipboard.writeText(String(props?.children ?? ''))}><Copy size={14} /></button>
+          onClick={() => window.span.copyText(String(props?.children ?? '')).catch(() => {})}><Copy size={14} /></button>
       </div>
       <pre>{children}</pre>
     </div>;

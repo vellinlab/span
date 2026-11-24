@@ -82,7 +82,7 @@ function CopyPatch({ text }) {
   const Icon = copy === '已复制差异' ? Check : copy ? AlertCircle : Copy;
   return <button className="icon-button" type="button" aria-label="复制差异" title={copy || '复制差异'} onClick={async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await window.span.copyText(text);
       setCopy('已复制差异');
     } catch {
       setCopy('复制失败');
@@ -112,7 +112,7 @@ export const PatchView = memo(function PatchView({ files, text }) {
       </select> : files.length > 0 && <code className="card-path">{active.label}</code>}
       {active.diff && <CopyPatch key={active.key} text={active.diff} />}
     </header>
-    {active.diff ? <DiffReader key={active.key} text={active.diff} label={`${active.label}的差异`}
+    {active.diff ? <DiffReader key={active.key} text={active.diff} label={active.key === 'turn' ? active.label : `${active.label}的差异`}
       position={positions.current.get(active.key)} scroll={scroll} />
       : <p className="diff-empty">没有可显示的差异。</p>}
   </>;

@@ -299,7 +299,7 @@ pub fn run() -> Result<()> {
                         &output,
                         "item/completed",
                         json!({"threadId":THREAD,"turnId":turn,"item":{"type":"agentMessage",
-                            "id":format!("{turn}-patch-result"),"text":"已记录文件变更。"}}),
+                            "id":format!("{turn}-patch-result"),"text":"已记录文件变更。\n\n```text\npatch preview ready\n```"}}),
                     )?;
                     background.store(false, Ordering::Release);
                     notice(

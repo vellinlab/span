@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('span', {
   request: (method, params = {}) => ipcRenderer.invoke('span:request', method, params),
   workspace: (choose = false) => ipcRenderer.invoke('span:workspace', choose),
   openLink: url => ipcRenderer.invoke('span:link', url),
+  copyText: text => ipcRenderer.invoke('span:copy-text', text),
   onEvent: listener => {
     listeners.add(listener);
     return () => listeners.delete(listener);
