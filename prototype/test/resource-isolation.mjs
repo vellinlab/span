@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { availableParallelism, release, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
@@ -29,58 +29,96 @@ async function terminalLine(page, command, result) {
     .some(row => row.textContent.trim() === line), result, { timeout: 20_000 });
 }
 
-async function echoSample(page, key) {
-  await page.evaluate(key => {
-    const terminal = document.querySelector('.terminal-canvas');
-    const rows = terminal.querySelector('.xterm-rows');
-    const expected = `span_echo_${key}`;
-    window.spanEchoSample = new Promise(resolve => {
-      terminal.addEventListener('keydown', function start(event) {
-        if (event.key !== key || !event.isTrusted) return;
-        terminal.removeEventListener('keydown', start, true);
-        const started = performance.now();
-        const observer = new MutationObserver(() => {
-          if (![...rows.children].some(row => row.textContent.trim() === expected)) return;
-          observer.disconnect();
-          requestAnimationFrame(() => resolve(performance.now() - started));
-        });
-        observer.observe(rows, { childList: true, subtree: true });
-      }, true);
+async function echoSample(app, page, key) {
+  await app.evaluate(key => {
+    const state = globalThis.spanTerminalEcho;
+    state.result = new Promise(resolve => {
+      const timer = setTimeout(() => {
+        state.pending = undefined;
+        resolve(null);
+      }, 2000);
+      state.pending = { key, started: performance.now(), finish: ms => {
+        clearTimeout(timer);
+        state.pending = undefined;
+        resolve(ms);
+      } };
     });
   }, key);
   await page.keyboard.press(key);
-  return page.evaluate(() => Promise.race([
-    window.spanEchoSample,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('The terminal echo never reached the visible rows')), 2000)),
-  ]));
+  const ms = await app.evaluate(() => globalThis.spanTerminalEcho.result);
+  assert.ok(Number.isFinite(ms), `The frame observer did not see the terminal echo for ${key}`);
+  return ms;
 }
 
-async function terminalInteraction(page, screenshot) {
+async function prepareEchoFrames(app, page) {
+  const firstRow = page.locator('.xterm-rows > div').first();
+  const area = await firstRow.evaluate(row => {
+    const rect = row.getBoundingClientRect();
+    return { x: Math.ceil(rect.left), y: Math.ceil(rect.top), width: 128, height: Math.floor(rect.height) - 1 };
+  });
+  const references = {};
+  for (const key of 'ab') {
+    await page.keyboard.press(key);
+    await page.waitForFunction(key => document.querySelector('.xterm-rows > div').textContent.trim() === `span_echo_${key}`, key);
+    await settle(page);
+    references[key] = await app.evaluate(async ({ BrowserWindow }, area) => (await BrowserWindow.getAllWindows()[0]
+      .webContents.capturePage(area)).toBitmap().toString('hex'), area);
+  }
+  assert.ok(references.a && references.b && references.a !== references.b, 'The two terminal keys must paint different pixels');
+  await app.evaluate(({ BrowserWindow }, { area, references }) => {
+    const pixels = { a: Buffer.from(references.a, 'hex'), b: Buffer.from(references.b, 'hex') };
+    const state = { frames: 0, pixels };
+    globalThis.spanTerminalEcho = state;
+    BrowserWindow.getAllWindows()[0].webContents.beginFrameSubscription(false, image => {
+      state.frames++;
+      const pending = state.pending;
+      if (pending && image.crop(area).toBitmap().equals(state.pixels[pending.key])) {
+        pending.finish(performance.now() - pending.started);
+      }
+    });
+  }, { area, references });
+  await echoSample(app, page, 'a');
+  await echoSample(app, page, 'b');
+}
+
+async function terminalInteraction(app, page, screenshot) {
   const script = fileURLToPath(new URL('./terminal-echo.cjs', import.meta.url));
   await terminalLine(page, `"${process.execPath}" "${script}"`, 'span_echo_ready');
+  await prepareEchoFrames(app, page);
   const idleMs = [];
-  for (const key of '123456') {
+  for (const key of 'abababab') {
     await delay(165);
-    idleMs.push(await echoSample(page, key));
+    idleMs.push(await echoSample(app, page, key));
   }
-  await echoSample(page, 'g');
+  await page.keyboard.press('g');
   await page.waitForFunction(() => document.querySelector('.xterm-rows').innerText.includes('span_interaction_3'));
   const streamingMs = [];
-  for (const key of 'abcdefhijklm') {
+  for (const key of 'abababababab') {
     await delay(165 + streamingMs.length % 3 * 16);
-    streamingMs.push(await echoSample(page, key));
+    streamingMs.push(await echoSample(app, page, key));
   }
+  const frames = await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.endFrameSubscription();
+    return globalThis.spanTerminalEcho.frames;
+  });
+  assert.ok(frames >= idleMs.length + streamingMs.length + 2);
   assert.match(await page.locator('.xterm-rows').innerText(), /span_interaction_\d+/);
   await page.keyboard.press('q');
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')].some(row => {
     if (row.textContent.trim() !== '绘_echo_final') return false;
     return [...row.querySelectorAll('.xterm-fg-2')].map(span => span.textContent).join('').trim() === '绘_echo_final';
   }));
-  await terminalLine(page, 'exit', '[终端已退出]');
-  const visible = await page.locator('.xterm-rows').innerText();
-  assert.match(visible, /绘_echo_final[\s\S]*\[终端已退出\]/);
+  if (linux) {
+    await terminalLine(page, 'exit', '[终端已退出]');
+    assert.match(await page.locator('.xterm-rows').innerText(), /绘_echo_final[\s\S]*\[终端已退出\]/);
+  }
   await page.screenshot({ path: screenshot });
-  return { idleMs, streamingMs };
+  await page.getByRole('button', { name: '关闭终端' }).click();
+  await page.locator('.terminal-canvas').waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: '切换终端' }).click();
+  await terminalLine(page, linux ? `printf '%s_%s\\n' span_echo reopened` : 'echo span_echo_reopened', 'span_echo_reopened');
+  assert.doesNotMatch(await page.locator('.xterm-rows').innerText(), /绘_echo_final/);
+  return { idleMs, streamingMs, frames };
 }
 
 async function output(page) {
@@ -161,7 +199,12 @@ async function trial(workload, variant, executable) {
     if (workload === 'interaction') {
       await openTerminal();
       const screenshot = reportPath.replace(/\.json$/, `-${variant}-terminal-end.png`);
-      return { workload, variant, ...await terminalInteraction(page, screenshot) };
+      try {
+        return { workload, variant, ...await terminalInteraction(app, page, screenshot) };
+      } catch (error) {
+        await page.screenshot({ path: screenshot }).catch(() => {});
+        throw error;
+      }
     }
     const [pid, cdp] = await Promise.all([
       app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getOSProcessId()),
@@ -197,7 +240,10 @@ async function trial(workload, variant, executable) {
   }
 }
 
-const report = { platform: process.platform, window: initialSize, activeWindowMs, baselineCommit, trials: [], interaction: [] };
+const report = {
+  platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
+  window: initialSize, activeWindowMs, baselineCommit, trials: [], interaction: [],
+};
 const run = (workload, variant) => trial(workload, variant, variant === 'baseline' ? baselineBinary : binary);
 const publish = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
 let outputPair = 0;
