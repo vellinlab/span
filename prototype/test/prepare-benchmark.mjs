@@ -20,6 +20,11 @@ try {
       await page.keyboard.press('Enter');
     }
   }
+  if (command === '--wait-for-history' || command === '--close-terminal') {
+    const session = await browser.newBrowserCDPSession();
+    const { processInfo } = await session.send('SystemInfo.getProcessInfo');
+    console.log(JSON.stringify(processInfo.map(({ id, type }) => ({ id, type }))));
+  }
 } finally {
   await browser.close();
 }

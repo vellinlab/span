@@ -34,9 +34,11 @@ def widget(*args):
     ).strip()
 
 
-def process_role(process, root_pid):
+def process_role(process, root_pid, chromium_roles):
     if process == root_pid:
         return "main"
+    if process in chromium_roles:
+        return chromium_roles[process]
     try:
         args = Path(f"/proc/{process}/cmdline").read_bytes().split(b"\0")
     except OSError:
@@ -52,7 +54,7 @@ def process_role(process, root_pid):
     return "other"
 
 
-def stats(pid):
+def stats(pid, chromium_roles=None):
     children = {}
     ticks = {}
     for file in Path("/proc").glob("[0-9]*/stat"):
@@ -68,12 +70,13 @@ def stats(pid):
         app.extend(children.get(process, []))
     memory = dict.fromkeys(("Pss", "Rss", "Private_Dirty"), 0)
     roles = {}
+    chromium_roles = chromium_roles or {}
     for process in app:
         try:
             lines = Path(f"/proc/{process}/smaps_rollup").read_text().splitlines()
         except OSError:
             continue
-        group = roles.setdefault(process_role(process, pid), dict.fromkeys((*memory, "processes"), 0))
+        group = roles.setdefault(process_role(process, pid, chromium_roles), dict.fromkeys((*memory, "processes"), 0))
         group["processes"] += 1
         for line in lines:
             key, _, value = line.partition(":")
@@ -86,6 +89,14 @@ def stats(pid):
                   main_cpu_ms=1000 * ticks.get(pid, 0) / CLOCK_TICKS,
                   processes=len(app), by_role=roles)
     return memory
+
+
+def browser_roles(browser, phase):
+    report = subprocess.check_output([*browser, phase], text=True, timeout=28)
+    roles = {process["id"]: process["type"] for process in json.loads(report)}
+    if "renderer" not in roles.values():
+        raise RuntimeError("Chromium did not report a renderer PID")
+    return roles
 
 
 def try_until(check, timeout=3):
@@ -134,6 +145,7 @@ def benchmark(name, binary):
             ["taskset", "-c", CPU, binary, *args], env=env, stdout=log, stderr=log,
         ) as app:
             try:
+                chromium_roles = None
                 title = "^Span" if candidate else "^Span$"
                 wid = int(subprocess.check_output(
                     ["timeout", "20", "xdotool", "search", "--sync", "--onlyvisible",
@@ -148,8 +160,8 @@ def benchmark(name, binary):
                         raise RuntimeError("Could not open the benchmark automation port")
                     port = port_file.read_text().splitlines()[0]
                     browser = ["/artifacts/node", "prototype/test/prepare-benchmark.mjs", port]
-                    subprocess.run([*browser, "--wait-for-history"], check=True, timeout=28)
-                    before_terminal = stats(app.pid)
+                    chromium_roles = browser_roles(browser, "--wait-for-history")
+                    before_terminal = stats(app.pid, chromium_roles)
                     subprocess.run([*browser, command], check=True, timeout=28)
                 else:
                     xdo("key", "ctrl+shift+a")
@@ -175,7 +187,7 @@ def benchmark(name, binary):
                 if not try_until((workspace / "span-terminal-ready").is_file, 5):
                     raise RuntimeError(f"{name}: the terminal stream did not start")
                 time.sleep(.35)
-                start_stats = stats(app.pid)
+                start_stats = stats(app.pid, chromium_roles)
                 xdo("mousemove", "--window", wid, 650, 240)
                 scroll = []
                 timeouts = 0
@@ -235,7 +247,7 @@ def benchmark(name, binary):
                     mouse(1, False)
                     screen.sync()
 
-                end = stats(app.pid)
+                end = stats(app.pid, chromium_roles)
                 record = {"app": name, "memory_kib": {key: end[key] for key in
                           ("Pss", "Rss", "Private_Dirty")}, "processes": end["processes"],
                           "by_role": end["by_role"],
@@ -245,10 +257,12 @@ def benchmark(name, binary):
                           "resize_geometry": sample(geometry), "resize_visible": sample(drag),
                           "resize_error": resize_error}
                 if candidate:
-                    subprocess.run([*browser, "--close-terminal"], check=True, timeout=15)
-                    after_close = stats(app.pid)
+                    if "renderer" not in end["by_role"]:
+                        raise RuntimeError("Chromium renderer PID did not match the process tree")
+                    chromium_roles = browser_roles(browser, "--close-terminal")
+                    after_close = stats(app.pid, chromium_roles)
                     time.sleep(2)
-                    after_settle = stats(app.pid)
+                    after_settle = stats(app.pid, chromium_roles)
                     record["terminal_memory_kib"] = {
                         stage: {key: measurement[key] for key in ("Pss", "Rss", "Private_Dirty", "by_role")}
                         for stage, measurement in (("before_open", before_terminal), ("active", end),
