@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Markdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
+import { ReasoningText } from './reasoning.jsx';
 import { timelineLayout, visibleRow } from './timeline.js';
 
 const truncate = text => text.length > 256 * 1024 ? text.slice(0, 256 * 1024) + '\n…' : text;
@@ -41,9 +42,7 @@ function ArtifactList({ artifacts, openArtifact }) {
 
 function Card({ icon: Icon, type, title, status, hint, expanded, toggle, children }) {
   const head = <><Icon size={15} className="card-icon" /><span className="card-title" title={title}>{title}</span>
-    {hint && <span className={`card-hint${type === 'reasoning' ? ' reasoning-preview' : ''}`} title={hint}>
-      {type === 'reasoning' ? <bdi>{hint}</bdi> : hint}
-    </span>}
+    {hint && <span className="card-hint" title={hint}>{hint}</span>}
     {status && status !== 'completed' && <span className="card-status" data-status={status}>{statusLabels[status]}</span>}</>;
   return <div className="activity" data-card={type}>
     {children ? <details open={expanded} onToggle={event => {
@@ -60,7 +59,7 @@ const cardIcons = {
   search: Search, delegation: Users, artifact: Image, notice: GitBranch,
 };
 
-const TranscriptRow = memo(function TranscriptRow({ row, liveReasoning, expanded, toggle, openSession, openArtifact, canOpenSession }) {
+const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openSession, openArtifact, canOpenSession }) {
   if (row.kind === 'user') return <div className="user-message">
     {row.text}{row.queued && row.queued !== 'delivered' && <small className="queued-input">
       {row.queued === 'cancelled' ? '已取消排队' : '等待当前任务结束'}
@@ -74,9 +73,7 @@ const TranscriptRow = memo(function TranscriptRow({ row, liveReasoning, expanded
   switch (row.kind) {
     case 'reasoning':
       title = '推理摘要';
-      if (liveReasoning && !expanded) hint = row.preview;
-      detail = () => Array.from(row.sources, ([source, { sections }]) => sections.map((section, index) =>
-        section?.trim() && <Markdown key={JSON.stringify([source, index])} text={section} />));
+      detail = () => <ReasoningText row={row} />;
       break;
     case 'plan':
       title = row.steps?.length ? '任务计划' : '规划草案';
@@ -134,7 +131,7 @@ const TranscriptRow = memo(function TranscriptRow({ row, liveReasoning, expanded
 });
 
 export const Transcript = memo(function Transcript({
-  rows, activeTurnId, cursor, loadOlder, loading, jumpToLatest, scroll, onScrollPosition, openSession, openArtifact, canOpenSession,
+  rows, liveReasoningKey, cursor, loadOlder, loading, jumpToLatest, scroll, onScrollPosition, openSession, openArtifact, canOpenSession,
 }) {
   const expanded = useRef(new Map());
   const following = useRef(true);
@@ -143,9 +140,12 @@ export const Transcript = memo(function Transcript({
     expanded.current.set(key, open);
     updateExpansion();
   }, []);
+  const layout = timelineLayout(rows);
+  const estimate = useCallback(index => layout.getItemKey(index) === liveReasoningKey ? 0 : layout.estimateSize(index), [layout, liveReasoningKey]);
   const virtual = useVirtualizer({
     count: rows.length, getScrollElement: () => scroll.current,
-    ...timelineLayout(rows), overscan: 6, paddingStart: 20, paddingEnd: 14,
+    getItemKey: layout.getItemKey, estimateSize: liveReasoningKey ? estimate : layout.estimateSize,
+    overscan: 6, paddingStart: 20, paddingEnd: 14,
     anchorTo: 'end', followOnAppend: true, scrollEndThreshold: 40,
   });
   const virtualRows = virtual.getVirtualItems();
@@ -189,11 +189,10 @@ export const Transcript = memo(function Transcript({
       {virtualRows.map(item => {
         const row = rows[item.index];
         const depth = Math.max(0, Math.min(3, row.depth ?? 0));
-        const show = Boolean(visibleRow(row));
+        const show = row.key !== liveReasoningKey && Boolean(visibleRow(row));
         return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
           {show && <TranscriptRow row={row}
-            liveReasoning={row.kind === 'reasoning' && row.turnId === activeTurnId}
             expanded={expanded.current.get(row.key) ?? (row.kind === 'plan' && Boolean(row.steps?.length))}
             toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />}
         </div>;

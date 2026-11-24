@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, ListChecks, SlidersHorizontal, Users, X } from 'lucide-react';
+import { ReasoningText } from './reasoning.jsx';
 
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', limited: '达到用量上限', unknown: '状态未知',
 };
 const memberStatuses = { pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止' };
 const number = new Intl.NumberFormat('zh-CN');
-const titles = { settings: '运行设置', goal: '会话目标', usage: '用量', agents: '代理与团队', output: '会话信息' };
+const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息' };
 const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
 
 export function agentCommands(api, models, options) {
@@ -239,14 +240,15 @@ function AgentsPanel({ work, openSession, report }) {
   </div>;
 }
 
-export function AgentPanel({ panel, work, setPanel, report, openSession }) {
+export function AgentPanel({ panel, work, reasoning, setPanel, report, openSession }) {
   const close = useRef(null);
   useLayoutEffect(() => {
     if (panel?.focus) close.current?.focus();
   }, [panel]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
-  return <section className="agent-panel popup-surface" id={panel.kind === 'goal' ? 'goal-panel' : undefined}
+  const id = panel.kind === 'goal' || panel.kind === 'reasoning' ? `${panel.kind}-panel` : undefined;
+  return <section className="agent-panel popup-surface" id={id} data-kind={panel.kind}
     aria-label={title} onKeyDown={event => {
       if (event.key === 'Escape' && panel.focus) setPanel(null);
     }}>
@@ -256,6 +258,7 @@ export function AgentPanel({ panel, work, setPanel, report, openSession }) {
     <div className="agent-panel-content">
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {panel.kind === 'goal' && <GoalPanel key={work.session?.ref.id} goal={work.goal} action={work.goalAction} report={report} />}
+      {panel.kind === 'reasoning' && <ReasoningText row={reasoning} />}
       {panel.kind === 'usage' && <UsagePanel usage={work.usage} refresh={work.refreshUsage} report={report} />}
       {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}

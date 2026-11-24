@@ -4,6 +4,13 @@ const reasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
 const positionsByRows = new WeakMap();
 const layoutByRows = new WeakMap();
 
+export function turnReasoning(rows, turnId) {
+  if (!turnId) return;
+  const key = reasoningKey(turnId);
+  const positions = positionsByRows.get(rows);
+  return positions ? rows[positions.get(key)?.[0]] : rows.findLast(row => row.key === key);
+}
+
 function estimateRow(row) {
   if (!visibleRow(row)) return 0;
   return row.kind === 'message' || row.kind === 'user' ? 92 : 34;

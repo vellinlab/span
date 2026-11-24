@@ -8,10 +8,12 @@ import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
 import { Interactions } from './interactions.jsx';
 import { Markdown } from './markdown.jsx';
+import { ReasoningStrip } from './reasoning.jsx';
 import { directoryName, SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
 import { Transcript } from './transcript.jsx';
+import { turnReasoning } from './timeline.js';
 import { useAgent } from './use-agent.js';
 import './workbench.css';
 
@@ -73,6 +75,9 @@ function App() {
   const refKey = sessionKey(session?.ref);
   const running = run?.status === 'running';
   const interaction = work.requests[0];
+  const liveReasoning = turnReasoning(rows, running ? run.id : undefined);
+  const showReasoning = Boolean(liveReasoning?.preview && !interaction);
+  const reasoningOpen = panel?.kind === 'reasoning';
   const previewBlocked = previewOverlay && Boolean(interaction);
   const readingOverlay = previewCoversConversation && !interaction;
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
@@ -104,6 +109,15 @@ function App() {
     setShowLatest(false);
     setCommandIndex(0);
   }, [refKey]);
+
+  useLayoutEffect(() => {
+    if (!reasoningOpen || showReasoning) return;
+    const focused = document.getElementById('reasoning-panel')?.contains(document.activeElement);
+    panelScope.current++;
+    panelTrigger.current = null;
+    setPanel(null);
+    if (focused) input.current?.focus({ preventScroll: true });
+  }, [reasoningOpen, showReasoning]);
 
   useLayoutEffect(() => {
     const focus = previewFocus.current;
@@ -558,7 +572,7 @@ function App() {
         <main className="main" inert={readingOverlay}>
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
             <Transcript key={refKey} rows={rows} cursor={work.cursor} loadOlder={work.loadOlder} loading={loading}
-              activeTurnId={running ? run.id : undefined}
+              liveReasoningKey={liveReasoning?.key}
               jumpToLatest={jumpToLatest} scroll={scroll} onScrollPosition={setShowLatest} openSession={openRef}
               openArtifact={openArtifact} canOpenSession={!running && !loading && connection === 'ready'} />
             <div className="composer-wrap reading-column">
@@ -576,7 +590,8 @@ function App() {
               </div>}
               {loading && !rows.length && <div className="live" role="status"><i />正在加载会话</div>}
               <div className="composer-overlay">
-                <AgentPanel panel={panel} work={work} setPanel={value => value ? setPanel(value) : closePanel()} report={report} openSession={openRef} />
+                <AgentPanel panel={panel} work={work} reasoning={reasoningOpen ? liveReasoning : undefined}
+                  setPanel={value => value ? setPanel(value) : closePanel()} report={report} openSession={openRef} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}
                     data-active={index === commandIndex % suggestions.length} onMouseDown={event => event.preventDefault()}
@@ -587,6 +602,8 @@ function App() {
               </div>
               <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host}
                 focusTarget={interactionRegion} returnFocus={input} />
+              {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningOpen} returnFocus={input}
+                toggle={event => reasoningOpen ? closePanel() : showPanel('reasoning', event.currentTarget)} />}
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
@@ -604,7 +621,7 @@ function App() {
                     <i className={connection} /><span>{backendName} · {host}</span><ChevronDown size={12} />
                   </button>
                   <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel :
-                    interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' : running ? '正在处理' : ''}</span>
+                    interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' : running && !showReasoning ? '正在处理' : ''}</span>
                   {showLatest && rows.length > 0 && <button type="button" className="icon-button jump-latest" title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
                     scroll.current.scrollTop = scroll.current.scrollHeight;
                   }}><ArrowDown size={16} /></button>}

@@ -254,10 +254,10 @@ p { margin-block: 0 12px; }
 .rail { position: relative; }
 .message { position: absolute; inset: 0 0 auto; padding-block: 9px; }
 .message[data-kind]:not([data-kind="user"], [data-kind="message"]) { padding-block: 3px; }
-.message[data-empty="true"] { padding: 0; }
 .message[data-kind]:not([data-kind="user"]) {
   padding-inline-start: calc(var(--depth, 0) * 15px);
 }
+.message[data-empty="true"][data-kind] { padding: 0; }
 .agent-commentary { color: #c8ced0; }
 .user-message {
   width: fit-content;
@@ -333,7 +333,6 @@ p { margin-block: 0 12px; }
 .activity[data-card="command"] .card-title { font: 12px/20px var(--mono); font-weight: 400; }
 .card-hint { color: var(--muted); }
 .activity[data-card="reasoning"] .card-title { flex: none; font-weight: 500; }
-.reasoning-preview { flex: 1; direction: rtl; text-align: left; }
 .card-status {
   margin-left: auto;
   flex: none;
@@ -353,7 +352,7 @@ p { margin-block: 0 12px; }
   border-radius: 8px;
   font-size: 13px;
 }
-.card-body .prose + .prose { margin-top: 10px; }
+.card-body .prose + .prose, .reasoning-text .prose + .prose { margin-top: 10px; }
 .activity[data-card="reasoning"] .card-body {
   margin-inline-start: 54px;
   padding: 2px 8px 4px 0;
@@ -508,6 +507,24 @@ p { margin-block: 0 12px; }
 .error-message p { margin: 0; color: var(--muted); }
 .retry { flex: none; font-size: 12px; }
 
+.reasoning-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  margin-bottom: 4px;
+  padding: 0 9px;
+  color: #bbc6c2;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+}
+.reasoning-strip[aria-expanded="true"] { background: var(--hover); }
+.reasoning-label, .reasoning-chevron { color: var(--muted); }
+.reasoning-label { flex: none; }
+.reasoning-strip[aria-expanded="true"] .reasoning-chevron { transform: rotate(180deg); }
+.reasoning-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .goal-strip {
   display: flex;
   align-items: center;
@@ -570,6 +587,11 @@ p { margin-block: 0 12px; }
 }
 .agent-menu-entries svg { color: var(--accent); }
 .agent-panel { display: flex; flex-direction: column; font-size: 13px; }
+.agent-panel[data-kind="reasoning"] {
+  inset-inline: 0 auto;
+  width: min(100%, 560px);
+  max-height: clamp(70px, calc(100cqh - 242px), 320px);
+}
 .agent-panel header {
   display: flex;
   justify-content: space-between;

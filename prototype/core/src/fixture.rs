@@ -311,6 +311,7 @@ pub fn run() -> Result<()> {
                 }
                 let output = output.clone();
                 let background = background.clone();
+                let verify_layout = params["input"][0]["text"] == "验证流式会话与底部终端。";
                 thread::spawn(move || {
                     let mut answer = String::new();
                     let item = format!("{turn}-answer");
@@ -368,7 +369,7 @@ pub fn run() -> Result<()> {
                     ]
                     .into_iter()
                     .cycle()
-                    .take(150)
+                    .take(if verify_layout { 240 } else { 150 })
                     .enumerate()
                     {
                         thread::sleep(Duration::from_millis(40));
