@@ -74,11 +74,18 @@ try {
     await tree.getByRole('treeitem', { name, exact: true }).click();
     await page.locator('.breadcrumb strong').filter({ hasText: new RegExp(`^${name}$`) }).waitFor();
   };
+  const composer = page.getByRole('textbox', { name: '消息' });
+  const firstDraft = '核对第 90 项的命令输出。\n确认后再发送。';
+  const secondDraft = '这里只保留第二个会话的草稿。';
+  await composer.fill(firstDraft);
   await openThread('目录会话 0002');
   await timeline.getByText('第 160 项', { exact: false }).waitFor();
   assert.equal(await historyCommand.count(), 0);
+  assert.equal(await composer.inputValue(), '');
+  await composer.fill(secondDraft);
   await openThread('工作台架构评审');
   await historyCommand.getByText('已核对第 90 项历史记录。', { exact: false }).waitFor();
+  assert.equal(await composer.inputValue(), firstDraft);
   const restoredReading = await readAnchor();
   assert.equal(restoredReading.text, beforeReadingSwitch.text);
   assert.ok(Math.abs(restoredReading.top - beforeReadingSwitch.top) <= 2, JSON.stringify({ beforeReadingSwitch, restoredReading }));
@@ -89,10 +96,13 @@ try {
   await jumpToLatest.waitFor({ state: 'detached' });
   await openThread('目录会话 0002');
   await timeline.getByText('第 160 项', { exact: false }).waitFor();
+  assert.equal(await composer.inputValue(), secondDraft);
   await openThread('工作台架构评审');
   await timeline.getByText('第 160 项', { exact: false }).waitFor();
   assert.equal(Number(await timeline.getAttribute('data-items')), 21);
   assert.equal(await jumpToLatest.count(), 0);
+  assert.equal(await composer.inputValue(), firstDraft);
+  await composer.fill('');
 
   assert.ok(await items.count() < 33);
   const hierarchy = await items.first().evaluate(parent => {
@@ -220,7 +230,7 @@ try {
   await page.getByRole('tree', { name: '已归档会话' }).getByRole('treeitem', { name: '归档会话示例' }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-search.png') });
   assert.equal(await loadMore.count(), 0);
-  console.log('Verified session reading position, expanded history cards, catalog navigation, append anchoring, and search.');
+  console.log('Verified session drafts, reading position, expanded history cards, catalog navigation, append anchoring, and search.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

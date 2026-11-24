@@ -175,6 +175,7 @@ try {
   }
 
   if (process.env.SPAN_TEST_SSH_ALIAS) {
+    await page.getByRole('textbox', { name: '消息' }).fill('这段文字只属于本机会话。');
     await page.getByRole('button', { name: '主机', exact: true }).click();
     await page.getByLabel('SSH 目标').fill(process.env.SPAN_TEST_SSH_ALIAS);
     await page.getByRole('button', { name: '连接 SSH' }).click();
@@ -185,6 +186,7 @@ try {
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
       .some(line => line.textContent.trim() === 'span_remote_pty'));
+    assert.equal(await page.getByRole('textbox', { name: '消息' }).inputValue(), '');
   }
   await page.getByRole('button', { name: '会话', exact: true }).click();
   const composer = page.getByRole('textbox', { name: '消息' });
@@ -371,10 +373,24 @@ try {
   await composer.fill('/goal clear');
   await composer.press('Enter');
   await goal.waitFor({ state: 'detached' });
+  await composer.fill('这段草稿留在原会话。');
   await page.getByRole('button', { name: /新会话/ }).click();
   await page.getByRole('heading', { name: '开始新会话' }).waitFor();
-  assert.ok(await page.getByRole('textbox', { name: '消息' }).evaluate(element => document.activeElement === element));
+  assert.ok(await composer.evaluate(element => document.activeElement === element));
+  assert.equal(await composer.inputValue(), '');
+  const retryDraft = '验证新会话草稿重试。';
+  await composer.fill(retryDraft);
+  await composer.press('Enter');
+  await page.getByRole('alert').getByText('模拟发送失败，请重试。', { exact: true }).waitFor();
+  assert.equal(await composer.inputValue(), retryDraft);
+  assert.equal(await transcript.getByText(retryDraft, { exact: true }).count(), 0);
+  await composer.press('Enter');
+  await transcript.getByText('草稿已成功重试。', { exact: true }).waitFor();
+  assert.equal(await transcript.getByText(retryDraft, { exact: true }).count(), 1);
+  await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
+  assert.equal(await page.getByRole('alert').count(), 0);
   console.log('Verified history paging, file preview, PTY, streaming and interrupt.');
+  console.log('Verified a new session keeps a rejected draft and clears it after one successful retry.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

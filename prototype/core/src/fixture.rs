@@ -175,9 +175,11 @@ pub fn run() -> Result<()> {
     let history = history();
     let background = Arc::new(AtomicBool::new(false));
     let mut turn_count = 0;
+    let mut new_thread_count = 0;
     let mut goal = Value::Null;
     let mut title = TITLE.to_owned();
     let mut search_failed = false;
+    let mut draft_send_failed = false;
     let mut review: Option<(String, bool)> = None;
     let mut reviewed = false;
     for line in io::stdin().lock().lines() {
@@ -241,7 +243,12 @@ pub fn run() -> Result<()> {
                 }
                 catalog(&cwd, &title, params, &catalog_mode)
             }
-            "thread/start" | "thread/resume" => {
+            "thread/start" => {
+                new_thread_count += 1;
+                json!({"thread":{"id":format!("fixture-new-{new_thread_count}"),"cwd":cwd},
+                    "cwd":cwd,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
+            }
+            "thread/resume" => {
                 let turns = if params["excludeTurns"] == true {
                     &[][..]
                 } else {
@@ -281,6 +288,15 @@ pub fn run() -> Result<()> {
                 json!({"data":page,"nextCursor":(start > 0).then(|| start.to_string())})
             }
             "turn/start" => {
+                let retry_draft = params["input"][0]["text"] == "验证新会话草稿重试。";
+                if retry_draft && !draft_send_failed {
+                    draft_send_failed = true;
+                    send(
+                        &output,
+                        json!({"id":id,"error":{"code":-32603,"message":"模拟发送失败，请重试。"}}),
+                    )?;
+                    continue;
+                }
                 if background.swap(true, Ordering::AcqRel) {
                     send(
                         &output,
@@ -288,6 +304,7 @@ pub fn run() -> Result<()> {
                     )?;
                     continue;
                 }
+                let thread_id = params["threadId"].as_str().unwrap_or(THREAD).to_owned();
                 turn_count += 1;
                 let turn = format!("live-{turn_count}");
                 let started = json!({"id":turn,"status":"inProgress","items":[]});
@@ -295,15 +312,30 @@ pub fn run() -> Result<()> {
                 notice(
                     &output,
                     "turn/started",
-                    json!({"threadId":THREAD,"turn":started}),
+                    json!({"threadId":thread_id,"turn":started}),
                 )?;
                 let user_item = json!({"id":format!("{turn}-input"),"type":"userMessage",
                     "content":params["input"],"clientId":params["clientUserMessageId"]});
                 notice(
                     &output,
                     "item/completed",
-                    json!({"threadId":THREAD,"turnId":turn,"item":user_item}),
+                    json!({"threadId":thread_id,"turnId":turn,"item":user_item}),
                 )?;
+                if retry_draft {
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"id":format!("{turn}-retry-result"),
+                            "type":"agentMessage","text":"草稿已成功重试。"}}),
+                    )?;
+                    background.store(false, Ordering::Release);
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+                    )?;
+                    continue;
+                }
                 if params["input"][0]["text"] == "验证审批与表单。" {
                     reviewed = false;
                     review = Some((turn, false));
@@ -313,19 +345,19 @@ pub fn run() -> Result<()> {
                     notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,"item":patch_sample(&turn)}),
+                        json!({"threadId":thread_id,"turnId":turn,"item":patch_sample(&turn)}),
                     )?;
                     notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,"item":{"type":"agentMessage",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage",
                             "id":format!("{turn}-patch-result"),"text":"已记录文件变更。\n\n```text\npatch preview ready\n```"}}),
                     )?;
                     background.store(false, Ordering::Release);
                     notice(
                         &output,
                         "turn/completed",
-                        json!({"threadId":THREAD,"turn":{"id":turn,"status":"completed","items":[]}}),
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
                     )?;
                     continue;
                 }
@@ -333,26 +365,26 @@ pub fn run() -> Result<()> {
                     notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,"item":command_output(&turn, &cwd)}),
+                        json!({"threadId":thread_id,"turnId":turn,"item":command_output(&turn, &cwd)}),
                     )?;
                     notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,"item":{"type":"dynamicToolCall","id":format!("{turn}-tool"),
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"dynamicToolCall","id":format!("{turn}-tool"),
                             "tool":"核对异常项","status":"completed",
                             "output":format!("  发现一项配置异常。\n{}", "  保留后续检查记录。\n".repeat(18))}}),
                     )?;
                     notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-output-result"),
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-output-result"),
                             "text":"**检查已结束。** 命令退出码为 3，末尾记录了异常。"}}),
                     )?;
                     background.store(false, Ordering::Release);
                     notice(
                         &output,
                         "turn/completed",
-                        json!({"threadId":THREAD,"turn":{"id":turn,"status":"completed","items":[]}}),
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
                     )?;
                     continue;
                 }
@@ -375,27 +407,27 @@ pub fn run() -> Result<()> {
                             &output,
                             "item/reasoning/summaryTextDelta",
                             json!({
-                                "threadId":THREAD,"turnId":turn,"itemId":summary,"summaryIndex":index,"delta":delta,
+                                "threadId":thread_id,"turnId":turn,"itemId":summary,"summaryIndex":index,"delta":delta,
                             }),
                         );
                     }
                     let _ = notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,
+                        json!({"threadId":thread_id,"turnId":turn,
                         "item":{"type":"reasoning","id":summary,"summary":sections}}),
                     );
                     let _ = notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,
+                        json!({"threadId":thread_id,"turnId":turn,
                         "item":{"type":"commandExecution","id":format!("{turn}-command"),"command":"git status --short",
                             "status":"completed","aggregatedOutput":" M prototype/ui/main.jsx","exitCode":0}}),
                     );
                     let _ = notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,
+                        json!({"threadId":thread_id,"turnId":turn,
                         "item":{"type":"collabAgentToolCall","id":format!("{turn}-delegate"),"tool":"spawnAgent",
                             "status":"completed","receiverThreadIds":["fixture-subagent"],
                             "agentsStates":{"fixture-subagent":{"status":"completed","message":"已检查界面。"}}}}),
@@ -403,7 +435,7 @@ pub fn run() -> Result<()> {
                     let _ = notice(
                         &output,
                         "thread/tokenUsage/updated",
-                        json!({"threadId":THREAD,"turnId":turn,
+                        json!({"threadId":thread_id,"turnId":turn,
                         "tokenUsage":{"total":{"totalTokens":140,"inputTokens":100,"outputTokens":40},
                             "last":{"totalTokens":140},"modelContextWindow":512}}),
                     );
@@ -431,7 +463,7 @@ pub fn run() -> Result<()> {
                             let _ = notice(
                                 &output,
                                 "item/reasoning/summaryTextDelta",
-                                json!({"threadId":THREAD,"turnId":turn,
+                                json!({"threadId":thread_id,"turnId":turn,
                                     "itemId":format!("{turn}-layout"),"summaryIndex":0,"delta":delta}),
                             );
                         }
@@ -440,7 +472,7 @@ pub fn run() -> Result<()> {
                         if notice(
                             &output,
                             "item/agentMessage/delta",
-                            json!({"threadId":THREAD,"turnId":turn,"itemId":item,"delta":piece}),
+                            json!({"threadId":thread_id,"turnId":turn,"itemId":item,"delta":piece}),
                         )
                         .is_err()
                         {
@@ -451,13 +483,13 @@ pub fn run() -> Result<()> {
                     let _ = notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":THREAD,"turnId":turn,
+                        json!({"threadId":thread_id,"turnId":turn,
                         "item":{"type":"agentMessage","id":item,"text":answer}}),
                     );
                     let _ = notice(
                         &output,
                         "turn/completed",
-                        json!({"threadId":THREAD,
+                        json!({"threadId":thread_id,
                         "turn":{"id":turn,"status": if done {"completed"} else {"interrupted"},"items":[]}}),
                     );
                 });

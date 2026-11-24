@@ -15,6 +15,7 @@ import { Sidebar } from './sidebar.jsx';
 import { Transcript } from './transcript.jsx';
 import { turnReasoning } from './timeline.js';
 import { useAgent } from './use-agent.js';
+import { draftKey, useDrafts } from './use-drafts.js';
 import './workbench.css';
 
 const TerminalPanel = lazy(() => import('./terminal.jsx').then(module => ({ default: module.TerminalPanel })));
@@ -41,7 +42,7 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [showLatest, setShowLatest] = useState(false);
-  const [draft, setDraft] = useState('');
+  const { drafts, edit, move, clearSent } = useDrafts();
   const [suggesting, setSuggesting] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const [panel, setPanel] = useState(null);
@@ -76,11 +77,16 @@ function App() {
     if (recent.size > 24) recent.delete(recent.keys().next().value);
   }, []);
   const previewCoversConversation = previewOverlay && Boolean(preview && !preview.parked);
-  const work = useAgent(config, { report, clearError, jumpToLatest, suspendTimeline: previewCoversConversation });
+  const adoptDraft = useCallback((connection, ref) => move(draftKey(connection), draftKey(connection, ref)), [move]);
+  const work = useAgent(config, { report, clearError, adoptDraft, jumpToLatest, suspendTimeline: previewCoversConversation });
   const { api, connection, route, sessions, session, rows, loading, run, goal } = work;
   const catalogQuery = sidebarOpen && tab === 'sessions' && searchOpen ? query.trim() : '';
   const catalogSearch = useCatalogSearch(api, catalogQuery, work.archived, connection === 'ready', work.catalogRevision);
   const refKey = sessionKey(session?.ref);
+  const composerKey = draftKey(config, session?.ref);
+  const activeDraft = drafts.get(composerKey);
+  const draft = activeDraft?.text ?? '';
+  const setDraft = text => edit(composerKey, text);
   const rememberedReading = readingViews.current.get(refKey);
   const running = run?.status === 'running';
   const interaction = work.requests[0];
@@ -97,11 +103,15 @@ function App() {
     ? commands.filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
 
   useEffect(() => {
-    window.span.workspace(false).then(settings => setConfig({ ...settings, backend: 'codex', ssh: '' })).catch(report);
+    window.span.workspace(false).then(settings => {
+      const initial = { ...settings, backend: 'codex', ssh: '' };
+      move(draftKey(null), draftKey(initial));
+      setConfig(initial);
+    }).catch(report);
     return window.span.onEvent(packet => {
       if (packet.event === 'core-error') setError(packet.data);
     });
-  }, [report]);
+  }, [move, report]);
 
   useEffect(() => {
     if (tab !== 'files' || !config || config.ssh) return;
@@ -208,6 +218,7 @@ function App() {
     setEntries([]);
     setDirectory('');
     closePanel();
+    work.prepareConnection();
     setConfig(next);
     if (tab === 'hosts') setTab('sessions');
   }
@@ -364,12 +375,10 @@ function App() {
         if (!args || args === 'status' || args === 'edit') {
           showPanel('goal');
           if (session) await work.goalAction();
-        } else if (['pause', 'resume', 'clear'].includes(args)) {
-          await work.goalAction({ kind: args });
-        } else {
-          await work.goalAction({ kind: 'set', objective: args });
+          return true;
         }
-        return true;
+        const action = ['pause', 'resume', 'clear'].includes(args) ? { kind: args } : { kind: 'set', objective: args };
+        return (await work.goalAction(action)) !== undefined;
       }
       case '/usage':
         showPanel('usage');
@@ -455,6 +464,8 @@ function App() {
   async function submit(raw = draft, delivery = running && !canSteer && canQueue ? 'followUp' : 'steer') {
     const text = raw.trim();
     if (!text || connection !== 'ready' || loading) return;
+    const submitted = raw === draft ? activeDraft : setDraft(raw);
+    const scope = work.timelineScope();
     setSuggesting(false);
     const command = text.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
     const known = command && (commands.some(([name]) => name === command[1]) ||
@@ -462,9 +473,9 @@ function App() {
     try {
       const sent = known ? await runCommand(command[1], command[2] ?? '')
         : await work.send(text, effectiveOptions(), delivery);
-      if (sent) setDraft(current => current === raw ? '' : current);
+      if (sent) clearSent(submitted);
     } catch (error) {
-      report(error);
+      if (work.timelineScope() === scope) report(error);
     }
   }
 
@@ -494,7 +505,6 @@ function App() {
       }
       if (suggestions.length && !suggestions.some(([name]) => name === draft)) {
         const name = suggestions[commandIndex % suggestions.length][0];
-        setDraft(name);
         submit(name);
       } else {
         submit();
@@ -610,7 +620,7 @@ function App() {
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}
                     data-active={index === commandIndex % suggestions.length} onMouseDown={event => event.preventDefault()}
-                    onClick={() => { setDraft(command); submit(command); }}>
+                    onClick={() => submit(command)}>
                     <code>{command}</code><span>{label}</span>
                   </button>)}
                 </div>}

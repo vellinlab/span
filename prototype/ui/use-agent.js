@@ -4,7 +4,7 @@ import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 
 const PAGE_SIZE = 20;
 
-export function useAgent(config, { report, clearError, jumpToLatest, suspendTimeline }) {
+export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest, suspendTimeline }) {
   const [api, setApi] = useState(null);
   const [connection, setConnection] = useState('connecting');
   const [route, setRoute] = useState('');
@@ -234,10 +234,11 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
     return page.items;
   }
 
-  useEffect(() => {
-    if (!config) return;
+  function prepareConnection() {
+    agent.current = null;
     clearTimeline();
     clearError();
+    setApi(null);
     setConnection('connecting');
     setRoute('');
     setSessions([]);
@@ -245,41 +246,46 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
     setArchived(false);
     setModels([]);
     setUsage({});
+  }
+
+  useEffect(() => {
+    if (!config) return;
     let disposed = false;
     const location = config.ssh ? { kind: 'ssh', host: config.ssh } : { kind: 'local' };
     const client = createAgent(config.backend, {
       generation: ++generation.current, cwd: config.cwd, location,
-      onEvent: event => { if (!disposed) receive(event); },
+      onEvent: event => { if (!disposed && agent.current === client) receive(event); },
     });
+    const isCurrent = () => !disposed && agent.current === client;
     agent.current = client;
     setApi(client);
     async function start() {
       await client.open();
-      if (disposed) return;
+      if (!isCurrent()) return;
       client.models?.().then(value => {
-        if (!disposed) setModels(value);
+        if (isCurrent()) setModels(value);
       }).catch(() => {});
       try {
         const items = await list(client, false);
-        if (disposed) return;
+        if (!isCurrent()) return;
         setConnection('ready');
         if (config.demo && items.length && !active.current && !busy.current) await loadSession(client, items[0]);
       } catch (error) {
-        if (!disposed) {
+        if (isCurrent()) {
           setConnection('ready');
           report(error);
         }
       }
     }
     start().catch(error => {
-      if (disposed) return;
+      if (!isCurrent()) return;
       setConnection('offline');
       report(error);
       client.close();
     });
     return () => {
       disposed = true;
-      agent.current = null;
+      if (agent.current === client) agent.current = null;
       client.close();
       cancelAnimationFrame(frame.current);
     };
@@ -337,6 +343,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
     if (scope !== layer.current) return null;
     const entry = { ...started.session, preview: started.session.preview || title };
     active.current = { ref: entry.ref, key: sessionKey(entry.ref) };
+    adoptDraft(config, entry.ref);
     setSession(entry);
     if (!archived) putSession(entry, true);
     return entry.ref;
@@ -371,7 +378,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
         const result = await client.turns.start(ref, input, selectedOptions, clientId);
         if (scope === layer.current && runVersion === callbacks.current.run) changeRun(result);
       }
-      return scope === layer.current;
+      return true;
     } catch (error) {
       if (scope !== layer.current) return false;
       if (added) updateRows(previous => previous.filter(row => row.key !== clientId || !row.optimistic));
@@ -468,6 +475,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
   return {
     api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyPages, loading, run, requests,
     goal, usage, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
+    prepareConnection, timelineScope: () => layer.current,
     refreshDelegation, delegate, manageTeam,
     list: (showArchived = archived, more = false) => list(agent.current, showArchived, more ? sessionCursor : null),
     stop: () => withSession((client, ref) => {
