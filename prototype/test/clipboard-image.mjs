@@ -5,10 +5,9 @@ export const samplePng = Buffer.from(
 
 export async function pasteNativeImage(app, composer) {
   await composer.focus();
-  await app.evaluate(({ BrowserWindow, clipboard, nativeImage }, bytes) => {
-    const image = nativeImage.createFromBuffer(Buffer.from(bytes));
-    if (image.isEmpty()) throw new Error('The test PNG could not be decoded.');
-    clipboard.writeImage(image);
+  await app.evaluate(async ({ BrowserWindow, clipboard, ClipboardItem }, bytes) => {
+    const png = new Blob([Uint8Array.from(bytes)], { type: 'image/png' });
+    await clipboard.write([new ClipboardItem({ 'image/png': png })]);
     BrowserWindow.getAllWindows()[0].webContents.paste();
   }, [...samplePng]);
 }

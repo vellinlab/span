@@ -587,8 +587,8 @@ try {
     const pasted = draftFiles.getByRole('button', { name: '预览图片 · 截图 1.png', exact: true });
     await pasted.waitFor();
     assert.equal(await composer.inputValue(), retryDraft);
-    await app.evaluate(({ BrowserWindow, clipboard }) => {
-      clipboard.writeText('继续核对');
+    await app.evaluate(async ({ BrowserWindow, clipboard }) => {
+      await clipboard.writeText('继续核对');
       BrowserWindow.getAllWindows()[0].webContents.paste();
     });
     await page.waitForFunction(() => document.querySelector('.composer textarea').value.includes('继续核对'));

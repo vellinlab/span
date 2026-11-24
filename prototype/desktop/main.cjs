@@ -231,7 +231,7 @@ ipcMain.handle('span:copy-text', (event, text) => {
   if (!trusted(event) || typeof text !== 'string' || text.length > maxClipboardLength) {
     throw new Error('无效的剪贴板文本。');
   }
-  clipboard.writeText(text);
+  return clipboard.writeText(text);
 });
 
 app.whenReady().then(() => {
