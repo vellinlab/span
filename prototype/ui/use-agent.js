@@ -38,6 +38,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const busy = useRef(false);
   const currentRun = useRef(null);
   const callbacks = useRef({ goal: 0, run: 0, catalog: 0 });
+  const requestedArchiveView = useRef(false);
   const pendingPage = useRef(null);
   const pendingSend = useRef(null);
   const rosterRefresh = useRef(null);
@@ -282,6 +283,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   }
 
   async function list(client, showArchived, next) {
+    requestedArchiveView.current = showArchived;
     const version = ++callbacks.current.catalog;
     const page = await client.sessions.list({ cursor: next ?? undefined, archived: showArchived });
     if (version !== callbacks.current.catalog || client !== agent.current) return [];
@@ -404,6 +406,11 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   function reset() {
     if (busy.current || currentRun.current || loading) return false;
+    clearSession();
+    return true;
+  }
+
+  function clearSession() {
     const previous = active.current?.ref;
     clearTimeline();
     if (previous) agent.current?.sessions.release?.(previous).catch(() => {});
@@ -411,7 +418,30 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       rememberWorkspace(config, null);
       clearError();
     }
-    return true;
+  }
+
+  async function archiveSession() {
+    const client = agent.current;
+    const ref = active.current?.ref;
+    if (!ref) throw new Error('请先打开一个会话。');
+    if (!guard()) throw new Error('请等当前任务或连接完成。');
+    const scope = layer.current;
+    const archived = !session?.archived;
+    busy.current = true;
+    try {
+      await client.sessions.archive(ref, archived);
+      if (scope !== layer.current || client !== agent.current) return false;
+      clearSession();
+      const key = sessionKey(ref);
+      setSessions(previous => previous.filter(entry => sessionKey(entry.ref) !== key || Boolean(entry.archived) === archived));
+      setCatalogRevision(value => value + 1);
+      list(client, requestedArchiveView.current).catch(error => {
+        if (client === agent.current) report(error);
+      });
+      return true;
+    } finally {
+      if (scope === layer.current) busy.current = false;
+    }
   }
 
   async function ensureSession(client, title, scope) {
@@ -588,16 +618,11 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     },
     rename: title => withSession(async (client, ref) => {
       await client.sessions.rename(ref, title);
+      if (client !== agent.current) return;
       setCatalogRevision(value => value + 1);
-      if (sessionKey(ref) !== active.current?.key) return;
-      setSession(previous => ({ ...previous, title }));
+      if (sessionKey(ref) === active.current?.key) setSession(previous => ({ ...previous, title }));
       putSession({ ref, title });
     }),
-    archive: () => withSession(async (client, ref) => {
-      await client.sessions.archive(ref, !session?.archived);
-      setCatalogRevision(value => value + 1);
-      if (sessionKey(ref) === active.current?.key) reset();
-      await list(client, archived);
-    }, { idle: true }),
+    archive: archiveSession,
   };
 }

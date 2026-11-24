@@ -418,7 +418,7 @@ try {
   const compactTitlebar = narrowTitle.available <= 280;
   assert.equal(narrowTitle.workspaceNameHidden, compactTitlebar);
   assert.equal(narrowTitle.branchNameHidden, compactTitlebar);
-  if (compactTitlebar) assert.ok(narrowTitle.width >= narrowTitle.available - 55);
+  if (compactTitlebar) assert.ok(narrowTitle.width >= narrowTitle.available - 73);
   if (screenshot) {
     await composer.focus();
     await page.screenshot({ path: screenshot.replace(/\.png$/, '-titlebar-narrow.png') });

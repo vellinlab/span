@@ -119,11 +119,15 @@ fn command_output(turn: &str, cwd: &Path) -> Value {
         "cwd":cwd,"status":"failed","exitCode":3,"aggregatedOutput":text})
 }
 
-fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str) -> Value {
-    let mut entries = vec![json!({"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
-        "gitInfo":{"branch":"prototype/web-workbench"}})];
-    if params["archived"] == true {
-        entries = vec![json!({"id":"catalog-archive","name":"归档会话示例","cwd":cwd})];
+fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str, is_archived: bool) -> Value {
+    let archived = params["archived"] == true;
+    let mut entries = Vec::new();
+    if archived == is_archived {
+        entries.push(json!({"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
+            "gitInfo":{"branch":"prototype/web-workbench"}}));
+    }
+    if archived {
+        entries.push(json!({"id":"catalog-archive","name":"归档会话示例","cwd":cwd}));
     } else if !mode.is_empty() {
         let last = if mode == "benchmark" { 1200 } else { 119 };
         let other = cwd.join("second-workspace");
@@ -310,6 +314,7 @@ pub fn run() -> Result<()> {
     let mut new_thread_count = 0;
     let mut goal = Value::Null;
     let mut title = TITLE.to_owned();
+    let mut is_archived = false;
     let mut search_failed = false;
     let mut draft_send_failed = false;
     let mut active_plan: Option<String> = None;
@@ -375,7 +380,7 @@ pub fn run() -> Result<()> {
                     )?;
                     continue;
                 }
-                catalog(&cwd, &title, params, &catalog_mode)
+                catalog(&cwd, &title, params, &catalog_mode, is_archived)
             }
             "thread/start" => {
                 new_thread_count += 1;
@@ -795,12 +800,23 @@ pub fn run() -> Result<()> {
                 json!({"cleared":true})
             }
             "thread/name/set" => {
+                if params["name"] == "本次重命名失败" {
+                    send(
+                        &output,
+                        json!({"id":id,"error":{"code":-32603,"message":"重命名未保存。"}}),
+                    )?;
+                    continue;
+                }
                 title = params["name"].as_str().unwrap_or(TITLE).to_owned();
                 notice(
                     &output,
                     "thread/name/updated",
                     json!({"threadId":THREAD,"threadName":title}),
                 )?;
+                json!({})
+            }
+            "thread/archive" | "thread/unarchive" if params["threadId"] == THREAD => {
+                is_archived = packet["method"] == "thread/archive";
                 json!({})
             }
             "model/list" => {

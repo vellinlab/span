@@ -212,7 +212,15 @@ export default function (pi) {
   await editor.getByRole('button', { name: '取消' }).click();
   await transcript.getByText('Pi 表单已取消。', { exact: true }).waitFor();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
-  await send('/rename Pi 原生会话验收');
+  await page.getByRole('button', { name: /^会话操作 · / }).click();
+  const actions = page.getByRole('region', { name: '会话操作' });
+  const rename = actions.getByRole('button', { name: '重命名' });
+  await rename.waitFor();
+  assert.deepEqual(await actions.getByRole('button').allTextContents(), ['重命名']);
+  await rename.click();
+  const name = actions.getByRole('textbox', { name: '会话名称' });
+  await name.fill('Pi 原生会话验收');
+  await name.press('Enter');
   await page.locator('.breadcrumb strong').getByText('Pi 原生会话验收', { exact: true }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot });
   assert.deepEqual(first.errors, []);

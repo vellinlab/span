@@ -10,6 +10,7 @@ import { Interactions } from './interactions.jsx';
 import { Markdown, prepareMarkdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
 import { startupWorkspace } from './recent-workspaces.js';
+import { SessionActions } from './session-actions.jsx';
 import { directoryName, SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
@@ -58,6 +59,7 @@ function App() {
   const input = useRef(null);
   const search = useRef(null);
   const searchTrigger = useRef(null);
+  const archiveTrigger = useRef(null);
   const backendControl = useRef(null);
   const scroll = useRef(null);
   const catalogScroll = useRef({ scope: '', top: 0 });
@@ -545,6 +547,15 @@ function App() {
   const branch = session?.branch;
   const connectionLabel = connectionLabels[connection];
   const connectionError = connection === 'offline' && error;
+  const sessionActions = refKey && (api?.sessions.rename || api?.sessions.archive);
+
+  async function archiveFromTitle() {
+    if (!await work.archive()) return;
+    closePanel();
+    if (archiveTrigger.current) archiveTrigger.current.focus();
+    else if (readingOverlay) dismissPreview('composer');
+    else input.current?.focus();
+  }
 
   return <div className={`workbench${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
     <header className="topbar">
@@ -561,7 +572,11 @@ function App() {
             <span className="breadcrumb-workspace" title={session?.cwd || cwd}>
               <Folder size={15} aria-hidden="true" /><span>{workspace}</span>
             </span>
-            <span aria-hidden="true" className="breadcrumb-separator">/</span><strong title={name}>{name}</strong>
+            <span aria-hidden="true" className="breadcrumb-separator">/</span>
+            {sessionActions ? <SessionActions key={refKey} title={name} archived={session.archived}
+              disabled={loading || running || Boolean(interaction) || connection !== 'ready'}
+              rename={api.sessions.rename && work.rename} archive={api.sessions.archive && archiveFromTitle} />
+              : <strong title={name}>{name}</strong>}
           </div>
           {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
         </div>
@@ -587,8 +602,8 @@ function App() {
           <button className="icon-button" aria-label="关闭搜索" onClick={closeSearch}><X size={16} /></button>
         </div>}
         {tab !== 'hosts' && <div className="section-heading"><strong>{tab === 'files' ? '文件' : work.archived ? '已归档' : '工作区'}</strong>
-          {tab === 'sessions' && api?.sessions.archive && <button className="archive-toggle" type="button"
-            disabled={connection !== 'ready'} onClick={() => work.list(!work.archived).catch(report)}>{work.archived ? '查看会话' : '归档'}</button>}
+          {tab === 'sessions' && api?.sessions.archive && <button ref={archiveTrigger} className="archive-toggle" type="button"
+            disabled={connection !== 'ready'} onClick={() => work.list(!work.archived).catch(report)}>{work.archived ? '查看会话' : '已归档'}</button>}
           <button className="icon-button" aria-label="选择本地工作区" title="选择本地工作区"
             disabled={running || !config} onClick={chooseWorkspace}><FolderOpen size={16} /></button>
         </div>}
