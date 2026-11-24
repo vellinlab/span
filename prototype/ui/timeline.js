@@ -32,6 +32,11 @@ export function turnReasoning(rows, turnId) {
     : rows.findLast(row => row.turnId === turnId && row.kind === 'reasoning' && row.preview);
 }
 
+export function hasReasoningSection(row, index) {
+  const cached = summaryTailsByRow.get(row)?.[index];
+  return cached ? Boolean(cached.preview) : Boolean(row.sections[index]?.trim());
+}
+
 function estimateRow(row) {
   if (!visibleRow(row)) return 0;
   return row.kind === 'message' || row.kind === 'user' ? 92 : 34;

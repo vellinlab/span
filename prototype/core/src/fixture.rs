@@ -290,7 +290,23 @@ fn stream_reasoning(
     gate: &Path,
 ) -> io::Result<()> {
     let id = format!("{turn}-streamed-summary");
-    let initial = "核对历史记录和工具结果。".repeat(38_000) + "\r\n开始复核长会话。";
+    let details = gate.join("reasoning-details").is_file();
+    let mut initial = if details {
+        let mut text =
+            "### 复核顺序\n\n- 检查会话正文\n  - 保留两级缩进\n  - 核对工具结果\n\n".to_owned();
+        let context = "记录核对过程、输入响应、工具结果与最终答复的顺序。".repeat(4);
+        for index in 1..=144 {
+            writeln!(
+                text,
+                "**复核记录 {index:03}**。核对修改的工作区、保留引用和步骤的归属。{context}\n"
+            )
+            .unwrap();
+        }
+        text
+    } else {
+        "核对历史记录和工具结果。".repeat(38_000) + "\r\n"
+    };
+    initial.push_str("开始复核长会话。");
     let delta = |fragment: &str| {
         notice(
             output,
@@ -312,6 +328,12 @@ fn stream_reasoning(
         thread::sleep(Duration::from_millis(40));
     }
     fs::write(gate.join("appended"), b"")?;
+    if details {
+        if !wait_for_stream_gate(&gate.join("follow-detail"), running) {
+            return Ok(());
+        }
+        delta("\r\n- 收尾复核完成。步骤 073")?;
+    }
     if !wait_for_stream_gate(&gate.join("finish"), running) {
         return Ok(());
     }

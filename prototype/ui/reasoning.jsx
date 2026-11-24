@@ -1,14 +1,41 @@
-import { memo, useLayoutEffect, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 import { Brain, ChevronDown } from 'lucide-react';
-import { Markdown } from './markdown.jsx';
+import { Markdown, StreamingMarkdown } from './markdown.jsx';
+import { hasReasoningSection } from './timeline.js';
 
-const ReasoningSections = memo(function ReasoningSections({ row }) {
-  return row.sections.map((section, index) => section?.trim() && <Markdown key={index} text={section} />);
+const ReasoningSections = memo(function ReasoningSections({ row, scroll }) {
+  return <div className="reasoning-sections">{row.sections.map((text, index) => hasReasoningSection(row, index) &&
+    <div key={index} className="reasoning-section">{scroll
+      ? <StreamingMarkdown text={text} streaming={!row.final} following={false} scroll={scroll} />
+      : <Markdown text={text} />}</div>)}</div>;
 });
 
-export const ReasoningText = memo(function ReasoningText({ rows }) {
-  return rows?.length > 0 && <div className="reasoning-text">{rows.map(row =>
-    <ReasoningSections key={row.key} row={row} />)}</div>;
+export const ReasoningText = memo(function ReasoningText({ rows, scroll }) {
+  const content = useRef(null);
+  const hasContent = Boolean(rows?.length);
+  useEffect(() => {
+    const viewport = scroll?.current;
+    const body = content.current;
+    if (!viewport || !body) return;
+    let following = false;
+    const rememberScroll = () => {
+      following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 24;
+    };
+    const observer = new ResizeObserver(() => {
+      if (!following) return;
+      const selection = viewport.ownerDocument.getSelection();
+      if (selection?.type === 'Range' && selection.containsNode(body, true)) return;
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+    observer.observe(body);
+    viewport.addEventListener('scroll', rememberScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      viewport.removeEventListener('scroll', rememberScroll);
+    };
+  }, [hasContent, scroll]);
+  return hasContent && <div ref={content} className="reasoning-text">{rows.map(row =>
+    <ReasoningSections key={row.key} row={row} scroll={scroll} />)}</div>;
 });
 
 export const ReasoningStrip = memo(function ReasoningStrip({ preview, expanded, toggle, hadFocus }) {

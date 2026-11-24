@@ -268,6 +268,7 @@ function AgentsPanel({ work, openSession, report }) {
 
 export function AgentPanel({ panel, work, reasoning, setPanel, report, openSession }) {
   const close = useRef(null);
+  const content = useRef(null);
   useLayoutEffect(() => {
     if (panel?.focus) close.current?.focus({ preventScroll: true });
   }, [panel]);
@@ -285,10 +286,10 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
       {usage && <small className="goal-usage" title={usage}>{usage}</small>}
       <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
     </header>
-    <div className="agent-panel-content">
+    <div className="agent-panel-content" ref={content}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {panel.kind === 'goal' && <GoalPanel key={work.session?.ref.id} goal={work.goal} action={work.goalAction} report={report} />}
-      {panel.kind === 'reasoning' && <ReasoningText rows={reasoning} />}
+      {panel.kind === 'reasoning' && <ReasoningText rows={reasoning} scroll={content} />}
       {panel.kind === 'usage' && <UsagePanel usage={work.usage} refresh={work.refreshUsage} report={report} />}
       {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}

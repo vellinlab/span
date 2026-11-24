@@ -465,7 +465,9 @@ p { margin-block: 0 12px; }
   border-radius: 8px;
   font-size: 13px;
 }
-.card-body .prose + .prose, .reasoning-text .prose + .prose { margin-top: 10px; }
+.card-body .prose + .prose, .reasoning-section + .reasoning-section { margin-top: 10px; }
+.reasoning-sections + .reasoning-sections { margin-top: 12px; }
+.reasoning-section { position: relative; }
 .activity:is([data-card="reasoning"], [data-card="plan"], [data-card="delegation"]) .card-body {
   margin-inline-start: 54px;
   padding: 2px 8px 4px 0;
