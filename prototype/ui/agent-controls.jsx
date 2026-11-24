@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, ListChecks, SlidersHorizontal, Users, X } from 'lucide-react';
 
 const statuses = {
@@ -240,11 +240,18 @@ function AgentsPanel({ work, openSession, report }) {
 }
 
 export function AgentPanel({ panel, work, setPanel, report, openSession }) {
+  const close = useRef(null);
+  useLayoutEffect(() => {
+    if (panel?.focus) close.current?.focus();
+  }, [panel]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
-  return <section className="agent-panel popup-surface" aria-label={title}>
+  return <section className="agent-panel popup-surface" id={panel.kind === 'goal' ? 'goal-panel' : undefined}
+    aria-label={title} onKeyDown={event => {
+      if (event.key === 'Escape' && panel.focus) setPanel(null);
+    }}>
     <header><strong>{title}</strong>
-      <button className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
+      <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
     </header>
     <div className="agent-panel-content">
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
@@ -275,10 +282,10 @@ export function AgentMenu({ work, onSelect }) {
       window.removeEventListener('pointerdown', dismiss);
     };
   }, [open]);
-  const { api, models, options } = work;
+  const { api, goal, models, options } = work;
   const entries = [
     ...(models.length || api?.permissions?.length ? [['settings', SlidersHorizontal]] : []),
-    ...(api?.goal ? [['goal', Goal]] : []),
+    ...(api?.goal && !goal ? [['goal', Goal]] : []),
     ...(api?.usage ? [['usage', ChartNoAxesColumnIncreasing]] : []),
     ...(api?.delegation ? [['agents', Users]] : []),
   ];
@@ -302,7 +309,7 @@ export function AgentMenu({ work, onSelect }) {
 export function GoalStrip({ goal, expanded, toggle }) {
   if (!goal) return null;
   return <button type="button" className="goal-strip" title={goal.objective} aria-expanded={expanded}
-    data-status={goal.status} onClick={toggle}>
+    aria-controls={expanded ? 'goal-panel' : undefined} data-status={goal.status} onClick={toggle}>
     <Goal size={16} className="goal-icon" /><span>{goal.objective}</span><small>{statuses[goal.status]}</small>
     <ChevronDown size={13} className="goal-chevron" />
   </button>;

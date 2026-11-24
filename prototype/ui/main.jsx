@@ -46,6 +46,7 @@ function App() {
   const scroll = useRef(null);
   const previewScope = useRef(0);
   const panelScope = useRef(0);
+  const panelTrigger = useRef(null);
   const closeTerminal = useCallback(() => setTerminal(false), []);
   const report = useCallback(error => setError(error.message), []);
   const clearError = useCallback(() => setError(''), []);
@@ -122,6 +123,10 @@ function App() {
   function closePanel() {
     panelScope.current++;
     setPanel(null);
+    if (panelTrigger.current) {
+      (panelTrigger.current.isConnected ? panelTrigger.current : input.current)?.focus();
+      panelTrigger.current = null;
+    }
   }
 
   function applyConfig(next) {
@@ -174,9 +179,10 @@ function App() {
     return () => window.removeEventListener('keydown', onShortcut);
   }, []);
 
-  function showPanel(kind) {
+  function showPanel(kind, trigger = null) {
     panelScope.current++;
-    setPanel({ kind });
+    panelTrigger.current = trigger;
+    setPanel({ kind, focus: Boolean(trigger) });
     setSuggesting(false);
     if (kind === 'usage') work.refreshUsage().catch(report);
     if (kind === 'agents') work.refreshDelegation().catch(report);
@@ -184,6 +190,7 @@ function App() {
 
   function output(title, text) {
     panelScope.current++;
+    panelTrigger.current = null;
     setPanel({ kind: 'output', title, text });
   }
 
@@ -511,7 +518,7 @@ function App() {
                 </div>}
               </div>
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
-                toggle={() => panel?.kind === 'goal' ? closePanel() : showPanel('goal')} />
+                toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
                 <textarea ref={input} rows={2} placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '向工作台发送消息…'}
                   aria-label="消息" value={draft} onFocus={() => setSuggesting(true)} onBlur={() => setSuggesting(false)}

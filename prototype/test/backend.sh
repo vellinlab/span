@@ -17,7 +17,10 @@ gateway=$!
 local_shared=
 remote_shared=
 trap 'kill "$gateway" ${local_shared:+$local_shared} ${remote_shared:+$remote_shared} 2>/dev/null || true
-      cat "$fixture/gateway.log"' EXIT
+      cat "$fixture/gateway.log"
+      for log in "$fixture/local-shared.log" "$fixture/remote-shared.log"; do
+          if [[ -f "$log" ]]; then tail -60 "$log"; fi
+      done' EXIT
 for _ in {1..50}; do [[ -s "$fixture/port" ]] && break; sleep 0.1; done
 cat > "$fixture/codex-state/config.toml" <<CONFIG
 model = "span-ci-model"
@@ -65,8 +68,8 @@ if [[ -n ${SPAN_TEST_SSH_ALIAS:-} ]]; then
     install -m 0600 -o span-preview-ci "$CODEX_HOME/config.toml" "$remote_state/config.toml"
     /artifacts/node prototype/test/real-agent.mjs "$binary" stdio "$SPAN_TEST_SSH_ALIAS"
 
-    runuser -u span-preview-ci -- env CODEX_HOME="$remote_state" "$backend" app-server --listen unix:// \
-        >"$fixture/remote-shared.log" 2>&1 &
+    runuser -u span-preview-ci -- bash -c 'cd "$HOME" && exec "$@"' span-codex \
+        env CODEX_HOME="$remote_state" "$backend" app-server --listen unix:// >"$fixture/remote-shared.log" 2>&1 &
     remote_shared=$!
     ready_socket "$remote_state/app-server-control/app-server-control.sock" "$remote_shared" "$fixture/remote-shared.log"
     /artifacts/node prototype/test/real-agent.mjs "$binary" shared "$SPAN_TEST_SSH_ALIAS"

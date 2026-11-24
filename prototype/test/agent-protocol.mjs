@@ -159,3 +159,15 @@ test('the server user echo merges into the optimistic row without moving it', ()
   assert.equal(rows[0].key, 'client');
   assert.equal(rows[0].id, 'server');
 });
+
+test('timeline updates can branch from the same rows without sharing new positions', () => {
+  const update = (id, text) => ({ kind: 'delta', delta: { turnId: 't', kind: 'message', id, text } });
+  const original = applyTimeline([], [update('m', 'Start')]);
+  const first = applyTimeline(original, [update('first', 'A')]);
+  const second = applyTimeline(original, [update('second', 'B')]);
+  const continued = applyTimeline(second, [update('first', 'C'), update('m', '?')]);
+  assert.deepEqual(original.map(row => row.text), ['Start']);
+  assert.deepEqual(first.map(row => row.text), ['Start', 'A']);
+  assert.deepEqual(second.map(row => row.text), ['Start', 'B']);
+  assert.deepEqual(continued.map(row => row.text), ['Start', 'B', 'C', '?']);
+});

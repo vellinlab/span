@@ -1,6 +1,7 @@
 export const itemKey = ({ turnId, id }) => JSON.stringify([turnId, id]);
 
 const reasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
+const positionsByRows = new WeakMap();
 
 export const historyRows = turns => applyTimeline([], turns.flatMap(turn => turn.rows.map(item => ({
   kind: 'item', item, final: turn.run.status !== 'running',
@@ -44,7 +45,8 @@ function addReasoning(rows, positions, data, final, delta) {
   const section = data.section ?? 0;
   if (delta && (typeof data.text !== 'string' || !data.text || !Number.isInteger(section) || section < 0 || section >= 24)) return;
   const key = reasoningKey(turnId);
-  const index = positions.get(key)?.[0] ?? rows.length;
+  const existing = positions.get(key)?.[0];
+  const index = existing ?? rows.length;
   const row = rows[index] ?? { key, turnId, kind: 'reasoning' };
   const previous = row.sources?.get(id);
   if (previous?.final && !final) return;
@@ -56,7 +58,7 @@ function addReasoning(rows, positions, data, final, delta) {
   sources.set(id, { sections, final });
   const text = delta ? sections[section] : sections.findLast(part => part?.trim());
   const preview = (delta || !previous || row.previewSource === id) && text && lastSummaryLine(text);
-  positions.set(key, [index]);
+  if (existing === undefined) positions.set(key, [index]);
   rows[index] = { ...row, sources, ...(preview && { preview, previewSource: id }) };
 }
 
@@ -132,18 +134,35 @@ function addDelta(rows, delta, positions) {
 
 export function applyTimeline(previous, events) {
   const rows = [...previous];
-  const positions = new Map();
-  rows.forEach((row, index) => {
-    if (row.optimistic) return;
-    const key = row.itemKey ?? row.key;
-    const indexes = positions.get(key);
-    if (indexes) indexes.push(index);
-    else positions.set(key, [index]);
-  });
+  let index = positionsByRows.get(previous);
+  let ownsIndex = !index;
+  if (!index) {
+    index = new Map();
+    previous.forEach((row, position) => {
+      if (row.optimistic) return;
+      const key = row.itemKey ?? row.key;
+      const indexes = index.get(key);
+      if (indexes) indexes.push(position);
+      else index.set(key, [position]);
+    });
+  }
+  // Existing rows retain their positions during streaming. Copy the index only
+  // when adding a position so concurrent reductions can reuse the same input.
+  const positions = {
+    get: key => index.get(key),
+    set(key, indexes) {
+      if (!ownsIndex) {
+        index = new Map(index);
+        ownsIndex = true;
+      }
+      index.set(key, indexes);
+    },
+  };
   for (const event of events) {
     if (event.kind === 'item') addItem(rows, event.item, event.final, positions);
     else if (event.kind === 'delta') addDelta(rows, event.delta, positions);
   }
+  positionsByRows.set(rows, index);
   return rows;
 }
 

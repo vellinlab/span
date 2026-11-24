@@ -191,9 +191,12 @@ try {
     return a.bottom < b.top && Math.abs(a.left - b.left) <= 1 && Math.abs(a.right - b.right) <= 1;
   }));
   await goal.press('Enter');
-  await page.getByRole('region', { name: '会话目标' }).waitFor();
-  await goal.press('Enter');
-  await page.getByRole('region', { name: '会话目标' }).waitFor({ state: 'detached' });
+  const goalPanel = page.getByRole('region', { name: '会话目标' });
+  const dismissGoal = goalPanel.getByRole('button', { name: '关闭面板' });
+  assert.ok(await dismissGoal.evaluate(button => button === document.activeElement));
+  await page.keyboard.press('Escape');
+  await goalPanel.waitFor({ state: 'detached' });
+  assert.ok(await goal.evaluate(button => button === document.activeElement));
   await composer.fill('/goal pause');
   await composer.press('Enter');
   await goal.getByText('已暂停').waitFor();
@@ -208,7 +211,10 @@ try {
   assert.equal(await reasoning.count(), 1);
   assert.ok(await summaryElement.evaluate((element, height) => element.isConnected && element.offsetHeight === height, initialHeight));
   assert.ok(await goal.isVisible());
-  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
+  if (screenshot) {
+    await summary.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
+  }
   await page.getByText('流式输出已接通。', { exact: true }).waitFor();
   await reasoning.getByText('推理摘要', { exact: true }).click();
   await reasoning.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
