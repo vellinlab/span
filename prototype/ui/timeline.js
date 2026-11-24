@@ -9,6 +9,8 @@ const layoutByRows = new WeakMap();
 const membersByRows = new WeakMap();
 const groupsByRows = new WeakMap();
 const groupedPrefixByExpansion = new WeakMap();
+const summaryTailsByRow = new WeakMap();
+const summaryPreviewLength = 240;
 
 export function delegatedMembers(rows) {
   let members = membersByRows.get(rows);
@@ -173,8 +175,21 @@ function mergeSections(live, snapshot) {
   return sections;
 }
 
-function lastSummaryLine(text) {
-  return text.trimEnd().slice(-240).split(/\r?\n/).at(-1).trim().replace(/^\s*(?:[-*+] |#{1,6} )/, '');
+function summarySuffix(prefix, text) {
+  const source = text.length >= summaryPreviewLength ? text : (prefix ?? '') + text;
+  let start = Math.max(0, source.length - summaryPreviewLength);
+  // The preview must not begin in the middle of a UTF-16 surrogate pair.
+  const first = source.charCodeAt(start);
+  if (first >= 0xdc00 && first <= 0xdfff) start++;
+  return source.slice(start);
+}
+
+function summaryTail(previous, fragment) {
+  const tail = summarySuffix(previous?.tail, fragment);
+  const trimmed = fragment.trimEnd();
+  if (!trimmed) return { tail, preview: previous?.preview };
+  const content = trimmed === fragment ? tail : summarySuffix(previous?.tail, trimmed);
+  return { tail, preview: content.split(/\r?\n/).at(-1).trim().replace(/^(?:[-*+] |#{1,6} )/, '') };
 }
 
 function addReasoning({ rows, positions, write }, data, final, delta) {
@@ -189,13 +204,32 @@ function addReasoning({ rows, positions, write }, data, final, delta) {
   if (!delta && !data.sections.some(Boolean) && !previous) return;
 
   const sections = delta ? [...(previous?.sections ?? [])] : mergeSections(data.sections, previous?.sections ?? []);
-  if (delta) sections[section] = (sections[section] ?? '') + data.text;
-  const text = delta ? sections[section] : sections.findLast(part => part?.trim());
-  const preview = (text && lastSummaryLine(text)) || previous?.preview;
+  const cached = summaryTailsByRow.get(previous);
+  let tails, summary;
+  if (delta) {
+    const text = sections[section] ?? '';
+    // Keep the complete text for expanded details and history. The fixed
+    // strip only reads the next fragment and the bounded tail for its section.
+    const current = cached?.[section] ?? summaryTail(undefined, text);
+    sections[section] = text + data.text;
+    tails = cached?.slice() ?? [];
+    summary = tails[section] = summaryTail(current, data.text);
+  } else {
+    const index = sections.findLastIndex(part => part?.trim());
+    if (index !== -1) {
+      summary = sections[index] === previous?.sections[index] ? cached?.[index] : undefined;
+      summary ??= summaryTail(undefined, sections[index]);
+      tails = [];
+      tails[index] = summary;
+    }
+  }
+  const preview = summary?.preview || previous?.preview;
   if (existing === undefined) positions.set(key, [index]);
   const latest = latestReasoningKey(turnId);
   if (preview && (positions.get(latest)?.[0] ?? -1) < index) positions.set(latest, [index]);
-  write(index, { ...previous, ...(delta ? {} : data), key, id, turnId, kind: 'reasoning', sections, final, preview });
+  const row = { ...previous, ...(delta ? {} : data), key, id, turnId, kind: 'reasoning', sections, final, preview };
+  if (!final && tails) summaryTailsByRow.set(row, tails);
+  write(index, row);
 }
 
 function sameFileReferences(left, right) {

@@ -13,6 +13,7 @@ import { _electron as electron } from 'playwright';
 const following = process.argv.includes('--following');
 const grouped = process.argv.includes('--grouped-history');
 const toolOutput = process.argv.includes('--tool-output');
+const streamedReasoning = process.argv.includes('--reasoning');
 const [candidate, baseline, screenshot] = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const linux = process.platform === 'linux';
 const lastFragment = `追加记录 ${following ? '160' : '040'}。继续核对正在生成的结果。`;
@@ -217,6 +218,85 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
   }
 }
 
+async function checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial) {
+  const goalText = '核对 Windows 与 EL8 的会话状态和历史阅读位置';
+  await composer.fill('/goal ' + goalText);
+  await composer.press('Enter');
+  const goal = page.locator('.goal-strip');
+  await goal.getByText(goalText).waitFor();
+  await composer.fill('验证高频推理摘要。');
+  await composer.press('Enter');
+  const strip = page.getByRole('button', { name: '实时推理摘要' });
+  const finalStep = '步骤 072';
+  await strip.getByText('开始复核长会话。').waitFor();
+  let desktop;
+  try {
+    let sampleInput;
+    if (linux && baseline) {
+      const box = await composer.boundingBox();
+      const area = { x: Math.ceil(box.x), y: Math.ceil(box.y), width: 56, height: 24 };
+      desktop = await observeDesktopDraft(app, area);
+      sampleInput = await prepareInputSampling(app, page, composer, area, desktop);
+    }
+    await transcript.evaluate(element => { element.scrollTop -= 640; });
+    const latest = page.getByRole('button', { name: '滚到最新消息' });
+    await latest.waitFor();
+    await settleFrame(page);
+    const position = () => transcript.evaluate(element => element.scrollTop);
+    const before = await position();
+    const geometry = await strip.boundingBox();
+    assert.ok(geometry);
+    const mutating = await strip.evaluateHandle(element => {
+      const preview = element.querySelector('bdi');
+      const seen = new Set();
+      const observer = new MutationObserver(() => seen.add(preview.textContent));
+      observer.observe(preview, { subtree: true, childList: true, characterData: true });
+      return () => {
+        observer.disconnect();
+        return { connected: element.isConnected, updates: seen.size };
+      };
+    });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
+      .map(({ name, value }) => [name, value]));
+    const pss = async () => linux ? Number((await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8'))
+      .match(/^Pss:\s+(\d+) kB$/m)[1]) : undefined;
+    const startPssKiB = await pss();
+    const start = await metrics();
+    await writeFile(join(profile, 'append'), '');
+    const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
+    await strip.getByText(finalStep, { exact: false }).waitFor();
+    await settleFrame(page);
+    const end = await metrics();
+    const endPssKiB = await pss();
+    const { connected, updates } = await mutating.evaluate(read => read());
+    await mutating.dispose();
+    assert.ok(connected && updates >= 20, `Only ${updates} updates reached the original strip.`);
+    assert.equal(await position(), before);
+    assert.deepEqual(await strip.boundingBox(), geometry);
+    assert.ok(await goal.evaluate(element => {
+      const goal = element.getBoundingClientRect();
+      const strip = element.previousElementSibling.getBoundingClientRect();
+      const composer = element.nextElementSibling.getBoundingClientRect();
+      return strip.bottom < goal.top && goal.bottom < composer.top && strip.x === goal.x && goal.x === composer.x
+        && strip.width === goal.width && goal.width === composer.width;
+    }));
+    if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}.png` });
+
+    await writeFile(join(profile, 'finish'), '');
+    await strip.waitFor({ state: 'detached' });
+    await latest.click();
+    await transcript.locator('[data-card="reasoning"]').getByText(finalStep, { exact: false }).waitFor();
+    return { label, updates, startPssKiB, endPssKiB, typing,
+      rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
+      mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
+      scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000 };
+  } finally {
+    desktop?.close();
+  }
+}
+
 async function check(binary, label, trial) {
   const profile = await mkdtemp(join(tmpdir(), 'span-long-reply-'));
   let app;
@@ -231,16 +311,18 @@ async function check(binary, label, trial) {
       env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_STREAM_GATE: profile },
     });
     const page = await app.firstWindow();
-    const rendererPid = await app.evaluate(({ BrowserWindow }) => {
+    const size = streamedReasoning ? [740, 520] : [800, 640];
+    const rendererPid = await app.evaluate(({ BrowserWindow }, [width, height]) => {
       const window = BrowserWindow.getAllWindows()[0];
-      window.setContentSize(800, 640);
+      window.setContentSize(width, height);
       return window.webContents.getOSProcessId();
-    });
-    await page.waitForFunction(() => innerWidth === 800 && innerHeight === 640);
+    }, size);
+    await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, size);
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
     if (toolOutput) return await checkToolOutput(app, page, composer, profile, rendererPid, label, trial);
+    if (streamedReasoning) return await checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial);
     if (grouped) {
       assert.equal(await transcript.getAttribute('data-items'), '2901');
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
@@ -392,10 +474,11 @@ async function check(binary, label, trial) {
 }
 
 const trials = [];
-const alternate = grouped || toolOutput;
+const alternate = grouped || toolOutput || streamedReasoning;
 for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
   if (baseline && (!alternate || trial === 0)) trials.push(await check(baseline, 'baseline', trial));
   trials.push(await check(candidate, 'candidate', trial));
   if (baseline && alternate && trial === 1) trials.push(await check(baseline, 'baseline', trial));
 }
-console.log(JSON.stringify({ platform: process.platform, ...(toolOutput && { scenario: 'tool-output' }), trials }, null, 2));
+const scenario = toolOutput ? 'tool-output' : streamedReasoning ? 'reasoning' : undefined;
+console.log(JSON.stringify({ platform: process.platform, scenario, trials }, null, 2));

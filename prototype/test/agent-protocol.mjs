@@ -461,6 +461,29 @@ test('reasoning received during an open Markdown reply does not break its format
   assert.equal(rows[0].text, '**First and last**');
 });
 
+test('streamed reasoning keeps a bounded preview and preserves the full summary', () => {
+  const delta = (section, text) => ({ kind: 'delta', delta: { kind: 'reasoning', id: 'r', turnId: 't', section, text } });
+  const summary = '# 验证路径\r\n' + '内容。'.repeat(100_000) + '最终检查';
+  const whitespace = ' '.repeat(300) + '\r\n';
+  const rows = applyTimeline([], [delta(0, summary), delta(1, '## 覆核'), delta(0, whitespace)]);
+  assert.ok(turnReasoning(rows, 't').preview.endsWith('最终检查'));
+
+  const unicodeBoundary = '😀' + '新'.repeat(239);
+  const updated = applyTimeline(rows, [delta(0, '- '), delta(0, unicodeBoundary)]);
+  const preview = turnReasoning(updated, 't');
+  assert.equal(preview.preview, '新'.repeat(239));
+  assert.deepEqual(preview.sections, [summary + whitespace + '- ' + unicodeBoundary, '## 覆核']);
+
+  const independent = applyTimeline(rows, [delta(1, '原文\n- 最新进度')]);
+  assert.equal(turnReasoning(independent, 't').preview, '最新进度');
+  assert.equal(turnReasoning(rows, 't').sections[0], summary + whitespace);
+  const completed = applyTimeline(updated, [{ kind: 'item', final: true, item: {
+    kind: 'reasoning', id: 'r', turnId: 't', sections: ['', '## 最终摘要'],
+  } }]);
+  assert.equal(turnReasoning(completed, 't').preview, '最终摘要');
+  assert.equal(turnReasoning(completed, 't').sections[0], preview.sections[0]);
+});
+
 test('the server user echo merges into the optimistic row without moving it', () => {
   const optimistic = { kind: 'user', text: 'Run', key: 'client', clientId: 'client', optimistic: true };
   const event = { kind: 'item', final: true, item: {

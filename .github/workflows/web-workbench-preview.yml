@@ -98,6 +98,7 @@ jobs:
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
             startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af \
             streaming-output:72576f01c969e452c5f8cc66940ce110f4fb7693 \
+            reasoning:2b2da807b5ec4496e20eece8df6d54763e2379e3 \
             grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51
           do
             target="${spec%%:*}-baseline"
@@ -148,6 +149,7 @@ jobs:
             /tmp/span-workbench-artifacts/startup-loading-baseline-commit.txt
             /tmp/span-workbench-artifacts/grouped-history-baseline-commit.txt
             /tmp/span-workbench-artifacts/streaming-output-baseline-commit.txt
+            /tmp/span-workbench-artifacts/reasoning-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -190,6 +192,7 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" --following
           node prototype/test/long-reply.mjs "$binary" --grouped-history
           node prototype/test/long-reply.mjs "$binary" --tool-output
+          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-stream" --reasoning
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           bash prototype/test/install-pi.sh "$PWD/pi-test"

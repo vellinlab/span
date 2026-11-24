@@ -282,6 +282,52 @@ fn stream_command_output(
     )
 }
 
+fn stream_reasoning(
+    output: &Output,
+    running: &AtomicBool,
+    thread_id: &str,
+    turn: &str,
+    gate: &Path,
+) -> io::Result<()> {
+    let id = format!("{turn}-streamed-summary");
+    let initial = "核对历史记录和工具结果。".repeat(38_000) + "\r\n开始复核长会话。";
+    let delta = |fragment: &str| {
+        notice(
+            output,
+            "item/reasoning/summaryTextDelta",
+            json!({"threadId":thread_id,"turnId":turn,"itemId":id,"summaryIndex":0,"delta":fragment}),
+        )
+    };
+    delta(&initial)?;
+    if !wait_for_stream_gate(&gate.join("append"), running) {
+        return Ok(());
+    }
+    for index in 1..=72 {
+        if !running.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        delta(&format!(
+            "\r\n- 正在比对工作区记录、工具输出和最近一次会话结果。步骤 {index:03}"
+        ))?;
+        thread::sleep(Duration::from_millis(40));
+    }
+    fs::write(gate.join("appended"), b"")?;
+    if !wait_for_stream_gate(&gate.join("finish"), running) {
+        return Ok(());
+    }
+    notice(
+        output,
+        "item/completed",
+        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning","id":id,"summary":[]}}),
+    )?;
+    running.store(false, Ordering::Release);
+    notice(
+        output,
+        "turn/completed",
+        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+    )
+}
+
 fn long_reply(
     output: &Output,
     running: &AtomicBool,
@@ -617,6 +663,16 @@ pub fn run() -> Result<()> {
                             &turn,
                             &gate,
                         );
+                    });
+                    continue;
+                }
+                if params["input"][0]["text"] == "验证高频推理摘要。"
+                    && let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                {
+                    let output = output.clone();
+                    let background = background.clone();
+                    thread::spawn(move || {
+                        let _ = stream_reasoning(&output, &background, &thread_id, &turn, &gate);
                     });
                     continue;
                 }
