@@ -288,7 +288,7 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
     <div className="agent-panel-content">
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {panel.kind === 'goal' && <GoalPanel key={work.session?.ref.id} goal={work.goal} action={work.goalAction} report={report} />}
-      {panel.kind === 'reasoning' && <ReasoningText row={reasoning} />}
+      {panel.kind === 'reasoning' && <ReasoningText rows={reasoning} />}
       {panel.kind === 'usage' && <UsagePanel usage={work.usage} refresh={work.refreshUsage} report={report} />}
       {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}

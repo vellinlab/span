@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
-import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, visibleRow } from '../ui/timeline.js';
+import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
@@ -247,30 +247,38 @@ test('timeline preserves interleaved tools, reconciles message chunks, and keeps
     item('command', 'c', { command: 'git status', text: 'working tree clean' }),
     delta('reasoning', 'second', 'Next\nChecking'),
     delta('reasoning', 'second', ' alignment'),
-    item('reasoning', 'r', { sections: ['First', 'Second'] }),
+    item('reasoning', 'r', { sections: ['First', 'Second.'] }),
     delta('message', 'm', 'Finish.'),
     item('message', 'm', { text: 'Start. Finish.' }),
     delta('message', 'm', 'late delta'),
   ]);
-  assert.deepEqual(rows.map(row => row.kind), ['reasoning', 'message', 'command', 'message']);
-  assert.deepEqual(rows[0].sources.get('r').sections, ['First', 'Second']);
-  assert.deepEqual(rows[0].sources.get('second').sections, ['Next\nChecking alignment']);
-  assert.equal(rows[0].preview, 'Checking alignment');
-  assert.equal(rows[1].text + rows[3].text, 'Start. Finish.');
+  assert.deepEqual(rows.map(row => row.kind), ['reasoning', 'message', 'command', 'reasoning', 'message']);
+  assert.deepEqual(rows[0].sections, ['First', 'Second.']);
+  assert.deepEqual(rows[3].sections, ['Next\nChecking alignment']);
+  assert.equal(turnReasoning(rows, 't'), rows[3]);
+  assert.equal(rows[3].preview, 'Checking alignment');
+  assert.equal(rows[1].text + rows[4].text, 'Start. Finish.');
+  const layout = timelineLayout(rows);
+  assert.deepEqual([0, 2, 3].map(index => layout.estimateSize(index, 't')), [0, 34, 0]);
+  const updated = applyTimeline(rows, [delta('reasoning', 'second', '.')]);
+  assert.equal(timelineLayout(updated), layout);
+  assert.equal(turnReasoning(updated, 't').preview, 'Checking alignment.');
   assert.equal(visibleRow({ kind: 'reasoning' }), false);
   const history = historyRows([
     { id: 'earlier', run: { status: 'completed' }, rows: [{ turnId: 'earlier', id: 'm', kind: 'message', text: 'History' }] },
     { id: 't', run: { status: 'completed' }, rows: [
-      { turnId: 't', id: 'r', kind: 'reasoning', sections: ['First', 'Second'] },
+      { turnId: 't', id: 'r', kind: 'reasoning', sections: ['First', 'Second.'] },
       { turnId: 't', id: 'm', kind: 'message', text: 'Start. Finish.' },
-      { turnId: 't', id: 'second', kind: 'reasoning', sections: ['Next\nChecking alignment'] },
+      { turnId: 't', id: 'c', kind: 'command', command: 'git status' },
+      { turnId: 't', id: 'second', kind: 'reasoning', sections: ['Next\nChecking alignment', 'Saved addendum'] },
     ] },
   ]);
   const reopened = mergeHistory(rows, history);
-  assert.equal(history.filter(row => row.kind === 'reasoning').length, 1);
-  assert.deepEqual(reopened.map(row => row.kind), ['message', 'reasoning', 'message', 'command', 'message']);
+  assert.deepEqual(history.map(row => row.kind), ['message', 'reasoning', 'message', 'command', 'reasoning']);
+  assert.deepEqual(reopened.map(row => row.kind), ['message', 'reasoning', 'message', 'command', 'reasoning', 'message']);
   assert.equal(reopened[1].key, rows[0].key);
-  assert.equal(reopened[1].sources.size, 2);
+  assert.deepEqual(reopened[4].sections, ['Next\nChecking alignment', 'Saved addendum']);
+  assert.equal(turnReasoning(reopened, 't'), reopened[4]);
 });
 
 test('the server user echo merges into the optimistic row without moving it', () => {

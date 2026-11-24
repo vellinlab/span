@@ -258,11 +258,14 @@ try {
   assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - reasoningAnchor) <= 2);
   await reasoningJump.click();
   await transcript.getByText('流式输出已接通。', { exact: true }).waitFor();
-  await archivedReasoning.locator('summary').click();
-  await archivedReasoning.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
-  await archivedReasoning.getByText('确认目标卡片和输入区之间的间距。', { exact: false }).waitFor();
+  const earlyReasoning = archivedReasoning.filter({ hasText: '再确认工具结果和最终回复的前后顺序。' });
+  const lateReasoning = archivedReasoning.filter({ hasText: '确认目标卡片和输入区之间的间距。' });
+  await earlyReasoning.locator('summary').click();
+  await earlyReasoning.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
+  await lateReasoning.locator('summary').waitFor();
+  assert.equal(await lateReasoning.locator('.card-body').count(), 0);
   assert.equal(await transcript.locator('[data-card="command"] pre').count(), 0);
-  await archivedReasoning.locator('summary').click();
+  await earlyReasoning.locator('summary').click();
   assert.equal(await page.getByRole('alert').count(), 0);
   console.log('Verified the fixed reasoning strip, history scroll position, nested details, and archived summary.');
   await composer.fill('/usage');

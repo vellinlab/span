@@ -94,6 +94,8 @@ function App() {
   const liveReasoning = turnReasoning(rows, running ? run.id : undefined);
   const showReasoning = Boolean(liveReasoning?.preview && !interaction);
   const reasoningOpen = panel?.kind === 'reasoning';
+  const reasoningDetails = reasoningOpen && liveReasoning
+    ? rows.filter(row => row.kind === 'reasoning' && row.turnId === liveReasoning.turnId && row.preview) : undefined;
   const previewBlocked = previewOverlay && Boolean(interaction);
   const readingOverlay = previewCoversConversation && !interaction;
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
@@ -609,7 +611,7 @@ function App() {
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
             <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
               rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
-              liveReasoningKey={liveReasoning?.key} activeTurnId={run?.id}
+              liveReasoningTurn={liveReasoning?.turnId} activeTurnId={run?.id}
               jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
               openArtifact={openArtifact} canOpenSession={!running && !loading && connection === 'ready'} />
             <div className="composer-wrap reading-column">
@@ -627,7 +629,7 @@ function App() {
               </div>}
               {loading && !rows.length && <div className="live" role="status"><i />{rememberedReading?.anchor ? '正在恢复阅读位置' : '正在加载会话'}</div>}
               <div className="composer-overlay">
-                <AgentPanel panel={panel} work={work} reasoning={reasoningOpen ? liveReasoning : undefined}
+                <AgentPanel panel={panel} work={work} reasoning={reasoningDetails}
                   setPanel={value => value ? setPanel(value) : closePanel()} report={report} openSession={openRef} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}

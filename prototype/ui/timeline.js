@@ -2,7 +2,7 @@ import { mergeAgentMember } from './delegation.js';
 
 export const itemKey = ({ turnId, id }) => JSON.stringify([turnId, id]);
 
-const reasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
+const latestReasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
 const positionsByRows = new WeakMap();
 const layoutByRows = new WeakMap();
 const membersByRows = new WeakMap();
@@ -22,9 +22,9 @@ export function delegatedMembers(rows) {
 
 export function turnReasoning(rows, turnId) {
   if (!turnId) return;
-  const key = reasoningKey(turnId);
   const positions = positionsByRows.get(rows);
-  return positions ? rows[positions.get(key)?.[0]] : rows.findLast(row => row.key === key);
+  return positions ? rows[positions.get(latestReasoningKey(turnId))?.[0]]
+    : rows.findLast(row => row.turnId === turnId && row.kind === 'reasoning' && row.preview);
 }
 
 function estimateRow(row) {
@@ -68,9 +68,14 @@ export function timelineLayout(rows) {
   let layout = layoutByRows.get(rows);
   if (!layout) {
     const keys = rows.map(row => row.key);
-    const sizes = rows.map(estimateRow);
+    const reasoningTurns = new Map();
+    const sizes = rows.map((row, index) => {
+      if (row.kind === 'reasoning') reasoningTurns.set(index, row.turnId);
+      return estimateRow(row);
+    });
     layout = { count: rows.length, groups: activityGroups(rows), getItemKey: index => keys[index],
-      estimateSize: index => sizes[index], rowAt: (items, index) => items[index] };
+      estimateSize: (index, hiddenTurn) => hiddenTurn && reasoningTurns.get(index) === hiddenTurn ? 0 : sizes[index],
+      rowAt: (items, index) => items[index] };
     layoutByRows.set(rows, layout);
   }
   return layout;
@@ -97,7 +102,7 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
   return {
     count: entries.length, nested,
     getItemKey: index => typeof entries[index] === 'number' ? layout.getItemKey(entries[index]) : entries[index]?.key,
-    estimateSize: index => typeof entries[index] === 'number' ? layout.estimateSize(entries[index]) : 34,
+    estimateSize: (index, hiddenTurn) => typeof entries[index] === 'number' ? layout.estimateSize(entries[index], hiddenTurn) : 34,
     rowAt: (rows, index) => typeof entries[index] === 'number' ? rows[entries[index]] : entries[index],
   };
 }
@@ -115,14 +120,8 @@ export function mergeHistory(previous, history) {
     ...history.filter(row => !liveKeys.has(row.key) && !(row.clientId && sent.has(row.clientId))),
     ...previous.map(row => {
       const saved = summaries.get(row.key);
-      if (!saved) return row;
-      const sources = new Map(saved.sources);
-      for (const [id, live] of row.sources) {
-        const old = sources.get(id);
-        if (!old || live.final) sources.set(id, live);
-        else sources.set(id, { ...live, sections: mergeSections(live.sections, old.sections) });
-      }
-      return { ...row, sources, preview: row.preview || saved.preview, previewSource: row.previewSource ?? saved.previewSource };
+      if (!saved || row.final) return row;
+      return { ...row, sections: mergeSections(row.sections, saved.sections), preview: row.preview || saved.preview };
     }),
   ];
 }
@@ -143,22 +142,21 @@ function addReasoning({ rows, positions, write }, data, final, delta) {
   const { turnId, id } = data;
   const section = data.section ?? 0;
   if (delta && (typeof data.text !== 'string' || !data.text || !Number.isInteger(section) || section < 0 || section >= 24)) return;
-  const key = reasoningKey(turnId);
+  const key = itemKey(data);
   const existing = positions.get(key)?.[0];
   const index = existing ?? rows.length;
-  const row = rows[index] ?? { key, turnId, kind: 'reasoning' };
-  const previous = row.sources?.get(id);
+  const previous = rows[index];
   if (previous?.final && !final) return;
   if (!delta && !data.sections.some(Boolean) && !previous) return;
 
   const sections = delta ? [...(previous?.sections ?? [])] : mergeSections(data.sections, previous?.sections ?? []);
   if (delta) sections[section] = (sections[section] ?? '') + data.text;
-  const sources = new Map(row.sources);
-  sources.set(id, { sections, final });
   const text = delta ? sections[section] : sections.findLast(part => part?.trim());
-  const preview = (delta || !previous || row.previewSource === id) && text && lastSummaryLine(text);
+  const preview = (text && lastSummaryLine(text)) || previous?.preview;
   if (existing === undefined) positions.set(key, [index]);
-  write(index, { ...row, sources, ...(preview && { preview, previewSource: id }) });
+  const latest = latestReasoningKey(turnId);
+  if (preview && (positions.get(latest)?.[0] ?? -1) < index) positions.set(latest, [index]);
+  write(index, { ...previous, ...(delta ? {} : data), key, id, turnId, kind: 'reasoning', sections, final, preview });
 }
 
 function addItem(state, item, final) {
@@ -245,6 +243,7 @@ export function applyTimeline(previous, events) {
       const indexes = index.get(key);
       if (indexes) indexes.push(position);
       else index.set(key, [position]);
+      if (row.kind === 'reasoning' && row.preview) index.set(latestReasoningKey(row.turnId), [position]);
     });
   }
   // Existing rows retain their positions during streaming. Copy the index only

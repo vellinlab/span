@@ -14,8 +14,11 @@ const prompts = [];
 const initialPrompt = '核对 Pi 的推理、工具与用量。';
 const resumePrompt = '继续刚才保存的 Pi 会话。';
 const firstAnswer = 'Pi 已完成工作台验收。';
+const beforeTool = '再核对工具和用量。';
+const afterTool = '工具已返回，整理核对结果。';
 let releaseReasoning;
 let releaseTool;
+let releaseAnswer;
 const gateway = createServer(async (request, response) => {
   try {
     assert.equal(request.url, '/v1/chat/completions');
@@ -43,12 +46,16 @@ const gateway = createServer(async (request, response) => {
     if (initial && !tool) {
       send({ reasoning_content: '先核对 Pi 会话。' });
       await new Promise(done => { releaseReasoning = done; });
-      send({ reasoning_content: '\n再核对工具和用量。' });
+      send({ reasoning_content: '\n' + beforeTool });
       await new Promise(done => { releaseTool = done; });
       send({ tool_calls: [{ index: 0, id: 'span-tool', type: 'function',
         function: { name: 'bash', arguments: JSON.stringify({ command: 'echo pi tool result' }) } }] });
       send({}, 'tool_calls', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
     } else {
+      if (initial) {
+        send({ reasoning_content: afterTool });
+        await new Promise(done => { releaseAnswer = done; });
+      }
       send({ content: initial ? firstAnswer : 'Pi 已恢复原会话。' });
       send({}, 'stop', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
     }
@@ -120,15 +127,29 @@ export default function (pi) {
   await reasoning.getByText('先核对 Pi 会话。', { exact: true }).waitFor();
   const bounds = await reasoning.boundingBox();
   releaseReasoning();
-  await reasoning.getByText('再核对工具和用量。', { exact: true }).waitFor();
+  await reasoning.getByText(beforeTool, { exact: true }).waitFor();
   assert.deepEqual(await reasoning.boundingBox(), bounds);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
   releaseTool();
+  await reasoning.getByText(afterTool, { exact: true }).waitFor();
+  assert.deepEqual(await reasoning.boundingBox(), bounds);
+  assert.equal(await transcript.locator('[data-card="reasoning"]').count(), 0);
+  releaseAnswer();
   await transcript.getByText(firstAnswer, { exact: true }).waitFor();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   assert.equal(await reasoning.count(), 0);
   assert.equal(await transcript.getByText(initialPrompt, { exact: true }).count(), 1);
   const tool = transcript.locator('[data-card="command"]').filter({ hasText: 'echo pi tool result' });
+  async function verifyArchive(log) {
+    const summaries = log.locator('[data-card="reasoning"]');
+    await summaries.getByText(afterTool, { exact: true }).waitFor();
+    assert.equal(await summaries.count(), 2);
+    assert.equal(await summaries.locator('.card-body').count(), 0);
+    const chronology = await log.locator('[data-card="reasoning"] .card-hint, [data-card="command"] .card-title').allTextContents();
+    assert.deepEqual(chronology, [beforeTool, 'echo pi tool result', afterTool]);
+  }
+  await verifyArchive(transcript);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-archive.png') });
   await tool.locator('summary').click();
   await tool.getByText('pi tool result', { exact: true }).waitFor();
   await send('/usage');
@@ -166,6 +187,7 @@ export default function (pi) {
   await resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: 'Pi 原生会话验收' })
     .or(resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: initialPrompt })).click();
   await resumed.page.getByTestId('transcript').getByText(firstAnswer, { exact: true }).waitFor();
+  await verifyArchive(resumed.page.getByTestId('transcript'));
   const editorAfterRestart = resumed.page.getByRole('textbox', { name: '消息' });
   await editorAfterRestart.fill(resumePrompt);
   await editorAfterRestart.press('Enter');
@@ -176,6 +198,7 @@ export default function (pi) {
 } finally {
   releaseReasoning?.();
   releaseTool?.();
+  releaseAnswer?.();
   gateway.closeAllConnections();
   gateway.close();
   await app?.close();

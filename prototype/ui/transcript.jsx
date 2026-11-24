@@ -129,7 +129,8 @@ const TranscriptRow = memo(function TranscriptRow({
   switch (row.kind) {
     case 'reasoning':
       title = '推理摘要';
-      detail = () => <ReasoningText row={row} />;
+      if (!expanded) hint = row.preview;
+      detail = () => <ReasoningText rows={[row]} />;
       break;
     case 'plan':
       title = row.steps?.length ? '任务计划' : '规划草案';
@@ -248,11 +249,11 @@ function readAnchor(element, rows, layout) {
   }
 }
 
-function anchorIndex(rows, layout, anchor, hiddenKey) {
+function anchorIndex(rows, layout, anchor, reasoningTurn) {
   let fallback = -1;
   for (let index = 0; index < layout.count; index++) {
     const row = layout.rowAt(rows, index);
-    if (row.turnId !== anchor.turnId || row.key === hiddenKey || !visibleRow(row)) continue;
+    if (row.turnId !== anchor.turnId || (row.kind === 'reasoning' && row.turnId === reasoningTurn) || !visibleRow(row)) continue;
     if (row.key === anchor.key || row.key === anchor.itemKey) return index;
     if (fallback === -1) fallback = index;
   }
@@ -260,7 +261,7 @@ function anchorIndex(rows, layout, anchor, hiddenKey) {
 }
 
 export const Transcript = memo(function Transcript({
-  rows, liveReasoningKey, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
+  rows, liveReasoningTurn, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
   onScrollPosition, openSession, openArtifact, canOpenSession, showLatest,
 }) {
   const expanded = useRef(null);
@@ -288,8 +289,8 @@ export const Transcript = memo(function Transcript({
   const rawLayout = timelineLayout(rows);
   const layout = useMemo(() => groupedTimelineLayout(rawLayout, liveTurnId, ungroupedTurns.current, openGroups),
     [rawLayout, liveTurnId, openGroups]);
-  const target = restore && !loading ? anchorIndex(rows, layout, restore, liveReasoningKey) : -1;
-  const estimate = useCallback(index => layout.getItemKey(index) === liveReasoningKey ? 0 : layout.estimateSize(index), [layout, liveReasoningKey]);
+  const target = restore && !loading ? anchorIndex(rows, layout, restore, liveReasoningTurn) : -1;
+  const estimate = useCallback(index => layout.estimateSize(index, liveReasoningTurn), [layout, liveReasoningTurn]);
   const rangeExtractor = useCallback(range => {
     const indexes = defaultRangeExtractor(range);
     if (target < indexes[0]) return [target, ...indexes];
@@ -298,7 +299,7 @@ export const Transcript = memo(function Transcript({
   }, [target]);
   const virtual = useVirtualizer({
     count: layout.count, getScrollElement: () => scroll.current,
-    getItemKey: layout.getItemKey, estimateSize: liveReasoningKey ? estimate : layout.estimateSize,
+    getItemKey: layout.getItemKey, estimateSize: liveReasoningTurn ? estimate : layout.estimateSize,
     rangeExtractor: target >= 0 ? rangeExtractor : defaultRangeExtractor,
     overscan: 6, paddingStart: 20, paddingEnd: 14,
     anchorTo: 'end', followOnAppend: true, scrollEndThreshold: 40,
@@ -435,7 +436,7 @@ export const Transcript = memo(function Transcript({
       {virtualRows.map(item => {
         const row = layout.rowAt(rows, item.index);
         const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + Number(Boolean(layout.nested?.has(item.index)));
-        const show = row.key !== liveReasoningKey && Boolean(visibleRow(row));
+        const show = !(row.kind === 'reasoning' && row.turnId === liveReasoningTurn) && Boolean(visibleRow(row));
         const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
         const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);
         return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}

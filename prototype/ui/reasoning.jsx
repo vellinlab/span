@@ -2,9 +2,13 @@ import { memo, useLayoutEffect, useRef } from 'react';
 import { Brain, ChevronDown } from 'lucide-react';
 import { Markdown } from './markdown.jsx';
 
-export const ReasoningText = memo(function ReasoningText({ row }) {
-  return row && <div className="reasoning-text">{Array.from(row.sources, ([source, { sections }]) => sections.map((section, index) =>
-    section?.trim() && <Markdown key={JSON.stringify([source, index])} text={section} />))}</div>;
+const ReasoningSections = memo(function ReasoningSections({ row }) {
+  return row.sections.map((section, index) => section?.trim() && <Markdown key={index} text={section} />);
+});
+
+export const ReasoningText = memo(function ReasoningText({ rows }) {
+  return rows?.length > 0 && <div className="reasoning-text">{rows.map(row =>
+    <ReasoningSections key={row.key} row={row} />)}</div>;
 });
 
 export const ReasoningStrip = memo(function ReasoningStrip({ preview, expanded, toggle, hadFocus }) {
