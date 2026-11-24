@@ -104,8 +104,22 @@ function CommandText({ command, titleRef, force }) {
   </div>;
 }
 
-function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, expanded, toggle, children }) {
+function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, expanded, toggle, scroll, children }) {
   const titleRef = useRef(null);
+  const reveal = useRef(null);
+  useLayoutEffect(() => {
+    const details = reveal.current;
+    if (!expanded || !details) return;
+    reveal.current = null;
+    const viewport = scroll.current;
+    const view = viewport.getBoundingClientRect();
+    const heading = details.firstElementChild.getBoundingClientRect();
+    const body = details.lastElementChild.getBoundingClientRect();
+    // Leave room for the start of the body when a card opens against the viewport edge.
+    const end = Math.min(body.bottom, body.top + 44);
+    const delta = Math.min(heading.top - view.top, end + 4 - view.bottom);
+    if (delta > 1) viewport.scrollTop += delta;
+  }, [expanded, scroll]);
   const failed = status === 'failed' && !recordedStatus;
   const CardIcon = failed ? CircleAlert : Icon;
   const statusLabel = statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
@@ -120,7 +134,10 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
     </span>}</>;
   return <div className="activity" data-card={type} data-failed={failed || undefined}>
     {children ? <details open={expanded} onToggle={event => {
-      if (event.currentTarget.open !== expanded) toggle(event.currentTarget.open);
+      const details = event.currentTarget;
+      if (details.open === expanded) return;
+      reveal.current = details.open ? details : null;
+      toggle(details.open);
     }}>
       <summary><ChevronRight size={13} className="card-chevron" />{head}</summary>
       {expanded && <div className="card-body">{children(titleRef)}</div>}
@@ -265,7 +282,7 @@ const TranscriptRow = memo(function TranscriptRow({
 
   return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} recordedStatus={recordedStatus}
     statusText={statusText} statusNote={statusNote}
-    title={title} hint={hint} path={path} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
+    title={title} hint={hint} path={path} expanded={expanded} scroll={scroll} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
 const ActivityGroup = memo(function ActivityGroup({ group, open, toggle }) {
@@ -323,7 +340,7 @@ export const Transcript = memo(function Transcript({
   const viewportHeight = useRef(0);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const inspect = useCallback((key, open) => {
-    if (open && (following.current || inspectedCard)) {
+    if (open) {
       following.current = false;
       setInspectedCard(key);
     } else if (!open && inspectedCard === key) {

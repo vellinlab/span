@@ -374,12 +374,31 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       const expandedHeader = await header.boundingBox();
       assert.ok(Math.abs(beforeOpen.y - expandedHeader.y) <= 2, 'Opening an archived summary should keep its title in place.');
       assert.ok(await header.evaluate(element => element === document.activeElement));
-      assert.ok(await startOfSummary.evaluate(element => {
+      const beginningInView = () => startOfSummary.evaluate(element => {
         const bounds = element.getBoundingClientRect();
         const view = element.closest('.timeline').getBoundingClientRect();
         return bounds.top >= view.top && bounds.bottom <= view.bottom;
-      }), 'The beginning of the summary should be in view.');
+      });
+      assert.ok(await beginningInView(), 'The beginning of the summary should be in view.');
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-archive.png` });
+      await header.press('Enter');
+      await startOfSummary.waitFor({ state: 'detached' });
+      await header.evaluate(element => {
+        const viewport = element.closest('.timeline');
+        viewport.scrollTop += element.getBoundingClientRect().bottom - viewport.getBoundingClientRect().bottom + 3;
+      });
+      await settleFrame(page);
+      const edge = await header.evaluate(element =>
+        element.closest('.timeline').getBoundingClientRect().bottom - element.getBoundingClientRect().bottom);
+      assert.ok(edge >= 0 && edge <= 5, 'The closed title should be at the lower edge of the viewport.');
+      const atEdge = await header.boundingBox();
+      await header.press('Enter');
+      await startOfSummary.waitFor();
+      await settleFrame(page);
+      const moved = atEdge.y - (await header.boundingBox()).y;
+      assert.ok(moved > 0 && moved <= 55 && await beginningInView(), 'Opening should reveal the start with a short scroll.');
+      assert.ok(await header.evaluate(element => element === document.activeElement));
+      if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-archive-edge.png` });
       await latest.click();
       await latest.waitFor({ state: 'detached' });
       const answer = transcript.getByText('推理核对已完成。', { exact: true });
