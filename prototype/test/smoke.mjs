@@ -428,7 +428,7 @@ try {
   await showSidebar.waitFor();
   assert.ok(await showSidebar.evaluate(element => element === document.activeElement));
   assert.ok(await heading.evaluate((element, previous) => element.clientWidth > previous &&
-    getComputedStyle(element.parentElement.querySelector('.breadcrumb-workspace span')).clipPath === 'none',
+    getComputedStyle(element.closest('.breadcrumb').querySelector('.breadcrumb-workspace span')).clipPath === 'none',
   narrowTitle.width));
   await showSidebar.press('Enter');
   await grip.dblclick();
