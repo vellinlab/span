@@ -175,6 +175,7 @@ export const Transcript = memo(function Transcript({
   const [restore, setRestore] = useState(remembered?.anchor);
   const latest = useRef(null);
   const following = useRef(true);
+  const viewportHeight = useRef(0);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const toggle = useCallback((key, open) => {
     expanded.current.delete(key);
@@ -251,11 +252,11 @@ export const Transcript = memo(function Transcript({
 
   useLayoutEffect(() => {
     const element = scroll.current;
-    let height = element.clientHeight;
+    viewportHeight.current = element.clientHeight;
     const observer = new ResizeObserver(() => {
       const nextHeight = element.clientHeight;
-      if (nextHeight === height) return;
-      height = nextHeight;
+      if (nextHeight === viewportHeight.current) return;
+      viewportHeight.current = nextHeight;
       if (following.current && virtual.options.count) virtual.scrollToEnd();
     });
     observer.observe(element);
@@ -265,7 +266,10 @@ export const Transcript = memo(function Transcript({
   function onScroll() {
     if (restore) return;
     const element = scroll.current;
-    const atBottom = element.scrollHeight - element.clientHeight - element.scrollTop < 40;
+    const height = element.clientHeight;
+    // A resize can scroll the list before its observer has restored the viewport.
+    if (height !== viewportHeight.current) return;
+    const atBottom = element.scrollHeight - height - element.scrollTop < 40;
     following.current = atBottom;
     onScrollPosition(!atBottom);
     if (!atBottom && element.scrollTop < 160 && cursor && !loading) loadOlder();

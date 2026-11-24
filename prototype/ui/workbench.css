@@ -409,7 +409,12 @@ p { margin-block: 0 12px; }
 .user-message .artifact-list { margin-top: 6px; }
 .queued-input { display: block; color: var(--muted); font-size: 11px; }
 
-.composer-wrap { flex: none; position: relative; padding-block: 5px 15px; }
+.composer-wrap {
+  --approval-height: clamp(96px, calc(100cqb - 218px), min(36vh, 300px));
+  flex: none;
+  position: relative;
+  padding-block: 5px 15px;
+}
 .composer {
   border-radius: 18px;
   background: var(--composer);
@@ -421,15 +426,22 @@ p { margin-block: 0 12px; }
 .composer textarea {
   display: block;
   width: 100%;
+  field-sizing: content;
   min-height: 48px;
+  max-height: max(48px, min(156px, 25cqb));
   padding: 1px 2px;
   line-height: 22px;
   background: transparent;
   border: none;
   outline: none;
   resize: none;
+  scrollbar-width: thin;
 }
 .composer textarea::placeholder { color: #b7b7b7; }
+.composer-wrap:has(.approval) .composer textarea {
+  /* Reserve the approval height, goal, controls and a line of history. */
+  max-height: max(48px, min(156px, 25cqb, 100cqb - var(--approval-height) - 168px));
+}
 .composer-bar {
   display: flex;
   align-items: center;
@@ -479,7 +491,7 @@ p { margin-block: 0 12px; }
   display: flex;
   flex-direction: column;
   /* Leave room for the composer, goal and a line of history above them. */
-  max-height: clamp(96px, calc(100cqh - 218px), min(36vh, 300px));
+  max-height: var(--approval-height);
   border-color: #b3a37455;
   font-size: 13px;
   overflow-wrap: anywhere;

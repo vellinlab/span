@@ -75,9 +75,16 @@ try {
     await page.locator('.breadcrumb strong').filter({ hasText: new RegExp(`^${name}$`) }).waitFor();
   };
   const composer = page.getByRole('textbox', { name: '消息' });
-  const firstDraft = '核对第 90 项的命令输出。\n确认后再发送。';
+  const idleHeight = await composer.evaluate(element => element.clientHeight);
+  const firstDraft = [
+    '核对第 90 项的命令输出。', '记下命令的退出状态。', '确认工作目录。',
+    '保留和下一步有关的内容。', '确认后再发送。',
+  ].join('\n');
   const secondDraft = '这里只保留第二个会话的草稿。';
   await composer.fill(firstDraft);
+  assert.ok(await composer.evaluate((element, idle) =>
+    element.clientHeight > idle && element.scrollHeight === element.clientHeight, idleHeight));
+  assert.deepEqual(await readAnchor(), beforeReadingSwitch);
   await openThread('目录会话 0002');
   await timeline.getByText('第 160 项', { exact: false }).waitFor();
   assert.equal(await historyCommand.count(), 0);
@@ -103,7 +110,16 @@ try {
   await jumpToLatest.waitFor({ state: 'detached' });
   assert.ok(await timeline.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop < 40));
   assert.equal(await composer.inputValue(), firstDraft);
+  await composer.fill(Array(20).fill(firstDraft).join('\n'));
+  assert.ok(await composer.evaluate(element => element.clientHeight <= 156 && element.scrollHeight > element.clientHeight));
+  const waitForBottom = () => page.waitForFunction(() => {
+    const element = document.querySelector('.timeline');
+    return element.scrollHeight - element.clientHeight - element.scrollTop < 2;
+  });
+  await waitForBottom();
   await composer.fill('');
+  assert.equal(await composer.evaluate(element => element.clientHeight), idleHeight);
+  await waitForBottom();
 
   assert.ok(await items.count() < 33);
   const hierarchy = await items.first().evaluate(parent => {

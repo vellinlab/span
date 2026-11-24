@@ -328,6 +328,8 @@ try {
     assert.equal(await restorePreview.isEnabled(), false);
     assert.ok(await approval.evaluate(element => document.activeElement === element));
   }
+  await composer.fill(Array(20).fill('处理审批后请继续，保留本次检查的结果。').join('\n'));
+  assert.ok(await composer.evaluate(element => element.scrollHeight > element.clientHeight));
   assert.ok(await page.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
     const refuse = rect('.approval-actions button');
@@ -335,8 +337,9 @@ try {
     return rect('.timeline').height > 0 && rect('.approval-context').bottom <= rect('.approval-body').bottom &&
       rect('.approval-actions').bottom <= rect('.composer').top && rect('.terminal-canvas').height >= 70 &&
       rect('.composer').bottom <= rect('.terminal-panel').top && Boolean(hit?.closest('.approval-actions button'));
-  }), 'History, approval scope and actions, the composer and terminal fit at the minimum window size');
+  }), 'History, approval scope and actions, the long draft and terminal fit at the minimum window size');
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval-compact.png') });
+  await composer.fill('');
   await approval.getByRole('button', { name: '拒绝' }).press('Enter');
   const question = page.getByRole('region', { name: 'Agent 请求输入' });
   await question.waitFor();
