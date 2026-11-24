@@ -25,4 +25,6 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 
 推理卡片读取后端提供的摘要。命令、补丁、任务计划、子代理、工具调用和用户交互使用专用条目。实时增量按接收顺序刷新，历史向上分页，折叠的详情在展开时渲染。
 
+Codex 会话搜索查询当前主机的历史目录，并沿用当前的归档范围。App Server 的标题匹配区分大小写。侧栏也按标题、原始 ID 和工作区筛选已加载的会话。适配器未声明后端搜索时，通过逐页加载扩大筛选范围。 [Codex App Server 搜索参数](https://learn.chatgpt.com/docs/app-server#list-threads-with-pagination--filters)
+
 `npm run check` 运行协议和时间线测试。Electron 打包、EL8/Windows 冒烟、以及使用真实 App Server 验证本机和 SSH 连接由 `web-workbench-preview.yml` 运行。

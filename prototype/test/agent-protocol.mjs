@@ -73,6 +73,12 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     const ref = list.items[0].ref;
     assert.deepEqual(ref, session('codex', remote));
     assert.equal(list.cursor, 'opaque');
+    const filtered = await agent.sessions.search({ query: 'Review', archived: true, cursor: 'filtered-page' });
+    assert.deepEqual(requests.at(-1)[1].packet.params, {
+      limit: 40, archived: true, cursor: 'filtered-page', searchTerm: 'Review',
+    });
+    assert.equal(filtered.cursor, 'opaque');
+    assert.equal(filtered.items[0].archived, true);
     const opened = await agent.sessions.resume(ref, 20);
     assert.equal(opened.history.cursor, 'old');
     assert.deepEqual(await agent.goal.update(ref, { kind: 'set', objective: 'Ship', budget: 100 }), {
@@ -105,6 +111,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
 
   const clue = createAgent('clue', { generation: 10, cwd: '/work', location: local, onEvent() {} });
   assert.equal(typeof clue.sessions.resume, 'function');
+  assert.equal(clue.sessions.search, undefined);
   assert.equal(clue.goal, undefined);
   assert.equal(clue.delegation, undefined);
   clue.close();

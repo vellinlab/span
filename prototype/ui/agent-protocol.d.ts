@@ -123,6 +123,7 @@ export interface AgentAdapter {
   close(): void;
   sessions: {
     list(options: { cursor?: string; archived?: boolean }): Promise<Page<Session>>;
+    search?(options: { query: string; cursor?: string; archived?: boolean }): Promise<Page<Session>>;
     start(options: { cwd?: string }): Promise<OpenSession>;
     resume(ref: SessionRef, limit: number): Promise<OpenSession>;
     history(ref: SessionRef, options: { cursor?: string; limit: number }): Promise<Page<Turn>>;

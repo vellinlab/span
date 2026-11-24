@@ -231,6 +231,11 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     },
   };
 
+  async function listSessions({ cursor, archived = false, query }) {
+    const result = await request('thread/list', { limit: 40, archived, cursor, ...(query && { searchTerm: query }) });
+    return { items: (result.data ?? []).map(item => ({ ...session(item), archived })), cursor: result.nextCursor ?? null };
+  }
+
   return {
     async open() {
       await window.span.request('agent.start', { backend, cwd, ssh: location.kind === 'ssh' ? location.host : undefined, generation });
@@ -246,10 +251,8 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       window.span.request('agent.close', { generation }).catch(() => {});
     },
     sessions: {
-      async list({ cursor, archived = false }) {
-        const result = await request('thread/list', { limit: 40, archived, cursor });
-        return { items: (result.data ?? []).map(item => ({ ...session(item), archived })), cursor: result.nextCursor ?? null };
-      },
+      list: listSessions,
+      search: native ? listSessions : undefined,
       async start({ cwd }) {
         const response = await request('thread/start', { cwd, approvalPolicy: 'on-request', sandbox: 'workspace-write' });
         active.add(response.thread.id);

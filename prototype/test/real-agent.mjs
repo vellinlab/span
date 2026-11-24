@@ -30,6 +30,20 @@ try {
   if (await alert.isVisible()) throw new Error(await alert.innerText());
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   assert.equal(await alert.count(), 0);
+  const title = `Span CI Search ${process.pid}`;
+  const composer = page.getByRole('textbox', { name: '消息' });
+  await composer.fill(`/rename ${title}`);
+  await composer.press('Enter');
+  await page.locator('.breadcrumb strong').filter({ hasText: title }).waitFor();
+  await page.getByRole('button', { name: '搜索' }).click();
+  const search = page.getByRole('textbox', { name: '搜索会话' });
+  const catalog = page.getByTestId('session-catalog');
+  await search.fill(title);
+  await catalog.getByRole('treeitem', { name: title }).waitFor();
+  await page.waitForFunction(() => document.querySelector('[data-testid="session-catalog"]')?.getAttribute('aria-busy') !== 'true');
+  assert.equal(await catalog.getByText('搜索失败', { exact: true }).count(), 0);
+  await search.fill(`${title} absent`);
+  await catalog.getByRole('status').filter({ hasText: '没有匹配的会话' }).waitFor();
   console.log(`Verified real Codex on ${ssh ? 'SSH' : 'the local host'} using ${route} transport.`);
 } finally {
   await app.close();

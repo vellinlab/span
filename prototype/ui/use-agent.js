@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createAgent, sessionKey } from './agent.js';
+import { createAgent, mergeSessions, sessionKey } from './agent.js';
 import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 
 const PAGE_SIZE = 20;
@@ -10,6 +10,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
   const [route, setRoute] = useState('');
   const [sessions, setSessions] = useState([]);
   const [sessionCursor, setSessionCursor] = useState(null);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [archived, setArchived] = useState(false);
   const [session, setSession] = useState(null);
   const [rows, setRows] = useState([]);
@@ -191,7 +192,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
     const version = ++callbacks.current.catalog;
     const page = await client.sessions.list({ cursor: next ?? undefined, archived: showArchived });
     if (version !== callbacks.current.catalog || client !== agent.current) return [];
-    setSessions(previous => next ? [...new Map([...previous, ...page.items].map(entry => [sessionKey(entry.ref), entry])).values()] : page.items);
+    setSessions(previous => next ? mergeSessions(previous, page.items) : page.items);
     setSessionCursor(page.cursor);
     setArchived(showArchived);
     return page.items;
@@ -428,7 +429,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
   }
 
   return {
-    api, connection, route, sessions, sessionCursor, archived, session, rows, cursor, loading, run, requests,
+    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, loading, run, requests,
     goal, usage, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
     refreshDelegation, delegate, manageTeam,
     list: (showArchived = archived, more = false) => list(agent.current, showArchived, more ? sessionCursor : null),
@@ -443,12 +444,14 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
     },
     rename: title => withSession(async (client, ref) => {
       await client.sessions.rename(ref, title);
+      setCatalogRevision(value => value + 1);
       if (sessionKey(ref) !== active.current?.key) return;
       setSession(previous => ({ ...previous, title }));
       putSession({ ref, title });
     }),
     archive: () => withSession(async (client, ref) => {
       await client.sessions.archive(ref, !session?.archived);
+      setCatalogRevision(value => value + 1);
       if (sessionKey(ref) === active.current?.key) reset();
       await list(client, archived);
     }, { idle: true }),

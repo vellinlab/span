@@ -154,7 +154,10 @@ p { margin-block: 0 12px; }
 .section-heading strong { color: var(--muted); font-size: 12px; font-weight: 500; }
 .session-search { display: flex; gap: 3px; margin-top: 8px; }
 .session-search input { width: 100%; font-size: 13px; }
-.search-empty { padding: 6px 8px; color: var(--muted); font-size: 12px; }
+.search-empty, .search-feedback { padding: 6px 8px; color: var(--muted); font-size: 12px; }
+.search-feedback { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.search-feedback p { margin: 0; }
+.side-list .search-feedback button { width: auto; padding-inline: 7px; }
 .side-list { overflow: auto; scrollbar-width: thin; }
 .workspaces { overflow-anchor: none; scrollbar-width: auto; }
 .workspaces::-webkit-scrollbar { width: var(--scrollbar-width); }

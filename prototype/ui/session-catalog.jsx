@@ -1,18 +1,20 @@
 import { memo, useId, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Folder } from 'lucide-react';
-import { sessionKey, sessionTitle } from './agent.js';
+import { mergeSessions, sessionKey, sessionTitle } from './agent.js';
 import { catalogRowHeight, useCatalogViewport } from './catalog-viewport.js';
 
 export function directoryName(path) {
   return path?.split(/[\\/]/).filter(Boolean).at(-1) || path;
 }
 
-function catalogRows(sessions, project, archived, filter, collapsed) {
+function catalogRows(sessions, project, archived, filter, collapsed, matches) {
   const groups = new Map();
   if (project && !archived && !filter) groups.set(project, []);
-  for (const entry of sessions) {
+  const local = filter ? sessions.filter(entry => [sessionTitle(entry), entry.ref.id, entry.cwd]
+    .some(value => value?.toLocaleLowerCase().includes(filter))) : sessions;
+  const entries = matches?.length ? mergeSessions(local, matches) : local;
+  for (const entry of entries) {
     const title = sessionTitle(entry);
-    if (filter && ![title, entry.ref.id, entry.cwd].some(value => value?.toLocaleLowerCase().includes(filter))) continue;
     const workspace = entry.cwd || project || '工作区';
     if (!groups.has(workspace)) groups.set(workspace, []);
     groups.get(workspace).push({ key: sessionKey(entry.ref), title, entry });
@@ -48,16 +50,19 @@ const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selec
 });
 
 export const SessionCatalog = memo(function SessionCatalog({
-  sessions, project, scope, archived, query, selected, disabled, more, open, loadMore, scrollPosition,
+  sessions, project, scope, archived, query, selected, disabled, more, searchResult, open, loadMore, scrollPosition,
 }) {
-  const filter = query.trim().toLocaleLowerCase();
-  const scrollScope = JSON.stringify([scope, archived, filter]);
+  const filter = query.toLocaleLowerCase();
+  const scrollScope = JSON.stringify([scope, archived, query]);
+  const view = filter ? 'search' : archived ? 'archive' : 'browse';
   const prefix = useId();
   const typeahead = useRef({ text: '', time: 0 });
-  const [collapsed, setCollapsed] = useState(null);
+  const [collapsed, setCollapsed] = useState({});
   const [activeKey, setActiveKey] = useState(null);
-  const rows = useMemo(() => catalogRows(sessions, project, archived, filter,
-    collapsed?.scope === scrollScope ? collapsed.keys : undefined), [sessions, project, archived, filter, collapsed, scrollScope]);
+  const keys = collapsed[view]?.scope === scrollScope ? collapsed[view].keys : undefined;
+  const matches = searchResult?.items;
+  const rows = useMemo(() => catalogRows(sessions, project, archived, filter, keys, matches),
+    [sessions, project, archived, filter, keys, matches]);
   const indexes = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows]);
   const active = indexes.get(activeKey);
   const { scroll, band, offsets, ensureVisible, visibleRange } = useCatalogViewport(rows, indexes, scrollScope, scrollPosition);
@@ -70,10 +75,10 @@ export const SessionCatalog = memo(function SessionCatalog({
 
   function setExpanded(row, expanded) {
     setCollapsed(previous => {
-      const next = new Set(previous?.scope === scrollScope ? previous.keys : undefined);
+      const next = new Set(previous[view]?.scope === scrollScope ? previous[view].keys : undefined);
       if (expanded) next.delete(row.key);
       else next.add(row.key);
-      return { scope: scrollScope, keys: next };
+      return { ...previous, [view]: { scope: scrollScope, keys: next } };
     });
   }
 
@@ -137,7 +142,14 @@ export const SessionCatalog = memo(function SessionCatalog({
     if (!mountedGroups.has(group)) mountedGroups.set(group, []);
     if (parent !== undefined) mountedGroups.get(group).push(index);
   }
-  return <div className="side-list workspaces" data-testid="session-catalog" ref={scroll} data-items={rows.length}>
+  let empty = archived && !filter ? '没有归档会话' : '';
+  if (filter) {
+    if (searchResult?.pending) empty = '正在搜索会话…';
+    else if (searchResult?.unavailable) empty = '请连接 Agent 后搜索历史会话';
+    else empty = more && !searchResult ? '已加载的会话中没有匹配项' : '没有匹配的会话';
+  }
+  return <div className="side-list workspaces" data-testid="session-catalog" ref={scroll} data-items={rows.length}
+    aria-busy={searchResult?.pending || undefined}>
     {rows.length > 0 && <div className="catalog-tree" role="tree" aria-label={archived ? '已归档会话' : '工作区会话'} tabIndex={0}
       aria-activedescendant={active === undefined ? undefined : `${prefix}-${active}`}
       onFocus={() => {
@@ -169,7 +181,14 @@ export const SessionCatalog = memo(function SessionCatalog({
         </div>;
       })}
     </div>}
-    {!rows.length && (filter || archived) && <p className="search-empty">{filter ? '没有匹配的会话' : '没有归档会话'}</p>}
-    {more && <button className="load-more" type="button" onClick={loadMore}>加载更多会话</button>}
+    {searchResult?.error ? <div className="search-feedback">
+      <p role="status" title={searchResult.error}>搜索失败</p>
+      <button type="button" onClick={loadMore}>重试</button>
+    </div> : <>
+      {!rows.length && empty && <p className="search-empty" role="status">{empty}</p>}
+      {more && <button className="load-more" type="button" disabled={searchResult?.pending} onClick={loadMore}>
+        {searchResult ? '加载更多结果' : '加载更多会话'}
+      </button>}
+    </>}
   </div>;
 });

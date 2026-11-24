@@ -18,20 +18,28 @@ const TITLE: &str = "工作台架构评审";
 fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str) -> Value {
     let mut entries = vec![json!({"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
         "gitInfo":{"branch":"prototype/web-workbench"}})];
-    if mode.is_empty() {
-        return json!({"data":entries,"nextCursor":null});
-    }
     if params["archived"] == true {
-        return json!({"data":[{"id":"catalog-archive","name":"归档会话示例","cwd":cwd}],"nextCursor":null});
+        entries = vec![json!({"id":"catalog-archive","name":"归档会话示例","cwd":cwd})];
+    } else if !mode.is_empty() {
+        let last = if mode == "benchmark" { 1200 } else { 119 };
+        let other = cwd.join("second-workspace");
+        entries.extend((1..=last).map(|number| {
+            json!({"id":format!("catalog-{number:04}"),
+            "name":format!("目录会话 {number:04}"),"cwd":if number % 2 == 0 { cwd } else { &other }})
+        }));
     }
-    let last = if mode == "benchmark" { 1200 } else { 119 };
-    let other = cwd.join("second-workspace");
-    entries.extend((1..=last).map(|number| {
-        json!({"id":format!("catalog-{number:04}"),
-        "name":format!("目录会话 {number:04}"),"cwd":if number % 2 == 0 { cwd } else { &other }})
-    }));
+    let query = params["searchTerm"].as_str().unwrap_or_default();
+    if !query.is_empty() {
+        entries.retain(|entry| {
+            entry["name"]
+                .as_str()
+                .is_some_and(|name| name.contains(query))
+        });
+    }
     let limit = if mode == "benchmark" {
         entries.len()
+    } else if !query.is_empty() {
+        12
     } else {
         40
     };
@@ -91,6 +99,7 @@ pub fn run() -> Result<()> {
     let mut turn_count = 0;
     let mut goal = Value::Null;
     let mut title = TITLE.to_owned();
+    let mut search_failed = false;
     for line in io::stdin().lock().lines() {
         let packet: Value = serde_json::from_str(&line?)?;
         let id = &packet["id"];
@@ -100,7 +109,20 @@ pub fn run() -> Result<()> {
         let params = &packet["params"];
         let result = match packet["method"].as_str().unwrap_or_default() {
             "initialize" => json!({"userAgent":"Span preview fixture"}),
-            "thread/list" => catalog(&cwd, &title, params, &catalog_mode),
+            "thread/list" => {
+                if catalog_mode == "paged"
+                    && params["searchTerm"] == "目录会话 0119"
+                    && !search_failed
+                {
+                    search_failed = true;
+                    send(
+                        &output,
+                        json!({"id":id,"error":{"code":-32603,"message":"fixture search failed"}}),
+                    )?;
+                    continue;
+                }
+                catalog(&cwd, &title, params, &catalog_mode)
+            }
             "thread/start" | "thread/resume" => {
                 let turns = if params["excludeTurns"] == true {
                     &[][..]

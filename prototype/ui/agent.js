@@ -24,3 +24,7 @@ export function sessionKey(ref) {
 export function sessionTitle(entry) {
   return entry?.title || entry?.preview || '新会话';
 }
+
+export function mergeSessions(previous, next) {
+  return [...new Map([...previous, ...next].map(entry => [sessionKey(entry.ref), entry])).values()];
+}

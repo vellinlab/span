@@ -131,15 +131,37 @@ try {
 
   await page.getByRole('button', { name: '搜索' }).click();
   const search = page.getByRole('textbox', { name: '搜索会话' });
-  await search.fill('目录会话 0002');
+  await search.fill('目录会话 0119');
+  await catalog.getByRole('status').filter({ hasText: '搜索失败' }).waitFor();
+  await catalog.getByRole('button', { name: '重试' }).click();
+  await tree.getByRole('treeitem', { name: '目录会话 0119' }).click();
+  await page.locator('.breadcrumb strong').filter({ hasText: /^目录会话 0119$/ }).waitFor();
+  assert.equal(await loadMore.count(), 0);
+
+  await search.fill('目录会话 01');
+  await waitForCount(14);
+  await tree.getByRole('treeitem', { name: '目录会话 0100' }).waitFor();
+  await catalog.getByRole('button', { name: '加载更多结果' }).click();
+  await waitForCount(22);
+  assert.equal(await catalog.getByRole('button', { name: '加载更多结果' }).count(), 0);
+
+  await search.fill('catalog-0002');
   await waitForCount(2);
   await tree.getByRole('treeitem', { name: '目录会话 0002' }).click();
   await page.locator('.breadcrumb strong').filter({ hasText: /^目录会话 0002$/ }).waitFor();
   await search.press('Escape');
+  await waitForCount(82);
+  assert.deepEqual(await firstVisible(), afterSwitch);
+  assert.ok(await page.getByRole('button', { name: '搜索' }).evaluate(button => button === document.activeElement));
+
+  await page.getByRole('button', { name: '搜索' }).click();
+  await search.fill('归档会话');
+  await catalog.getByRole('status').filter({ hasText: '没有匹配的会话' }).waitFor();
   await page.getByRole('button', { name: '归档', exact: true }).click();
   await page.getByRole('tree', { name: '已归档会话' }).getByRole('treeitem', { name: '归档会话示例' }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-search.png') });
   assert.equal(await loadMore.count(), 0);
-  console.log('Verified viewport mounting, sticky group transitions, keyboard navigation, search, append anchoring, tab restoration and archive.');
+  console.log('Verified catalog navigation, append anchoring, search beyond loaded pages, retry, search pagination and archive scope.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

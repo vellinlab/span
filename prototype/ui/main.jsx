@@ -8,6 +8,7 @@ import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, AgentMenu, AgentPanel, GoalStrip, Interactions } from './agent-controls.jsx';
 import { Markdown } from './markdown.jsx';
 import { directoryName, SessionCatalog } from './session-catalog.jsx';
+import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
 import { Transcript } from './transcript.jsx';
 import { useAgent } from './use-agent.js';
@@ -40,8 +41,10 @@ function App() {
   const jumpToLatest = useRef(true);
   const input = useRef(null);
   const search = useRef(null);
+  const searchTrigger = useRef(null);
   const scroll = useRef(null);
   const catalogScroll = useRef({ scope: '', top: 0 });
+  const searchScroll = useRef({ scope: '', top: 0 });
   const previewScope = useRef(0);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
@@ -50,6 +53,8 @@ function App() {
   const clearError = useCallback(() => setError(''), []);
   const work = useAgent(config, { report, clearError, jumpToLatest });
   const { api, connection, route, sessions, session, rows, loading, run, goal } = work;
+  const catalogQuery = sidebarOpen && tab === 'sessions' && searchOpen ? query.trim() : '';
+  const catalogSearch = useCatalogSearch(api, catalogQuery, work.archived, connection === 'ready', work.catalogRevision);
   const refKey = sessionKey(session?.ref);
   const running = run?.status === 'running';
   const canSteer = Boolean(api?.turns.steer && run?.id);
@@ -144,6 +149,12 @@ function App() {
     requestAnimationFrame(() => search.current?.focus());
   }
 
+  function closeSearch() {
+    setSearchOpen(false);
+    setQuery('');
+    searchTrigger.current?.focus();
+  }
+
   function newSession() {
     if (!work.reset()) return false;
     closePanel();
@@ -159,12 +170,13 @@ function App() {
   }
 
   const latestWork = useRef();
-  latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived };
+  latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch };
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
   const loadCatalogPage = useCallback(() => {
-    const { list, archived } = latestWork.current;
-    list(archived, true).catch(report);
+    const { list, archived, catalogSearch } = latestWork.current;
+    if (catalogSearch) catalogSearch.load?.();
+    else list(archived, true).catch(report);
   }, [report]);
 
   useEffect(() => {
@@ -424,14 +436,15 @@ function App() {
       {sidebarOpen && <Sidebar>
         <nav className="sidebar-actions" aria-label="会话操作">
           <button disabled={running || loading} onClick={newSession}><SquarePen size={16} />新会话<kbd>Ctrl+N</kbd></button>
-          <button onClick={openSearch}><Search size={16} />搜索<kbd>Ctrl+K</kbd></button>
+          <button ref={searchTrigger} onClick={openSearch}><Search size={16} />搜索<kbd>Ctrl+K</kbd></button>
         </nav>
         {tab === 'sessions' && searchOpen && <div className="session-search">
-          <input ref={search} aria-label="搜索会话" placeholder="搜索会话…" value={query}
-            onChange={event => setQuery(event.target.value)} onKeyDown={event => {
-              if (event.key === 'Escape') { setSearchOpen(false); setQuery(''); }
+          <input ref={search} aria-label="搜索会话" placeholder="搜索会话…" defaultValue={query}
+            onChange={event => { if (!event.nativeEvent.isComposing) setQuery(event.target.value); }}
+            onCompositionEnd={event => setQuery(event.currentTarget.value)} onKeyDown={event => {
+              if (event.key === 'Escape' && !event.nativeEvent.isComposing) closeSearch();
             }} />
-          <button className="icon-button" aria-label="关闭搜索" onClick={() => { setSearchOpen(false); setQuery(''); }}><X size={16} /></button>
+          <button className="icon-button" aria-label="关闭搜索" onClick={closeSearch}><X size={16} /></button>
         </div>}
         {tab !== 'hosts' && <div className="section-heading"><strong>{tab === 'files' ? '文件' : work.archived ? '已归档' : '工作区'}</strong>
           {tab === 'sessions' && api?.sessions.archive && <button className="archive-toggle" type="button"
@@ -440,9 +453,10 @@ function App() {
             disabled={running || !config} onClick={chooseWorkspace}><FolderOpen size={16} /></button>
         </div>}
         {tab === 'sessions' && <SessionCatalog sessions={sessions} project={config && (config.ssh || cwd || '工作区')}
-          scope={JSON.stringify([config?.backend, config?.ssh || cwd])} archived={work.archived} query={query} selected={refKey}
-          disabled={running || loading || connection !== 'ready'} more={Boolean(work.sessionCursor)}
-          open={openCatalogSession} loadMore={loadCatalogPage} scrollPosition={catalogScroll} />}
+          scope={JSON.stringify([config?.backend, config?.ssh || cwd])} archived={work.archived} query={catalogQuery} selected={refKey}
+          disabled={running || loading || connection !== 'ready'} more={Boolean(catalogSearch ? catalogSearch.cursor : work.sessionCursor)}
+          searchResult={catalogSearch} open={openCatalogSession} loadMore={loadCatalogPage}
+          scrollPosition={catalogQuery ? searchScroll : catalogScroll} />}
         {tab === 'hosts' && <form className="host-form" onSubmit={event => {
           event.preventDefault();
           if (config) applyConfig({ ...config, backend, ssh: target.trim() });
