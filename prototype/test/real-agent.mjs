@@ -105,6 +105,23 @@ try {
     await resumed.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
     await closePreview.press('Escape');
     assert.ok(await attachment.evaluate(element => document.activeElement === element));
+
+    const activeSessionId = () => JSON.parse(localStorage.getItem('span.workbench.recent.v1'))[0].sessionId;
+    const source = await resumed.evaluate(activeSessionId);
+    assert.ok(source);
+    await resumed.getByRole('button', { name: /^会话操作 · / }).click();
+    await resumed.getByRole('button', { name: '复制会话', exact: true }).click();
+    const copy = await resumed.waitForFunction(previous => {
+      const current = JSON.parse(localStorage.getItem('span.workbench.recent.v1'))[0].sessionId;
+      return current !== previous && current;
+    }, source).then(handle => handle.jsonValue());
+    await resumed.getByTestId('transcript').getByText(expected, { exact: true }).waitFor();
+    await app.close();
+    app = await open();
+    const restoredCopy = await app.firstWindow();
+    await restoredCopy.getByTestId('transcript').getByText(expected, { exact: true }).waitFor();
+    assert.equal(await restoredCopy.evaluate(activeSessionId), copy);
+    console.log('Verified a real Codex fork has a distinct ID, copies the conversation, and reopens after restart.');
   }
   console.log(`Verified real Codex on ${ssh ? 'SSH' : 'the local host'} using ${route} transport, including automatic session restore${imageTest ? ' with selected and pasted images' : ''}.`);
 } finally {

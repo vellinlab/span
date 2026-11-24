@@ -320,6 +320,17 @@ function App() {
     work.open(entry, readingViews.current.get(key));
   }
 
+  async function forkConversation() {
+    if (!await work.fork()) return false;
+    closePanel();
+    if (readingOverlay || preview?.attachment) dismissPreview('composer');
+    else {
+      previewScope.current++;
+      input.current?.focus({ preventScroll: true });
+    }
+    return true;
+  }
+
   const latestWork = useRef();
   latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch,
     composerKey, draft, files, canAttach, canSendImages };
@@ -491,10 +502,7 @@ function App() {
         return true;
       }
       case '/fork':
-        if (running) throw new Error('请先结束当前任务。');
-        if (!session) throw new Error('请先打开一个会话。');
-        await work.fork();
-        return true;
+        return forkConversation();
       case '/rename':
         if (!args) { setDraft('/rename '); return false; }
         await work.rename(args);
@@ -666,7 +674,7 @@ function App() {
   const branch = session?.branch;
   const connectionLabel = connectionLabels[connection];
   const connectionError = connection === 'offline' && error;
-  const sessionActions = refKey && (api?.sessions.rename || api?.sessions.archive);
+  const sessionActions = refKey && (api?.sessions.rename || api?.sessions.fork || api?.sessions.archive);
 
   async function archiveFromTitle() {
     if (!await work.archive()) return;
@@ -694,7 +702,8 @@ function App() {
             <span aria-hidden="true" className="breadcrumb-separator">/</span>
             {sessionActions ? <SessionActions key={refKey} title={name} archived={session.archived}
               disabled={loading || running || Boolean(interaction) || connection !== 'ready'}
-              rename={api.sessions.rename && work.rename} archive={api.sessions.archive && archiveFromTitle} />
+              rename={api.sessions.rename && work.rename} fork={api.sessions.fork && forkConversation}
+              archive={api.sessions.archive && archiveFromTitle} />
               : <strong title={name}>{name}</strong>}
           </div>
           {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}

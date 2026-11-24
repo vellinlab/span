@@ -230,6 +230,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     initialize: {},
     'thread/list': { data: [{ id: 'thread', cwd: '/work', name: 'Review' }], nextCursor: 'opaque' },
     'thread/resume': { thread: { id: 'thread' }, initialTurnsPage: { data: [], nextCursor: 'old' } },
+    'thread/fork': { thread: { id: 'copy', cwd: '/work' } },
     'thread/goal/set': { goal: { objective: 'Ship', status: 'active', tokenBudget: 100 } },
     'account/rateLimits/read': { rateLimits: { primary: { usedPercent: 22, windowDurationMins: 60 } } },
   };
@@ -265,6 +266,11 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.equal(filtered.items[0].archived, true);
     const opened = await agent.sessions.resume(ref, 20);
     assert.equal(opened.history.cursor, 'old');
+    const copy = await agent.sessions.fork(ref);
+    assert.equal(requests.at(-1)[1].packet.method, 'thread/fork');
+    assert.equal(requests.at(-1)[1].packet.params.threadId, ref.id);
+    assert.equal(requests.at(-1)[1].packet.params.excludeTurns, true);
+    assert.deepEqual(copy.session.ref, { ...ref, id: 'copy' });
     assert.deepEqual(await agent.goal.update(ref, { kind: 'set', objective: 'Ship', budget: 100 }), {
       objective: 'Ship', status: 'active', budget: 100, seconds: undefined, tokens: undefined,
     });
@@ -309,6 +315,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
   const clue = await createAgent('clue', { generation: 10, cwd: '/work', location: local, onEvent() {} });
   assert.equal(typeof clue.sessions.resume, 'function');
   assert.equal(clue.sessions.search, undefined);
+  assert.equal(clue.sessions.fork, undefined);
   assert.equal(clue.goal, undefined);
   assert.equal(clue.delegation, undefined);
   clue.close();

@@ -217,31 +217,26 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     });
   }
 
-  async function loadSession(client, entry, { opening, view, restoring } = {}) {
+  async function loadSession(client, entry, { opened, view, restoring } = {}) {
     const previous = active.current?.ref;
     const scope = clearTimeline();
     clearError();
     setLoading(true);
     let selected = entry;
-    if (!opening) {
-      active.current = { ref: entry.ref, key: sessionKey(entry.ref) };
-      setSession(entry);
-    }
+    active.current = { ref: entry.ref, key: sessionKey(entry.ref) };
+    setSession(entry);
     const runVersion = callbacks.current.run;
     try {
-      if (previous && sessionKey(previous) !== sessionKey(entry.ref) && !opening) {
+      if (previous && sessionKey(previous) !== active.current.key) {
         client.sessions.release?.(previous).catch(() => {});
       }
-      const state = await (opening ?? client.sessions.resume(entry.ref, PAGE_SIZE));
+      const state = opened ?? await client.sessions.resume(entry.ref, PAGE_SIZE);
       if (scope !== layer.current) return;
       selected = { ...entry, ...Object.fromEntries(Object.entries(state.session).filter(([, value]) => value != null)) };
       active.current = { ref: selected.ref, key: sessionKey(selected.ref) };
       setSession(selected);
-      putSession(selected, Boolean(opening) && !archived);
+      putSession(selected, Boolean(opened) && !archived);
       setOptions(state.options ?? {});
-      if (previous && opening && sessionKey(previous) !== active.current.key) {
-        client.sessions.release?.(previous).catch(() => {});
-      }
 
       const goalVersion = callbacks.current.goal;
       client.goal?.read(selected.ref).then(value => {
@@ -418,6 +413,27 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     if (connection === 'ready') {
       rememberWorkspace(config, null);
       clearError();
+    }
+  }
+
+  async function forkSession() {
+    const client = agent.current;
+    const ref = active.current?.ref;
+    if (!ref || !session) throw new Error('请先打开一个会话。');
+    if (!client?.sessions.fork) throw new Error('当前 Agent 不支持复制会话。');
+    if (!guard()) throw new Error('请等当前任务或连接完成。');
+    const scope = layer.current;
+    busy.current = true;
+    try {
+      const opened = await client.sessions.fork(ref);
+      if (scope !== layer.current) return false;
+      const loadingCopy = loadSession(client, { ...session, ref: opened.session.ref, archived: false }, { opened });
+      const copyScope = layer.current;
+      setCatalogRevision(value => value + 1);
+      await loadingCopy;
+      return copyScope === layer.current;
+    } finally {
+      if (scope === layer.current) busy.current = false;
     }
   }
 
@@ -618,10 +634,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       return api.interactions.respond(id, reply);
     },
     withSession,
-    fork() {
-      if (!guard() || !session) return;
-      return loadSession(agent.current, { ...session, archived: false }, { opening: agent.current.sessions.fork(session.ref) });
-    },
+    fork: forkSession,
     rename: title => withSession(async (client, ref) => {
       await client.sessions.rename(ref, title);
       if (client !== agent.current) return;

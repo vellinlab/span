@@ -794,7 +794,7 @@ p { margin-block: 0 12px; }
   box-shadow: 0 10px 30px #00000065;
 }
 .session-actions {
-  width: min(238px, calc(100vw - 24px));
+  width: min(176px, calc(100vw - 24px));
   padding: 5px;
   font-size: 13px;
   app-region: no-drag;
@@ -813,10 +813,14 @@ p { margin-block: 0 12px; }
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 6px 9px;
+  padding: 4px 9px;
   text-align: start;
 }
-.session-action-list svg { color: var(--accent); }
+.session-action-list button:focus-visible { outline-width: 1px; outline-offset: -1px; }
+.session-action-list button[aria-disabled="true"] { color: var(--muted); cursor: default; }
+.session-action-list button[aria-disabled="true"]:hover { background: transparent; }
+.session-action-list svg { color: var(--muted); }
+.session-actions:has(.session-rename) { width: min(238px, calc(100vw - 24px)); }
 .session-rename, .session-rename label { display: grid; gap: 5px; }
 .session-rename { gap: 10px; padding: 6px; }
 .session-rename .panel-actions { justify-content: end; }

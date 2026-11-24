@@ -1,13 +1,13 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { Archive, ArchiveRestore, ChevronDown, Pencil } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, GitFork, Pencil } from 'lucide-react';
 
-export function SessionActions({ title, archived, disabled, rename, archive }) {
+export function SessionActions({ title, archived, disabled, rename, fork, archive }) {
   const id = useId();
   const trigger = useRef(null);
   const popover = useRef(null);
   const field = useRef(null);
   const [editing, setEditing] = useState(false);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState('');
   const [error, setError] = useState('');
 
   useLayoutEffect(() => {
@@ -21,9 +21,9 @@ export function SessionActions({ title, archived, disabled, rename, archive }) {
     else panel.querySelector('button')?.focus();
   }, [disabled, editing]);
 
-  async function perform(action) {
+  async function perform(kind, action) {
     if (pending || disabled) return;
-    setPending(true);
+    setPending(kind);
     setError('');
     try {
       await action();
@@ -36,7 +36,7 @@ export function SessionActions({ title, archived, disabled, rename, archive }) {
     } catch (error) {
       setError(error.message);
     } finally {
-      setPending(false);
+      setPending('');
     }
   }
 
@@ -57,9 +57,9 @@ export function SessionActions({ title, archived, disabled, rename, archive }) {
       {editing ? <form className="session-rename" onSubmit={event => {
         event.preventDefault();
         const next = field.current.value.trim();
-        if (next) perform(() => rename(next));
+        if (next) perform('rename', () => rename(next));
       }}>
-        <label>会话名称<input ref={field} defaultValue={title} required readOnly={pending}
+        <label>会话名称<input ref={field} defaultValue={title} required readOnly={Boolean(pending)}
           onKeyDown={event => {
             if (event.nativeEvent.isComposing && ['Enter', 'Escape'].includes(event.key)) event.preventDefault();
           }} /></label>
@@ -68,9 +68,14 @@ export function SessionActions({ title, archived, disabled, rename, archive }) {
           <button type="submit" className="primary" disabled={pending}>保存</button>
         </div>
       </form> : <div className="session-action-list">
-        {rename && <button type="button" onClick={() => setEditing(true)} disabled={pending}><Pencil size={15} />重命名</button>}
-        {archive && <button type="button" onClick={() => perform(archive)} disabled={pending}>
-          <ArchiveIcon size={15} />{archived ? '恢复会话' : '归档会话'}
+        {rename && <button type="button" onClick={() => { if (!pending) setEditing(true); }} aria-disabled={Boolean(pending)}>
+          <Pencil size={15} aria-hidden="true" />重命名
+        </button>}
+        {fork && <button type="button" onClick={() => perform('fork', fork)} aria-disabled={Boolean(pending)}>
+          <GitFork size={15} aria-hidden="true" />{pending === 'fork' ? '正在复制…' : '复制会话'}
+        </button>}
+        {archive && <button type="button" onClick={() => perform('archive', archive)} aria-disabled={Boolean(pending)}>
+          <ArchiveIcon size={15} aria-hidden="true" />{archived ? '恢复会话' : '归档会话'}
         </button>}
       </div>}
       {error && <p className="session-action-error" role="alert">{error}</p>}

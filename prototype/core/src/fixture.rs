@@ -339,6 +339,7 @@ pub fn run() -> Result<()> {
     let background = Arc::new(AtomicBool::new(false));
     let mut turn_count = 0;
     let mut new_thread_count = 0;
+    let mut fork_count = 0;
     let mut goal = Value::Null;
     let mut title = TITLE.to_owned();
     let mut is_archived = false;
@@ -413,6 +414,18 @@ pub fn run() -> Result<()> {
                 new_thread_count += 1;
                 json!({"thread":{"id":format!("fixture-new-{new_thread_count}"),"cwd":cwd},
                     "cwd":cwd,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
+            }
+            "thread/fork" => {
+                fork_count += 1;
+                if catalog_mode == "paged" && fork_count == 1 {
+                    send(
+                        &output,
+                        json!({"id":id,"error":{"code":-32603,"message":"复制会话失败，请重试。"}}),
+                    )?;
+                    continue;
+                }
+                json!({"thread":{"id":format!("fixture-fork-{fork_count}"),"name":format!("会话副本 {fork_count}"),"cwd":cwd},
+                    "cwd":cwd,"model":"fixture"})
             }
             "thread/resume" if params["threadId"] == "fixture-subagent" => json!({
                 "thread":{"id":"fixture-subagent","name":REVIEW_AGENT,"cwd":cwd},
