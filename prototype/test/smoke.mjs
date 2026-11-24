@@ -207,6 +207,11 @@ try {
   await goal.press('Enter');
   const goalPanel = page.getByRole('region', { name: '会话目标' });
   const dismissGoal = goalPanel.getByRole('button', { name: '关闭面板' });
+  assert.ok(await goalPanel.evaluate(panel => {
+    const bounds = panel.getBoundingClientRect();
+    const card = document.querySelector('.goal-strip').getBoundingClientRect();
+    return Math.abs(bounds.left - card.left) <= 1 && bounds.right <= card.right + 1;
+  }), 'The Goal panel should start at the left edge of its card and fit its column.');
   assert.ok(await dismissGoal.evaluate(button => button === document.activeElement));
   await page.keyboard.press('Escape');
   await goalPanel.waitFor({ state: 'detached' });
@@ -246,11 +251,14 @@ try {
     const actions = panel.querySelector('.goal-actions').getBoundingClientRect();
     const hit = document.elementFromPoint(close.left + close.width / 2, close.top + close.height / 2);
     return { fits: bounds.top >= timeline.top + 4 && bounds.bottom < card.top,
+      fillsColumn: Math.abs(bounds.left - card.left) <= 1 && Math.abs(bounds.right - card.right) <= 1,
       scrolls: body.scrollTop === 0 && body.scrollHeight > body.clientHeight,
       closeVisible: panel.querySelector('header button').contains(hit),
       actionsVisible: actions.top > body.getBoundingClientRect().top && actions.bottom <= bounds.bottom };
   });
-  assert.deepEqual(compactGoal, { fits: true, scrolls: true, closeVisible: true, actionsVisible: true });
+  assert.deepEqual(compactGoal, {
+    fits: true, fillsColumn: true, scrolls: true, closeVisible: true, actionsVisible: true,
+  });
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact.png') });
   await goalPanel.getByRole('button', { name: '继续', exact: true }).click();
   await goal.getByText('进行中', { exact: true }).waitFor();

@@ -892,11 +892,11 @@ p { margin-block: 0 12px; }
 }
 .agent-menu-entries svg { color: var(--accent); }
 .agent-panel { display: flex; flex-direction: column; font-size: 13px; }
-.agent-panel[data-kind="reasoning"] {
-  --panel-height: 320px;
+.agent-panel:is([data-kind="goal"], [data-kind="reasoning"]) {
   inset-inline: 0 auto;
   width: min(100%, 560px);
 }
+.agent-panel[data-kind="reasoning"] { --panel-height: 320px; }
 .agent-panel header {
   display: flex;
   justify-content: space-between;
