@@ -529,6 +529,47 @@ try {
   await transcript.getByText('子代理的会话记录。', { exact: true }).waitFor();
   await page.locator('.topbar').getByText(agentName, { exact: true }).waitFor();
   console.log('Verified delegation summaries, shared member rows, and keyboard navigation to the child session.');
+
+  if (await terminalToggle.getAttribute('aria-pressed') === 'true') await terminalToggle.click();
+  await composer.fill('整理检查结果，给出可复查的步骤。');
+  await composer.press('Enter');
+  const readingTitle = transcript.getByRole('heading', { name: '工作台会话验收', level: 1 });
+  await readingTitle.waitFor();
+  const reply = transcript.locator('.agent-reply').filter({ has: readingTitle });
+  const table = reply.getByRole('table');
+  const code = reply.locator('pre');
+  const captureReading = async suffix => {
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, `-reading-${suffix}.png`) });
+  };
+  for (const [width, height] of [[1240, 840], [740, 520]]) {
+    await app.evaluate(({ BrowserWindow }, [w, h]) =>
+      BrowserWindow.getAllWindows()[0].setContentSize(w, h), [width, height]);
+    await page.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [width, height]);
+    const tableLayout = await table.evaluate(element => ({
+      compact: element.offsetWidth < element.closest('.prose').clientWidth / 2,
+      rightAligned: getComputedStyle(element.querySelector('td:last-child')).textAlign === 'right',
+    }));
+    assert.ok(tableLayout.compact && tableLayout.rightAligned, 'Short tables keep related values together and preserve Markdown alignment.');
+    const codeOverflow = await code.evaluate(element => element.scrollWidth - element.clientWidth);
+    assert.equal(codeOverflow > 0, width === 740, 'The long command scrolls horizontally when the reading column is narrow.');
+    const hasNestedList = await reply.locator('ul ul').getByText('审批出现后，仍可看到原先阅读的段落。').count();
+    assert.equal(hasNestedList, 1);
+    if (width === 740) {
+      await readingTitle.evaluate(element => {
+        const timeline = element.closest('.timeline');
+        timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 14;
+      });
+      await page.waitForFunction(() => {
+        const heading = document.querySelector('.agent-reply h1');
+        const top = heading.getBoundingClientRect().top - heading.closest('.timeline').getBoundingClientRect().top;
+        return top >= 0 && top <= 20;
+      });
+      await captureReading('narrow');
+      await page.getByRole('button', { name: '滚到最新消息' }).click();
+    }
+    await captureReading(width === 740 ? 'narrow-end' : 'wide');
+  }
+  console.log('Verified the rich answer layout and long code overflow at two window sizes.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

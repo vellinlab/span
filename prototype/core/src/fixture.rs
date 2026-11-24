@@ -17,6 +17,31 @@ use std::{
 const THREAD: &str = "workspace-review";
 const TITLE: &str = "工作台架构评审";
 const REVIEW_AGENT: &str = "键盘导航和窄窗布局复核";
+const READING_REVIEW: &str = r#"# 工作台会话验收
+
+已确认会话可以继续。当前回合的文件、终端和执行记录均归属正确。
+
+## 核对结果
+
+- 保留当前阅读位置，更新时只补齐新增文字。
+  - 审批出现后，仍可看到原先阅读的段落。
+  - 路径 `prototype/ui/transcript.jsx` 能够选中复制。
+- 使用 [验收记录](https://example.com/span) 核对回合。
+
+| 核对项目 | 结果 |
+| :--- | ---: |
+| 会话历史 | 已通过 |
+| 跨主机审批 | 已通过 |
+
+### 复查命令
+
+```sh
+git diff --check -- prototype/ui/transcript.jsx prototype/core/src/fixture.rs
+```
+
+> 如需继续验证，用同一个窗口复查切换会话后的焦点。
+
+回放和继续会话均已验证。"#;
 const LONG_COMMAND: &str = concat!(
     "workspace inspect --profile desktop --path prototype/resources/workbench/verification/candidate \\\n",
     "\t--check output-and-history --keep-annotations \\\n",
@@ -435,12 +460,19 @@ pub fn run() -> Result<()> {
                     "item/completed",
                     json!({"threadId":thread_id,"turnId":turn,"item":user_item}),
                 )?;
-                if retry_draft {
+                let fixture_reply = match params["input"][0]["text"].as_str() {
+                    Some("验证新会话草稿重试。") => Some("草稿已成功重试。"),
+                    Some("整理检查结果，给出可复查的步骤。") => {
+                        Some(READING_REVIEW)
+                    }
+                    _ => None,
+                };
+                if let Some(text) = fixture_reply {
                     notice(
                         &output,
                         "item/completed",
-                        json!({"threadId":thread_id,"turnId":turn,"item":{"id":format!("{turn}-retry-result"),
-                            "type":"agentMessage","text":"草稿已成功重试。"}}),
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"id":format!("{turn}-fixture-result"),
+                            "type":"agentMessage","phase":"final_answer","text":text}}),
                     )?;
                     background.store(false, Ordering::Release);
                     notice(

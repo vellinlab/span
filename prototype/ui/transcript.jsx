@@ -120,7 +120,7 @@ const TranscriptRow = memo(function TranscriptRow({
       {row.queued === 'cancelled' ? '已取消排队' : '等待当前任务结束'}
     </small>}{Boolean(row.attachments?.length) && <ArtifactList artifacts={row.attachments} openArtifact={openArtifact} />}
   </div>;
-  if (row.kind === 'message') return <div className={row.phase === 'commentary' ? 'agent-commentary' : undefined}>
+  if (row.kind === 'message') return <div className={row.phase === 'commentary' ? 'agent-commentary' : 'agent-reply'}>
     <StreamingMarkdown text={row.text} streaming={streaming} following={following} scroll={scroll} />
   </div>;
 

@@ -303,6 +303,21 @@ p { margin-block: 0 12px; }
   background: #303032;
   font-size: 13px;
 }
+.agent-reply > .prose { line-height: 23px; }
+.agent-reply > .prose :is(h1, h2, h3) {
+  margin-block: 20px 8px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.agent-reply > .prose h1 { font-size: 22px; }
+.agent-reply > .prose h2 { font-size: 17px; }
+.agent-reply > .prose h3 { font-size: 15px; }
+.agent-reply > .prose :is(ul, ol) { margin-block: 0 12px; padding-inline-start: 1.45em; }
+.agent-reply > .prose li + li { margin-block-start: 3px; }
+.agent-reply > .prose li > :is(ul, ol) { margin-block: 3px 0; }
+.agent-reply > .prose li::marker { color: var(--muted); }
+.agent-reply > .prose > :first-child { margin-block-start: 0; }
+.agent-reply > .prose > :last-child { margin-block-end: 0; }
 .code-card, .table-scroll {
   margin: 10px 0;
   background: var(--surface);
@@ -324,6 +339,13 @@ p { margin-block: 0 12px; }
 .prose th, .prose td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .prose th { background: var(--selected); }
 .prose tr:last-child td { border-bottom: none; }
+.agent-reply > .prose .table-scroll {
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  background: transparent;
+}
+.agent-reply > .prose :is(th, td) { padding-inline: 12px; }
+.agent-reply > .prose th { background: var(--hover); font-weight: 600; }
 .activity {
   margin-inline-start: 4px;
   color: #c0c6c6;
