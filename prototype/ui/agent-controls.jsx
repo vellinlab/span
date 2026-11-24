@@ -227,10 +227,10 @@ function AgentsPanel({ work, openSession, report }) {
     const members = new Map(recordedMembers);
     const groups = new Map(teams.map(team => [team.id, []]));
     const parents = new Map();
-    for (const member of liveMembers) mergeAgentMember(members, member);
     for (const team of teams) {
       for (const member of team.members) mergeAgentMember(members, { ...member, teamId: team.id });
     }
+    for (const member of liveMembers) mergeAgentMember(members, member);
     const entries = [...members.values()];
     const subagents = [];
     for (const member of entries) {
@@ -254,7 +254,10 @@ function AgentsPanel({ work, openSession, report }) {
       <h3>{name}</h3>
       {groups.get(id).length > 0 && <AgentMemberList members={groups.get(id)} parentName={parentName}
         currentKey={activeKey} openSession={openSession} canOpenSession={canOpenSession} />}
-      {tasks?.length > 0 && <AgentTaskList tasks={tasks} members={members} />}
+      {tasks?.length > 0 && <div className="agent-task-group">
+        <h4>任务</h4>
+        <AgentTaskList tasks={tasks} members={members} />
+      </div>}
     </section>)}
     <DelegationControls key={activeKey} work={work} members={entries} report={report} />
   </div>;
