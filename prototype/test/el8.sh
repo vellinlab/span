@@ -94,6 +94,10 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/following-reply-baseline/span-preview --following | tee /artifacts/following-reply.json
+SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
+taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
+    /artifacts/linux/span-preview /artifacts/grouped-history-baseline/span-preview /artifacts/el8-grouped-history \
+    --grouped-history | tee /artifacts/grouped-history.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/patch-view.mjs \
     /artifacts/linux/span-preview /artifacts/el8-workbench-patch.png /artifacts/covered-baseline/span-preview | tee /artifacts/patch-view.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/output-view.mjs \

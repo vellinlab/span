@@ -88,6 +88,36 @@ test('completed activity groups preserve chronology and exclude failure, prose a
   assert.notEqual(timelineLayout(update(command('d', { exitCode: 1 }))), layout);
 });
 
+test('live commands reuse earlier group mappings until a history change affects them', () => {
+  const command = (turnId, id, exitCode = 0) => ({ kind: 'item', final: true,
+    item: { kind: 'command', turnId, id, status: 'completed', exitCode } });
+  const saved = applyTimeline([], [
+    ...['a', 'b', 'c', 'd'].map(id => command('history', id)),
+    { kind: 'item', final: true, item: { kind: 'message', turnId: 'history', id: 'reply', text: 'Filed.' } },
+  ]);
+  const initial = timelineLayout(saved);
+  const open = new Set([initial.groups[0].key]);
+  const plain = new Set();
+  const opened = groupedTimelineLayout(initial, 'live', plain, open);
+  const live = applyTimeline(saved, ['a', 'b', 'c', 'd'].map(id => command('live', id)));
+  const next = timelineLayout(live);
+  const view = groupedTimelineLayout(next, 'live', plain, open);
+  assert.equal(next.groups.length, 2);
+  assert.equal(next.groups[0], initial.groups[0]);
+  assert.equal(view.nested, opened.nested);
+  assert.deepEqual(Array.from({ length: live.length }, (_, i) => view.rowAt(live, i + 1)), live);
+  assert.deepEqual(Array.from({ length: live.length }, (_, i) => view.getItemKey(i + 1)), live.map(row => row.key));
+
+  const completed = groupedTimelineLayout(next, undefined, plain, open);
+  assert.equal(completed.rowAt(live, 6), next.groups[1]);
+  assert.equal(completed.count, 7);
+  const revised = applyTimeline(live, [command('history', 'c', 1)]);
+  const revisedLayout = timelineLayout(revised);
+  assert.deepEqual(revisedLayout.groups.map(group => group.turnId), ['live']);
+  assert.equal(groupedTimelineLayout(revisedLayout, 'live', plain, open), revisedLayout);
+  assert.equal(opened.rowAt(saved, 0), initial.groups[0]);
+});
+
 test('delegation metadata survives sparse events and unrelated timeline updates reuse the roster', () => {
   const turnId = 'turn';
   const member = { id: 'child', name: 'Reviewer', role: 'review', status: 'running', session: { ...session('codex', remote), id: 'child' } };

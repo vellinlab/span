@@ -6,6 +6,8 @@ const latestReasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null])
 const positionsByRows = new WeakMap();
 const layoutByRows = new WeakMap();
 const membersByRows = new WeakMap();
+const groupsByRows = new WeakMap();
+const groupedPrefixByExpansion = new WeakMap();
 
 export function delegatedMembers(rows) {
   let members = membersByRows.get(rows);
@@ -41,9 +43,9 @@ function sameActivityScope(a, b) {
   return a.turnId === b.turnId && a.depth === b.depth && a.actor?.id === b.actor?.id;
 }
 
-function activityGroups(rows) {
+function activityGroups(rows, start = 0) {
   const groups = [];
-  for (let start = 0; start < rows.length;) {
+  while (start < rows.length) {
     const first = rows[start];
     const kind = routineActivity(first);
     let end = start + 1;
@@ -64,6 +66,18 @@ function activityGroups(rows) {
   return groups;
 }
 
+function refreshActivityGroups(groups, rows, changed) {
+  const preceding = rows[changed - 1];
+  // Start at the beginning of the adjacent activity run. Any earlier group
+  // is separated by another scope or a non-routine row.
+  let start = changed;
+  while (start > 0 && routineActivity(rows[start - 1]) && sameActivityScope(preceding, rows[start - 1])) start--;
+  let keep = groups.length;
+  while (keep > 0 && groups[keep - 1].end > start) keep--;
+  const updates = activityGroups(rows, start);
+  return keep === groups.length && !updates.length ? groups : [...groups.slice(0, keep), ...updates];
+}
+
 export function timelineLayout(rows) {
   let layout = layoutByRows.get(rows);
   if (!layout) {
@@ -73,7 +87,12 @@ export function timelineLayout(rows) {
       if (row.kind === 'reasoning') reasoningTurns.set(index, row.turnId);
       return estimateRow(row);
     });
-    layout = { count: rows.length, groups: activityGroups(rows), getItemKey: index => keys[index],
+    let groups = groupsByRows.get(rows);
+    if (!groups) {
+      groups = activityGroups(rows);
+      groupsByRows.set(rows, groups);
+    }
+    layout = { count: rows.length, groups, getItemKey: index => keys[index],
       estimateSize: (index, hiddenTurn) => hiddenTurn && reasoningTurns.get(index) === hiddenTurn ? 0 : sizes[index],
       rowAt: (items, index) => items[index] };
     layoutByRows.set(rows, layout);
@@ -84,26 +103,45 @@ export function timelineLayout(rows) {
 export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
   const groups = layout.groups.filter(group => group.turnId !== liveTurnId && !ungroupedTurns.has(group.turnId));
   if (!groups.length) return layout;
-  const entries = [];
-  const nested = new Set();
-  let nextRow = 0;
-  for (const group of groups) {
-    for (; nextRow < group.start; nextRow++) entries.push(nextRow);
-    entries.push(group);
-    if (openGroups.has(group.key)) {
-      for (; nextRow < group.end; nextRow++) {
-        nested.add(entries.length);
-        entries.push(nextRow);
+  let prefix = groupedPrefixByExpansion.get(openGroups);
+  if (prefix?.groups.length !== groups.length ||
+    groups.some((group, index) => prefix.groups[index] !== group || prefix.open[index] !== openGroups.has(group.key))) {
+    const entries = [];
+    const nested = new Set();
+    const open = groups.map(group => openGroups.has(group.key));
+    let nextRow = 0;
+    for (const [index, group] of groups.entries()) {
+      for (; nextRow < group.start; nextRow++) entries.push(nextRow);
+      entries.push(group);
+      if (open[index]) {
+        for (; nextRow < group.end; nextRow++) {
+          nested.add(entries.length);
+          entries.push(nextRow);
+        }
       }
+      nextRow = group.end;
     }
-    nextRow = group.end;
+    prefix = { groups, open, entries, nested, offset: entries.length - nextRow };
+    groupedPrefixByExpansion.set(openGroups, prefix);
   }
-  for (; nextRow < layout.count; nextRow++) entries.push(nextRow);
+  // The ungrouped tail maps directly to source rows. Appending to a live
+  // turn keeps the existing history map and does not allocate tail entries.
+  const { entries, offset, nested } = prefix;
+  const entryAt = index => index < entries.length ? entries[index] : index - offset;
   return {
-    count: entries.length, nested,
-    getItemKey: index => typeof entries[index] === 'number' ? layout.getItemKey(entries[index]) : entries[index]?.key,
-    estimateSize: (index, hiddenTurn) => typeof entries[index] === 'number' ? layout.estimateSize(entries[index], hiddenTurn) : 34,
-    rowAt: (rows, index) => typeof entries[index] === 'number' ? rows[entries[index]] : entries[index],
+    count: layout.count + offset, nested,
+    getItemKey(index) {
+      const entry = entryAt(index);
+      return typeof entry === 'number' ? layout.getItemKey(entry) : entry?.key;
+    },
+    estimateSize(index, hiddenTurn) {
+      const entry = entryAt(index);
+      return typeof entry === 'number' ? layout.estimateSize(entry, hiddenTurn) : 34;
+    },
+    rowAt(rows, index) {
+      const entry = entryAt(index);
+      return typeof entry === 'number' ? rows[entry] : entry;
+    },
   };
 }
 
@@ -276,16 +314,21 @@ export function applyTimeline(previous, events) {
   };
   let layout = layoutByRows.get(previous);
   let members = membersByRows.get(previous);
+  const groups = groupsByRows.get(previous);
+  let groupingChangedAt = Infinity;
   const state = {
     rows,
     positions,
     write(position, row) {
-      if (row.kind === 'delegation' || rows[position]?.kind === 'delegation') members = undefined;
+      const earlier = rows[position];
+      if (row.kind === 'delegation' || earlier?.kind === 'delegation') members = undefined;
+      const activity = routineActivity(row);
+      const groupingChanged = activity !== routineActivity(earlier) ||
+        (activity && (row.key !== earlier.key || !sameActivityScope(row, earlier)));
+      if (groups && groupingChanged) groupingChangedAt = Math.min(groupingChangedAt, position);
       if (layout) {
-        const previous = rows[position];
-        const activity = routineActivity(row);
         if (layout.getItemKey(position) !== row.key || layout.estimateSize(position) !== estimateRow(row) ||
-          activity !== routineActivity(previous) || (activity && !sameActivityScope(row, previous))) {
+          groupingChanged) {
           layout = undefined;
         }
       }
@@ -299,6 +342,7 @@ export function applyTimeline(previous, events) {
   positionsByRows.set(rows, index);
   // Stable callbacks let the virtualizer retain measured offsets during text-only updates.
   if (layout) layoutByRows.set(rows, layout);
+  if (groups) groupsByRows.set(rows, groupingChangedAt === Infinity ? groups : refreshActivityGroups(groups, rows, groupingChangedAt));
   if (members) membersByRows.set(rows, members);
   return rows;
 }

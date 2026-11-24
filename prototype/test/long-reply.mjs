@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
 
 const following = process.argv.includes('--following');
-const [candidate, baseline] = process.argv.slice(2).filter(arg => arg !== '--following');
+const grouped = process.argv.includes('--grouped-history');
+const [candidate, baseline, screenshot] = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const linux = process.platform === 'linux';
 const lastFragment = `追加记录 ${following ? '160' : '040'}。继续核对正在生成的结果。`;
 
@@ -154,12 +155,13 @@ async function prepareInputSampling(app, page, composer, area, desktop) {
   };
 }
 
-async function check(binary, label) {
+async function check(binary, label, trial) {
   const profile = await mkdtemp(join(tmpdir(), 'span-long-reply-'));
   let app;
   let desktop;
   try {
     if (following) await writeFile(join(profile, 'fast'), '');
+    if (grouped) await writeFile(join(profile, 'grouped-history'), '');
     app = await electron.launch({
       executablePath: binary,
       args: ['--demo', '--force-device-scale-factor=1',
@@ -176,6 +178,12 @@ async function check(binary, label) {
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
+    if (grouped) {
+      assert.equal(await transcript.getAttribute('data-items'), '2901');
+      const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
+      await group.press('Enter');
+      await transcript.getByText('workspace verify --record 160-143', { exact: true }).waitFor();
+    }
     await composer.fill('验证长回复末尾。');
     await composer.press('Enter');
     const heading = transcript.getByRole('heading', { name: '长回复的开头', exact: true });
@@ -191,7 +199,7 @@ async function check(binary, label) {
     if (linux && baseline) {
       const box = await composer.boundingBox();
       const area = { x: Math.ceil(box.x), y: Math.ceil(box.y), width: 56, height: 24 };
-      if (following) desktop = await observeDesktopDraft(app, area);
+      if (following || grouped) desktop = await observeDesktopDraft(app, area);
       sampleInput = await prepareInputSampling(app, page, composer, area, desktop);
     }
     await settleFrame(page);
@@ -262,27 +270,40 @@ async function check(binary, label) {
     } else {
       const offset = await headingOffset();
       assert.ok(Math.abs(offset - position) <= 2, `Reading anchor moved from ${position} to ${offset}.`);
-      if (label === 'baseline') assert.ok(mutationBatches > 0);
+      if (grouped) {
+        await latest.click();
+        await tailInView();
+        await transcript.getByText('workspace verify --live 40', { exact: true }).waitFor();
+      } else if (label === 'baseline') assert.ok(mutationBatches > 0);
       else {
         assert.equal(mutationBatches, 0);
         assert.equal(await fragment.count(), 0);
       }
-      await initialTail.evaluate(element => {
-        const timeline = element.closest('.timeline');
-        timeline.scrollTop += element.getBoundingClientRect().bottom - timeline.getBoundingClientRect().bottom - 74;
-      });
-      await fragment.waitFor();
-      await latest.click();
-      await tailInView();
+      if (!grouped) {
+        await initialTail.evaluate(element => {
+          const timeline = element.closest('.timeline');
+          timeline.scrollTop += element.getBoundingClientRect().bottom - timeline.getBoundingClientRect().bottom - 74;
+        });
+        await fragment.waitFor();
+        await latest.click();
+        await tailInView();
+      }
     }
 
-    assert.ok(await fragment.evaluate(element => {
+    if (!grouped) assert.ok(await fragment.evaluate(element => {
       const text = element.getBoundingClientRect();
       const viewport = element.closest('.timeline').getBoundingClientRect();
       return text.top >= viewport.top && text.bottom <= viewport.bottom;
     }));
     await writeFile(join(profile, 'finish'), '');
     await transcript.getByText('长回复已全部生成。', { exact: true }).waitFor();
+    if (grouped) {
+      const group = transcript.getByRole('button', { name: '40 条命令', exact: true });
+      await group.waitFor();
+      await tailInView();
+      assert.equal(await group.getAttribute('aria-expanded'), 'false');
+      if (screenshot) await page.screenshot({ path: `${screenshot}-${label}-${trial}.png` });
+    }
     if (following) {
       await tailInView();
       assert.equal(await transcript.getByRole('link', { name: '后补引用' }).getAttribute('href'),
@@ -295,7 +316,7 @@ async function check(binary, label) {
       selection.selectAllChildren(element);
       return selection.toString();
     }), '复核链接');
-    return { label, following, mutationBatches, maxBatchGapMs, startPssKiB, endPssKiB, typing,
+    return { label, following, grouped, mutationBatches, maxBatchGapMs, startPssKiB, endPssKiB, typing,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,
@@ -309,7 +330,8 @@ async function check(binary, label) {
 
 const trials = [];
 for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
-  if (baseline) trials.push(await check(baseline, 'baseline'));
-  trials.push(await check(candidate, 'candidate'));
+  if (baseline && (!grouped || trial === 0)) trials.push(await check(baseline, 'baseline', trial));
+  trials.push(await check(candidate, 'candidate', trial));
+  if (baseline && grouped && trial === 1) trials.push(await check(baseline, 'baseline', trial));
 }
 console.log(JSON.stringify({ platform: process.platform, trials }, null, 2));

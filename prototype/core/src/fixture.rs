@@ -160,7 +160,7 @@ fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str, is_archived: boo
     json!({"data":entries[start..end],"nextCursor":(end < entries.len()).then(|| end.to_string())})
 }
 
-fn history() -> Vec<Value> {
+fn history(grouped: bool) -> Vec<Value> {
     (1..=160)
         .map(|number| {
             let reply = match number % 8 {
@@ -180,7 +180,7 @@ fn history() -> Vec<Value> {
                     中英文保持自然换行，连续滚动时会保留当前阅读位置。"
                 ),
             };
-            let items = if number == 1 || number == 160 {
+            let mut items = if number == 1 || number == 160 {
                 vec![
                     json!({"id":format!("question-{number}"),"type":"userMessage",
                         "content":[{"type":"text","text":"请检查长会话、终端和文件预览的表现。"}]}),
@@ -195,6 +195,18 @@ fn history() -> Vec<Value> {
             } else {
                 vec![json!({"id":format!("result-{number}"),"type":"agentMessage","text":reply})]
             };
+            if grouped && number > 140 {
+                let activities = (0..144).map(|index| {
+                    let id = format!("history-{number}-{index}");
+                    if index % 24 >= 18 {
+                        json!({"id":id,"type":"commandExecution","status":"completed","exitCode":0,
+                            "command":format!("workspace verify --record {number}-{index:03}")})
+                    } else {
+                        json!({"id":id,"type":"agentMessage","text":"已复核工作区响应与会话记录。"})
+                    }
+                });
+                items.splice(0..0, activities);
+            }
             json!({"id":format!("review-{number}"),"status":"completed","items":items})
         })
         .collect()
@@ -243,6 +255,7 @@ fn long_reply(
     }
     answer.push_str("### 预置正文末尾\n\n");
     let fast = gate.join("fast").is_file();
+    let grouped = gate.join("grouped-history").is_file();
     if fast {
         answer.push_str("查看[后补引用][later]的链接。\n\n");
     }
@@ -253,6 +266,18 @@ fn long_reply(
         for index in 1..=count {
             if !running.load(Ordering::Acquire) {
                 return Ok(());
+            }
+            if grouped {
+                notice(
+                    output,
+                    "item/completed",
+                    json!({"threadId":thread_id,"turnId":turn,"item":{
+                        "id":format!("{turn}-history-command-{index}"),"type":"commandExecution",
+                        "status":"completed","exitCode":0,"command":format!("workspace verify --live {index:02}")
+                    }}),
+                )?;
+                thread::sleep(Duration::from_millis(interval));
+                continue;
             }
             let mut fragment = format!("追加记录 {index:03}。继续核对正在生成的结果。\n\n");
             if fast && index == 80 {
@@ -308,7 +333,9 @@ pub fn run() -> Result<()> {
     let output = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
     let cwd = env::current_dir()?;
     let catalog_mode = env::var("SPAN_PREVIEW_CATALOG_FIXTURE").unwrap_or_default();
-    let history = history();
+    let grouped = env::var_os("SPAN_PREVIEW_STREAM_GATE")
+        .is_some_and(|path| PathBuf::from(path).join("grouped-history").is_file());
+    let history = history(grouped);
     let background = Arc::new(AtomicBool::new(false));
     let mut turn_count = 0;
     let mut new_thread_count = 0;

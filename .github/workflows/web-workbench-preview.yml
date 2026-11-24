@@ -96,7 +96,8 @@ jobs:
             long-reply:3b8abac80eb31c73f4360a0721bb5c8823ab575e \
             following-reply:ed7985bab09e6eb610298d73200028aa93028b9c \
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
-            startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af
+            startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af \
+            grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51
           do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
@@ -144,6 +145,7 @@ jobs:
             /tmp/span-workbench-artifacts/long-reply-baseline-commit.txt
             /tmp/span-workbench-artifacts/following-reply-baseline-commit.txt
             /tmp/span-workbench-artifacts/startup-loading-baseline-commit.txt
+            /tmp/span-workbench-artifacts/grouped-history-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -184,6 +186,7 @@ jobs:
           node prototype/test/covered-transcript.mjs "$binary"
           node prototype/test/long-reply.mjs "$binary"
           node prototype/test/long-reply.mjs "$binary" --following
+          node prototype/test/long-reply.mjs "$binary" --grouped-history
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           bash prototype/test/install-pi.sh "$PWD/pi-test"
