@@ -58,6 +58,8 @@ pub fn run() -> Result<()> {
     let history = history();
     let background = Arc::new(AtomicBool::new(false));
     let mut turn_count = 0;
+    let mut goal = Value::Null;
+    let mut title = TITLE.to_owned();
     for line in io::stdin().lock().lines() {
         let packet: Value = serde_json::from_str(&line?)?;
         let id = &packet["id"];
@@ -68,7 +70,7 @@ pub fn run() -> Result<()> {
         let result = match packet["method"].as_str().unwrap_or_default() {
             "initialize" => json!({"userAgent":"Span preview fixture"}),
             "thread/list" => {
-                json!({"data":[{"id":THREAD,"name":TITLE,"cwd":cwd,"preview":TITLE,
+                json!({"data":[{"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
                     "gitInfo":{"branch":"prototype/web-workbench"}}],"nextCursor":null})
             }
             "thread/start" | "thread/resume" => {
@@ -78,7 +80,7 @@ pub fn run() -> Result<()> {
                     &history
                 };
                 let page = history.iter().rev().take(20).collect::<Vec<_>>();
-                json!({"thread":{"id":THREAD,"name":TITLE,"cwd":cwd,"turns":turns},
+                json!({"thread":{"id":THREAD,"name":title,"cwd":cwd,"turns":turns},
                     "initialTurnsPage":{"data":page,"nextCursor":(history.len()-20).to_string()},
                     "cwd":cwd,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
             }
@@ -110,16 +112,62 @@ pub fn run() -> Result<()> {
                     "turn/started",
                     json!({"threadId":THREAD,"turn":started}),
                 )?;
+                let user_item = json!({"id":format!("{turn}-input"),"type":"userMessage",
+                    "content":params["input"],"clientId":params["clientUserMessageId"]});
+                notice(
+                    &output,
+                    "item/completed",
+                    json!({"threadId":THREAD,"turnId":turn,"item":user_item}),
+                )?;
                 let output = output.clone();
                 let background = background.clone();
                 thread::spawn(move || {
                     let mut answer = String::new();
                     let item = format!("{turn}-answer");
+                    let summary = format!("{turn}-summary");
+                    let sections = [
+                        "正在核对窗口响应。
+
+- 检查流式输出
+  - 保留列表缩进",
+                        "再确认工具结果和最终回复的前后顺序。",
+                    ];
+                    for (index, delta) in sections.into_iter().enumerate() {
+                        let _ = notice(
+                            &output,
+                            "item/reasoning/summaryTextDelta",
+                            json!({
+                                "threadId":THREAD,"turnId":turn,"itemId":summary,"summaryIndex":index,"delta":delta,
+                            }),
+                        );
+                    }
                     let _ = notice(
                         &output,
-                        "item/reasoning/summaryTextDelta",
-                        json!({"threadId":THREAD,"turnId":turn,"itemId":"live-summary","summaryIndex":0,
-                            "delta":"正在核对窗口响应"}),
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,
+                        "item":{"type":"reasoning","id":summary,"summary":sections}}),
+                    );
+                    let _ = notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,
+                        "item":{"type":"commandExecution","id":format!("{turn}-command"),"command":"git status --short",
+                            "status":"completed","aggregatedOutput":" M prototype/ui/main.jsx","exitCode":0}}),
+                    );
+                    let _ = notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,
+                        "item":{"type":"collabAgentToolCall","id":format!("{turn}-delegate"),"tool":"spawnAgent",
+                            "status":"completed","receiverThreadIds":["fixture-subagent"],
+                            "agentsStates":{"fixture-subagent":{"status":"completed","message":"已检查界面。"}}}}),
+                    );
+                    let _ = notice(
+                        &output,
+                        "thread/tokenUsage/updated",
+                        json!({"threadId":THREAD,"turnId":turn,
+                        "tokenUsage":{"total":{"totalTokens":140,"inputTokens":100,"outputTokens":40},
+                            "last":{"totalTokens":140},"modelContextWindow":512}}),
                     );
                     for (index, delta) in [
                         "**流式输出已接通。**\n\n",
@@ -136,6 +184,18 @@ pub fn run() -> Result<()> {
                         thread::sleep(Duration::from_millis(40));
                         if !background.load(Ordering::Acquire) {
                             break;
+                        }
+                        if let Some(delta) = match index {
+                            16 => Some("检查窄窗口的对齐。"),
+                            42 => Some("\n确认目标卡片和输入区之间的间距。"),
+                            _ => None,
+                        } {
+                            let _ = notice(
+                                &output,
+                                "item/reasoning/summaryTextDelta",
+                                json!({"threadId":THREAD,"turnId":turn,
+                                    "itemId":format!("{turn}-layout"),"summaryIndex":0,"delta":delta}),
+                            );
                         }
                         let piece = if index < 5 { delta } else { "·" };
                         answer.push_str(piece);
@@ -169,8 +229,56 @@ pub fn run() -> Result<()> {
                 background.store(false, Ordering::Release);
                 json!({})
             }
-            "thread/goal/get" => json!({"goal":null}),
-            "model/list" | "app/list" | "skills/list" => json!({"data":[],"nextCursor":null}),
+            "turn/steer" => {
+                let turn = &params["expectedTurnId"];
+                notice(
+                    &output,
+                    "item/completed",
+                    json!({"threadId":THREAD,"turnId":turn,
+                    "item":{"id":format!("steer-{}",params["clientUserMessageId"]),"type":"userMessage",
+                        "content":params["input"],"clientId":params["clientUserMessageId"]}}),
+                )?;
+                json!({"turnId":turn})
+            }
+            "thread/goal/get" => json!({"goal":goal}),
+            "thread/goal/set" => {
+                if let Some(objective) = params["objective"].as_str() {
+                    goal = json!({"objective":objective,"tokenBudget":params["tokenBudget"],"tokensUsed":0});
+                }
+                if !goal.is_null() {
+                    goal["status"] = params["status"].clone();
+                }
+                notice(
+                    &output,
+                    "thread/goal/updated",
+                    json!({"threadId":THREAD,"goal":goal}),
+                )?;
+                json!({"goal":goal})
+            }
+            "thread/goal/clear" => {
+                goal = Value::Null;
+                notice(&output, "thread/goal/cleared", json!({"threadId":THREAD}))?;
+                json!({"cleared":true})
+            }
+            "thread/name/set" => {
+                title = params["name"].as_str().unwrap_or(TITLE).to_owned();
+                notice(
+                    &output,
+                    "thread/name/updated",
+                    json!({"threadId":THREAD,"threadName":title}),
+                )?;
+                json!({})
+            }
+            "model/list" => {
+                json!({"data":[{"id":"fixture","model":"fixture","displayName":"Fixture",
+                "isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}],
+                "serviceTiers":[{"id":"priority","name":"Fast"}],"inputModalities":["text"]}]})
+            }
+            "account/rateLimits/read" => {
+                json!({"rateLimits":{"limitId":"codex","limitName":"Codex",
+                "primary":{"usedPercent":24,"windowDurationMins":300}}})
+            }
+            "app/list" | "skills/list" => json!({"data":[],"nextCursor":null}),
             _ => json!({}),
         };
         send(&output, json!({"id":id,"result":result}))?;

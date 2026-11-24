@@ -115,9 +115,9 @@ app.whenReady().then(() => {
     minWidth: 740,
     minHeight: 520,
     autoHideMenuBar: true,
-    backgroundColor: '#181818',
+    backgroundColor: '#181a1b',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#181818', symbolColor: '#ededed', height: 44 },
+    titleBarOverlay: { color: '#181a1b', symbolColor: '#ededed', height: 44 },
     ...(process.platform === 'win32' && { icon: path.join(root, 'span.ico') }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

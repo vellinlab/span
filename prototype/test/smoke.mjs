@@ -178,12 +178,56 @@ try {
       .some(line => line.textContent.trim() === 'span_remote_pty'));
   }
   await page.getByRole('button', { name: '会话', exact: true }).click();
-  await page.getByRole('textbox', { name: '消息' }).fill('验证流式会话与底部终端。');
-  await page.getByRole('textbox', { name: '消息' }).press('Enter');
+  const composer = page.getByRole('textbox', { name: '消息' });
+  const goal = page.locator('.goal-strip');
+  await composer.fill('/goal 验证会话目标');
+  await composer.press('Enter');
+  await goal.getByText('验证会话目标').waitFor();
+  assert.ok(await goal.evaluate(card => {
+    const form = card.nextElementSibling;
+    if (!form?.matches('form.composer')) return false;
+    const a = card.getBoundingClientRect();
+    const b = form.getBoundingClientRect();
+    return a.bottom < b.top && Math.abs(a.left - b.left) <= 1 && Math.abs(a.right - b.right) <= 1;
+  }));
+  await goal.press('Enter');
+  await page.getByRole('region', { name: '会话目标' }).waitFor();
+  await goal.press('Enter');
+  await page.getByRole('region', { name: '会话目标' }).waitFor({ state: 'detached' });
+  await composer.fill('/goal pause');
+  await composer.press('Enter');
+  await goal.getByText('已暂停').waitFor();
+  await composer.fill('验证流式会话与底部终端。');
+  await composer.press('Enter');
+  const reasoning = page.locator('[data-card="reasoning"]');
+  const summary = reasoning.locator('summary');
+  const summaryElement = await summary.elementHandle();
+  const initialHeight = await summaryElement.evaluate(element => element.offsetHeight);
+  assert.equal(await reasoning.locator('.card-body').count(), 0);
+  await summary.getByText('确认目标卡片和输入区之间的间距。', { exact: true }).waitFor();
+  assert.equal(await reasoning.count(), 1);
+  assert.ok(await summaryElement.evaluate((element, height) => element.isConnected && element.offsetHeight === height, initialHeight));
+  assert.ok(await goal.isVisible());
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
   await page.getByText('流式输出已接通。', { exact: true }).waitFor();
+  await reasoning.getByText('推理摘要', { exact: true }).click();
+  await reasoning.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
+  await reasoning.getByText('再确认工具结果和最终回复的前后顺序。', { exact: true }).waitFor();
+  assert.equal(await page.locator('[data-card="command"] pre').count(), 0);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-expanded.png') });
   await page.getByRole('button', { name: '停止', exact: true }).click();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  await summary.click();
+  assert.equal(await summary.locator('.reasoning-preview').count(), 0);
   assert.equal(await page.getByRole('alert').count(), 0);
+  await composer.fill('/usage');
+  await composer.press('Enter');
+  await page.getByRole('region', { name: '用量' }).getByText('已用 24%', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '关闭面板' }).click();
+  await composer.fill('/agents');
+  await composer.press('Enter');
+  await page.getByRole('region', { name: '代理与团队' }).getByText('fixture-subagent', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '关闭面板' }).click();
   if (screenshot) {
     const latest = page.getByRole('button', { name: '滚到最新消息' });
     if (await latest.isVisible()) await latest.click();
@@ -194,6 +238,9 @@ try {
       await page.screenshot({ path: screenshot });
     }
   }
+  await composer.fill('/goal clear');
+  await composer.press('Enter');
+  await goal.waitFor({ state: 'detached' });
   await page.getByRole('button', { name: /新会话/ }).click();
   await page.getByRole('heading', { name: '开始新会话' }).waitFor();
   assert.ok(await page.getByRole('textbox', { name: '消息' }).evaluate(element => document.activeElement === element));

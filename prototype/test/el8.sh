@@ -50,6 +50,9 @@ Host span-ci-ssh
 CONFIG
 cat > "$fixture/remote-shell" <<'SCRIPT'
 #!/bin/bash
+if [[ -n ${SSH_ORIGINAL_COMMAND:-} ]]; then
+    exec /bin/bash -c "$SSH_ORIGINAL_COMMAND"
+fi
 printf 'span_ssh_connected\n'
 exec /bin/bash --noprofile --norc -i
 SCRIPT

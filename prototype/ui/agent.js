@@ -1,80 +1,26 @@
-export function connectAgent(generation, onPacket, onClosed) {
-  const calls = new Map();
-  let next = 0;
-  let closed = false;
-  const stop = window.span.onEvent(({ event, generation: source, data }) => {
-    if (source !== generation) return;
-    if (event === 'agent-closed') {
-      close();
-      onClosed();
-    }
-    if (event !== 'agent') return;
-    const call = data.method ? null : calls.get(data.id);
-    if (call) {
-      calls.delete(data.id);
-      clearTimeout(call.timer);
-      if (data.error) call.reject(new Error(data.error.message));
-      else call.resolve(data.result);
-    } else if (data.method) {
-      onPacket(data);
-    }
-  });
+import { codexAdapter, clueAdapter } from './codex.js';
 
-  function send(packet) {
-    if (closed) return Promise.reject(new Error('Agent 连接已关闭。'));
-    return window.span.request('agent.send', { generation, packet });
+/** @type {import('./agent-protocol').AdapterDefinition[]} */
+const definitions = [codexAdapter, clueAdapter];
+
+export const agentBackends = definitions.map(({ id, label, locations }) => ({ id, label, locations }));
+
+/** @param {string} id @param {import('./agent-protocol').AdapterContext} context */
+export function createAgent(id, context) {
+  const definition = definitions.find(entry => entry.id === id);
+  if (!definition?.locations.includes(context.location.kind)) {
+    throw new Error('此主机不支持所选 Agent。');
   }
-
-  function request(method, params = {}) {
-    const id = ++next;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        calls.delete(id);
-        reject(new Error('Agent 响应超时。'));
-      }, 20000);
-      calls.set(id, { resolve, reject, timer });
-      send({ id, method, params }).catch(error => {
-        calls.delete(id);
-        clearTimeout(timer);
-        reject(error);
-      });
-    });
-  }
-
-  function close() {
-    if (closed) return;
-    closed = true;
-    stop();
-    for (const call of calls.values()) {
-      clearTimeout(call.timer);
-      call.reject(new Error('Agent 连接已关闭。'));
-    }
-    calls.clear();
-  }
-
-  return { request, send, close };
+  return definition.create(context);
 }
 
-export function historyRows(turns) {
-  return turns.flatMap(turn => (turn.items ?? []).map(toRow).filter(Boolean));
+/** @param {import('./agent-protocol').SessionRef | undefined | null} ref */
+export function sessionKey(ref) {
+  if (!ref) return '';
+  return JSON.stringify([ref.backend, ref.location.kind, ref.location.kind === 'ssh' ? ref.location.host : '', ref.id]);
 }
 
-export function toRow(item) {
-  switch (item.type) {
-    case 'userMessage': {
-      const text = item.content?.filter(part => part.type === 'text').map(part => part.text).join('\n') ?? '';
-      return { id: item.id, kind: 'user', text };
-    }
-    case 'agentMessage':
-      return { id: item.id, kind: 'agent', text: item.text ?? '' };
-    case 'commandExecution':
-      return { id: item.id, kind: 'activity', title: item.command, text: item.aggregatedOutput ?? '' };
-    case 'fileChange':
-      return { id: item.id, kind: 'activity', title: '文件变更',
-        text: item.changes?.map(change => change.diff).join('\n') ?? '' };
-    case 'contextCompaction':
-      return { id: item.id, kind: 'activity', title: '已压缩上下文', text: '' };
-    default:
-      return null;
-  }
+/** @param {import('./agent-protocol').Session | undefined | null} entry */
+export function sessionTitle(entry) {
+  return entry?.title || entry?.preview || '新会话';
 }

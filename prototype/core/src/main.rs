@@ -1,13 +1,15 @@
+mod agent;
 mod fixture;
+
+use agent::Agent;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde_json::{Value, json};
 use std::{
     env, fs,
-    io::{self, BufRead, BufReader, BufWriter, Read, Write},
+    io::{self, BufRead, BufWriter, Read, Write},
     path::PathBuf,
-    process::{self, ChildStdin, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
 };
@@ -27,19 +29,6 @@ fn event(output: &Output, kind: &str, generation: u64, payload: Value) -> io::Re
         output,
         json!({"event":kind,"generation":generation,"data":payload}),
     )
-}
-
-struct Agent {
-    generation: u64,
-    child: process::Child,
-    input: ChildStdin,
-}
-
-impl Drop for Agent {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 struct Terminal {
@@ -73,68 +62,6 @@ fn ssh_destination(params: &Value) -> Result<Option<&str>> {
         return Err("请使用 SSH 配置别名或 user@host。".into());
     }
     Ok(Some(target))
-}
-
-fn agent_start(params: &Value, output: &Output, generation: u64) -> Result<Agent> {
-    let backend = match params["backend"].as_str() {
-        Some("codex") => "codex",
-        Some("clue") => "clue",
-        _ => return Err("未知的 Agent 后端。".into()),
-    };
-    let mut command = if params["demo"] == true {
-        let mut command = Command::new(env::current_exe()?);
-        command.arg("--fixture");
-        command
-    } else if let Some(target) = ssh_destination(params)? {
-        let mut command = Command::new("ssh");
-        command.args([
-            "-T",
-            "-o",
-            "BatchMode=yes",
-            "--",
-            target,
-            backend,
-            "app-server",
-        ]);
-        command
-    } else {
-        let mut command = Command::new(backend);
-        command
-            .current_dir(process_directory(params)?)
-            .arg("app-server");
-        command
-    };
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|error| format!("无法启动 {backend} App Server：{error}"))?;
-    let input = child.stdin.take().expect("piped stdin");
-    let reader = BufReader::new(child.stdout.take().expect("piped stdout"));
-    let output = output.clone();
-    thread::spawn(move || {
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            let Ok(value) = serde_json::from_str(&line) else {
-                continue;
-            };
-            if event(&output, "agent", generation, value).is_err() {
-                return;
-            }
-        }
-        let _ = event(&output, "agent-closed", generation, Value::Null);
-    });
-    Ok(Agent {
-        generation,
-        child,
-        input,
-    })
 }
 
 fn dimensions(params: &Value) -> PtySize {
@@ -290,7 +217,7 @@ impl Service {
         match message["method"].as_str().unwrap_or_default() {
             "agent.start" => {
                 self.agent.take();
-                self.agent = Some(agent_start(params, output, generation)?);
+                self.agent = Some(Agent::start(params, output, generation)?);
             }
             "agent.close" => {
                 if self
@@ -304,12 +231,10 @@ impl Service {
             "agent.send" => {
                 let agent = self
                     .agent
-                    .as_mut()
+                    .as_ref()
                     .filter(|agent| agent.generation == generation)
                     .ok_or("Agent 尚未连接。")?;
-                serde_json::to_writer(&mut agent.input, &params["packet"])?;
-                agent.input.write_all(b"\n")?;
-                agent.input.flush()?;
+                agent.send(&params["packet"])?;
             }
             "terminal.start" => {
                 self.terminal.take();

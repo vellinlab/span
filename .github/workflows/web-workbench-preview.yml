@@ -100,5 +100,5 @@ jobs:
           name: span-web-windows-preview
           path: |
             span-web-windows-x86_64.zip
-            windows-workbench.png
+            windows-workbench*.png
           if-no-files-found: warn
