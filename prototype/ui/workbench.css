@@ -788,6 +788,8 @@ p { margin-block: 0 12px; }
 .reasoning-label { flex: none; }
 .reasoning-strip[aria-expanded="true"] .reasoning-chevron { transform: rotate(180deg); }
 .reasoning-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+/* Clip the start of the isolated text in either reading direction. */
+.reasoning-preview:has(> bdi:dir(rtl)) { direction: ltr; }
 .goal-strip {
   display: flex;
   align-items: center;

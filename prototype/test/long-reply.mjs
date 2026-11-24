@@ -349,11 +349,30 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     if (reasoningFollowing) {
       await writeFile(join(profile, 'reference-prefix'), '');
       await panel.getByText('[迟到引用]', { exact: true }).waitFor();
+      if (label === 'candidate') {
+        const ending = 'آخر خطوة: مراجعة النتائج.';
+        await strip.getByText(ending, { exact: false }).waitFor();
+        const endingVisible = await strip.locator('bdi').evaluate((preview, ending) => {
+          const text = preview.firstChild;
+          const view = preview.parentElement.getBoundingClientRect();
+          const range = document.createRange();
+          range.setStart(text, text.length - ending.length);
+          range.setEnd(text, text.length);
+          const boxes = Array.from(range.getClientRects());
+          return preview.getBoundingClientRect().width > view.width && boxes.length > 0 &&
+            boxes.every(box => box.left >= view.left - 1 && box.right <= view.right + 1);
+        }, ending);
+        assert.ok(endingVisible, 'The fixed strip should show the end of a long right-to-left summary.');
+        assert.deepEqual(await strip.boundingBox(), geometry);
+        if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-rtl.png` });
+      }
       await writeFile(join(profile, 'reference-definition'), '');
       const link = panel.getByRole('link', { name: '迟到引用', exact: true });
       await link.waitFor();
       assert.equal(await link.getAttribute('href'), 'https://example.com/span/reference');
       archived = '引用检查完成。';
+      await strip.getByText(archived, { exact: true }).waitFor();
+      assert.deepEqual(await strip.boundingBox(), geometry);
     }
     await writeFile(join(profile, 'finish'), '');
     await strip.waitFor({ state: 'detached' });

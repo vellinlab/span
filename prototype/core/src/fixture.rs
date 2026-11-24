@@ -345,6 +345,11 @@ fn stream_reasoning(
             json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning","id":id,
                 "summary":[format!("[迟到引用]\n\n{initial}") ]}}),
         )?;
+        delta(concat!(
+            "\n\nتحقق من عرض ملخص الاستدلال أثناء تحديث المحادثة ثم افحص التطبيق على Windows و EL8. ",
+            "راجع ترتيب عناصر الواجهة وتأكد من سهولة قراءة التحديث في النافذة الضيقة. ",
+            "آخر خطوة: مراجعة النتائج."
+        ))?;
         if !wait_for_stream_gate(&gate.join("reference-definition"), running) {
             return Ok(());
         }
