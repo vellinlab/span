@@ -13,6 +13,7 @@ const state = process.env.SPAN_TEST_PI_STATE ?? join(profile, "Pi's state");
 const localWorkspace = join(profile, 'Pi 工作区');
 const referenceName = '工作区检查.txt';
 const localReference = join(localWorkspace, referenceName);
+const missingFile = 'span-ci-preview-deliberately-missing.txt';
 const prompts = [];
 const initialPrompt = '核对 Pi 的推理、工具与用量。';
 const resumePrompt = '继续刚才保存的 Pi 会话。';
@@ -36,14 +37,17 @@ const gateway = createServer(async (request, response) => {
     const content = userMessages.at(-1)?.content;
     const prompt = typeof content === 'string' ? content
       : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
-    const tool = messages.findLast(message => message.role === 'tool');
+    const tools = messages.filter(message => message.role === 'tool');
     const initial = prompt.includes(initialPrompt);
     assert.ok(initial || prompt.includes(resumePrompt));
     if (initial && !ssh) assert.ok(prompt.includes('- ' + JSON.stringify(localReference)));
     if (!initial) assert.ok(messages.some(message => message.role === 'assistant' &&
       JSON.stringify(message.content).includes(firstAnswer)));
-    if (tool) assert.ok(JSON.stringify(tool.content).includes('pi tool result'));
-    prompts.push({ initial, tool: Boolean(tool) });
+    if (initial && tools.length) {
+      assert.ok(tools.some(tool => JSON.stringify(tool.content).includes('pi tool result')));
+      assert.ok(tools.some(tool => JSON.stringify(tool.content).includes(missingFile)));
+    }
+    prompts.push({ initial, tool: tools.length > 0 });
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const send = (delta, finish_reason = null, usage = undefined) => {
       const choices = [{ index: 0, delta, finish_reason }];
@@ -52,13 +56,17 @@ const gateway = createServer(async (request, response) => {
       }) + '\n\n');
     };
     send({ role: 'assistant' });
-    if (initial && !tool) {
+    if (initial && !tools.length) {
       send({ reasoning_content: '先核对 Pi 会话。' });
       await new Promise(done => { releaseReasoning = done; });
       send({ reasoning_content: '\n' + beforeTool });
       await new Promise(done => { releaseTool = done; });
-      send({ tool_calls: [{ index: 0, id: 'span-tool', type: 'function',
-        function: { name: 'bash', arguments: JSON.stringify({ command: 'echo pi tool result' }) } }] });
+      send({ tool_calls: [
+        { index: 0, id: 'span-tool', type: 'function',
+          function: { name: 'bash', arguments: JSON.stringify({ command: 'echo pi tool result' }) } },
+        { index: 1, id: 'span-missing-file', type: 'function',
+          function: { name: 'read', arguments: JSON.stringify({ path: missingFile }) } },
+      ] });
       send({}, 'tool_calls', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
     } else {
       if (initial) {
@@ -184,6 +192,9 @@ export default function (pi) {
     assert.equal(await summaries.locator('.card-body').count(), 0);
     const chronology = await log.locator('[data-card="reasoning"] .card-hint, [data-card="command"] .card-title').allTextContents();
     assert.deepEqual(chronology, [beforeTool, 'echo pi tool result', afterTool]);
+    const failed = log.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
+    await failed.getByText('失败', { exact: true }).waitFor();
+    assert.equal(await failed.locator('summary .card-icon.lucide-circle-alert').count(), 1);
   }
   async function verifyShortLayout(view, answer) {
     await view.waitForFunction(answer => {
@@ -205,6 +216,10 @@ export default function (pi) {
   await narrow(page);
   await verifyShortLayout(page, firstAnswer);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-archive-narrow.png') });
+  const failedTool = transcript.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
+  await failedTool.locator('summary').press('Enter');
+  await failedTool.getByText(missingFile, { exact: false }).waitFor();
+  await failedTool.locator('summary').press('Enter');
   await tool.locator('summary').click();
   await tool.getByText('pi tool result', { exact: true }).waitFor();
   await send('/usage');

@@ -542,9 +542,22 @@ try {
   const groupAnswer = transcript.getByText('连续工具活动验收完成。', { exact: true });
   const firstCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git status --short -- review-1' });
   const failedCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git diff --check -- review-missing' });
+  const change = transcript.locator('[data-card="patch"]').filter({ hasText: 'review-notes.md' });
   await group.waitFor();
   await groupAnswer.waitFor();
+  await change.waitFor();
+  await failedCommand.getByText('失败', { exact: true }).waitFor();
   await failedCommand.getByText('退出码 1', { exact: true }).waitFor();
+  assert.equal(await failedCommand.getAttribute('data-failed'), 'true');
+  assert.equal(await change.getAttribute('data-failed'), null);
+  assert.ok(await failedCommand.locator('summary').evaluate(element => {
+    const lead = element.querySelector('.card-icon.lucide-circle-alert');
+    const title = element.querySelector('.card-title');
+    const status = element.querySelector('.card-status');
+    return lead?.getBoundingClientRect().right < title.getBoundingClientRect().left &&
+      title.getBoundingClientRect().right < status.getBoundingClientRect().left &&
+      getComputedStyle(lead).color === getComputedStyle(status).color;
+  }), 'Failed activities use the same warning at the leading icon and the status label.');
   await waitForTranscriptEnd();
   assert.ok(await groupAnswer.evaluate(element => {
     const answer = element.getBoundingClientRect();
@@ -699,6 +712,8 @@ try {
   await spawnCard.locator('.agent-state[data-recorded="true"]').getByText('当时进行中', { exact: true }).waitFor();
   await spawnCard.locator('summary').press('Enter');
   await waitCard.getByText('1 个失败', { exact: true }).waitFor();
+  assert.equal(await waitCard.getAttribute('data-failed'), 'true');
+  assert.equal(await spawnCard.getAttribute('data-failed'), null);
   assert.equal(await waitCard.getByRole('list', { name: '代理成员' }).count(), 0);
   await waitCard.locator('summary').press('Enter');
   await waitCard.getByRole('button', { name: openAgent }).waitFor();

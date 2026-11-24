@@ -1,7 +1,7 @@
 import { memo, useCallback, useDeferredValue, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
-  ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
+  ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
   Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
@@ -80,15 +80,18 @@ function CommandText({ command, titleRef, force }) {
 
 function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, expanded, toggle, children }) {
   const titleRef = useRef(null);
+  const failed = status === 'failed' && !recordedStatus;
+  const CardIcon = failed ? CircleAlert : Icon;
   const statusLabel = statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
-  const head = <><Icon size={15} className="card-icon" /><span className="card-title" ref={titleRef} title={title}>{title}</span>
+  const head = <><CardIcon size={15} className="card-icon" aria-hidden="true" />
+    <span className="card-title" ref={titleRef} title={title}>{title}</span>
     {hint && <span className="card-hint" title={hint}>{hint}</span>}
     {(statusLabel || statusNote) && <span className="card-status" data-status={status} data-recorded={recordedStatus || undefined}>
       {statusLabel && <span>{statusLabel}</span>}
       {statusLabel && statusNote && <span aria-hidden="true">·</span>}
       {statusNote && <span>{statusNote}</span>}
     </span>}</>;
-  return <div className="activity" data-card={type}>
+  return <div className="activity" data-card={type} data-failed={failed || undefined}>
     {children ? <details open={expanded} onToggle={event => {
       if (event.currentTarget.open !== expanded) toggle(event.currentTarget.open);
     }}>

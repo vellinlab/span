@@ -15,6 +15,7 @@
   --muted: #acadae;
   --accent: #c2dbc9;
   --activity-line: #ffffff20;
+  --failure: #efb8ad;
   --mono: Consolas, "Cascadia Mono", "Liberation Mono", monospace;
   --titlebar-height: max(44px, env(titlebar-area-height, 44px));
   --reading-width: 736px;
@@ -428,6 +429,10 @@ p { margin-block: 0 12px; }
 .card-placeholder { width: 13px; flex: none; }
 .card-title, .card-hint, .agent-member-label, .agent-member-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-title { font-weight: 600; }
+.activity[data-card="activity-group"] .card-title { font-weight: 500; }
+.activity[data-failed="true"] { border-left-color: color-mix(in srgb, var(--failure) 48%, transparent); }
+.activity[data-failed="true"] > .card-heading > .card-icon,
+.activity[data-failed="true"] > details > summary > .card-icon { color: var(--failure); }
 .activity[data-card="command"] .card-title { font: 12px/20px var(--mono); font-weight: 400; }
 .card-hint { color: var(--muted); }
 .activity[data-card="reasoning"] .card-title { flex: none; font-weight: 500; }
@@ -443,7 +448,7 @@ p { margin-block: 0 12px; }
   white-space: nowrap;
 }
 :is(.card-status, .agent-state)[data-status="running"] { color: #dbca9d; }
-:is(.card-status, .agent-state)[data-status="failed"] { color: #efb8ad; }
+:is(.card-status, .agent-state)[data-status="failed"] { color: var(--failure); }
 :is(.card-status, .agent-state)[data-status="completed"] { color: var(--accent); }
 :is(.card-status, .agent-state)[data-recorded="true"] { color: var(--muted); }
 .card-body {

@@ -600,6 +600,13 @@ pub fn run() -> Result<()> {
                     notice(
                         &output,
                         "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"fileChange","id":format!("{turn}-change"),
+                            "status":"completed","changes":[{"path":"review-notes.md","kind":{"type":"add"},
+                            "diff":"@@ -0,0 +1 @@\n+已记录缺失文件。\n"}]}}),
+                    )?;
+                    notice(
+                        &output,
+                        "item/completed",
                         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-activity-result"),
                             "phase":"final_answer","text":"连续工具活动验收完成。"}}),
                     )?;
