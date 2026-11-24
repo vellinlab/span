@@ -530,6 +530,10 @@ p { margin-block: 0 12px; }
   box-shadow: 0 8px 28px #00000026;
 }
 .composer:focus-within { border-color: #c2dbc953; }
+.composer-wrap:has(.approval) .composer:not(:focus-within) {
+  background: var(--panel);
+  box-shadow: none;
+}
 .composer textarea {
   display: block;
   width: 100%;
@@ -603,6 +607,7 @@ p { margin-block: 0 12px; }
 .approval-host { max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .approval[data-kind="input"] { border-color: #c2dbc94a; }
 .approval[data-kind="input"] header svg { color: var(--accent); }
+.approval[data-kind="input"] header, .approval[data-kind="input"] .approval-actions { border-color: transparent; }
 .approval form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .approval-body { display: grid; gap: 7px; min-height: 0; padding: 8px 10px; overflow: auto; overscroll-behavior: contain; }
 .approval-body:empty { display: none; }

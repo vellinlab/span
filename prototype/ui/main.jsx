@@ -43,6 +43,7 @@ function App() {
   const [query, setQuery] = useState('');
   const [showLatest, setShowLatest] = useState(false);
   const { drafts, edit, move, clearSent } = useDrafts();
+  const [dispatchedDraft, setDispatchedDraft] = useState();
   const [suggesting, setSuggesting] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const [panel, setPanel] = useState(null);
@@ -85,7 +86,7 @@ function App() {
   const refKey = sessionKey(session?.ref);
   const composerKey = draftKey(config, session?.ref);
   const activeDraft = drafts.get(composerKey);
-  const draft = activeDraft?.text ?? '';
+  const draft = activeDraft === dispatchedDraft ? '' : (activeDraft?.text ?? '');
   const setDraft = text => edit(composerKey, text);
   const rememberedReading = readingViews.current.get(refKey);
   const running = run?.status === 'running';
@@ -470,14 +471,20 @@ function App() {
     const command = text.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
     const known = command && (commands.some(([name]) => name === command[1]) ||
       (command[1] === '/diff' && rows.some(row => row.kind === 'patch')));
+    let dispatched = false;
     try {
       const nativePrompt = known && !api.execute && api.commands?.some(item => '/' + item.id === command[1])
         && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
       const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '')
-        : await work.send(text, effectiveOptions(), delivery);
+        : await work.send(text, effectiveOptions(), delivery, () => {
+          dispatched = true;
+          setDispatchedDraft(submitted);
+        });
       if (sent) clearSent(submitted);
     } catch (error) {
       if (work.timelineScope() === scope) report(error);
+    } finally {
+      if (dispatched) setDispatchedDraft(current => current === submitted ? undefined : current);
     }
   }
 

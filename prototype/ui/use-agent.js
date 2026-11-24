@@ -371,7 +371,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     return entry.ref;
   }
 
-  async function send(text, selectedOptions, delivery = 'steer') {
+  async function send(text, selectedOptions, delivery = 'steer', onDispatch) {
     const client = agent.current;
     const steering = currentRun.current;
     if (!client || connection !== 'ready' || loading || busy.current ||
@@ -391,6 +391,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       updateRows(previous => [...previous, { kind: 'user', text, clientId, key: clientId,
         turnId: steering?.id, optimistic: true, queued: steering && delivery === 'followUp' ? 'queued' : undefined }]);
       added = true;
+      onDispatch?.();
       if (steering && delivery === 'followUp') {
         await client.turns.followUp(ref, input, clientId);
       } else if (steering) {

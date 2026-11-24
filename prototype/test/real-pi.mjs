@@ -139,6 +139,9 @@ export default function (pi) {
   await page.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
   await send('/span-form');
   const confirm = page.getByRole('region', { name: '核对 Pi 操作' });
+  await confirm.waitFor();
+  assert.equal(await composer.inputValue(), '');
+  assert.equal(await transcript.getByText('/span-form', { exact: true }).count(), 1);
   await confirm.getByRole('button', { name: '确认', exact: true }).click();
   const editor = page.getByRole('region', { name: '编辑 Pi 说明' });
   const answer = editor.getByRole('textbox', { name: '回答' });
