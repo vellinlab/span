@@ -5,6 +5,8 @@ import { rememberWorkspace, savedSession } from './recent-workspaces.js';
 import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 
 const PAGE_SIZE = 20;
+const HIDDEN_DELTA_LIMIT = 128;
+const HIDDEN_TEXT_LIMIT = 64 * 1024;
 
 export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest, suspendTimeline }) {
   const [api, setApi] = useState(null);
@@ -39,31 +41,41 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const pendingPage = useRef(null);
   const pendingSend = useRef(null);
   const rosterRefresh = useRef(null);
-  const queue = useRef([]);
+  const queue = useRef({ events: [], characters: 0 });
   const frame = useRef(0);
   const bufferedRows = useRef(rows);
   const publicationPaused = useRef(false);
   const updateRows = useCallback(update => {
-    bufferedRows.current = update(bufferedRows.current);
-    if (!publicationPaused.current) publishRows(bufferedRows.current);
-  }, []);
-  const flushTimeline = useCallback(() => {
-    frame.current = 0;
-    const events = queue.current;
-    queue.current = [];
-    updateRows(previous => applyTimeline(previous, events));
-  }, [updateRows]);
-
-  const pausePublication = suspendTimeline && requests.length === 0;
-  useLayoutEffect(() => {
-    publicationPaused.current = pausePublication;
-    if (pausePublication) return;
-    // Include the current batch when an approval or file dismissal reveals the conversation.
     if (frame.current) {
       cancelAnimationFrame(frame.current);
-      flushTimeline();
-    } else publishRows(bufferedRows.current);
-  }, [pausePublication, flushTimeline]);
+      frame.current = 0;
+    }
+    const pending = queue.current;
+    if (pending.events.length) {
+      queue.current = { events: [], characters: 0 };
+      bufferedRows.current = applyTimeline(bufferedRows.current, pending.events);
+    }
+    if (update) bufferedRows.current = update(bufferedRows.current);
+    if (!publicationPaused.current) publishRows(bufferedRows.current);
+  }, []);
+  const flushFrame = useCallback(() => {
+    frame.current = 0;
+    updateRows();
+  }, [updateRows]);
+
+  const covered = suspendTimeline && requests.length === 0;
+  useLayoutEffect(() => {
+    function syncPublication() {
+      const paused = covered || document.hidden;
+      if (paused === publicationPaused.current) return;
+      publicationPaused.current = paused;
+      // Commit the previous batch. Revealing the conversation also publishes it.
+      updateRows();
+    }
+    syncPublication();
+    document.addEventListener('visibilitychange', syncPublication);
+    return () => document.removeEventListener('visibilitychange', syncPublication);
+  }, [covered, updateRows]);
 
   function clearTimeline() {
     layer.current++;
@@ -76,7 +88,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     jumpToLatest.current = true;
     cancelAnimationFrame(frame.current);
     frame.current = 0;
-    queue.current = [];
+    queue.current = { events: [], characters: 0 };
     updateRows(() => []);
     setCursor(null);
     setHistoryPages(0);
@@ -111,6 +123,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       return;
     }
     if (event.kind === 'disconnected') {
+      if (queue.current.events.length) updateRows();
       changeRun(null);
       rosterRefresh.current = null;
       busy.current = false;
@@ -134,11 +147,22 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     if (sessionKey(event.session) !== active.current?.key) return;
     switch (event.kind) {
       case 'item':
-      case 'delta':
-        queue.current.push(event);
-        if (!frame.current) frame.current = requestAnimationFrame(flushTimeline);
+      case 'delta': {
+        const pending = queue.current;
+        pending.events.push(event);
+        if (!publicationPaused.current) {
+          if (!frame.current) frame.current = requestAnimationFrame(flushFrame);
+          break;
+        }
+        // Full items can carry large diffs or output. Drain them in arrival order,
+        // and cap the delta backlog without waking a covered or minimized window per frame.
+        if (event.kind === 'delta' && typeof event.delta.text === 'string') pending.characters += event.delta.text.length;
+        if (event.kind === 'item' || pending.events.length >= HIDDEN_DELTA_LIMIT ||
+          pending.characters >= HIDDEN_TEXT_LIMIT) updateRows();
         break;
+      }
       case 'run':
+        if (publicationPaused.current && event.run.status !== 'running' && queue.current.events.length) updateRows();
         changeRun(event.run);
         if (event.run.error) report(new Error(event.run.error));
         break;

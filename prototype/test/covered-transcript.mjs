@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright';
 
-const [candidate, baseline] = process.argv.slice(2);
+const [candidate, baseline, frameBaseline] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const tail = '·'.repeat(145);
 
@@ -14,7 +14,7 @@ async function rendererPss(pid) {
   return Number(sample.match(/^Pss:\s+(\d+) kB$/m)[1]);
 }
 
-async function check(binary, label, following) {
+async function check(binary, label, following, cover = 'preview') {
   const profile = await mkdtemp(join(tmpdir(), 'span-covered-'));
   let app;
   try {
@@ -49,11 +49,16 @@ async function check(binary, label, following) {
       return { text: first?.textContent, offset: first?.getBoundingClientRect().top - top };
     });
     const position = following ? null : await readPosition();
-    await page.getByRole('button', { name: '文件', exact: true }).click();
-    await page.getByRole('button', { name: 'README.md' }).click();
     const preview = page.getByRole('complementary', { name: '文件预览' });
-    await preview.getByText('Span 工作台预览', { exact: true }).waitFor();
-    assert.equal(await page.locator('main[inert]').count(), 1);
+    if (cover === 'minimized') {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
+      await page.waitForFunction(() => document.hidden, null, { polling: 50 });
+    } else {
+      await page.getByRole('button', { name: '文件', exact: true }).click();
+      await page.getByRole('button', { name: 'README.md' }).click();
+      await preview.getByText('Span 工作台预览', { exact: true }).waitFor();
+      assert.equal(await page.locator('main[inert]').count(), 1);
+    }
     const stop = page.locator('.send.stop:enabled');
     await stop.waitFor();
 
@@ -83,7 +88,12 @@ async function check(binary, label, following) {
     if (label === 'baseline') assert.ok(dom.changed && dom.mutationBatches > 0, 'The baseline must exercise hidden Markdown updates');
     else if (following) assert.deepEqual(dom, { mutationBatches: 0, changed: false, mounted: true });
 
-    await preview.getByRole('button', { name: '关闭预览' }).click();
+    if (cover === 'minimized') {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
+      await page.waitForFunction(() => !document.hidden, null, { polling: 50 });
+    } else {
+      await preview.getByRole('button', { name: '关闭预览' }).click();
+    }
     if (!following) {
       await latest.waitFor();
       const restored = await readPosition();
@@ -96,7 +106,7 @@ async function check(binary, label, following) {
       return timeline.textContent.includes(tail) && timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop < 40;
     }, tail);
 
-    return { label, following, dom, startPssKiB, endPssKiB,
+    return { label, cover, following, dom, startPssKiB, endPssKiB,
       wallMs: (end.Timestamp - start.Timestamp) * 1000,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
@@ -112,7 +122,11 @@ async function check(binary, label, following) {
 const trials = [];
 for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
   if (baseline) trials.push(await check(baseline, 'baseline', true));
+  if (frameBaseline && trial === 0) trials.push(await check(frameBaseline, 'frame-baseline', true));
   trials.push(await check(candidate, 'candidate', true));
+  if (frameBaseline && trial === 1) trials.push(await check(frameBaseline, 'frame-baseline', true));
 }
 trials.push(await check(candidate, 'candidate', false));
+trials.push(await check(candidate, 'candidate', true, 'minimized'));
+trials.push(await check(candidate, 'candidate', false, 'minimized'));
 console.log(JSON.stringify({ platform: process.platform, trials }, null, 2));

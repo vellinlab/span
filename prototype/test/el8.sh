@@ -87,7 +87,8 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/terminal-pressure.mjs 
 /artifacts/node prototype/test/catalog.mjs /artifacts/linux/span-preview /artifacts/el8-catalog.png
 SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench-local.png webgl
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/covered-transcript.mjs \
-    /artifacts/linux/span-preview /artifacts/covered-baseline/span-preview | tee /artifacts/covered-transcript.json
+    /artifacts/linux/span-preview /artifacts/covered-baseline/span-preview \
+    /artifacts/hidden-timeline-baseline/span-preview | tee /artifacts/covered-transcript.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/long-reply-baseline/span-preview | tee /artifacts/long-reply.json
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
