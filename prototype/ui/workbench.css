@@ -171,7 +171,15 @@ p { margin-block: 0 12px; }
   content: "";
   position: absolute;
   inset: 0 4px;
-  background: var(--accent);
+  border-inline-start: 1px solid var(--accent);
+}
+.sidebar-grip:focus-visible { outline: none; }
+.sidebar-grip:focus-visible::after {
+  inset-inline: 3px;
+  border-inline-start-width: 3px;
+}
+@media (forced-colors: active) {
+  .sidebar-grip:focus-visible::after { border-inline-start-color: Highlight; }
 }
 .sidebar nav button, .side-list button {
   display: flex;

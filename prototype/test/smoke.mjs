@@ -78,6 +78,8 @@ try {
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 72, y, { steps: 4 });
+  assert.ok(await grip.evaluate(element => element.dataset.dragging === 'true' &&
+    getComputedStyle(element, '::after').borderInlineStartWidth === '1px'));
   await page.mouse.up();
   await page.waitForFunction(expected =>
     document.getElementById('workbench-sidebar').offsetWidth === expected, original + 72);
@@ -521,6 +523,17 @@ try {
     const grip = document.querySelector('.sidebar-grip');
     return grip.getAttribute('aria-valuenow') === grip.getAttribute('aria-valuemax');
   });
+  const separatorFocusVisible = () => grip.evaluate(element => {
+    const stroke = getComputedStyle(element, '::after');
+    return element.matches(':focus-visible') && getComputedStyle(element).outlineStyle === 'none' &&
+      stroke.borderInlineStartWidth === '3px' &&
+      stroke.borderInlineStartColor !== getComputedStyle(element.parentElement).backgroundColor;
+  });
+  assert.ok(await separatorFocusVisible(), 'The focused separator should display one visible stroke.');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-sidebar-focus.png') });
+  await page.emulateMedia({ forcedColors: 'active' });
+  assert.ok(await separatorFocusVisible(), 'The separator focus should remain visible in forced colors.');
+  await page.emulateMedia({ forcedColors: null });
   const narrowTitle = await heading.evaluate(element => {
     const location = element.closest('.titlebar-location');
     const workspace = location.querySelector('.breadcrumb-workspace');
