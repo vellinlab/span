@@ -358,6 +358,16 @@ fn stream_reasoning(
         "item/completed",
         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning","id":id,"summary":[]}}),
     )?;
+    if following {
+        notice(
+            output,
+            "item/completed",
+            json!({"threadId":thread_id,"turnId":turn,"item":{
+                "type":"agentMessage","id":format!("{turn}-reasoning-answer"),"phase":"final_answer",
+                "text":"**推理核对已完成。**\n\n检查了实时摘要的更新、列表缩进和历史归档。"
+            }}),
+        )?;
+    }
     running.store(false, Ordering::Release);
     notice(
         output,

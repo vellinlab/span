@@ -359,7 +359,33 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     await strip.waitFor({ state: 'detached' });
     if (detail) await detail.waitFor({ state: 'detached' });
     await latest.click();
-    await transcript.locator('[data-card="reasoning"]').getByText(archived, { exact: false }).waitFor();
+    const archive = transcript.locator('[data-card="reasoning"]').filter({ hasText: archived });
+    await archive.getByText(archived, { exact: false }).waitFor();
+    if (reasoningFollowing && label === 'candidate') {
+      const header = archive.locator('summary');
+      await latest.waitFor({ state: 'detached' });
+      await settleFrame(page);
+      const beforeOpen = await header.boundingBox();
+      await header.press('Enter');
+      const startOfSummary = archive.getByRole('link', { name: '迟到引用', exact: true });
+      await startOfSummary.waitFor();
+      await latest.waitFor();
+      await settleFrame(page);
+      const expandedHeader = await header.boundingBox();
+      assert.ok(Math.abs(beforeOpen.y - expandedHeader.y) <= 2, 'Opening an archived summary should keep its title in place.');
+      assert.ok(await header.evaluate(element => element === document.activeElement));
+      assert.ok(await startOfSummary.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const view = element.closest('.timeline').getBoundingClientRect();
+        return bounds.top >= view.top && bounds.bottom <= view.bottom;
+      }), 'The beginning of the summary should be in view.');
+      if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-archive.png` });
+      await latest.click();
+      await latest.waitFor({ state: 'detached' });
+      const answer = transcript.getByText('推理核对已完成。', { exact: true });
+      assert.ok(await answer.evaluate(element => element.getBoundingClientRect().bottom <=
+        element.closest('.timeline').getBoundingClientRect().bottom));
+    }
     return { label, updates, bodyUpdates, startPssKiB, endPssKiB, typing,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,

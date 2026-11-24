@@ -275,7 +275,7 @@ const ActivityGroup = memo(function ActivityGroup({ group, open, toggle }) {
   const label = tools ? `${group.commands ? `${group.commands} 条命令 · ` : ''}${tools} 次工具调用`
     : `${count} 条命令`;
   return <div className="activity" data-card="activity-group">
-    <button type="button" className="card-heading" aria-expanded={open} onClick={() => toggle(group.key)}>
+    <button type="button" className="card-heading" aria-expanded={open} onClick={() => toggle(group.key, !open)}>
       <ChevronRight size={13} className="card-chevron" /><Icon size={15} className="card-icon" />
       <span className="card-title">{label}</span>
     </button>
@@ -316,21 +316,37 @@ export const Transcript = memo(function Transcript({
   const [openGroups, setOpenGroups] = useState(() => new Set(remembered?.openGroups));
   const [restore, setRestore] = useState(remembered?.anchor);
   const [liveTurnId, setLiveTurnId] = useState(activeTurnId);
+  const [inspectedCard, setInspectedCard] = useState(null);
   const latest = useRef(null);
   const following = useRef(true);
   const followAfterFold = useRef(false);
   const viewportHeight = useRef(0);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
+  const inspect = useCallback((key, open) => {
+    if (open && (following.current || inspectedCard)) {
+      following.current = false;
+      setInspectedCard(key);
+    } else if (!open && inspectedCard === key) {
+      const element = scroll.current;
+      following.current = element.scrollHeight - element.clientHeight - element.scrollTop < 40;
+      setInspectedCard(null);
+    }
+  }, [inspectedCard, scroll]);
   const toggle = useCallback((key, open) => {
+    inspect(key, open);
     expanded.current.delete(key);
     expanded.current.set(key, open);
     updateExpansion();
-  }, []);
-  const toggleGroup = useCallback(key => setOpenGroups(previous => {
-    const next = new Set(previous);
-    if (!next.delete(key)) next.add(key);
-    return next;
-  }), []);
+  }, [inspect]);
+  const toggleGroup = useCallback((key, open) => {
+    inspect(key, open);
+    setOpenGroups(previous => {
+      const next = new Set(previous);
+      if (open) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, [inspect]);
   const rawLayout = timelineLayout(rows);
   const layout = useMemo(() => groupedTimelineLayout(rawLayout, liveTurnId, ungroupedTurns.current, openGroups),
     [rawLayout, liveTurnId, openGroups]);
@@ -347,10 +363,16 @@ export const Transcript = memo(function Transcript({
     getItemKey: layout.getItemKey, estimateSize: liveReasoningTurn ? estimate : layout.estimateSize,
     rangeExtractor: target >= 0 ? rangeExtractor : defaultRangeExtractor,
     overscan: 6, paddingStart: 20, paddingEnd: 14,
-    anchorTo: 'end', followOnAppend: true, scrollEndThreshold: 40,
+    anchorTo: 'end', followOnAppend: true,
+    // Keep prepend anchoring when the reader has paused following to inspect a card.
+    scrollEndThreshold: inspectedCard ? -1 : 40,
   });
   const virtualRows = virtual.getVirtualItems();
   const height = virtual.getTotalSize();
+
+  useLayoutEffect(() => {
+    if (inspectedCard) onScrollPosition(virtual.getDistanceFromEnd() >= 40);
+  }, [inspectedCard, height, onScrollPosition, virtual]);
 
   useLayoutEffect(() => {
     latest.current = { rows, layout, historyPages, restore, openGroups };
@@ -442,6 +464,7 @@ export const Transcript = memo(function Transcript({
     if (restore || !jumpToLatest.current || !rows.length) return;
     jumpToLatest.current = false;
     following.current = true;
+    setInspectedCard(null);
     virtual.scrollToEnd();
     onScrollPosition(false);
   }, [rows, virtual, jumpToLatest, onScrollPosition, restore]);
@@ -467,6 +490,7 @@ export const Transcript = memo(function Transcript({
     if (height !== viewportHeight.current) return;
     const atBottom = element.scrollHeight - height - element.scrollTop < 40;
     following.current = atBottom;
+    if (atBottom && inspectedCard) setInspectedCard(null);
     onScrollPosition(!atBottom);
     if (!atBottom && element.scrollTop < 160 && cursor && !loading) loadOlder();
   }
@@ -490,7 +514,7 @@ export const Transcript = memo(function Transcript({
             : <TranscriptRow row={row} activePlan={activePlan}
               liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
-              streaming={streaming} following={streaming && !showLatest} scroll={scroll}
+              streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll}
               expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
               toggle={toggle} openSession={openSession} openArtifact={openArtifact} openImage={openImage} canOpenSession={canOpenSession} />)}
         </div>;
