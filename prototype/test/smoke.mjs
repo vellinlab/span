@@ -415,11 +415,14 @@ try {
   });
   assert.equal(narrowTitle.title, longTitle);
   assert.ok(narrowTitle.path && narrowTitle.terminalFits);
-  const compactTitlebar = narrowTitle.available <= 250;
+  const compactTitlebar = narrowTitle.available <= 280;
   assert.equal(narrowTitle.workspaceNameHidden, compactTitlebar);
   assert.equal(narrowTitle.branchNameHidden, compactTitlebar);
   if (compactTitlebar) assert.ok(narrowTitle.width >= narrowTitle.available - 55);
-  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-titlebar-narrow.png') });
+  if (screenshot) {
+    await composer.focus();
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-titlebar-narrow.png') });
+  }
   const showSidebar = page.getByRole('button', { name: '展开侧栏' });
   await page.getByRole('button', { name: '收起侧栏' }).press('Enter');
   await showSidebar.waitFor();

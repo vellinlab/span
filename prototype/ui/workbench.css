@@ -112,7 +112,7 @@ p { margin-block: 0 12px; }
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-@container (max-width: 250px) {
+@container (max-width: 280px) {
   .breadcrumb, .branch { --branch-min-width: 25px; }
   .breadcrumb-separator { display: none; }
   .branch { justify-content: center; }
