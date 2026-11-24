@@ -333,8 +333,8 @@ p { margin-block: 0 12px; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.welcome { margin-bottom: 18px; padding-inline: 2px; }
-.welcome h1 { font-size: 22px; line-height: 29px; font-weight: 600; margin: 2px 0 0; }
+.welcome { margin-bottom: 20px; text-align: center; }
+.welcome h1 { font-size: clamp(24px, 4cqi, 30px); line-height: 1.3; font-weight: 600; margin: 0; }
 .prose { line-height: 22px; overflow-wrap: anywhere; }
 .markdown-pending { min-height: 1lh; }
 .prose > :last-child { margin-bottom: 0; }
@@ -572,23 +572,22 @@ p { margin-block: 0 12px; }
   position: relative;
   padding-block: 5px 15px;
 }
+.conversation-empty .composer-wrap { max-width: 600px; }
 .composer {
   border-radius: 18px;
   background: var(--composer);
-  padding: 10px 12px 8px;
+  padding: 8px 12px;
   border: 1px solid #ffffff15;
-  box-shadow: 0 8px 28px #00000026;
 }
 .composer:focus-within { border-color: #c2dbc953; }
 .composer-wrap:has(.approval) .composer:not(:focus-within) {
   background: var(--panel);
-  box-shadow: none;
 }
 .composer textarea {
   display: block;
   width: 100%;
   field-sizing: content;
-  min-height: 48px;
+  min-height: 32px;
   max-height: max(48px, min(156px, 25cqb));
   padding: 1px 2px;
   line-height: 22px;
@@ -599,6 +598,7 @@ p { margin-block: 0 12px; }
   scrollbar-width: thin;
 }
 .composer textarea::placeholder { color: #b7b7b7; }
+.conversation-empty .composer textarea { min-height: 48px; }
 .composer-wrap:has(.approval) .composer textarea {
   /* Reserve the approval height, goal, controls and a line of history. */
   max-height: max(48px, min(156px, 25cqb, 100cqb - var(--approval-height) - 168px));
@@ -637,7 +637,9 @@ p { margin-block: 0 12px; }
   color: #1b2b21;
 }
 .send:hover:not(:disabled) { background: #d1e7d8; }
-.send.stop, .send:disabled { background: #525655; color: #e7eae8; opacity: 1; }
+.send.stop:not(:disabled) { background: #414845; color: #f0f3f1; }
+.send.stop:hover:not(:disabled) { background: #515c56; }
+.send:disabled { background: #ffffff0b; color: #929a96; opacity: 1; }
 .live { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-height: 26px; padding-left: 4px; }
 .approval, .error { margin-bottom: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .approval {

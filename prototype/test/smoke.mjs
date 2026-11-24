@@ -528,10 +528,19 @@ try {
 
   await composer.fill('这段草稿留在原会话。');
   await page.getByRole('button', { name: /新会话/ }).click();
-  await page.getByRole('heading', { name: '开始新会话' }).waitFor();
+  const welcome = page.getByRole('heading', { name: '开始新会话' });
+  await welcome.waitFor();
   assert.equal(await branch.count(), 0);
   assert.ok(await composer.evaluate(element => document.activeElement === element));
   assert.equal(await composer.inputValue(), '');
+  const welcomeInputHeight = await composer.evaluate(element => element.clientHeight);
+  assert.ok(await welcome.evaluate(element => {
+    const heading = element.getBoundingClientRect();
+    const form = element.closest('.composer-wrap').querySelector('.composer').getBoundingClientRect();
+    return heading.bottom < form.top && Math.abs(heading.left + heading.right - form.left - form.right) <= 1
+      && form.width <= 600 && getComputedStyle(element).textAlign === 'center';
+  }), 'The welcome heading and composer share a centered column.');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-composer-welcome.png') });
   const retryDraft = '验证新会话草稿重试。';
   await composer.fill(retryDraft);
   await composer.press('Enter');
@@ -542,6 +551,8 @@ try {
   await transcript.getByText('草稿已成功重试。', { exact: true }).waitFor();
   assert.equal(await transcript.getByText(retryDraft, { exact: true }).count(), 1);
   await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
+  assert.ok(await composer.evaluate((element, initialHeight) =>
+    element.clientHeight <= initialHeight - 12, welcomeInputHeight), 'The empty composer leaves more room for the reply.');
   assert.equal(await page.getByRole('alert').count(), 0);
   console.log('Verified history paging, file preview, PTY, streaming and interrupt.');
   console.log('Verified a new session keeps a rejected draft and clears it after one successful retry.');

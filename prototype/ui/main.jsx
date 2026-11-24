@@ -690,7 +690,7 @@ function App() {
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
-                <textarea ref={input} rows={2} placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '向工作台发送消息…'}
+                <textarea ref={input} rows={1} placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '描述要完成的任务…'}
                   aria-label="消息" value={draft} onFocus={() => setSuggesting(true)} onBlur={() => setSuggesting(false)}
                   onChange={event => {
                     setDraft(event.target.value);
