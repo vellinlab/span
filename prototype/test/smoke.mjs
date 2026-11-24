@@ -546,6 +546,7 @@ try {
   await group.waitFor();
   await groupAnswer.waitFor();
   await change.waitFor();
+  assert.equal(await change.locator('summary > .file-reference-name').getAttribute('title'), 'review/notes/review-notes.md');
   await failedCommand.getByText('失败', { exact: true }).waitFor();
   await failedCommand.getByText('退出码 1', { exact: true }).waitFor();
   assert.equal(await failedCommand.getAttribute('data-failed'), 'true');
@@ -568,6 +569,18 @@ try {
   assert.equal(await firstCommand.count(), 0);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-activity-group.png') });
   await group.press('Enter');
+  const fileTool = transcript.locator('[data-card="tool"]').filter({ hasText: '复核记录 2' });
+  const fileTarget = 'review/checks/工作区检查-2.txt';
+  const fileSummary = fileTool.locator('summary');
+  assert.equal(await fileSummary.locator('.file-reference-name').getAttribute('title'), fileTarget);
+  assert.equal(await fileSummary.locator('.file-reference-name').textContent(), '工作区检查-2.txt');
+  assert.equal(await fileTool.locator('.tool-context').count(), 0);
+  await fileSummary.press('Enter');
+  await fileTool.locator('.tool-context').getByText(fileTarget, { exact: true }).waitFor();
+  await fileTool.locator('.tool-context').getByText('工作区', { exact: true }).waitFor();
+  await fileTool.getByText('记录可读。', { exact: true }).waitFor();
+  await fileSummary.press('Enter');
+  await fileTool.locator('.tool-context').waitFor({ state: 'detached' });
   await firstCommand.locator('summary').press('Enter');
   await firstCommand.getByText('第 1 条命令的输出。', { exact: true }).waitFor();
   assert.equal(await group.getAttribute('aria-expanded'), 'true');

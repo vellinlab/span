@@ -435,6 +435,12 @@ p { margin-block: 0 12px; }
 .activity[data-failed="true"] > details > summary > .card-icon { color: var(--failure); }
 .activity[data-card="command"] .card-title { font: 12px/20px var(--mono); font-weight: 400; }
 .card-hint { color: var(--muted); }
+.activity :is(summary, .card-heading) > .file-reference-name {
+  color: var(--muted);
+  font: 12px/20px var(--mono);
+  white-space: nowrap;
+}
+.activity :is(summary, .card-heading):has(> .file-reference-name) > .card-title { flex: none; max-width: 48%; }
 .activity[data-card="reasoning"] .card-title { flex: none; font-weight: 500; }
 .activity[data-card="reasoning"] .card-hint { color: #a7b0ad; }
 .card-status {
@@ -478,6 +484,16 @@ p { margin-block: 0 12px; }
   line-height: 18px;
 }
 .card-path { display: block; overflow-wrap: anywhere; color: var(--muted); padding: 3px 0; font-size: 12px; }
+.tool-context {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 9px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tool-context dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.tool-context + .tool-output { margin-top: 6px; }
 .tool-output-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .tool-output-heading .icon-button { width: 26px; height: 26px; }
 .command-source { margin-bottom: 4px; }

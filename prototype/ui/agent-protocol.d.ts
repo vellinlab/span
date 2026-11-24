@@ -59,6 +59,7 @@ export type DelegationAction =
   | { kind: 'message'; memberId: string; text: string }
   | { kind: 'cancel'; memberId: string };
 export type PlanStep = { text: string; status: 'pending' | 'running' | 'completed' };
+export type ToolTarget = { kind: 'path'; path: string };
 type ItemBase = { id: string; turnId: string; status?: AgentStatus; depth?: number; actor?: AgentMember };
 export type TimelineItem = ItemBase & (
   | { kind: 'user'; clientId?: string; text: string; attachments?: Artifact[] }
@@ -67,7 +68,7 @@ export type TimelineItem = ItemBase & (
   | { kind: 'plan'; text?: string; steps?: PlanStep[] }
   | { kind: 'command'; command?: string; cwd?: string; text?: string; exitCode?: number }
   | { kind: 'patch'; files: { path: string; action?: string; diff?: string }[]; text?: string }
-  | { kind: 'tool'; name: string; source?: string; text?: string }
+  | { kind: 'tool'; name: string; source?: string; target?: ToolTarget; text?: string }
   | { kind: 'delegation'; action: string; members: AgentMember[]; text?: string }
   | { kind: 'search'; query: string; url?: string; text?: string }
   | { kind: 'artifact'; artifacts: Artifact[]; text?: string }

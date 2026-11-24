@@ -588,7 +588,9 @@ pub fn run() -> Result<()> {
                             &output,
                             "item/completed",
                             json!({"threadId":thread_id,"turnId":turn,"item":{"type":"dynamicToolCall","id":format!("{turn}-tool-{index}"),
-                                "tool":format!("复核记录 {index}"),"status":"completed","output":"记录可读。"}}),
+                                "tool":format!("复核记录 {index}"),"namespace":"工作区",
+                                "arguments":{"path":format!("review/checks/工作区检查-{index}.txt")},
+                                "status":"completed","output":"记录可读。"}}),
                         )?;
                     }
                     notice(
@@ -601,7 +603,7 @@ pub fn run() -> Result<()> {
                         &output,
                         "item/completed",
                         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"fileChange","id":format!("{turn}-change"),
-                            "status":"completed","changes":[{"path":"review-notes.md","kind":{"type":"add"},
+                            "status":"completed","changes":[{"path":"review/notes/review-notes.md","kind":{"type":"add"},
                             "diff":"@@ -0,0 +1 @@\n+已记录缺失文件。\n"}]}}),
                     )?;
                     notice(

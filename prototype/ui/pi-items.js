@@ -1,4 +1,5 @@
 import { parseFileReferences } from './file-references.js';
+import { toolPathTarget } from './tool-target.js';
 
 export const piText = content => typeof content === 'string' ? content
   : (content ?? []).filter(block => block.type === 'text').map(block => block.text).join('');
@@ -17,7 +18,8 @@ export function piTool(turnId, id, name, args, result, isError) {
   if (name === 'edit' && result?.details?.diff && typeof args?.path === 'string') {
     return { ...key, kind: 'patch', files: [{ path: args.path, diff: result.details.diff }] };
   }
-  return { ...key, kind: 'tool', name: name ?? 'Pi 工具', text };
+  const target = toolPathTarget(args?.path);
+  return { ...key, kind: 'tool', name: name ?? 'Pi 工具', ...(target && { target }), text };
 }
 
 export function piMessage(turnId, index, message, tools, clientId) {

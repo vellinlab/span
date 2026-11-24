@@ -1,4 +1,5 @@
 import { attachmentName, parseFileReferences } from './file-references.js';
+import { toolPathTarget } from './tool-target.js';
 
 /** @type {Record<string, import('./agent-protocol').AgentStatus>} */
 const agentStates = {
@@ -56,9 +57,12 @@ export function normalizeItem(item, turnId, ref) {
       return { ...base, kind: 'patch', files: patches(item.changes) };
     case 'mcpToolCall':
     case 'dynamicToolCall':
-    case 'functionCallOutput':
+    case 'functionCallOutput': {
+      const target = toolPathTarget(item.arguments?.path);
       return { ...base, kind: 'tool', name: item.tool ?? item.name, source: item.server ?? item.namespace,
+        ...(target && { target }),
         text: detailText(item.error ?? item.result?.structuredContent ?? item.result?.content ?? item.contentItems ?? item.output) };
+    }
     case 'webSearch': {
       const action = item.action;
       return { ...base, kind: 'search', query: item.query || action?.query || action?.pattern || action?.url || '网页',

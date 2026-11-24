@@ -14,6 +14,7 @@ const localWorkspace = join(profile, 'Pi 工作区');
 const referenceName = '工作区检查.txt';
 const localReference = join(localWorkspace, referenceName);
 const missingFile = 'span-ci-preview-deliberately-missing.txt';
+const missingPath = '.span-ci/工作区检查/记录/' + missingFile;
 const prompts = [];
 const initialPrompt = '核对 Pi 的推理、工具与用量。';
 const resumePrompt = '继续刚才保存的 Pi 会话。';
@@ -65,7 +66,7 @@ const gateway = createServer(async (request, response) => {
         { index: 0, id: 'span-tool', type: 'function',
           function: { name: 'bash', arguments: JSON.stringify({ command: 'echo pi tool result' }) } },
         { index: 1, id: 'span-missing-file', type: 'function',
-          function: { name: 'read', arguments: JSON.stringify({ path: missingFile }) } },
+          function: { name: 'read', arguments: JSON.stringify({ path: missingPath }) } },
       ] });
       send({}, 'tool_calls', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
     } else {
@@ -195,6 +196,17 @@ export default function (pi) {
     const failed = log.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
     await failed.getByText('失败', { exact: true }).waitFor();
     assert.equal(await failed.locator('summary .card-icon.lucide-circle-alert').count(), 1);
+    const target = failed.locator('summary > .file-reference-name');
+    assert.equal(await target.getAttribute('title'), missingPath);
+    assert.equal(await target.textContent(), missingFile);
+    assert.ok(await failed.locator('summary').evaluate(element => {
+      const title = element.querySelector('.card-title');
+      const path = element.querySelector('.file-reference-name');
+      const status = element.querySelector('.card-status');
+      return title.scrollWidth === title.clientWidth &&
+        path.getBoundingClientRect().right < status.getBoundingClientRect().left;
+    }));
+    assert.equal(await failed.locator('.tool-context').count(), 0);
   }
   async function verifyLatestReply(view, answer, fitsOnScreen) {
     await view.waitForFunction(({ answer, fitsOnScreen }) => {
@@ -220,8 +232,12 @@ export default function (pi) {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-archive-narrow.png') });
   const failedTool = transcript.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
   await failedTool.locator('summary').press('Enter');
-  await failedTool.getByText(missingFile, { exact: false }).waitFor();
+  const targetDetails = failedTool.locator('.tool-context');
+  await targetDetails.getByText(missingPath, { exact: true }).waitFor();
+  await failedTool.locator('.tool-output').getByText(missingFile, { exact: false }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-tool-target.png') });
   await failedTool.locator('summary').press('Enter');
+  await targetDetails.waitFor({ state: 'detached' });
   await tool.locator('summary').click();
   await tool.getByText('pi tool result', { exact: true }).waitFor();
   await send('/usage');

@@ -7,6 +7,7 @@ import {
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
 import { FileReferenceName, ImageReference } from './file-reference-name.jsx';
+import { attachmentName } from './file-references.js';
 import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
@@ -78,14 +79,15 @@ function CommandText({ command, titleRef, force }) {
   </div>;
 }
 
-function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, expanded, toggle, children }) {
+function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, expanded, toggle, children }) {
   const titleRef = useRef(null);
   const failed = status === 'failed' && !recordedStatus;
   const CardIcon = failed ? CircleAlert : Icon;
   const statusLabel = statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
+  const name = path && (attachmentName(path.replace(path.startsWith('/') ? /\/+$/ : /[\\/]+$/, '')) || path);
   const head = <><CardIcon size={15} className="card-icon" aria-hidden="true" />
     <span className="card-title" ref={titleRef} title={title}>{title}</span>
-    {hint && <span className="card-hint" title={hint}>{hint}</span>}
+    {name ? <FileReferenceName name={name} path={path} /> : hint && <span className="card-hint" title={hint}>{hint}</span>}
     {(statusLabel || statusNote) && <span className="card-status" data-status={status} data-recorded={recordedStatus || undefined}>
       {statusLabel && <span>{statusLabel}</span>}
       {statusLabel && statusNote && <span aria-hidden="true">·</span>}
@@ -134,7 +136,7 @@ const TranscriptRow = memo(function TranscriptRow({
     <StreamingMarkdown text={row.text} streaming={streaming} following={following} scroll={scroll} />
   </div>;
 
-  let title, hint, detail, recordedStatus, statusText, statusNote;
+  let title, hint, path, detail, recordedStatus, statusText, statusNote;
   let status = row.final && row.status === 'running' ? undefined : row.status;
   switch (row.kind) {
     case 'reasoning':
@@ -180,13 +182,21 @@ const TranscriptRow = memo(function TranscriptRow({
     }
     case 'patch':
       title = row.files?.length ? '文件变更' : '本轮差异';
-      hint = row.files?.length === 1 ? expanded ? undefined : row.files[0].path : row.files?.length ? `${row.files.length} 个文件` : undefined;
+      if (!expanded && row.files?.length === 1) path = row.files[0].path;
+      else if (row.files?.length > 1) hint = `${row.files.length} 个文件`;
       detail = () => <PatchView files={row.files ?? []} text={row.text} />;
       break;
     case 'tool':
       title = row.name || '调用工具';
       hint = row.source;
-      if (row.text) detail = () => <ToolOutput text={row.text} />;
+      path = row.target?.kind === 'path' ? row.target.path : undefined;
+      if (path || row.text) detail = () => <>
+        {path && <dl className="tool-context">
+          <dt>路径</dt><dd><code>{path}</code></dd>
+          {row.source && <><dt>来源</dt><dd>{row.source}</dd></>}
+        </dl>}
+        {row.text && <ToolOutput text={row.text} />}
+      </>;
       break;
     case 'search':
       title = row.query;
@@ -230,7 +240,7 @@ const TranscriptRow = memo(function TranscriptRow({
 
   return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} recordedStatus={recordedStatus}
     statusText={statusText} statusNote={statusNote}
-    title={title} hint={hint} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
+    title={title} hint={hint} path={path} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
 const ActivityGroup = memo(function ActivityGroup({ group, open, toggle }) {

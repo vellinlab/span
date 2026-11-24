@@ -307,6 +307,23 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     await Promise.all([agent.interactions.respond('57', { choice: 'decline' }), agent.interactions.respond('57', { choice: 'decline' })]);
     assert.equal(requests.length - sent, 1);
     assert.deepEqual(requests.at(-1)[1].packet, { id: 57, result: { decision: 'decline' } });
+
+    const start = events.length;
+    const tool = { type: 'mcpToolCall', id: 'inspect', server: 'workspace', tool: 'read_file' };
+    const path = 'D:\\Work\\检查记录.txt';
+    publish('agent', { method: 'item/started', params: { ...scope, item: {
+      ...tool, status: 'inProgress', arguments: { path, other: 'unrelated argument' },
+    } } });
+    publish('agent', { method: 'item/mcpToolCall/progress', params: { ...scope, itemId: 'inspect', message: 'Reading' } });
+    publish('agent', { method: 'item/completed', params: { ...scope, item: {
+      ...tool, status: 'failed', error: { message: 'Missing file' },
+    } } });
+    const [card] = applyTimeline([], events.slice(start));
+    assert.deepEqual(card.target, { kind: 'path', path });
+    assert.equal(card.name, 'read_file');
+    assert.equal(card.source, 'workspace');
+    assert.equal(card.status, 'failed');
+    assert.ok(!JSON.stringify(card).includes('unrelated argument'));
   } finally {
     agent.close();
   }
@@ -514,6 +531,13 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.equal(events.at(-1).item.status, 'running');
   emit({ type: 'tool_execution_end', toolName: 'bash', toolCallId: 'tool', args: { command: 'echo span' },
     result: { content: text('output'), details: { exitCode: 0 } }, isError: false });
+  const path = 'notes/项目记录.txt';
+  emit({ type: 'message_end', message: message('assistant', [{ type: 'toolCall', id: 'read-file',
+    name: 'read', arguments: { path } }]) });
+  emit({ type: 'tool_execution_end', toolName: 'read', toolCallId: 'read-file',
+    result: { content: text('Missing file') }, isError: true });
+  assert.deepEqual(events.at(-1).item.target, { kind: 'path', path });
+  assert.equal(events.at(-1).item.status, 'failed');
   emit({ type: 'agent_end', willRetry: true });
   assert.equal(events.at(-1).kind, 'item');
   emit({ type: 'message_end', message: message('user', 'steered') });
