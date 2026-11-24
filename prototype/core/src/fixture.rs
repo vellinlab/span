@@ -173,6 +173,30 @@ fn notice(output: &Output, method: &str, params: Value) -> io::Result<()> {
     send(output, json!({"method":method,"params":params}))
 }
 
+fn plan_notice(output: &Output, thread_id: &str, turn: &str, completed: usize) -> io::Result<()> {
+    let plan: Vec<_> = [
+        "核对工作目录和当前会话。",
+        "检查终端恢复和跨主机审批。",
+        "复核窄窗中的长草稿。",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, step)| {
+        let status = match index.cmp(&completed) {
+            std::cmp::Ordering::Less => "completed",
+            std::cmp::Ordering::Equal => "inProgress",
+            std::cmp::Ordering::Greater => "pending",
+        };
+        json!({"step":step,"status":status})
+    })
+    .collect();
+    notice(
+        output,
+        "turn/plan/updated",
+        json!({"threadId":thread_id,"turnId":turn,"explanation":"检查两端的会话布局。","plan":plan}),
+    )
+}
+
 pub fn run() -> Result<()> {
     let output = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
     let cwd = env::current_dir()?;
@@ -185,6 +209,7 @@ pub fn run() -> Result<()> {
     let mut title = TITLE.to_owned();
     let mut search_failed = false;
     let mut draft_send_failed = false;
+    let mut active_plan: Option<String> = None;
     let mut review: Option<(String, bool)> = None;
     let mut reviewed = false;
     for line in io::stdin().lock().lines() {
@@ -344,6 +369,11 @@ pub fn run() -> Result<()> {
                 if params["input"][0]["text"] == "验证审批与表单。" {
                     reviewed = false;
                     review = Some((turn, false));
+                    continue;
+                }
+                if params["input"][0]["text"] == "验证任务计划。" {
+                    plan_notice(&output, &thread_id, &turn, 1)?;
+                    active_plan = Some(turn);
                     continue;
                 }
                 if params["input"][0]["text"] == "验证长差异与文件切换。" {
@@ -509,17 +539,50 @@ pub fn run() -> Result<()> {
             }
             "turn/interrupt" => {
                 background.store(false, Ordering::Release);
+                if let Some(turn) = active_plan.take() {
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":params["threadId"],"turn":{"id":turn,"status":"interrupted","items":[]}}),
+                    )?;
+                }
                 json!({})
             }
             "turn/steer" => {
                 let turn = &params["expectedTurnId"];
+                let thread_id = params["threadId"].as_str().unwrap_or(THREAD);
                 notice(
                     &output,
                     "item/completed",
-                    json!({"threadId":THREAD,"turnId":turn,
+                    json!({"threadId":thread_id,"turnId":turn,
                     "item":{"id":format!("steer-{}",params["clientUserMessageId"]),"type":"userMessage",
                         "content":params["input"],"clientId":params["clientUserMessageId"]}}),
                 )?;
+                if let Some(plan_turn) = active_plan
+                    .as_deref()
+                    .filter(|plan| Some(*plan) == turn.as_str())
+                {
+                    match params["input"][0]["text"].as_str() {
+                        Some("推进计划。") => plan_notice(&output, thread_id, plan_turn, 2)?,
+                        Some("完成计划。") => {
+                            plan_notice(&output, thread_id, plan_turn, 3)?;
+                            notice(
+                                &output,
+                                "item/completed",
+                                json!({"threadId":thread_id,"turnId":turn,"item":{"id":format!("{plan_turn}-plan-result"),
+                                    "type":"agentMessage","phase":"final_answer","text":"计划验收完成。"}}),
+                            )?;
+                            background.store(false, Ordering::Release);
+                            active_plan = None;
+                            notice(
+                                &output,
+                                "turn/completed",
+                                json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+                            )?;
+                        }
+                        _ => {}
+                    }
+                }
                 json!({"turnId":turn})
             }
             "thread/goal/get" => json!({"goal":goal}),

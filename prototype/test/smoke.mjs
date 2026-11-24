@@ -393,6 +393,60 @@ try {
   await composer.fill('/goal clear');
   await composer.press('Enter');
   await goal.waitFor({ state: 'detached' });
+
+  const sendPlanMessage = async text => {
+    await composer.fill(text);
+    await composer.press('Enter');
+  };
+  const plan = transcript.locator('[data-card="plan"]').last();
+  const planSummary = plan.locator('summary');
+  const steps = plan.getByRole('list', { name: '计划步骤' });
+  await sendPlanMessage('验证任务计划。');
+  await planSummary.getByText('已完成 1/3', { exact: true }).waitFor();
+  for (const status of ['已完成', '进行中', '等待中']) {
+    await steps.getByRole('img', { name: status, exact: true }).waitFor();
+  }
+  const waitForTranscriptEnd = () => page.waitForFunction(() => {
+    const element = document.querySelector('[data-testid="transcript"]');
+    return element && element.scrollHeight - element.clientHeight - element.scrollTop <= 2;
+  });
+  await waitForTranscriptEnd();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-plan-active.png') });
+  await sendPlanMessage('完成计划。');
+  const planAnswer = transcript.getByText('计划验收完成。', { exact: true });
+  await planAnswer.waitFor();
+  await planSummary.getByText('已完成 3/3', { exact: true }).waitFor();
+  await steps.waitFor({ state: 'detached' });
+  await waitForTranscriptEnd();
+  assert.ok(await planAnswer.evaluate(element => {
+    const answer = element.getBoundingClientRect();
+    const viewport = element.closest('[data-testid="transcript"]').getBoundingClientRect();
+    return answer.top >= viewport.top && answer.bottom <= viewport.bottom;
+  }));
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-plan-complete.png') });
+  await planSummary.press('Enter');
+  await steps.waitFor();
+  assert.equal(await steps.getByRole('img', { name: '已完成', exact: true }).count(), 3);
+  await planSummary.press('Enter');
+  await steps.waitFor({ state: 'detached' });
+
+  await sendPlanMessage('验证任务计划。');
+  await planSummary.getByText('已完成 1/3', { exact: true }).waitFor();
+  await steps.waitFor();
+  await planSummary.press('Enter');
+  await steps.waitFor({ state: 'detached' });
+  await sendPlanMessage('推进计划。');
+  await planSummary.getByText('已完成 2/3', { exact: true }).waitFor();
+  assert.equal(await steps.count(), 0);
+  await planSummary.getByText('复核窄窗中的长草稿。', { exact: true }).waitFor();
+  await planSummary.press('Enter');
+  await steps.waitFor();
+  await sendPlanMessage('完成计划。');
+  await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
+  await planSummary.getByText('已完成 3/3', { exact: true }).waitFor();
+  assert.equal(await steps.getByRole('img', { name: '已完成', exact: true }).count(), 3);
+  console.log('Verified live and archived plan details, progress updates, and manual disclosure.');
+
   await composer.fill('这段草稿留在原会话。');
   await page.getByRole('button', { name: /新会话/ }).click();
   await page.getByRole('heading', { name: '开始新会话' }).waitFor();

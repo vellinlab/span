@@ -600,7 +600,7 @@ function App() {
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
             <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
               rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
-              liveReasoningKey={liveReasoning?.key}
+              liveReasoningKey={liveReasoning?.key} activeTurnId={run?.id}
               jumpToLatest={jumpToLatest} scroll={scroll} onScrollPosition={setShowLatest} openSession={openRef}
               openArtifact={openArtifact} canOpenSession={!running && !loading && connection === 'ready'} />
             <div className="composer-wrap reading-column">

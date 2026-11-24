@@ -1,7 +1,7 @@
 import { memo, useCallback, useDeferredValue, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
-  ArrowUpRight, Brain, Check, ChevronRight, Circle, CodeXml, FileCode2, FileText, GitBranch,
+  ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
   Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { Markdown } from './markdown.jsx';
@@ -13,6 +13,7 @@ import { timelineLayout, visibleRow } from './timeline.js';
 const statusLabels = {
   pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
 };
+const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
 
 function SourceLink({ url, children }) {
   return <a href={url} onClick={event => {
@@ -108,7 +109,7 @@ const cardIcons = {
   search: Search, delegation: Users, artifact: Image, notice: GitBranch,
 };
 
-const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openSession, openArtifact, canOpenSession }) {
+const TranscriptRow = memo(function TranscriptRow({ row, activePlan, expanded, toggle, openSession, openArtifact, canOpenSession }) {
   if (row.kind === 'user') return <div className="user-message">
     {row.text}{row.queued && row.queued !== 'delivered' && <small className="queued-input">
       {row.queued === 'cancelled' ? '已取消排队' : '等待当前任务结束'}
@@ -127,13 +128,23 @@ const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openS
       break;
     case 'plan':
       title = row.steps?.length ? '任务计划' : '规划草案';
-      if (row.steps?.length) hint = `${row.steps.filter(step => step.status === 'completed').length}/${row.steps.length}`;
+      if (row.steps?.length) {
+        statusNote = `已完成 ${row.steps.filter(step => step.status === 'completed').length}/${row.steps.length}`;
+        if (activePlan && !expanded) hint = row.steps.find(step => step.status === 'running')?.text;
+      }
       detail = () => <>
         {row.text && <Markdown text={row.text} />}
-        {row.steps && <ul className="plan-list">{row.steps.map((step, index) => <li key={index} data-status={step.status}>
-          {step.status === 'completed' ? <Check size={14} /> : <Circle size={12} />}
-          <Markdown text={step.text} />
-        </li>)}</ul>}
+        {Boolean(row.steps?.length) && <ol className="plan-list" aria-label="计划步骤" tabIndex={0}>
+          {row.steps.map((step, index) => {
+            const state = activePlan || step.status === 'completed' ? step.status : 'pending';
+            const label = !activePlan && state === 'pending' ? '未完成' : statusLabels[state] ?? statusLabels.unknown;
+            const StepIcon = stepIcons[state] ?? Circle;
+            return <li key={index} data-status={state}>
+              <span className="plan-step-icon" role="img" aria-label={label}><StepIcon size={14} aria-hidden="true" /></span>
+              <Markdown text={step.text} />
+            </li>;
+          })}
+        </ol>}
       </>;
       break;
     case 'command': {
@@ -211,14 +222,16 @@ function anchorIndex(rows, anchor, hiddenKey) {
 }
 
 export const Transcript = memo(function Transcript({
-  rows, liveReasoningKey, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
+  rows, liveReasoningKey, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
   onScrollPosition, openSession, openArtifact, canOpenSession,
 }) {
   const expanded = useRef(null);
   if (!expanded.current) expanded.current = new Map(remembered?.expansion);
   const [restore, setRestore] = useState(remembered?.anchor);
+  const [planTurnId, setPlanTurnId] = useState(activeTurnId);
   const latest = useRef(null);
   const following = useRef(true);
+  const followPlanCollapse = useRef(false);
   const viewportHeight = useRef(0);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const toggle = useCallback((key, open) => {
@@ -248,6 +261,35 @@ export const Transcript = memo(function Transcript({
   useLayoutEffect(() => {
     latest.current = { rows, historyPages, restore };
   }, [rows, historyPages, restore]);
+
+  useLayoutEffect(() => {
+    if (planTurnId === activeTurnId) {
+      if (followPlanCollapse.current) {
+        followPlanCollapse.current = false;
+        virtual.scrollToEnd();
+      }
+      return;
+    }
+    if (planTurnId) {
+      // Inspect the existing body before applying the collapsed default for an inactive turn.
+      const element = scroll.current;
+      const viewport = following.current ? null : element.getBoundingClientRect();
+      const focus = element.ownerDocument.activeElement;
+      const selection = element.ownerDocument.getSelection();
+      for (const body of element.querySelectorAll('.message[data-kind="plan"] .card-body')) {
+        const row = latest.current.rows[Number(body.closest('.message').dataset.index)];
+        if (row?.turnId !== planTurnId || expanded.current.has(row.key)) continue;
+        const rect = viewport && body.getBoundingClientRect();
+        if ((rect && rect.bottom > viewport.top && rect.top < viewport.bottom) || body.contains(focus) ||
+          (selection?.type === 'Range' && selection.containsNode(body, true))) {
+          expanded.current.set(row.key, true);
+        } else if (following.current && row.steps?.length) {
+          followPlanCollapse.current = true;
+        }
+      }
+    }
+    setPlanTurnId(activeTurnId);
+  }, [activeTurnId, planTurnId, scroll, virtual]);
 
   useLayoutEffect(() => {
     const element = scroll.current;
@@ -322,17 +364,19 @@ export const Transcript = memo(function Transcript({
   return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
     data-items={rows.length} onScroll={onScroll}
     onWheel={event => {
-      if (event.deltaY < 0 && scroll.current.scrollTop < 160 && !event.target.closest('.text-scroll, .output-scroll, .command-text')) onScroll();
+      if (event.deltaY < 0 && scroll.current.scrollTop < 160 &&
+        !event.target.closest('.text-scroll, .output-scroll, .command-text, .plan-list')) onScroll();
     }}>
     {rows.length ? <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
       {virtualRows.map(item => {
         const row = rows[item.index];
         const depth = Math.max(0, Math.min(3, row.depth ?? 0));
         const show = row.key !== liveReasoningKey && Boolean(visibleRow(row));
+        const activePlan = row.kind === 'plan' && Boolean(planTurnId && row.turnId === planTurnId);
         return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
-          {show && <TranscriptRow row={row}
-            expanded={expanded.current.get(row.key) ?? (row.kind === 'plan' && Boolean(row.steps?.length))}
+          {show && <TranscriptRow row={row} activePlan={activePlan}
+            expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
             toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />}
         </div>;
       })}

@@ -369,7 +369,7 @@ p { margin-block: 0 12px; }
   font-size: 13px;
 }
 .card-body .prose + .prose, .reasoning-text .prose + .prose { margin-top: 10px; }
-.activity[data-card="reasoning"] .card-body {
+.activity:is([data-card="reasoning"], [data-card="plan"]) .card-body {
   margin-inline-start: 54px;
   padding: 2px 8px 4px 0;
   background: none;
@@ -426,9 +426,18 @@ p { margin-block: 0 12px; }
 .text-pages span, .diff-empty { color: var(--muted); }
 .diff-empty { margin: 0; }
 .plan-list, .member-list, .artifact-list { margin: 0; padding: 0; list-style: none; }
-.plan-list li { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
-.plan-list li > svg { align-self: start; margin-top: 4px; color: var(--muted); }
-.plan-list li:is([data-status="completed"], [data-status="running"]) > svg { color: var(--accent); }
+.plan-list {
+  max-height: clamp(88px, calc(100cqh - 116px), 232px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.activity[data-card="plan"] .prose + .plan-list { margin-top: 6px; }
+.plan-list li { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; }
+.plan-list li > .prose { min-width: 0; }
+.plan-step-icon { flex: none; display: grid; place-items: center; width: 16px; height: 22px; color: var(--muted); }
+.plan-list li:is([data-status="completed"], [data-status="running"]) .plan-step-icon { color: var(--accent); }
+.plan-list li[data-status="completed"] .prose { color: var(--muted); }
 .plan-list li[data-status="running"] { color: #edf4ee; }
 .member-list li, .artifact-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .member-list li + li { margin-top: 4px; }
