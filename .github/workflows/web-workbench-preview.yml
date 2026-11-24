@@ -201,6 +201,7 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
+          node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json"
           bash prototype/test/install-pi.sh "$PWD/pi-test"
           node prototype/test/real-pi.mjs "$binary" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
           mv preview-under-test.zip span-web-windows-x86_64.zip
@@ -213,4 +214,5 @@ jobs:
             span-web-windows-x86_64.zip
             windows-workbench*.png
             windows-workbench-startup.json
+            windows-workbench-resource-isolation.json
           if-no-files-found: warn
