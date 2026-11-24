@@ -62,7 +62,7 @@ Span 是需要长时间阅读的桌面工作台。完成一轮任务时，视觉
 ## 证据怎么取
 
 - **协议与状态。** 在 `prototype/` 运行 `npm run check` 做轻量检查。核对具体断言覆盖了哪条失败路径。受控事件适合验证并发、交错和重复回包，真实后端往返用于验证传输及方法兼容性。[协议回归用例](test/agent-protocol.mjs) · [真实 Codex 连接用例](test/backend.sh)
-- **桌面与安装。** 编译、打包和安装测试在 GitHub Actions 运行。记录候选提交、作业链接和产物。EL8 检查普通用户从 RPM 启动和沙箱，Windows 检查预览包启动、ConPTY 和窗口操作。Windows 商店版发现 CLI 的结论须注明实际安装布局和执行结果。[预览工作流](../.github/workflows/web-workbench-preview.yml) · [Electron 冒烟用例](test/smoke.mjs)
+- **桌面与安装。** 编译、打包和安装测试在 GitHub Actions 运行。记录候选提交、作业链接和产物。EL8 检查普通用户从 RPM 启动和沙箱。Windows 从待发布 ZIP 解压并比对文件，再从解压目录启动，验收 ConPTY、窗口操作和会话功能。Windows 商店版发现 CLI 的结论须注明实际安装布局和执行结果。[预览工作流](../.github/workflows/web-workbench-preview.yml) · [Electron 冒烟用例](test/smoke.mjs)
 - **性能。** 对性能改动，固定尺寸、数据、CPU 限制和渲染环境，在同一 runner 上交替测基线与候选。判断本次 Electron 改动的收益时选用改动前的 Electron 提交；现有 EL8 基准还提供原生 Span 0.1.0 的参照。记录主进程与进程树 CPU、PSS、输入到正确画面的 P95、样本数和最长停顿。内存问题补充打开、关闭、回收后的 RSS 与 Private_Dirty，核对渲染进程的 JavaScript 堆和 DOM 节点变化。基准中的手动垃圾回收采样独立记录。先证明观测器捕获到正确画面，再比较延迟；结果落在运行波动范围时复测并保留原始数据。[原型基准](test/benchmark.py) · [终端压力用例](test/terminal-pressure.mjs)
 
 ## 首轮从哪里开始

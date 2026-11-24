@@ -124,15 +124,25 @@ jobs:
           npm ci --no-audit --no-fund
           npm run check
           npm run build
-      - name: Verify Electron and native ConPTY
+      - name: Package and extract the Windows preview
+        run: |
+          bash prototype/test/package.sh win32 prototype/core/target/release/span-workbench-core.exe preview
+          powershell.exe -NoProfile -Command '
+            $ErrorActionPreference = "Stop"
+            Compress-Archive -Path preview -DestinationPath preview-under-test.zip
+            Expand-Archive -LiteralPath preview-under-test.zip -DestinationPath verified-preview
+          '
+          cmp preview/span-preview.exe verified-preview/preview/span-preview.exe
+          diff -qr preview/resources/app verified-preview/preview/resources/app
+      - name: Verify the extracted Windows preview and native ConPTY
         run: |
           node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
-          bash prototype/test/package.sh win32 prototype/core/target/release/span-workbench-core.exe preview
-          node prototype/test/smoke.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench.png"
-          node prototype/test/catalog.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench-catalog.png"
-          node prototype/test/covered-transcript.mjs "$PWD/preview/span-preview.exe"
-          node prototype/test/patch-view.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench-patch.png"
-          powershell.exe -NoProfile -Command 'Compress-Archive -Path preview -DestinationPath span-web-windows-x86_64.zip'
+          binary="$PWD/verified-preview/preview/span-preview.exe"
+          node prototype/test/smoke.mjs "$binary" "$PWD/windows-workbench.png"
+          node prototype/test/catalog.mjs "$binary" "$PWD/windows-workbench-catalog.png"
+          node prototype/test/covered-transcript.mjs "$binary"
+          node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
+          mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Publish Windows preview and screenshot
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
