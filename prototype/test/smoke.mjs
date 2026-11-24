@@ -556,6 +556,12 @@ try {
     const hasNestedList = await reply.locator('ul ul').getByText('审批出现后，仍可看到原先阅读的段落。').count();
     assert.equal(hasNestedList, 1);
     if (width === 740) {
+      assert.ok(await code.evaluate(element => {
+        element.scrollLeft = element.scrollWidth;
+        const atEnd = Math.abs(element.scrollLeft - (element.scrollWidth - element.clientWidth)) <= 1;
+        element.scrollLeft = 0;
+        return atEnd;
+      }), 'The horizontal scroller reaches the full command.');
       await readingTitle.evaluate(element => {
         const timeline = element.closest('.timeline');
         timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 14;

@@ -346,6 +346,10 @@ p { margin-block: 0 12px; }
 }
 .agent-reply > .prose :is(th, td) { padding-inline: 12px; }
 .agent-reply > .prose th { background: var(--hover); font-weight: 600; }
+.agent-reply > .prose :is(.code-card pre, .table-scroll) {
+  scrollbar-width: thin;
+  scrollbar-color: #697477 transparent;
+}
 .activity {
   margin-inline-start: 4px;
   color: #c0c6c6;
