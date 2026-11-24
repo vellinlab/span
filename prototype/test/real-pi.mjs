@@ -17,9 +17,12 @@ const resumePrompt = '继续刚才保存的 Pi 会话。';
 const firstAnswer = 'Pi 已完成工作台验收。';
 const beforeTool = '再核对工具和用量。';
 const afterTool = '工具已返回，整理核对结果。';
+const resumedAnswer = 'Pi 已恢复原会话。';
+const longAnswerEnd = '已读到这次长答复的末尾。';
 let releaseReasoning;
 let releaseTool;
 let releaseAnswer;
+let releaseLongReply;
 const gateway = createServer(async (request, response) => {
   try {
     assert.equal(request.url, '/v1/chat/completions');
@@ -57,7 +60,12 @@ const gateway = createServer(async (request, response) => {
         send({ reasoning_content: afterTool });
         await new Promise(done => { releaseAnswer = done; });
       }
-      send({ content: initial ? firstAnswer : 'Pi 已恢复原会话。' });
+      send({ content: initial ? firstAnswer : resumedAnswer });
+      if (!initial) {
+        await new Promise(done => { releaseLongReply = done; });
+        const paragraphs = Array.from({ length: 32 }, (_, index) => `第 ${index + 1} 项 · 复查工作台中的会话与工具记录。`);
+        send({ content: '\n\n' + [...paragraphs, longAnswerEnd].join('\n\n') });
+      }
       send({}, 'stop', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
     }
     response.end('data: [DONE]\n\n');
@@ -160,16 +168,32 @@ export default function (pi) {
     const chronology = await log.locator('[data-card="reasoning"] .card-hint, [data-card="command"] .card-title').allTextContents();
     assert.deepEqual(chronology, [beforeTool, 'echo pi tool result', afterTool]);
   }
+  async function verifyShortLayout(view, answer) {
+    await view.waitForFunction(answer => {
+      const log = document.querySelector('[data-testid="transcript"]');
+      const row = [...log.querySelectorAll('.agent-reply')].find(node => node.textContent.includes(answer));
+      if (!row) return false;
+      const bottom = row.getBoundingClientRect().bottom;
+      const composer = document.querySelector('form.composer').getBoundingClientRect();
+      return log.scrollHeight === log.clientHeight && bottom <= composer.top && composer.top - bottom <= 36;
+    }, answer);
+  }
+  async function narrow(view) {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+    await view.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
+  }
   await verifyArchive(transcript);
+  await verifyShortLayout(page, firstAnswer);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-archive.png') });
+  await narrow(page);
+  await verifyShortLayout(page, firstAnswer);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-archive-narrow.png') });
   await tool.locator('summary').click();
   await tool.getByText('pi tool result', { exact: true }).waitFor();
   await send('/usage');
   const usage = page.getByRole('region', { name: '用量' });
   await usage.getByText('总计', { exact: true }).waitFor();
   await usage.getByRole('button', { name: '关闭面板' }).click();
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
-  await page.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
   await send('/span-form');
   const confirm = page.getByRole('region', { name: '核对 Pi 操作' });
   await confirm.waitFor();
@@ -201,10 +225,26 @@ export default function (pi) {
   if (!ssh) assert.equal(await resumed.page.locator('.breadcrumb > span').first().getAttribute('title'), localWorkspace);
   else assert.equal(await resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: ssh, exact: true }).count(), 0);
   await verifyArchive(resumed.page.getByTestId('transcript'));
+  await narrow(resumed.page);
   const editorAfterRestart = resumed.page.getByRole('textbox', { name: '消息' });
   await editorAfterRestart.fill(resumePrompt);
   await editorAfterRestart.press('Enter');
-  await resumed.page.getByTestId('transcript').getByText('Pi 已恢复原会话。', { exact: true }).waitFor();
+  const resumedLog = resumed.page.getByTestId('transcript');
+  await resumedLog.getByText(resumedAnswer, { exact: true }).waitFor();
+  await verifyShortLayout(resumed.page, resumedAnswer);
+  releaseLongReply();
+  await resumedLog.getByText(longAnswerEnd, { exact: true }).waitFor();
+  await resumed.page.waitForFunction(text => {
+    const log = document.querySelector('[data-testid="transcript"]');
+    const tail = [...log.querySelectorAll('.agent-reply p')].find(node => node.textContent === text);
+    if (!tail || log.scrollHeight <= log.clientHeight || log.scrollTop <= 0) return false;
+    const bounds = tail.getBoundingClientRect();
+    const view = log.getBoundingClientRect();
+    return bounds.top >= view.top && bounds.bottom <= view.bottom;
+  }, longAnswerEnd);
+  await resumedLog.evaluate(log => { log.scrollTop = 0; });
+  await resumed.page.getByRole('button', { name: '滚到最新消息' }).waitFor();
+  await resumedLog.getByText(initialPrompt, { exact: true }).waitFor();
   assert.deepEqual(prompts.map(entry => entry.initial), [true, true, false]);
   assert.deepEqual(resumed.errors, []);
   console.log('Verified real Pi streaming, tools, extension dialogs, usage, and automatic workspace and session restore on ' +
@@ -213,6 +253,7 @@ export default function (pi) {
   releaseReasoning?.();
   releaseTool?.();
   releaseAnswer?.();
+  releaseLongReply?.();
   gateway.closeAllConnections();
   gateway.close();
   await app?.close();
