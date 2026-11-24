@@ -766,6 +766,7 @@ p { margin-block: 0 12px; }
 .approval form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .approval-body { display: grid; gap: 7px; min-height: 0; padding: 8px 10px; overflow: auto; overscroll-behavior: contain; }
 .approval-body:empty { display: none; }
+.approval-body:focus-visible { outline-offset: -2px; }
 .approval-body textarea {
   display: block;
   width: 100%;
@@ -778,16 +779,30 @@ p { margin-block: 0 12px; }
 }
 .approval-body textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .approval-reason, .approval-context, .approval-context dd { margin: 0; }
+.approval-reason { color: var(--muted); }
 .approval-context div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 7px; }
 .approval-context dt { color: var(--muted); }
-.approval-context dd { font: 12px/20px var(--mono); }
-.approval pre { margin: 0; padding: 6px 8px; border-radius: 5px; background: var(--canvas); font-size: 12px; white-space: pre-wrap; }
+.approval-context dd { font: 12px/18px var(--mono); }
+.approval-operation { display: grid; gap: 4px; min-width: 0; }
+.approval pre { margin: 0; padding: 4px 8px; border-radius: 5px; background: var(--canvas); font: 12px/18px var(--mono); white-space: pre-wrap; }
 .approval-actions { justify-content: flex-end; flex-wrap: wrap; border-top: 1px solid var(--line); }
 .approval-actions button { min-height: 28px; padding-block: 3px; }
 .approval-actions button[data-effect="allow"] { color: #eedbad; background: #c4a45827; }
 .approval-actions button[data-effect="allow"]:hover { background: #c4a45842; }
 .approval-actions button[aria-disabled="true"] { cursor: default; opacity: .5; }
 .approval-error { margin-inline-end: auto; color: #efb8ad; }
+@container (min-width: 760px) {
+  .approval-body:has(> .approval-operation):has(> .approval-reason) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 32%);
+    align-items: start;
+    column-gap: 12px;
+  }
+  .approval-context { grid-column: 1 / -1; }
+}
+@container (max-height: 400px) {
+  .approval[data-kind="approval"] :is(header, .approval-actions) { padding-block: 4px; }
+  .approval[data-kind="approval"] .approval-body { gap: 4px; padding-block: 4px; }
+}
 .error { display: flex; align-items: flex-start; gap: 5px; padding: 7px; }
 .error-message { min-width: 0; flex: 1; padding: 4px; color: #eed1c8; overflow-wrap: anywhere; }
 .error-message summary { width: fit-content; color: var(--muted); cursor: pointer; font-size: 12px; }

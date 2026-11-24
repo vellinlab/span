@@ -475,13 +475,33 @@ try {
   }), 'The branch sits between the session title and window actions');
   assert.ok(await page.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    const body = rect('.approval-body');
+    const command = document.querySelector('.approval-operation pre').firstChild;
+    const firstLine = document.createRange();
+    firstLine.setStart(command, 0);
+    firstLine.setEnd(command, command.textContent.indexOf('\n'));
+    const commandStart = firstLine.getBoundingClientRect();
     const refuse = rect('.approval-actions button');
     const hit = document.elementFromPoint(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2);
-    return rect('.timeline').height >= 44 && rect('.approval-context').bottom <= rect('.approval-body').bottom &&
+    return rect('.timeline').height >= 44 && rect('.approval-context').bottom <= body.bottom &&
+      commandStart.top >= body.top && commandStart.bottom <= body.bottom + 1 &&
       rect('.approval-actions').bottom <= rect('.composer').top && rect('.terminal-canvas').height >= 70 &&
       rect('.composer').bottom <= rect('.terminal-panel').top && Boolean(hit?.closest('.approval-actions button'));
-  }), 'History, approval scope and actions, the long draft and terminal fit at the minimum window size');
+  }), 'History, approval scope, the first command line, actions, the long draft and terminal fit at the minimum window size');
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval-compact.png') });
+  const approvalDetails = approval.getByRole('group', { name: '操作详情' });
+  await approval.focus();
+  await page.keyboard.press('Tab');
+  assert.ok(await approvalDetails.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => {
+    const reason = document.querySelector('.approval-reason');
+    const body = reason.parentElement.getBoundingClientRect();
+    const text = reason.getBoundingClientRect();
+    return text.top >= body.top && text.bottom <= body.bottom + 1;
+  });
+  await page.keyboard.press('Home');
+  await page.waitForFunction(() => document.querySelector('.approval-body').scrollTop === 0);
   await composer.fill('');
   await approval.getByRole('button', { name: '拒绝' }).press('Enter');
   const question = page.getByRole('region', { name: 'Agent 请求输入' });

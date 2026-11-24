@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { CircleHelp, ShieldCheck } from 'lucide-react';
+import { PathText } from './file-reference-name.jsx';
 
 function InteractionInput({ field }) {
   const [other, setOther] = useState(false);
@@ -25,16 +26,19 @@ function ApprovalDetails({ request, item }) {
   const command = operation?.kind === 'command' ? operation.command || item?.command : undefined;
   const cwd = operation?.cwd || item?.cwd;
   const files = operation?.kind === 'files' ? item?.files?.map(file => file.path).filter(Boolean) : undefined;
+  const permissions = operation?.permissions;
   return <>
     {(cwd || operation?.target || operation?.root) && <dl className="approval-context">
-      {cwd && <div><dt>工作目录</dt><dd>{cwd}</dd></div>}
+      {cwd && <div><dt>工作目录</dt><dd><PathText path={cwd} /></dd></div>}
       {operation?.target && <div><dt>目标</dt><dd>{[operation.protocol, operation.target].filter(Boolean).join(' · ')}</dd></div>}
-      {operation?.root && <div><dt>写入范围</dt><dd>{operation.root}</dd></div>}
+      {operation?.root && <div><dt>写入范围</dt><dd><PathText path={operation.root} /></dd></div>}
     </dl>}
+    {(command || files?.length || permissions) ? <div className="approval-operation">
+      {command && <pre aria-label="待执行命令">{command}</pre>}
+      {Boolean(files?.length) && <pre aria-label="待修改文件">{files.join('\n')}</pre>}
+      {permissions && <pre aria-label="请求的权限">{JSON.stringify(permissions, null, 2)}</pre>}
+    </div> : null}
     {request.detail && <p className="approval-reason">{request.detail}</p>}
-    {command && <pre aria-label="待执行命令">{command}</pre>}
-    {Boolean(files?.length) && <pre aria-label="待修改文件">{files.join('\n')}</pre>}
-    {operation?.permissions && <pre aria-label="请求的权限">{JSON.stringify(operation.permissions, null, 2)}</pre>}
   </>;
 }
 
@@ -71,7 +75,9 @@ function InteractionCard({ request, count, respond, item, host, focusTarget, onF
     <header><Icon size={16} aria-hidden="true" /><strong>{request.title}</strong>
       {count > 1 && <small>还有 {count - 1} 项</small>}<small className="approval-host" title={host}>{host}</small></header>
     {approval ? <>
-      <div className="approval-body"><ApprovalDetails request={request} item={item} /></div>
+      <div className="approval-body" role="group" aria-label="操作详情" tabIndex={0}>
+        <ApprovalDetails request={request} item={item} />
+      </div>
       {actions}
     </> : <form onSubmit={event => {
       event.preventDefault();
