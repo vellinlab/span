@@ -156,6 +156,10 @@ p { margin-block: 0 12px; }
 .session-search input { width: 100%; font-size: 13px; }
 .search-empty { padding: 6px 8px; color: var(--muted); font-size: 12px; }
 .side-list { overflow: auto; scrollbar-width: thin; }
+.workspaces { scrollbar-width: auto; }
+.workspaces::-webkit-scrollbar { width: var(--scrollbar-width); }
+.workspaces::-webkit-scrollbar-thumb { border-radius: 4px; background: #ffffff24; }
+.workspaces::-webkit-scrollbar-thumb:hover { background: #ffffff45; }
 .catalog-tree { position: relative; }
 .catalog-tree:focus-visible { outline: none; }
 .catalog-tree [role="treeitem"] {

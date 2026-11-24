@@ -78,7 +78,8 @@ try {
   const search = page.getByRole('textbox', { name: '搜索会话' });
   await search.fill('目录会话 0002');
   await waitForCount(2);
-  await tree.getByRole('treeitem', { name: '目录会话 0002' }).waitFor();
+  await tree.getByRole('treeitem', { name: '目录会话 0002' }).click();
+  await page.locator('.breadcrumb strong').filter({ hasText: /^目录会话 0002$/ }).waitFor();
   await search.press('Escape');
   await page.getByRole('button', { name: '归档', exact: true }).click();
   await page.getByRole('tree', { name: '已归档会话' }).getByRole('treeitem', { name: '归档会话示例' }).waitFor();

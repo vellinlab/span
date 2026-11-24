@@ -34,6 +34,20 @@ function catalogRows(sessions, project, archived, filter, collapsed) {
   return rows;
 }
 
+const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selected, disabled }) {
+  return <div id={id} role="treeitem" aria-level={row.entry ? 2 : 1}
+    aria-posinset={row.position} aria-setsize={row.siblings} aria-expanded={row.expanded}
+    aria-current={selected ? 'true' : undefined} aria-disabled={row.entry && disabled ? true : undefined}
+    className={row.entry ? 'catalog-session' : 'catalog-workspace'} data-active={active} data-catalog-index={index}
+    title={row.workspace ?? row.title} style={{ transform: `translateY(${top}px)` }}>
+    {!row.entry && <>
+      <ChevronRight className="group-chevron" size={12} aria-hidden="true" />
+      <Folder size={15} aria-hidden="true" />
+    </>}
+    <span>{row.title}</span>
+  </div>;
+});
+
 export const SessionCatalog = memo(function SessionCatalog({
   sessions, project, scope, archived, query, selected, disabled, more, open, loadMore, scrollPosition,
 }) {
@@ -56,7 +70,7 @@ export const SessionCatalog = memo(function SessionCatalog({
   const getItemKey = useCallback(index => rows[index].key, [rows]);
   const virtual = useVirtualizer({ count: rows.length, getScrollElement: () => scroll.current,
     getItemKey, estimateSize: index => rowHeight + (rows[index].entry && rows[index].position === rows[index].siblings ? 5 : 0),
-    overscan: 4, rangeExtractor, anchorTo: 'end',
+    overscan: 4, rangeExtractor, anchorTo: 'end', useFlushSync: false,
     initialOffset: () => scrollPosition.current.scope === scrollScope ? scrollPosition.current.top : 0,
   });
 
@@ -137,25 +151,18 @@ export const SessionCatalog = memo(function SessionCatalog({
         if (active >= startIndex && active <= endIndex) return;
         const current = indexes.get(selected);
         setActiveKey(rows[current >= startIndex && current <= endIndex ? current : startIndex]?.key ?? null);
+      }} onClick={event => {
+        const item = event.target.closest('[data-catalog-index]');
+        if (!item) return;
+        const row = rows[Number(item.dataset.catalogIndex)];
+        event.currentTarget.focus({ preventScroll: true });
+        setActiveKey(row.key);
+        activate(row);
       }} onKeyDown={onKeyDown} style={{ height: virtual.getTotalSize() }}>
       {mounted.map(item => {
         const row = rows[item.index];
-        return <div key={row.key} id={`${prefix}-${item.index}`} role="treeitem" aria-level={row.entry ? 2 : 1}
-          aria-posinset={row.position} aria-setsize={row.siblings} aria-expanded={row.expanded}
-          aria-current={row.key === selected ? 'true' : undefined} aria-disabled={row.entry && disabled ? true : undefined}
-          className={row.entry ? 'catalog-session' : 'catalog-workspace'} data-active={item.index === active}
-          title={row.workspace ?? row.title} style={{ transform: `translateY(${item.start}px)` }}
-          onClick={event => {
-            event.currentTarget.parentElement.focus({ preventScroll: true });
-            setActiveKey(row.key);
-            activate(row);
-          }}>
-          {!row.entry && <>
-            <ChevronRight className="group-chevron" size={12} aria-hidden="true" />
-            <Folder size={15} aria-hidden="true" />
-          </>}
-          <span>{row.title}</span>
-        </div>;
+        return <CatalogRow key={row.key} row={row} id={`${prefix}-${item.index}`} index={item.index} top={item.start}
+          active={item.index === active} selected={row.key === selected} disabled={disabled} />;
       })}
     </div>}
     {!rows.length && (filter || archived) && <p className="search-empty">{filter ? '没有匹配的会话' : '没有归档会话'}</p>}
