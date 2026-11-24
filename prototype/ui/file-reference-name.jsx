@@ -1,4 +1,12 @@
+import { memo } from 'react';
 import { Image } from 'lucide-react';
+
+export const PathText = memo(function PathText({ path, className }) {
+  // POSIX absolute paths can contain literal backslashes in a filename.
+  const segments = path.match(path.startsWith('/') ? /\/*[^/]+\/*|\/+/g : /[\\/]*[^\\/]+[\\/]*|[\\/]+/g);
+  return <code className={className}>{segments?.map((segment, index) =>
+    <span className="path-segment" key={index}>{segment}</span>)}</code>;
+});
 
 export function FileReferenceName({ name, path }) {
   if (name.length <= 16) return <span className="file-reference-name" title={path}>{name}</span>;

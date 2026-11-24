@@ -147,6 +147,28 @@ async function check(binary, legacy, screenshot) {
     await longSummary.press('Enter');
     await original.waitFor();
     assert.equal(await original.textContent(), fullCommand);
+    const wrappedPath = longCard.locator('.output-directory code');
+    const pathText = await wrappedPath.textContent();
+    assert.match(pathText.replaceAll('\\', '/'), /\/sample\/validation environment\/workbench-desktop\/artifact review$/);
+    const pathLayout = await wrappedPath.evaluate(element => {
+      const selection = window.getSelection();
+      selection.selectAllChildren(element);
+      const selected = selection.toString();
+      selection.removeAllRanges();
+      const range = document.createRange();
+      const parts = Array.from(element.children, part => {
+        range.selectNodeContents(part);
+        return Array.from(range.getClientRects(), ({ top }) => top);
+      });
+      const header = element.closest('.tool-output-heading');
+      const copy = header.querySelector('button').getBoundingClientRect();
+      const path = element.getBoundingClientRect();
+      return { selected, parts, copyAlongsideFirstLine: path.right < copy.left && path.top < copy.bottom };
+    });
+    assert.equal(pathLayout.selected, pathText);
+    assert.ok(pathLayout.parts.every(part => part.length === 1), 'Folder names remain on one line when they fit');
+    assert.ok(new Set(pathLayout.parts.flat()).size > 1, 'The deep working directory wraps in the narrow window');
+    assert.ok(pathLayout.copyAlongsideFirstLine);
     await original.focus();
     assert.ok(await original.evaluate(element => element === document.activeElement));
     if (screenshot) {

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
-import { FileReferenceName, ImageReference } from './file-reference-name.jsx';
+import { FileReferenceName, ImageReference, PathText } from './file-reference-name.jsx';
 import { attachmentName } from './file-references.js';
 import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
@@ -65,11 +65,11 @@ function ToolOutput({ row }) {
   }, [pending, previous, refreshMs]);
   const text = visible.text;
   const long = text && (text.length > largeOutputSize || text.split('\n', 32).length === 32);
-  if (!text) return row.cwd && <code className="card-path">{row.cwd}</code>;
+  if (!text) return row.cwd && <PathText className="card-path" path={row.cwd} />;
   return <div className="tool-output">
     <div className="tool-output-heading">
       {row.cwd ? <span className="output-directory"><Folder size={13} role="img" aria-label="工作目录" />
-        <code>{row.cwd}</code></span> : <span>输出</span>}
+        <PathText path={row.cwd} /></span> : <span>输出</span>}
       <CopyTextButton text={row.text} label="复制输出" copiedLabel="已复制输出" />
     </div>
     <TextReader text={text} output={visible.outputChunks} plain={!long} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
@@ -217,7 +217,7 @@ const TranscriptRow = memo(function TranscriptRow({
       path = row.target?.kind === 'path' ? row.target.path : undefined;
       if (path || row.text) detail = () => <>
         {path && <dl className="tool-context">
-          <dt>路径</dt><dd><code>{path}</code></dd>
+          <dt>路径</dt><dd><PathText path={path} /></dd>
           {row.source && <><dt>来源</dt><dd>{row.source}</dd></>}
         </dl>}
         {row.text && <ToolOutput row={row} />}

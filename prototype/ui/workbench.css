@@ -484,6 +484,7 @@ p { margin-block: 0 12px; }
   line-height: 18px;
 }
 .card-path { display: block; overflow-wrap: anywhere; color: var(--muted); padding: 3px 0; font-size: 12px; }
+.path-segment { display: inline-block; max-inline-size: 100%; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-context {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -496,9 +497,10 @@ p { margin-block: 0 12px; }
 .tool-context + .tool-output { margin-top: 6px; }
 .tool-output-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .tool-output-heading .icon-button { flex: 0 0 26px; width: 26px; height: 26px; }
-.output-directory { display: flex; align-items: flex-start; gap: 6px; min-width: 0; line-height: 18px; }
+.tool-output-heading:has(.output-directory) { align-items: flex-start; gap: 8px; }
+.output-directory { display: flex; align-items: flex-start; gap: 6px; min-width: 0; padding-block: 4px; line-height: 18px; }
 .output-directory svg { flex: none; margin-top: 2px; }
-.output-directory code { overflow-wrap: anywhere; }
+.output-directory code { min-width: 0; }
 .command-source { margin-bottom: 4px; }
 .card-body .command-text {
   max-height: clamp(44px, calc(100cqh - 140px), 116px);

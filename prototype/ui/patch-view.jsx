@@ -1,4 +1,5 @@
 import { memo, useRef, useState } from 'react';
+import { PathText } from './file-reference-name.jsx';
 import { CopyTextButton, TextReader } from './text-reader.jsx';
 
 function updateHunk(inHunk, text, start) {
@@ -33,7 +34,7 @@ export const PatchView = memo(function PatchView({ files, text }) {
       {sources.length > 1 ? <select aria-label="变更文件" title={active.label} value={active.key}
         onChange={event => select(event.target.value)}>
         {sources.map(source => <option key={source.key} value={source.key}>{source.label}</option>)}
-      </select> : files.length > 0 && <code className="card-path">{active.label}</code>}
+      </select> : files.length > 0 && <PathText className="card-path" path={active.label} />}
       {active.diff && <CopyTextButton key={active.key} text={active.diff} label="复制差异" copiedLabel="已复制差异" />}
     </header>
     {active.diff ? <TextReader key={active.key} kind="diff" pagesLabel="差异分页" text={active.diff} label={active.key === 'turn' ? active.label : `${active.label}的差异`}

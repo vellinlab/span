@@ -724,11 +724,15 @@ pub fn run() -> Result<()> {
                             "tool":"核对异常项","status":"completed",
                             "output":format!("  发现一项配置异常。\n{}", "  保留后续检查记录。\n".repeat(18))}}),
                     )?;
+                    let validation_dir = cwd
+                        .join("validation environment")
+                        .join("workbench-desktop")
+                        .join("artifact review");
                     notice(
                         &output,
                         "item/completed",
                         json!({"threadId":thread_id,"turnId":turn,"item":{"id":format!("{turn}-long-command"),
-                            "type":"commandExecution","command":LONG_COMMAND,"cwd":cwd,"status":"completed",
+                            "type":"commandExecution","command":LONG_COMMAND,"cwd":validation_dir,"status":"completed",
                             "exitCode":17,"aggregatedOutput":"检查未完成。\n"}}),
                     )?;
                     notice(
