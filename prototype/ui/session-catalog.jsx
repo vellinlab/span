@@ -7,9 +7,9 @@ export function directoryName(path) {
   return path?.split(/[\\/]/).filter(Boolean).at(-1) || path;
 }
 
-function catalogRows(sessions, project, archived, filter, collapsed, matches) {
+function catalogRows(sessions, project, remote, archived, filter, collapsed, matches) {
   const groups = new Map();
-  if (project && !archived && !filter) groups.set(project, []);
+  if (project && !archived && !filter && (!remote || !sessions.length)) groups.set(project, []);
   const local = filter ? sessions.filter(entry => [sessionTitle(entry), entry.ref.id, entry.cwd]
     .some(value => value?.toLocaleLowerCase().includes(filter))) : sessions;
   const entries = matches?.length ? mergeSessions(local, matches) : local;
@@ -50,7 +50,7 @@ const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selec
 });
 
 export const SessionCatalog = memo(function SessionCatalog({
-  sessions, project, scope, archived, query, selected, disabled, more, searchResult, open, loadMore, scrollPosition,
+  sessions, project, remote, scope, archived, query, selected, disabled, more, searchResult, open, loadMore, scrollPosition,
 }) {
   const filter = query.toLocaleLowerCase();
   const scrollScope = JSON.stringify([scope, archived, query]);
@@ -61,8 +61,8 @@ export const SessionCatalog = memo(function SessionCatalog({
   const [activeKey, setActiveKey] = useState(null);
   const keys = collapsed[view]?.scope === scrollScope ? collapsed[view].keys : undefined;
   const matches = searchResult?.items;
-  const rows = useMemo(() => catalogRows(sessions, project, archived, filter, keys, matches),
-    [sessions, project, archived, filter, keys, matches]);
+  const rows = useMemo(() => catalogRows(sessions, project, remote, archived, filter, keys, matches),
+    [sessions, project, remote, archived, filter, keys, matches]);
   const indexes = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows]);
   const active = indexes.get(activeKey);
   const { scroll, band, offsets, ensureVisible, visibleRange } = useCatalogViewport(rows, indexes, scrollScope, scrollPosition);

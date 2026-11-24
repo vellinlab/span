@@ -9,6 +9,7 @@ import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } 
 import { Interactions } from './interactions.jsx';
 import { Markdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
+import { startupWorkspace } from './recent-workspaces.js';
 import { directoryName, SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
@@ -36,6 +37,7 @@ function App() {
   const [config, setConfig] = useState(null);
   const [backend, setBackend] = useState('codex');
   const [target, setTarget] = useState('');
+  const [connectionCwd, setConnectionCwd] = useState('');
   const [tab, setTab] = useState('sessions');
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -56,6 +58,7 @@ function App() {
   const input = useRef(null);
   const search = useRef(null);
   const searchTrigger = useRef(null);
+  const backendControl = useRef(null);
   const scroll = useRef(null);
   const catalogScroll = useRef({ scope: '', top: 0 });
   const searchScroll = useRef({ scope: '', top: 0 });
@@ -107,7 +110,7 @@ function App() {
 
   useEffect(() => {
     window.span.workspace(false).then(settings => {
-      const initial = { ...settings, backend: 'codex', ssh: '' };
+      const initial = startupWorkspace(settings);
       move(draftKey(null), draftKey(initial));
       setConfig(initial);
     }).catch(report);
@@ -217,13 +220,17 @@ function App() {
   }
 
   function applyConfig(next) {
+    if (tab === 'hosts') setTab('sessions');
+    if (connection !== 'offline' && next.backend === config?.backend && next.ssh === config.ssh && next.cwd === config.cwd) {
+      input.current?.focus();
+      return;
+    }
     dismissPreview();
     setEntries([]);
     setDirectory('');
     closePanel();
     work.prepareConnection();
     setConfig(next);
-    if (tab === 'hosts') setTab('sessions');
   }
 
   function openSearch() {
@@ -332,8 +339,10 @@ function App() {
   function showConnection() {
     setBackend(config?.backend ?? 'codex');
     setTarget(config?.ssh ?? '');
+    setConnectionCwd(config?.cwd ?? '');
     setSidebarOpen(true);
     setTab('hosts');
+    requestAnimationFrame(() => backendControl.current?.focus());
   }
 
   function selectedModel() {
@@ -575,19 +584,27 @@ function App() {
             disabled={running || !config} onClick={chooseWorkspace}><FolderOpen size={16} /></button>
         </div>}
         {tab === 'sessions' && <SessionCatalog sessions={sessions} project={config && (config.ssh || cwd || '工作区')}
-          scope={JSON.stringify([config?.backend, config?.ssh || cwd])} archived={work.archived} query={catalogQuery} selected={refKey}
+          remote={Boolean(config?.ssh)} scope={JSON.stringify([config?.backend, config?.ssh || cwd])}
+          archived={work.archived} query={catalogQuery} selected={refKey}
           disabled={running || loading || connection !== 'ready'} more={Boolean(catalogSearch ? catalogSearch.cursor : work.sessionCursor)}
           searchResult={catalogSearch} open={openCatalogSession} loadMore={loadCatalogPage}
           scrollPosition={catalogQuery ? searchScroll : catalogScroll} />}
         {tab === 'hosts' && <form className="host-form" onSubmit={event => {
           event.preventDefault();
-          if (config) applyConfig({ ...config, backend, ssh: target.trim() });
+          if (config) applyConfig({ ...config, backend, ssh: target.trim(), cwd: connectionCwd || config.cwd });
         }}>
-          <label>Agent 后端<select value={backend} onChange={event => setBackend(event.target.value)}>
+          <label>Agent 后端<select ref={backendControl} value={backend} onChange={event => setBackend(event.target.value)}>
             {agentBackends.filter(item => item.locations.includes(target.trim() ? 'ssh' : 'local')).map(item =>
               <option key={item.id} value={item.id}>{item.label}</option>)}
           </select></label>
           <label>SSH 目标<input value={target} placeholder="别名或 user@host" onChange={event => setTarget(event.target.value)} /></label>
+          {!target.trim() && connectionCwd && <div className="host-workspace">
+            <span>本地工作区</span>
+            <button type="button" aria-label="选择本地工作区" title={connectionCwd} disabled={running}
+              onClick={() => window.span.workspace(true).then(cwd => {
+                if (cwd) setConnectionCwd(cwd);
+              }).catch(report)}><FolderOpen size={15} /><span>{directoryName(connectionCwd)}</span></button>
+          </div>}
           <button className="primary" disabled={running || !config}>连接{target.trim() ? ' SSH' : '本机'}</button>
         </form>}
         {tab === 'files' && <>
@@ -622,9 +639,12 @@ function App() {
                     <strong>无法连接到 {backendName}</strong><details><summary>技术详情</summary><p>{error}</p></details>
                   </> : error}
                 </div>
-                {connectionError && <button type="button" className="retry" onClick={() => {
-                  if (config) applyConfig({ ...config });
-                }}>重新连接</button>}
+                {connectionError && <>
+                  <button type="button" className="retry" onClick={() => {
+                    if (config) applyConfig({ ...config });
+                  }}>重新连接</button>
+                  <button type="button" className="retry" onClick={showConnection}>切换连接</button>
+                </>}
                 <button className="icon-button" type="button" aria-label="关闭错误提示" onClick={clearError}><X size={16} /></button>
               </div>}
               {loading && !rows.length && <div className="live" role="status"><i />{rememberedReading?.anchor ? '正在恢复阅读位置' : '正在加载会话'}</div>}

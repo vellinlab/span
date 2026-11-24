@@ -25,6 +25,8 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 
 Pi 可以使用 PATH 中的 CLI。本机也可用 `SPAN_PI_PATH` 指定可执行文件。工作台读取 Pi 为当前工作区返回的会话目录，通过 Pi RPC 恢复会话，并显示当前历史分支。扩展注册的命令可从斜杠菜单发送给 Pi。 [Pi RPC 协议](https://github.com/earendil-works/pi/blob/v1.6.0/packages/coding-agent/docs/rpc.md)
 
+工作台启动时恢复上次成功连接的 Agent、主机和本地工作区。每个连接保留自己最后打开的会话，点击「新会话」后会记住空白状态。无法连接时，可以重试或从连接设置选择其他后端、主机和本地目录。首次启动默认连接本机 Codex。
+
 推理卡片读取后端提供的摘要。命令、补丁、任务计划、子代理、工具调用和用户交互使用专用条目。实时增量按接收顺序刷新，历史向上分页，折叠的详情在展开时渲染。
 
 Codex 会话搜索查询当前主机的历史目录，并沿用当前的归档范围。App Server 的标题匹配区分大小写。侧栏也按标题、原始 ID 和工作区筛选已加载的会话。适配器未声明后端搜索时，通过逐页加载扩大筛选范围。 [Codex App Server 搜索参数](https://learn.chatgpt.com/docs/app-server#list-threads-with-pagination--filters)

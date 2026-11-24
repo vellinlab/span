@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
+import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
@@ -116,6 +117,42 @@ test('session identities are scoped by backend and host, and the factory rejects
   assert.equal(new Set(refs.map(sessionKey)).size, refs.length);
   assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi']);
   assert.throws(() => createAgent('missing', { location: local }), /不支持/);
+});
+
+test('workspace recovery keeps session IDs scoped to their Agent and location', () => {
+  let saved = '{broken';
+  let writes = 0;
+  globalThis.window = { localStorage: {
+    getItem: () => saved,
+    setItem(_key, value) { saved = value; writes++; },
+  } };
+  const home = { cwd: 'C:\\Users\\Test', demo: false, terminalRenderer: 'dom' };
+  const codex = { ...home, backend: 'codex', ssh: '' };
+  const pi = { ...codex, backend: 'pi', cwd: 'C:\\actual-workspace' };
+  const remotePi = { ...pi, ssh: 'dev' };
+  try {
+    assert.deepEqual(startupWorkspace(home), codex);
+    rememberWorkspace(codex, 'codex-local');
+    rememberWorkspace(pi, 'pi-local');
+    rememberWorkspace(remotePi, 'pi-remote');
+    rememberWorkspace(remotePi);
+    assert.equal(writes, 3);
+    assert.deepEqual(startupWorkspace(home), remotePi);
+    assert.equal(savedSession(codex), 'codex-local');
+    assert.equal(savedSession(pi), 'pi-local');
+    assert.equal(savedSession({ ...pi, cwd: 'D:\\other-workspace' }), undefined);
+    assert.equal(savedSession({ ...remotePi, ssh: 'other' }), undefined);
+    rememberWorkspace(remotePi, null);
+    assert.equal(savedSession(remotePi), undefined);
+    assert.equal(savedSession(pi), 'pi-local');
+    assert.deepEqual(startupWorkspace({ ...home, demo: true }), { ...codex, demo: true });
+    rememberWorkspace({ ...codex, demo: true }, 'fixture');
+    assert.equal(writes, 4);
+    rememberWorkspace({ ...pi, ssh: '-Options' }, 'bad');
+    assert.equal(writes, 4);
+  } finally {
+    delete globalThis.window;
+  }
 });
 
 test('Codex adapter translates RPC, streams summaries, and routes different interaction replies', async () => {

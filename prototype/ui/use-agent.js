@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createAgent, mergeSessions, sessionKey } from './agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from './delegation.js';
+import { rememberWorkspace, savedSession } from './recent-workspaces.js';
 import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 
 const PAGE_SIZE = 20;
@@ -188,7 +189,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     });
   }
 
-  async function loadSession(client, entry, opening, view) {
+  async function loadSession(client, entry, { opening, view, restoring } = {}) {
     const previous = active.current?.ref;
     const scope = clearTimeline();
     clearError();
@@ -235,9 +236,20 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
           break;
         }
       }
-      if (scope === layer.current) readPage({ items: pages.reverse().flat(), cursor: page.cursor }, runVersion, pages.length);
+      if (scope === layer.current) {
+        readPage({ items: pages.reverse().flat(), cursor: page.cursor }, runVersion, pages.length);
+        rememberWorkspace(config, selected.ref.id);
+      }
     } catch (error) {
-      if (scope === layer.current) report(error);
+      if (scope !== layer.current) return;
+      if (restoring) {
+        client.sessions.release?.(selected.ref).catch(() => {});
+        clearTimeline();
+        if (restoring()) {
+          rememberWorkspace(config, null);
+          report(new Error(`无法恢复上次会话。 ${error.message}`));
+        }
+      } else report(error);
     } finally {
       if (scope === layer.current) setLoading(false);
     }
@@ -270,31 +282,39 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   useEffect(() => {
     if (!config) return;
     let disposed = false;
+    let disconnected = false;
     const location = config.ssh ? { kind: 'ssh', host: config.ssh } : { kind: 'local' };
     const client = createAgent(config.backend, {
       generation: ++generation.current, cwd: config.cwd, location,
-      onEvent: event => { if (!disposed && agent.current === client) receive(event); },
+      onEvent: event => {
+        if (disposed || agent.current !== client) return;
+        if (event.kind === 'disconnected') disconnected = true;
+        receive(event);
+      },
     });
-    const isCurrent = () => !disposed && agent.current === client;
+    const isCurrent = () => !disposed && !disconnected && agent.current === client;
     agent.current = client;
     setApi(client);
     async function start() {
       await client.open();
       if (!isCurrent()) return;
+      const previousId = savedSession(config);
+      rememberWorkspace(config);
       client.models?.().then(value => {
         if (isCurrent()) setModels(value);
       }).catch(() => {});
-      try {
-        const items = await list(client, false);
-        if (!isCurrent()) return;
+      const items = await list(client, false).catch(error => {
+        if (isCurrent()) report(error);
+        return [];
+      });
+      if (!isCurrent()) return;
+      const selected = config.demo ? items[0] : previousId && (items.find(item => item.ref.id === previousId) ??
+        { ref: { backend: config.backend, location, id: previousId } });
+      if (selected && !active.current && !busy.current) {
+        const opening = loadSession(client, selected, { restoring: config.demo ? undefined : isCurrent });
         setConnection('ready');
-        if (config.demo && items.length && !active.current && !busy.current) await loadSession(client, items[0]);
-      } catch (error) {
-        if (isCurrent()) {
-          setConnection('ready');
-          report(error);
-        }
-      }
+        await opening;
+      } else setConnection('ready');
     }
     start().catch(error => {
       if (!isCurrent()) return;
@@ -347,7 +367,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       report(new Error('请先连接此会话所在的 Agent 和主机。'));
       return;
     }
-    return loadSession(agent.current, entry, undefined, view);
+    return loadSession(agent.current, entry, { view });
   }
 
   function reset() {
@@ -355,7 +375,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     const previous = active.current?.ref;
     clearTimeline();
     if (previous) agent.current?.sessions.release?.(previous).catch(() => {});
-    if (connection === 'ready') clearError();
+    if (connection === 'ready') {
+      rememberWorkspace(config, null);
+      clearError();
+    }
     return true;
   }
 
@@ -399,7 +422,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       } else {
         const runVersion = callbacks.current.run;
         const result = await client.turns.start(ref, input, selectedOptions, clientId);
-        if (scope === layer.current && runVersion === callbacks.current.run) changeRun(result);
+        if (scope === layer.current) {
+          rememberWorkspace(config, ref.id);
+          if (runVersion === callbacks.current.run) changeRun(result);
+        }
       }
       return true;
     } catch (error) {
@@ -429,7 +455,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       const ref = create ? await ensureSession(client, title, scope) : active.current.ref;
       if (!ref || scope !== layer.current) return;
       const result = await action(client, ref);
-      if (scope === layer.current) return result;
+      if (scope === layer.current) {
+        if (create) rememberWorkspace(config, ref.id);
+        return result;
+      }
     } finally {
       if (create && scope === layer.current) busy.current = false;
     }
@@ -523,7 +552,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     withSession,
     fork() {
       if (!guard() || !session) return;
-      return loadSession(agent.current, { ...session, archived: false }, agent.current.sessions.fork(session.ref));
+      return loadSession(agent.current, { ...session, archived: false }, { opening: agent.current.sessions.fork(session.ref) });
     },
     rename: title => withSession(async (client, ref) => {
       await client.sessions.rename(ref, title);

@@ -10,6 +10,7 @@ import { _electron as electron } from 'playwright';
 const [binary, piPath, screenshot, ssh] = process.argv.slice(2);
 const profile = await mkdtemp(join(tmpdir(), 'span-pi-preview-'));
 const state = process.env.SPAN_TEST_PI_STATE ?? join(profile, "Pi's state");
+const localWorkspace = join(profile, 'Pi 工作区');
 const prompts = [];
 const initialPrompt = '核对 Pi 的推理、工具与用量。';
 const resumePrompt = '继续刚才保存的 Pi 会话。';
@@ -96,8 +97,9 @@ export default function (pi) {
 }
 `);
   if (ssh) execFileSync('chown', ['-R', 'span-preview-ci:span-preview-ci', state]);
+  else await mkdir(localWorkspace);
 
-  async function open() {
+  async function open(selectConnection = false) {
     app = await electron.launch({
       executablePath: binary,
       args: ['--no-sandbox', '--disable-gpu'],
@@ -106,10 +108,20 @@ export default function (pi) {
     const page = await app.firstWindow();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.getByRole('button', { name: '主机', exact: true }).click();
-    if (ssh) await page.getByLabel('SSH 目标').fill(ssh);
-    await page.getByLabel('Agent 后端').selectOption('pi');
-    await page.getByRole('button', { name: ssh ? '连接 SSH' : '连接本机', exact: true }).click();
+    if (selectConnection) {
+      await page.getByRole('button', { name: '主机', exact: true }).click();
+      if (ssh) await page.getByLabel('SSH 目标').fill(ssh);
+      await page.getByLabel('Agent 后端').selectOption('pi');
+      if (!ssh) {
+        await app.evaluate(({ dialog }, directory) => {
+          dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] });
+        }, localWorkspace);
+        const folder = page.locator('.host-form').getByRole('button', { name: '选择本地工作区' });
+        await folder.click();
+        await folder.getByText('Pi 工作区', { exact: true }).waitFor();
+      }
+      await page.getByRole('button', { name: ssh ? '连接 SSH' : '连接本机', exact: true }).click();
+    }
     const connected = page.locator('.connection[data-route="stdio"]').filter({
       hasText: ssh ? 'Pi · ' + ssh : 'Pi · 本机', has: page.locator('i.ready'),
     });
@@ -117,7 +129,7 @@ export default function (pi) {
     assert.deepEqual(errors, []);
     return { page, errors };
   }
-  const first = await open();
+  const first = await open(true);
   const page = first.page;
   const composer = page.getByRole('textbox', { name: '消息' });
   const send = async text => { await composer.fill(text); await composer.press('Enter'); };
@@ -184,9 +196,10 @@ export default function (pi) {
   app = undefined;
 
   const resumed = await open();
-  await resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: 'Pi 原生会话验收' })
-    .or(resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: initialPrompt })).click();
+  await resumed.page.locator('.breadcrumb strong').getByText('Pi 原生会话验收', { exact: true }).waitFor();
   await resumed.page.getByTestId('transcript').getByText(firstAnswer, { exact: true }).waitFor();
+  if (!ssh) assert.equal(await resumed.page.locator('.breadcrumb > span').first().getAttribute('title'), localWorkspace);
+  else assert.equal(await resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: ssh, exact: true }).count(), 0);
   await verifyArchive(resumed.page.getByTestId('transcript'));
   const editorAfterRestart = resumed.page.getByRole('textbox', { name: '消息' });
   await editorAfterRestart.fill(resumePrompt);
@@ -194,7 +207,8 @@ export default function (pi) {
   await resumed.page.getByTestId('transcript').getByText('Pi 已恢复原会话。', { exact: true }).waitFor();
   assert.deepEqual(prompts.map(entry => entry.initial), [true, true, false]);
   assert.deepEqual(resumed.errors, []);
-  console.log('Verified real Pi streaming, tools, native extension dialogs, usage, and persisted resume on ' + (ssh ?? process.platform));
+  console.log('Verified real Pi streaming, tools, extension dialogs, usage, and automatic workspace and session restore on ' +
+    (ssh ?? process.platform));
 } finally {
   releaseReasoning?.();
   releaseTool?.();
