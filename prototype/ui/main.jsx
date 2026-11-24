@@ -535,7 +535,11 @@ function App() {
         });
         if (selected.size > maxFileReferences) throw new Error(`最多附加 ${maxFileReferences} 个文件。`);
       }
-      edit(composerKey, current.draft, [...selected.values()]);
+      const attachments = [...selected.values()];
+      edit(composerKey, current.draft, [
+        ...attachments.filter(file => file.kind !== 'image'),
+        ...attachments.filter(file => file.kind === 'image'),
+      ]);
       input.current?.focus();
     } catch (error) {
       if (scope === work.timelineScope()) report(error);

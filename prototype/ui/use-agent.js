@@ -479,9 +479,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
         ? { kind: 'image', path: file.path }
         : { kind: 'file', path: file.path, name: file.name });
       updateRows(previous => [...previous, { kind: 'user', text, clientId, key: clientId,
-        ...(files.length && { attachments: attachmentArtifacts([
-          ...files.filter(file => file.kind !== 'image'), ...files.filter(file => file.kind === 'image'),
-        ]) }),
+        ...(files.length && { attachments: attachmentArtifacts(files) }),
         turnId: steering?.id, optimistic: true, queued: steering && delivery === 'followUp' ? 'queued' : undefined }]);
       added = true;
       onDispatch?.();
