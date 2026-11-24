@@ -36,21 +36,24 @@ async function echoSample(app, page, key) {
     const pixels = state.pixels[key];
     if (!pixels) throw Error(`No reference pixels for terminal key ${key}`);
     state.result = new Promise(resolve => {
+      const started = performance.now();
+      const firstFrame = state.frames;
       const timer = setTimeout(() => {
+        const bestMatch = state.pending.bestMatch;
         state.pending = undefined;
-        resolve(null);
+        resolve({ frames: state.frames - firstFrame, bestMatch });
       }, 2000);
-      state.pending = { pixels, started: performance.now(), finish: ms => {
+      state.pending = { pixels, started, bestMatch: 0, finish: ms => {
         clearTimeout(timer);
         state.pending = undefined;
-        resolve(ms);
+        resolve({ ms });
       } };
     });
   }, key);
   await page.keyboard.press(key);
-  const ms = await app.evaluate(() => globalThis.spanTerminalEcho.result);
-  assert.ok(Number.isFinite(ms), `The frame observer did not see the terminal echo for ${key}`);
-  return ms;
+  const result = await app.evaluate(() => globalThis.spanTerminalEcho.result);
+  assert.ok(Number.isFinite(result.ms), `No matching echo for ${key} after ${result.frames} frames (best match ${result.bestMatch})`);
+  return result.ms;
 }
 
 async function prepareEchoFrames(app, page) {
@@ -77,18 +80,32 @@ async function prepareEchoFrames(app, page) {
   assert.ok(references.a && references.b && references.a !== references.b, 'The two terminal keys must paint different pixels');
   console.log('Captured different reference pixels for both keys. Verifying frame notifications.');
   await app.evaluate(({ BrowserWindow }, { area, references }) => {
-    const pixels = { a: Buffer.from(references.a, 'hex'), b: Buffer.from(references.b, 'hex') };
+    const a = Buffer.from(references.a, 'hex');
+    const b = Buffer.from(references.b, 'hex');
+    const pixels = { a: [], b: [] };
+    // Match the pixels that distinguish the two glyphs. Ignore the rest of the row and the spaces around the text.
+    for (let index = 0; index < a.length; index += 4) {
+      if (Math.abs(a[index] - b[index]) < 100) continue;
+      const midpoint = (a[index] + b[index]) / 2;
+      pixels.a.push({ index, midpoint, light: a[index] > midpoint });
+      pixels.b.push({ index, midpoint, light: b[index] > midpoint });
+    }
+    if (pixels.a.length < 8) throw Error('The terminal reference glyphs do not differ enough for a paint probe');
     const state = { frames: 0, pixels };
     globalThis.spanTerminalEcho = state;
     BrowserWindow.getAllWindows()[0].webContents.beginFrameSubscription(false, image => {
       state.frames++;
       const pending = state.pending;
-      if (pending && image.crop(area).toBitmap().equals(pending.pixels)) {
-        pending.finish(performance.now() - pending.started);
-      }
+      if (!pending) return;
+      const bitmap = image.crop(area).toBitmap();
+      const matching = pending.pixels.filter(({ index, midpoint, light }) => (bitmap[index] > midpoint) === light).length;
+      pending.bestMatch = Math.max(pending.bestMatch, matching / pending.pixels.length);
+      if (matching === pending.pixels.length) pending.finish(performance.now() - pending.started);
     });
   }, { area, references });
+  await delay(165);
   await echoSample(app, page, 'a');
+  await delay(165);
   await echoSample(app, page, 'b');
 }
 
