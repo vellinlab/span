@@ -186,8 +186,10 @@ async function check(binary, label) {
       return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
     });
     await initialTail.waitFor();
-    if (following) await tailInView();
-    else {
+    await tailInView();
+    if (!following) {
+      // Let the initial Markdown measurement finish following the tail before moving up to read.
+      await settleFrame(page);
       await heading.evaluate(element => {
         const timeline = element.closest('.timeline');
         timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 28;
@@ -205,6 +207,8 @@ async function check(binary, label) {
     const headingOffset = () => heading.evaluate(element =>
       element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top);
     const position = following ? undefined : await headingOffset();
+    if (!following) assert.ok(Math.abs(position - 28) <= 2,
+      `Expected to start reading the reply at 28 pixels, observed ${position}.`);
 
     const observation = await heading.evaluateHandle(element => {
       const parent = element.closest('.prose');
