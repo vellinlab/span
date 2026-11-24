@@ -196,25 +196,27 @@ export default function (pi) {
     await failed.getByText('失败', { exact: true }).waitFor();
     assert.equal(await failed.locator('summary .card-icon.lucide-circle-alert').count(), 1);
   }
-  async function verifyShortLayout(view, answer) {
-    await view.waitForFunction(answer => {
+  async function verifyLatestReply(view, answer, fitsOnScreen) {
+    await view.waitForFunction(({ answer, fitsOnScreen }) => {
       const log = document.querySelector('[data-testid="transcript"]');
       const row = [...log.querySelectorAll('.agent-reply')].find(node => node.textContent.includes(answer));
       if (!row) return false;
-      const bottom = row.getBoundingClientRect().bottom;
+      const reply = row.getBoundingClientRect();
       const composer = document.querySelector('form.composer').getBoundingClientRect();
-      return log.scrollHeight === log.clientHeight && bottom <= composer.top && composer.top - bottom <= 36;
-    }, answer);
+      return (!fitsOnScreen || log.scrollHeight === log.clientHeight) &&
+        log.scrollHeight - log.clientHeight - log.scrollTop <= 2 &&
+        reply.top >= log.getBoundingClientRect().top && reply.bottom <= composer.top && composer.top - reply.bottom <= 36;
+    }, { answer, fitsOnScreen });
   }
   async function narrow(view) {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
     await view.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
   }
   await verifyArchive(transcript);
-  await verifyShortLayout(page, firstAnswer);
+  await verifyLatestReply(page, firstAnswer, true);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-archive.png') });
   await narrow(page);
-  await verifyShortLayout(page, firstAnswer);
+  await verifyLatestReply(page, firstAnswer, true);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-archive-narrow.png') });
   const failedTool = transcript.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
   await failedTool.locator('summary').press('Enter');
@@ -273,7 +275,7 @@ export default function (pi) {
   await editorAfterRestart.press('Enter');
   const resumedLog = resumed.page.getByTestId('transcript');
   await resumedLog.getByText(resumedAnswer, { exact: true }).waitFor();
-  await verifyShortLayout(resumed.page, resumedAnswer);
+  await verifyLatestReply(resumed.page, resumedAnswer, false);
   releaseLongReply();
   await resumedLog.getByText(longAnswerEnd, { exact: true }).waitFor();
   await resumed.page.waitForFunction(text => {
