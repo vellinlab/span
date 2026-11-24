@@ -1,13 +1,11 @@
-import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
+import { memo, useId, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Folder } from 'lucide-react';
 import { sessionKey, sessionTitle } from './agent.js';
+import { catalogRowHeight, useCatalogViewport } from './catalog-viewport.js';
 
 export function directoryName(path) {
   return path?.split(/[\\/]/).filter(Boolean).at(-1) || path;
 }
-
-const rowHeight = 32;
 
 function catalogRows(sessions, project, archived, filter, collapsed) {
   const groups = new Map();
@@ -53,7 +51,6 @@ export const SessionCatalog = memo(function SessionCatalog({
 }) {
   const filter = query.trim().toLocaleLowerCase();
   const scrollScope = JSON.stringify([scope, archived, filter]);
-  const scroll = useRef(null);
   const prefix = useId();
   const typeahead = useRef({ text: '', time: 0 });
   const [collapsed, setCollapsed] = useState(null);
@@ -62,27 +59,12 @@ export const SessionCatalog = memo(function SessionCatalog({
     collapsed?.scope === scrollScope ? collapsed.keys : undefined), [sessions, project, archived, filter, collapsed, scrollScope]);
   const indexes = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows]);
   const active = indexes.get(activeKey);
-  const rangeExtractor = useCallback(range => {
-    const visible = defaultRangeExtractor(range);
-    if (active === undefined || visible.includes(active)) return visible;
-    return [...visible, active].sort((a, b) => a - b);
-  }, [active]);
-  const getItemKey = useCallback(index => rows[index].key, [rows]);
-  const virtual = useVirtualizer({ count: rows.length, getScrollElement: () => scroll.current,
-    getItemKey, estimateSize: index => rowHeight + (rows[index].entry && rows[index].position === rows[index].siblings ? 5 : 0),
-    overscan: 4, rangeExtractor, anchorTo: 'end', useFlushSync: false,
-    initialOffset: () => scrollPosition.current.scope === scrollScope ? scrollPosition.current.top : 0,
-  });
-
-  useLayoutEffect(() => {
-    if (scrollPosition.current.scope !== scrollScope) scrollPosition.current = { scope: scrollScope, top: 0 };
-    virtual.scrollToOffset(scrollPosition.current.top);
-  }, [scrollPosition, scrollScope, virtual]);
+  const { scroll, band, offsets, ensureVisible, visibleRange } = useCatalogViewport(rows, indexes, scrollScope, scrollPosition);
 
   function move(index) {
     const target = Math.max(0, Math.min(rows.length - 1, index));
     setActiveKey(rows[target].key);
-    virtual.scrollToIndex(target, { align: 'auto' });
+    ensureVisible(target);
   }
 
   function setExpanded(row, expanded) {
@@ -101,10 +83,10 @@ export const SessionCatalog = memo(function SessionCatalog({
 
   function onKeyDown(event) {
     if (event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;
-    const index = active ?? virtual.range?.startIndex ?? 0;
+    const index = active ?? visibleRange().start;
     const row = rows[index];
     if (!row) return;
-    const page = Math.max(1, Math.floor(scroll.current.clientHeight / rowHeight));
+    const page = Math.max(1, Math.floor(scroll.current.clientHeight / catalogRowHeight));
     switch (event.key) {
       case 'ArrowUp': move(index - 1); break;
       case 'ArrowDown': move(index + 1); break;
@@ -141,16 +123,20 @@ export const SessionCatalog = memo(function SessionCatalog({
     event.preventDefault();
   }
 
-  const mounted = virtual.getVirtualItems();
-  return <div className="side-list workspaces" data-testid="session-catalog" ref={scroll}
-    data-items={rows.length} onScroll={event => { scrollPosition.current = { scope: scrollScope, top: event.currentTarget.scrollTop }; }}>
+  const end = Math.min(band.end, rows.length);
+  const mounted = Array.from({ length: Math.max(0, end - band.start) }, (_, offset) => band.start + offset);
+  if (active !== undefined && !mounted.includes(active)) {
+    if (active < band.start) mounted.unshift(active);
+    else mounted.push(active);
+  }
+  return <div className="side-list workspaces" data-testid="session-catalog" ref={scroll} data-items={rows.length}>
     {rows.length > 0 && <div className="catalog-tree" role="tree" aria-label={archived ? '已归档会话' : '工作区会话'} tabIndex={0}
-      aria-activedescendant={active !== undefined && mounted.some(item => item.index === active) ? `${prefix}-${active}` : undefined}
+      aria-activedescendant={active === undefined ? undefined : `${prefix}-${active}`}
       onFocus={() => {
-        const { startIndex, endIndex } = virtual.range ?? { startIndex: 0, endIndex: 0 };
-        if (active >= startIndex && active <= endIndex) return;
+        const { start, end } = visibleRange();
+        if (active >= start && active <= end) return;
         const current = indexes.get(selected);
-        setActiveKey(rows[current >= startIndex && current <= endIndex ? current : startIndex]?.key ?? null);
+        setActiveKey(rows[current >= start && current <= end ? current : start]?.key ?? null);
       }} onClick={event => {
         const item = event.target.closest('[data-catalog-index]');
         if (!item) return;
@@ -158,11 +144,11 @@ export const SessionCatalog = memo(function SessionCatalog({
         event.currentTarget.focus({ preventScroll: true });
         setActiveKey(row.key);
         activate(row);
-      }} onKeyDown={onKeyDown} style={{ height: virtual.getTotalSize() }}>
-      {mounted.map(item => {
-        const row = rows[item.index];
-        return <CatalogRow key={row.key} row={row} id={`${prefix}-${item.index}`} index={item.index} top={item.start}
-          active={item.index === active} selected={row.key === selected} disabled={disabled} />;
+      }} onKeyDown={onKeyDown} style={{ height: offsets.at(-1), '--catalog-row-height': `${catalogRowHeight}px` }}>
+      {mounted.map(index => {
+        const row = rows[index];
+        return <CatalogRow key={row.key} row={row} id={`${prefix}-${index}`} index={index} top={offsets[index]}
+          active={index === active} selected={row.key === selected} disabled={disabled} />;
       })}
     </div>}
     {!rows.length && (filter || archived) && <p className="search-empty">{filter ? '没有匹配的会话' : '没有归档会话'}</p>}

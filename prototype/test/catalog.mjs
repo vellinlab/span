@@ -37,6 +37,19 @@ try {
   });
   assert.ok(hierarchy.indent >= 6 && hierarchy.selected === 'true', JSON.stringify(hierarchy));
   if (screenshot) await page.screenshot({ path: screenshot });
+  const blankJumps = await catalog.evaluate(async element => {
+    const bounds = element.getBoundingClientRect();
+    const max = element.scrollHeight - element.clientHeight;
+    const blank = [];
+    for (const fraction of [.98, .19, .68, 0]) {
+      element.scrollTop = max * fraction;
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const points = [bounds.top + 40, bounds.bottom - 40];
+      if (points.some(y => !document.elementFromPoint(bounds.left + 100, y)?.closest('[role="treeitem"]'))) blank.push(fraction);
+    }
+    return blank;
+  });
+  assert.deepEqual(blankJumps, [], 'Fast scrollbar jumps leave rendered rows on screen');
   await tree.focus();
   await tree.press('Home');
   const project = items.first();

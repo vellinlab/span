@@ -156,7 +156,7 @@ p { margin-block: 0 12px; }
 .session-search input { width: 100%; font-size: 13px; }
 .search-empty { padding: 6px 8px; color: var(--muted); font-size: 12px; }
 .side-list { overflow: auto; scrollbar-width: thin; }
-.workspaces { scrollbar-width: auto; }
+.workspaces { overflow-anchor: none; scrollbar-width: auto; }
 .workspaces::-webkit-scrollbar { width: var(--scrollbar-width); }
 .workspaces::-webkit-scrollbar-thumb { border-radius: 4px; background: #ffffff24; }
 .workspaces::-webkit-scrollbar-thumb:hover { background: #ffffff45; }
@@ -165,7 +165,7 @@ p { margin-block: 0 12px; }
 .catalog-tree [role="treeitem"] {
   position: absolute;
   inset: 0 0 auto;
-  height: 32px;
+  height: var(--catalog-row-height);
   display: flex;
   align-items: center;
   border-radius: 7px;
