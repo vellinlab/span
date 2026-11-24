@@ -213,17 +213,25 @@ fn long_reply(
         .unwrap();
     }
     answer.push_str("### 预置正文末尾\n\n");
+    let fast = gate.join("fast").is_file();
+    if fast {
+        answer.push_str("查看[后补引用][later]的链接。\n\n");
+    }
     send_delta(&answer)?;
     let mut complete = false;
     if wait_for_stream_gate(&gate.join("append"), running) {
-        for index in 1..=40 {
+        let (count, interval) = if fast { (160, 20) } else { (40, 75) };
+        for index in 1..=count {
             if !running.load(Ordering::Acquire) {
                 return Ok(());
             }
-            let fragment = format!("追加记录 {index:03}。继续核对正在生成的结果。\n\n");
+            let mut fragment = format!("追加记录 {index:03}。继续核对正在生成的结果。\n\n");
+            if fast && index == 80 {
+                fragment.push_str("[later]: https://example.com/span/reference\n\n");
+            }
             answer.push_str(&fragment);
             send_delta(&fragment)?;
-            thread::sleep(Duration::from_millis(75));
+            thread::sleep(Duration::from_millis(interval));
         }
         fs::write(gate.join("appended"), b"")?;
         complete = wait_for_stream_gate(&gate.join("finish"), running);

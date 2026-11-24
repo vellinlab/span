@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { _electron as electron } from 'playwright';
 
-const [candidate, baseline] = process.argv.slice(2);
+const following = process.argv.includes('--following');
+const [candidate, baseline] = process.argv.slice(2).filter(arg => arg !== '--following');
 const linux = process.platform === 'linux';
-const lastFragment = '追加记录 040。继续核对正在生成的结果。';
+const lastFragment = `追加记录 ${following ? '160' : '040'}。继续核对正在生成的结果。`;
 
 const settleFrame = page => page.evaluate(async () => {
   await new Promise(requestAnimationFrame);
@@ -95,6 +96,7 @@ async function check(binary, label) {
   const profile = await mkdtemp(join(tmpdir(), 'span-long-reply-'));
   let app;
   try {
+    if (following) await writeFile(join(profile, 'fast'), '');
     app = await electron.launch({
       executablePath: binary,
       args: ['--demo', '--force-device-scale-factor=1',
@@ -116,24 +118,38 @@ async function check(binary, label) {
     const heading = transcript.getByRole('heading', { name: '长回复的开头', exact: true });
     const initialTail = transcript.getByRole('heading', { name: '预置正文末尾', exact: true });
     const latest = page.getByRole('button', { name: '滚到最新消息' });
-    await initialTail.waitFor();
-    await heading.evaluate(element => {
-      const timeline = element.closest('.timeline');
-      timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 28;
+    const tailInView = () => page.waitForFunction(() => {
+      const timeline = document.querySelector('.timeline');
+      return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
     });
-    await latest.waitFor();
+    await initialTail.waitFor();
+    if (following) await tailInView();
+    else {
+      await heading.evaluate(element => {
+        const timeline = element.closest('.timeline');
+        timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 28;
+      });
+      await latest.waitFor();
+    }
     const sampleInput = linux && baseline ? await prepareInputSampling(app, page, composer) : undefined;
     await settleFrame(page);
     const headingOffset = () => heading.evaluate(element =>
       element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top);
-    const position = await headingOffset();
+    const position = following ? undefined : await headingOffset();
 
     const observation = await heading.evaluateHandle(element => {
       const parent = element.closest('.prose');
       let mutationBatches = 0;
-      const observer = new MutationObserver(() => { mutationBatches++; });
+      let lastBatch;
+      let maxBatchGapMs = 0;
+      const observer = new MutationObserver(() => {
+        mutationBatches++;
+        const now = performance.now();
+        if (lastBatch !== undefined) maxBatchGapMs = Math.max(maxBatchGapMs, now - lastBatch);
+        lastBatch = now;
+      });
       observer.observe(parent, { childList: true, subtree: true, characterData: true });
-      return () => { observer.disconnect(); return mutationBatches; };
+      return () => { observer.disconnect(); return { mutationBatches, maxBatchGapMs }; };
     });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
@@ -143,37 +159,52 @@ async function check(binary, label) {
       .match(/^Pss:\s+(\d+) kB$/m)[1]) : undefined;
     const startPssKiB = await pss();
     const start = await metrics();
+    const fragment = transcript.getByText(lastFragment, { exact: true });
     await writeFile(join(profile, 'append'), '');
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
+    if (following) {
+      await fragment.waitFor();
+      await tailInView();
+    }
     await settleFrame(page);
     const end = await metrics();
     const endPssKiB = await pss();
-    const mutationBatches = await observation.evaluate(read => read());
+    const { mutationBatches, maxBatchGapMs } = await observation.evaluate(read => read());
     await observation.dispose();
-    const offset = await headingOffset();
-    assert.ok(Math.abs(offset - position) <= 2, `Reading anchor moved from ${position} to ${offset}.`);
     if (typing) assert.equal(await composer.inputValue(), 'MM');
-    const fragment = transcript.getByText(lastFragment, { exact: true });
-    if (label === 'baseline') assert.ok(mutationBatches > 0);
-    else {
-      assert.equal(mutationBatches, 0);
-      assert.equal(await fragment.count(), 0);
+    if (following) {
+      assert.ok(mutationBatches >= 10, `Only ${mutationBatches} updates reached the viewport.`);
+      if (label === 'candidate') assert.ok(mutationBatches <= 70 && maxBatchGapMs < 350,
+        `Unexpected visible rendering cadence: ${mutationBatches} updates, gap ${maxBatchGapMs} ms.`);
+    } else {
+      const offset = await headingOffset();
+      assert.ok(Math.abs(offset - position) <= 2, `Reading anchor moved from ${position} to ${offset}.`);
+      if (label === 'baseline') assert.ok(mutationBatches > 0);
+      else {
+        assert.equal(mutationBatches, 0);
+        assert.equal(await fragment.count(), 0);
+      }
+      await initialTail.evaluate(element => {
+        const timeline = element.closest('.timeline');
+        timeline.scrollTop += element.getBoundingClientRect().bottom - timeline.getBoundingClientRect().bottom - 74;
+      });
+      await fragment.waitFor();
+      await latest.click();
+      await tailInView();
     }
 
-    await initialTail.evaluate(element => {
-      const timeline = element.closest('.timeline');
-      timeline.scrollTop += element.getBoundingClientRect().bottom - timeline.getBoundingClientRect().bottom - 74;
-    });
-    await fragment.waitFor();
-    await latest.click();
-    await page.waitForFunction(() => {
-      const timeline = document.querySelector('.timeline');
-      return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
-    });
-    assert.ok(await fragment.evaluate(element =>
-      element.getBoundingClientRect().bottom <= element.closest('.timeline').getBoundingClientRect().bottom));
+    assert.ok(await fragment.evaluate(element => {
+      const text = element.getBoundingClientRect();
+      const viewport = element.closest('.timeline').getBoundingClientRect();
+      return text.top >= viewport.top && text.bottom <= viewport.bottom;
+    }));
     await writeFile(join(profile, 'finish'), '');
     await transcript.getByText('长回复已全部生成。', { exact: true }).waitFor();
+    if (following) {
+      await tailInView();
+      assert.equal(await transcript.getByRole('link', { name: '后补引用' }).getAttribute('href'),
+        'https://example.com/span/reference');
+    }
     const link = transcript.getByRole('link', { name: '复核链接' });
     assert.equal(await link.getAttribute('href'), 'https://example.com/span');
     assert.equal(await link.evaluate(element => {
@@ -181,7 +212,7 @@ async function check(binary, label) {
       selection.selectAllChildren(element);
       return selection.toString();
     }), '复核链接');
-    return { label, mutationBatches, startPssKiB, endPssKiB, typing,
+    return { label, following, mutationBatches, maxBatchGapMs, startPssKiB, endPssKiB, typing,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,

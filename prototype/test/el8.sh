@@ -87,6 +87,8 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/covered-transcript.mjs
     /artifacts/linux/span-preview /artifacts/covered-baseline/span-preview | tee /artifacts/covered-transcript.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/long-reply-baseline/span-preview | tee /artifacts/long-reply.json
+taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
+    /artifacts/linux/span-preview /artifacts/following-reply-baseline/span-preview --following | tee /artifacts/following-reply.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/patch-view.mjs \
     /artifacts/linux/span-preview /artifacts/el8-workbench-patch.png /artifacts/covered-baseline/span-preview | tee /artifacts/patch-view.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/output-view.mjs \
