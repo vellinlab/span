@@ -87,6 +87,7 @@ function App() {
   const reasoningHadFocus = useRef(false);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
+  const commandSelection = useRef(null);
   const closeTerminal = useCallback(() => setTerminal(false), []);
   const report = useCallback(error => setError(error.message), []);
   const clearError = useCallback(() => setError(''), []);
@@ -161,6 +162,16 @@ function App() {
     setShowLatest(false);
     setCommandIndex(0);
   }, [refKey]);
+
+  useLayoutEffect(() => {
+    const button = commandSelection.current;
+    if (!button) return;
+    const list = button.parentElement;
+    const top = button.offsetTop;
+    const bottom = top + button.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+  }, [commandIndex, suggestions.length]);
 
   useLayoutEffect(() => {
     if (showReasoning) return;
@@ -256,7 +267,7 @@ function App() {
     panelScope.current++;
     setPanel(null);
     if (panelTrigger.current) {
-      (panelTrigger.current.isConnected ? panelTrigger.current : input.current)?.focus();
+      (panelTrigger.current.isConnected ? panelTrigger.current : input.current)?.focus({ preventScroll: true });
       panelTrigger.current = null;
     }
   }
@@ -780,11 +791,13 @@ function App() {
                 <button className="icon-button" type="button" aria-label="关闭错误提示" onClick={clearError}><X size={16} /></button>
               </div>}
               {loading && !rows.length && <div className="live" role="status"><i />{rememberedReading?.anchor ? '正在恢复阅读位置' : '正在加载会话'}</div>}
+              <div className="composer-overlay-anchor" aria-hidden="true" />
               <div className="composer-overlay">
                 <AgentPanel panel={panel} work={work} reasoning={reasoningDetails}
                   setPanel={value => value ? setPanel(value) : closePanel()} report={report} openSession={openRef} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}
+                    ref={index === commandIndex % suggestions.length ? commandSelection : undefined}
                     data-active={index === commandIndex % suggestions.length} onMouseDown={event => event.preventDefault()}
                     onClick={() => submit(command)}>
                     <code>{command}</code><span>{label}</span>

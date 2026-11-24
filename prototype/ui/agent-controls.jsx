@@ -111,10 +111,6 @@ function GoalPanel({ goal, action, report }) {
     event.preventDefault();
     if (objective.trim()) update({ kind: 'set', objective: objective.trim(), budget: budget === '' ? undefined : Number(budget) });
   }}>
-    {goal && <div className="panel-meta">
-      <span>{statuses[goal.status]}</span>
-      {goal.tokens != null && <span>{number.format(goal.tokens)} tokens{goal.budget != null && ` / ${number.format(goal.budget)}`}</span>}
-    </div>}
     <label>目标<textarea rows={3} value={objective} required onChange={event => { setObjective(event.target.value); setEdited(true); }} /></label>
     <label>Token 预算<input type="number" min={1} step={1} value={budget} placeholder="可选" onChange={event => { setBudget(event.target.value); setEdited(true); }} /></label>
     <div className="panel-actions">
@@ -273,16 +269,20 @@ function AgentsPanel({ work, openSession, report }) {
 export function AgentPanel({ panel, work, reasoning, setPanel, report, openSession }) {
   const close = useRef(null);
   useLayoutEffect(() => {
-    if (panel?.focus) close.current?.focus();
+    if (panel?.focus) close.current?.focus({ preventScroll: true });
   }, [panel]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
   const id = panel.kind === 'goal' || panel.kind === 'reasoning' ? `${panel.kind}-panel` : undefined;
+  const goal = panel.kind === 'goal' ? work.goal : undefined;
+  const usage = goal?.tokens == null ? '' : [goal.tokens, goal.budget].filter(value => value != null)
+    .map(value => number.format(value)).join(' / ') + ' tokens';
   return <section className="agent-panel popup-surface" id={id} data-kind={panel.kind}
     aria-label={title} onKeyDown={event => {
       if (event.key === 'Escape' && panel.focus) setPanel(null);
     }}>
     <header><strong>{title}</strong>
+      {usage && <small className="goal-usage" title={usage}>{usage}</small>}
       <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
     </header>
     <div className="agent-panel-content">

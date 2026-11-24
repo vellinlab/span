@@ -214,6 +214,43 @@ try {
   await composer.fill('/goal pause');
   await composer.press('Enter');
   await goal.getByText('已暂停').waitFor();
+  const goalWindowSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
+  await composer.fill(Array(12).fill('保留长草稿，准备继续核对会话。').join('\n'));
+  await goal.press('Enter');
+  const compactGoal = await goalPanel.evaluate(panel => {
+    const bounds = panel.getBoundingClientRect();
+    const timeline = document.querySelector('.timeline').getBoundingClientRect();
+    const card = document.querySelector('.goal-strip').getBoundingClientRect();
+    const close = panel.querySelector('header button').getBoundingClientRect();
+    const body = panel.querySelector('.agent-panel-content');
+    const hit = document.elementFromPoint(close.left + close.width / 2, close.top + close.height / 2);
+    return { fits: bounds.top >= timeline.top + 4 && bounds.bottom < card.top,
+      scrolls: body.scrollHeight > body.clientHeight, closeVisible: panel.querySelector('header button').contains(hit) };
+  });
+  assert.deepEqual(compactGoal, { fits: true, scrolls: true, closeVisible: true });
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact.png') });
+  const saveGoal = goalPanel.getByRole('button', { name: '保存目标' });
+  await saveGoal.scrollIntoViewIfNeeded();
+  assert.ok(await saveGoal.evaluate(button => {
+    const bounds = button.getBoundingClientRect();
+    return button.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+  }));
+  await dismissGoal.press('Escape');
+  await goalPanel.waitFor({ state: 'detached' });
+  assert.ok(await goal.evaluate(button => button === document.activeElement));
+  await composer.fill('/');
+  const commandList = page.locator('.command-list');
+  await commandList.waitFor();
+  for (let index = 1, count = await commandList.locator('button').count(); index < count; index++) await composer.press('ArrowDown');
+  assert.ok(await commandList.locator('button[data-active="true"]').evaluate(button => {
+    const item = button.getBoundingClientRect(), list = button.parentElement.getBoundingClientRect();
+    return item.top >= list.top && item.bottom <= list.bottom;
+  }));
+  await composer.press('Escape');
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), goalWindowSize);
+  await page.waitForFunction(([width, height]) => Math.abs(innerWidth - width) <= 2 && Math.abs(innerHeight - height) <= 2, goalWindowSize);
   await composer.fill('验证流式会话与底部终端。');
   await composer.press('Enter');
   const liveReasoning = page.getByRole('button', { name: '实时推理摘要' });
