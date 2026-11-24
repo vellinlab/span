@@ -98,6 +98,8 @@ async function check(binary, label, following) {
 
     return { label, following, dom, startPssKiB, endPssKiB,
       wallMs: (end.Timestamp - start.Timestamp) * 1000,
+      rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
+      mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       taskMs: (end.TaskDuration - start.TaskDuration) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,
       layouts: end.LayoutCount - start.LayoutCount };
