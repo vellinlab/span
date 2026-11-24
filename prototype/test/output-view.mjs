@@ -147,6 +147,16 @@ async function check(binary, legacy, screenshot) {
     await longSummary.press('Enter');
     await original.waitFor();
     assert.equal(await original.textContent(), fullCommand);
+    assert.ok(await longCard.evaluate(element => {
+      const title = element.querySelector('.card-title').getBoundingClientRect();
+      const body = element.querySelector('.card-body');
+      const command = element.querySelector('.command-text');
+      const output = element.querySelector('.output-scroll');
+      const commandStyle = getComputedStyle(command);
+      const commandTextStart = command.getBoundingClientRect().left + parseFloat(commandStyle.paddingLeft);
+      return Math.abs(title.left - commandTextStart) <= 1 && getComputedStyle(body).backgroundColor === 'rgba(0, 0, 0, 0)' &&
+        commandStyle.backgroundColor === getComputedStyle(output).backgroundColor;
+    }), 'The full command aligns with its title and the raw text surfaces have no outer fill');
     const wrappedPath = longCard.locator('.output-directory code');
     const pathText = await wrappedPath.textContent();
     assert.match(pathText.replaceAll('\\', '/'), /\/sample\/validation environment\/workbench-desktop\/artifact review$/);
