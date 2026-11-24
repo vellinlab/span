@@ -6,6 +6,7 @@ import { burstMarker, terminalBurst } from './terminal-fixture.mjs';
 
 const [candidate, baseline] = process.argv.slice(2);
 const maxPending = 256 * 1024;
+const nearlyFull = maxPending - 16 * 1024;
 const windows = process.platform === 'win32';
 const burst = terminalBurst(windows) + '\r';
 
@@ -87,7 +88,7 @@ async function measure(binary, controlled) {
   try {
     await start();
     await send('terminal.write', { data: burst });
-    await until(() => failure || count >= 192 * 1024, diagnostic('The terminal burst did not reach 192 KiB.'));
+    await until(() => failure || count >= nearlyFull, diagnostic('The terminal burst did not reach the start of the final output chunk.'));
     await delay(600);
     if (failure) throw failure;
     const withheld = count;
@@ -103,12 +104,10 @@ async function measure(binary, controlled) {
     complete = false;
     await start();
     await send('terminal.write', { data: burst });
-    await until(() => failure || count >= 192 * 1024, diagnostic('The reopened terminal did not produce its first window.'));
-    await delay(350);
-    const nextWindow = count;
+    await until(() => failure || count >= nearlyFull, diagnostic('The reopened terminal did not fill its first window.'));
     await send('terminal.ack', { generation: generation - 1, bytes: maxPending });
-    await delay(350);
-    assert.equal(count, nextWindow, 'An acknowledgment from the closed terminal released the reopened stream.');
+    await delay(1000);
+    assert.ok(count <= maxPending, `A stale acknowledgment released the reopened stream: ${count} bytes.`);
 
     ack = true;
     await send('terminal.ack', { bytes: count });
