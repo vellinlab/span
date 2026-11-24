@@ -1,5 +1,6 @@
 const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
+const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises');
 const { createInterface } = require('node:readline');
 const path = require('node:path');
 
@@ -13,8 +14,27 @@ const allowed = new Set([
 ]);
 const terminalEvents = new Set(['terminal', 'terminal-error', 'terminal-closed']);
 const maxClipboardLength = 64 * 1024 * 1024;
+const maxScreenshotBytes = 4 * 1024 * 1024;
 const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
 const selectedImages = new Set();
+const stagedScreenshots = new Set();
+const screenshotSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+let screenshotNumber = 0;
+
+const screenshotRoot = () => path.join(app.getPath('userData'), 'screenshots');
+
+function isStoredScreenshot(file) {
+  const directory = path.dirname(file);
+  return path.dirname(directory) === screenshotRoot() &&
+    /^paste-[a-z0-9]{6}$/i.test(path.basename(directory)) &&
+    /^截图 \d+\.png$/.test(path.basename(file));
+}
+
+async function discardScreenshot(file) {
+  if (!stagedScreenshots.has(file)) return;
+  await rm(path.dirname(file), { recursive: true, force: true });
+  stagedScreenshots.delete(file);
+}
 
 function rememberImage(file) {
   const normalized = path.normalize(file);
@@ -142,10 +162,51 @@ ipcMain.handle('span:choose-files', async event => {
   });
 });
 
+ipcMain.handle('span:stage-screenshot', async (event, bytes) => {
+  if (!trusted(event) || !(bytes instanceof ArrayBuffer)) throw new Error('无效的工作台请求。');
+  if (bytes.byteLength > maxScreenshotBytes) {
+    throw new Error('截图不能超过 4 MiB。');
+  }
+  const png = Buffer.from(bytes);
+  if (!png.subarray(0, screenshotSignature.length).equals(screenshotSignature)) {
+    throw new Error('剪贴板中没有可用的 PNG 图片。');
+  }
+  const root = screenshotRoot();
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const directory = await mkdtemp(path.join(root, 'paste-'));
+  const name = `截图 ${++screenshotNumber}.png`;
+  const file = path.join(directory, name);
+  try {
+    await writeFile(file, png, { flag: 'wx', mode: 0o600 });
+    stagedScreenshots.add(file);
+    if (!window || window.isDestroyed() || closing) {
+      await discardScreenshot(file);
+      return null;
+    }
+    return { path: file, name };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+});
+
+ipcMain.handle('span:discard-screenshot', (event, file) => {
+  if (trusted(event)) return discardScreenshot(file);
+});
+
+ipcMain.on('span:retain-screenshots', (event, files) => {
+  if (!trusted(event) || !Array.isArray(files) || files.length > 6) return;
+  for (const file of files) stagedScreenshots.delete(file);
+});
+
 ipcMain.handle('span:preview-image', async (event, file) => {
   if (!trusted(event) || typeof file !== 'string' || file.includes('\0') || !path.isAbsolute(file) ||
     !imageExtensions.includes(path.extname(file).slice(1).toLowerCase())) throw new Error('无效的图片位置。');
   const normalized = path.normalize(file);
+  if (isStoredScreenshot(normalized)) {
+    const cwd = screenshotRoot();
+    return request('files.preview', { cwd, path: path.relative(cwd, normalized), imageOnly: true });
+  }
   if (!selectedImages.has(normalized)) {
     const result = await dialog.showOpenDialog(window, {
       title: '选择会话中的原图',
@@ -211,6 +272,13 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => app.quit());
+let cleaningScreenshots = false;
+app.on('will-quit', event => {
+  if (cleaningScreenshots || !stagedScreenshots.size) return;
+  event.preventDefault();
+  cleaningScreenshots = true;
+  Promise.allSettled([...stagedScreenshots].map(discardScreenshot)).then(() => app.quit());
+});
 app.on('before-quit', event => {
   if (closing || !core || core.exitCode !== null || core.stdin.destroyed) return;
   event.preventDefault();

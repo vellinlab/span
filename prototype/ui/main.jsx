@@ -59,6 +59,7 @@ function App() {
   const [showLatest, setShowLatest] = useState(false);
   const { drafts, edit, move, clearSent } = useDrafts();
   const [dispatchedDraft, setDispatchedDraft] = useState();
+  const [pasting, setPasting] = useState(null);
   const [suggesting, setSuggesting] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const [panel, setPanel] = useState(null);
@@ -128,6 +129,7 @@ function App() {
   const localFiles = Boolean(api?.localFileReferences && window.span.chooseFiles);
   const canSendImages = Boolean(localFiles && api.localImageInputs && !running && selectedModel()?.inputs.includes('image'));
   const canAttach = localFiles && connection === 'ready' && !loading && !interaction && (!running || canSteer || canQueue);
+  const pastingScreenshot = pasting === composerKey;
   const canSendDraft = Boolean(draft.trim() || files.length);
   const commands = agentCommands(api, work.models, work.options);
   const suggestions = suggesting && !files.length && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
@@ -309,7 +311,7 @@ function App() {
 
   const latestWork = useRef();
   latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch,
-    composerKey, draft, files, localFiles, canSendImages };
+    composerKey, draft, files, canAttach, canSendImages };
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
   const loadCatalogPage = useCallback(() => {
@@ -516,7 +518,7 @@ function App() {
 
   async function submit(raw = draft, delivery = running && !canSteer && canQueue ? 'followUp' : 'steer') {
     const text = raw.trim();
-    if ((!text && !files.length) || connection !== 'ready' || loading) return;
+    if ((!text && !files.length) || connection !== 'ready' || loading || pastingScreenshot) return;
     const submitted = raw === draft ? visibleDraft : setDraft(raw);
     const scope = work.timelineScope();
     setSuggesting(false);
@@ -534,6 +536,8 @@ function App() {
       if (!known || nativePrompt) prepareMarkdown().catch(() => {});
       const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '')
         : await work.send(text, effectiveOptions(), delivery, () => {
+          const screenshots = files.filter(file => file.screenshot).map(file => file.path);
+          if (screenshots.length) window.span.retainScreenshots(screenshots);
           dispatched = true;
           setDispatchedDraft(submitted);
         }, files);
@@ -545,6 +549,21 @@ function App() {
     }
   }
 
+  function appendFiles(current, picked) {
+    const selected = new Map(current.files.map(file => [file.path, file]));
+    for (const file of picked) {
+      if (!selected.has(file.path)) selected.set(file.path, {
+        ...file, kind: current.canSendImages && imageFileName(file.name) ? 'image' : 'file',
+      });
+      if (selected.size > maxFileReferences) throw new Error(`最多附加 ${maxFileReferences} 个文件。`);
+    }
+    const attachments = [...selected.values()];
+    edit(current.composerKey, current.draft, [
+      ...attachments.filter(file => file.kind !== 'image'),
+      ...attachments.filter(file => file.kind === 'image'),
+    ]);
+  }
+
   async function addFiles() {
     if (!canAttach || choosingFiles.current) return;
     const scope = work.timelineScope();
@@ -552,24 +571,46 @@ function App() {
     try {
       const picked = await window.span.chooseFiles();
       const current = latestWork.current;
-      if (!picked.length || !current.localFiles || current.composerKey !== composerKey || scope !== work.timelineScope()) return;
-      const selected = new Map(current.files.map(file => [file.path, file]));
-      for (const file of picked) {
-        if (!selected.has(file.path)) selected.set(file.path, {
-          ...file, kind: current.canSendImages && imageFileName(file.name) ? 'image' : 'file',
-        });
-        if (selected.size > maxFileReferences) throw new Error(`最多附加 ${maxFileReferences} 个文件。`);
-      }
-      const attachments = [...selected.values()];
-      edit(composerKey, current.draft, [
-        ...attachments.filter(file => file.kind !== 'image'),
-        ...attachments.filter(file => file.kind === 'image'),
-      ]);
+      if (!picked.length || !current.canAttach || current.composerKey !== composerKey || scope !== work.timelineScope()) return;
+      appendFiles(current, picked);
       input.current?.focus();
     } catch (error) {
       if (scope === work.timelineScope()) report(error);
     } finally {
       choosingFiles.current = false;
+    }
+  }
+
+  async function pasteScreenshot(event) {
+    const clipboard = event.clipboardData;
+    if (!canAttach || !canSendImages || !window.span.stageScreenshot || clipboard.getData('text/plain')) return;
+    const image = [...clipboard.files].find(file => file.type === 'image/png');
+    if (!image) return;
+    event.preventDefault();
+    if (choosingFiles.current) return;
+    if (files.length >= maxFileReferences || image.size > 4 * 1024 * 1024) {
+      report(new Error(files.length >= maxFileReferences
+        ? `最多附加 ${maxFileReferences} 个文件。` : '截图不能超过 4 MiB。'));
+      return;
+    }
+    const scope = work.timelineScope();
+    choosingFiles.current = true;
+    setPasting(composerKey);
+    let staged;
+    try {
+      staged = await window.span.stageScreenshot(await image.arrayBuffer());
+      const current = latestWork.current;
+      if (!staged || !current.canAttach || !current.canSendImages ||
+        current.composerKey !== composerKey || scope !== work.timelineScope()) return;
+      appendFiles(current, [{ ...staged, screenshot: true }]);
+      staged = null;
+      clearError();
+    } catch (error) {
+      if (scope === work.timelineScope()) report(error);
+    } finally {
+      if (staged) window.span.discardScreenshot(staged.path).catch(() => {});
+      choosingFiles.current = false;
+      setPasting(null);
     }
   }
 
@@ -764,12 +805,14 @@ function App() {
                     </>}
                     <button type="button" className="attachment-remove" aria-label={'移除附件 · ' + file.name} onClick={() => {
                       edit(composerKey, draft, files.filter(other => other.path !== file.path));
+                      if (file.screenshot) window.span.discardScreenshot(file.path).catch(report);
                       input.current?.focus();
                     }}><X size={13} /></button>
                   </li>)}
                 </ul>}
                 <textarea ref={input} rows={1} placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '描述要完成的任务…'}
                   aria-label="消息" value={draft} onFocus={() => setSuggesting(true)} onBlur={() => setSuggesting(false)}
+                  onPaste={pasteScreenshot}
                   onChange={event => {
                     setDraft(event.target.value);
                     setSuggesting(true);
@@ -777,15 +820,16 @@ function App() {
                   }} onKeyDown={textareaKey} />
                 <div className="composer-bar">
                   {localFiles && <button type="button" className="icon-button composer-attach" aria-label="添加本机文件"
-                    title={canSendImages ? '添加本机文件，支持的图片会作为图片发送' : '添加本机文件'}
-                    disabled={!canAttach} onClick={addFiles}><Paperclip size={16} /></button>}
+                    title={canSendImages ? '添加本机文件，也可在输入框粘贴截图' : '添加本机文件'}
+                    disabled={!canAttach || pastingScreenshot} onClick={addFiles}><Paperclip size={16} /></button>}
                   <button type="button" className="composer-control connection" aria-label="主机" data-route={route || undefined}
                     title={[backendName, host, connectionLabel, routeLabels[route]].filter(Boolean).join(' · ')}
                     onClick={showConnection}>
                     <i className={connection} /><span>{backendName} · {host}</span><ChevronDown size={12} />
                   </button>
                   <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel :
-                    interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' : running && !showReasoning ? '正在处理' : ''}</span>
+                    interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' :
+                      pastingScreenshot ? '正在添加截图' : running && !showReasoning ? '正在处理' : ''}</span>
                   {showLatest && rows.length > 0 && <button type="button" className="icon-button jump-latest" title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
                     scroll.current.scrollTop = scroll.current.scrollHeight;
                   }}><ArrowDown size={16} /></button>}
@@ -794,7 +838,7 @@ function App() {
                     onClick={() => work.stop().catch(report)}><Square size={13} fill="currentColor" /></button>}
                   {(!running || ((canSteer || canQueue) && canSendDraft)) && <button className="send" type="submit" aria-label={running ? canSteer ? '追加' : '排队' : '发送'}
                     title={canSteer && canQueue ? 'Enter 追加，Alt+Enter 排队' : undefined}
-                    disabled={!canSendDraft || connection !== 'ready' || loading}><ArrowUp size={16} /></button>}
+                    disabled={!canSendDraft || connection !== 'ready' || loading || pastingScreenshot}><ArrowUp size={16} /></button>}
                 </div>
               </form>
             </div>

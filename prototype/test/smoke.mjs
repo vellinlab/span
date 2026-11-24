@@ -1,9 +1,10 @@
 import { _electron as electron } from 'playwright';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
+import { pasteNativeImage, samplePng } from './clipboard-image.mjs';
 import { burstMarker, terminalBurst } from './terminal-fixture.mjs';
 
 const [binary, screenshot, renderer] = process.argv.slice(2);
@@ -555,8 +556,7 @@ try {
     const image = join(profile, imageName);
     const removedName = '较长文件名用于核对会话附件的省略和键盘移除.txt';
     const removed = join(profile, removedName);
-    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFUlEQVR4nGPUqihkYGBgYGBgYoABABNLAReRfidRAAAAAElFTkSuQmCC', 'base64');
-    await Promise.all([writeFile(reference, '附件验收'), writeFile(removed, '这份文件应从草稿移除'), writeFile(image, png)]);
+    await Promise.all([writeFile(reference, '附件验收'), writeFile(removed, '这份文件应从草稿移除'), writeFile(image, samplePng)]);
     const pick = async paths => {
       await app.evaluate(({ dialog }, filePaths) => {
         dialog.showOpenDialog = async (_window, options) => ({
@@ -583,12 +583,31 @@ try {
     assert.ok(await composer.evaluate(element => document.activeElement === element));
     assert.equal(await draftFiles.getByRole('listitem').count(), 2);
     assert.equal(await draftFiles.getByText(fileName, { exact: true }).getAttribute('title'), reference);
+    await pasteNativeImage(app, composer);
+    const pasted = draftFiles.getByRole('button', { name: '预览图片 · 截图 1.png', exact: true });
+    await pasted.waitFor();
+    assert.equal(await composer.inputValue(), retryDraft);
+    await app.evaluate(({ BrowserWindow, clipboard }) => {
+      clipboard.writeText('继续核对');
+      BrowserWindow.getAllWindows()[0].webContents.paste();
+    });
+    await page.waitForFunction(() => document.querySelector('.composer textarea').value.includes('继续核对'));
+    await composer.fill(retryDraft);
+    assert.equal(await draftFiles.getByRole('listitem').count(), 3);
+    await draftFiles.getByRole('button', { name: '移除附件 · 截图 1.png', exact: true }).press('Enter');
+    await pasted.waitFor({ state: 'detached' });
+    assert.ok(await composer.evaluate(element => document.activeElement === element));
+    await pasteNativeImage(app, composer);
+    const retryScreenshot = draftFiles.getByRole('button', { name: '预览图片 · 截图 2.png', exact: true });
+    await retryScreenshot.waitFor();
+    assert.equal((await readdir(join(profile, 'screenshots'))).length, 1);
     await page.getByTestId('session-catalog').getByRole('treeitem', { name: previousTitle, exact: true }).click();
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
     assert.equal(await draftFiles.count(), 0);
     assert.equal(await composer.inputValue(), '这段草稿留在原会话。');
     await page.getByRole('button', { name: /新会话/ }).click();
     await draftFiles.getByText(fileName, { exact: true }).waitFor();
+    await retryScreenshot.waitFor();
     assert.equal(await composer.inputValue(), retryDraft);
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-composer-files.png') });
   }
@@ -603,6 +622,7 @@ try {
   if (!process.env.SPAN_TEST_SSH_ALIAS) {
     const sentFiles = transcript.getByRole('list', { name: '已发送的附件' });
     await sentFiles.getByText(fileName, { exact: true }).waitFor();
+    await sentFiles.getByRole('button', { name: '预览图片 · 截图 2.png', exact: true }).waitFor();
     const sentImage = sentFiles.getByRole('button', { name: previewImageName, exact: true });
     await sentImage.waitFor();
     assert.equal(await transcript.getByText('Span 附件路径', { exact: false }).count(), 0);

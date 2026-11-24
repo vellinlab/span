@@ -191,6 +191,11 @@ declare global {
     span: {
       request(method: string, params?: Record<string, unknown>): Promise<any>;
       workspace(choose?: boolean): Promise<any>;
+      chooseFiles(): Promise<{ path: string; name: string }[]>;
+      stageScreenshot(bytes: ArrayBuffer): Promise<{ path: string; name: string } | null>;
+      discardScreenshot(path: string): Promise<void>;
+      retainScreenshots(paths: string[]): void;
+      previewImage(path: string): Promise<{ kind: 'image'; mime: string; data: string } | null>;
       openLink(url: string): Promise<void>;
       onEvent(listener: (packet: { event: string; generation: number; data: any }) => void): () => void;
     };

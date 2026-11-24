@@ -77,9 +77,9 @@ class Responses(BaseHTTPRequestHandler):
         elif latest_prompt == IMAGE_PROMPT:
             message = next(item for item in reversed(inputs) if item.get("role") == "user")
             images = [part for part in message["content"] if part.get("type") == "input_image"]
-            if len(images) != 1 or not images[0].get("image_url", "").startswith("data:image/"):
-                raise ValueError("The selected local image did not reach the model as image input")
-            item = self.message("preview-image-message", "Span preview sent an image.")
+            if len(images) != 2 or not all(part.get("image_url", "").startswith("data:image/") for part in images):
+                raise ValueError("The selected and pasted images did not both reach the model as image inputs")
+            item = self.message("preview-image-message", "Span preview sent two images.")
         else:
             raise ValueError("Unexpected prompt in request")
         response_id = f"fixture-{self.server.responses + 1}"

@@ -1,13 +1,14 @@
 import { _electron as electron } from 'playwright';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
+import { pasteNativeImage, samplePng } from './clipboard-image.mjs';
 
 const args = process.argv.slice(2);
 const [binary, route = 'stdio', ssh] = args.filter(arg => arg !== '--image');
 const imageTest = args.includes('--image');
-const expected = imageTest ? 'Span preview sent an image.' : 'Span preview is connected.';
+const expected = imageTest ? 'Span preview sent two images.' : 'Span preview is connected.';
 const imageName = '会话验收.png';
 const profile = await mkdtemp(join(tmpdir(), 'span-real-'));
 const image = join(profile, imageName);
@@ -37,15 +38,15 @@ try {
     await vision.waitFor({ state: 'attached' });
     await model.selectOption('gpt-6.2-sol');
     await page.getByRole('button', { name: '关闭面板' }).click();
-    await writeFile(image, Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFUlEQVR4nGPUqihkYGBgYGBgYoABABNLAReRfidRAAAAAElFTkSuQmCC',
-      'base64',
-    ));
+    await writeFile(image, samplePng);
     await app.evaluate(({ dialog }, image) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [image] });
     }, image);
     await page.getByRole('button', { name: '添加本机文件' }).click();
-    await page.getByRole('list', { name: '待发送的附件' }).getByRole('button', { name: '预览图片 · ' + imageName }).waitFor();
+    const draft = page.getByRole('list', { name: '待发送的附件' });
+    await draft.getByRole('button', { name: '预览图片 · ' + imageName }).waitFor();
+    await pasteNativeImage(app, page.getByRole('textbox', { name: '消息' }));
+    await draft.getByRole('button', { name: '预览图片 · 截图 1.png', exact: true }).waitFor();
   }
   await page.getByRole('textbox', { name: '消息' }).fill(imageTest ? 'Check the preview image.' : 'Check the preview connection.');
   await page.getByRole('button', { name: '发送', exact: true }).click();
@@ -69,7 +70,13 @@ try {
   assert.equal(await catalog.getByText('搜索失败', { exact: true }).count(), 0);
   await search.fill(`${title} absent`);
   await catalog.getByRole('status').filter({ hasText: '没有匹配的会话' }).waitFor();
+  if (imageTest) {
+    await pasteNativeImage(app, composer);
+    await page.getByRole('list', { name: '待发送的附件' })
+      .getByRole('button', { name: '预览图片 · 截图 2.png', exact: true }).waitFor();
+  }
   await app.close();
+  if (imageTest) assert.equal((await readdir(join(profile, 'screenshots'))).length, 1);
   app = await open();
   const resumed = await app.firstWindow();
   await resumed.locator(`.connection[data-route="${route}"]`).filter({ has: resumed.locator('i.ready') })
@@ -77,7 +84,10 @@ try {
   await resumed.locator('.breadcrumb strong').getByText(title, { exact: true }).waitFor();
   await resumed.getByTestId('transcript').getByText(expected, { exact: true }).waitFor();
   if (imageTest) {
-    const attachment = resumed.getByRole('list', { name: '已发送的附件' }).getByRole('button', { name: '预览图片 · ' + imageName });
+    const attachments = resumed.getByRole('list', { name: '已发送的附件' });
+    const attachment = attachments.getByRole('button', { name: '预览图片 · ' + imageName });
+    const pasted = attachments.getByRole('button', { name: '预览图片 · 截图 1.png', exact: true });
+    const closePreview = resumed.locator('#file-preview').getByRole('button', { name: '关闭预览' });
     await app.evaluate(({ dialog }, { file, name }) => {
       let choices = 0;
       dialog.showOpenDialog = async (_window, options) => {
@@ -85,14 +95,18 @@ try {
         return ++choices === 1 ? { canceled: true, filePaths: [] } : { canceled: false, filePaths: [file] };
       };
     }, { file: image, name: imageName });
+    await pasted.press('Enter');
+    await resumed.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
+    await closePreview.press('Escape');
+    assert.ok(await pasted.evaluate(element => document.activeElement === element));
     await attachment.press('Enter');
     assert.equal(await resumed.getByRole('complementary', { name: '文件预览' }).count(), 0);
     await attachment.press('Enter');
     await resumed.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
-    await resumed.locator('#file-preview').getByRole('button', { name: '关闭预览' }).press('Escape');
+    await closePreview.press('Escape');
     assert.ok(await attachment.evaluate(element => document.activeElement === element));
   }
-  console.log(`Verified real Codex on ${ssh ? 'SSH' : 'the local host'} using ${route} transport, including automatic session restore${imageTest ? ' with a native image' : ''}.`);
+  console.log(`Verified real Codex on ${ssh ? 'SSH' : 'the local host'} using ${route} transport, including automatic session restore${imageTest ? ' with selected and pasted images' : ''}.`);
 } finally {
   await app?.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });
