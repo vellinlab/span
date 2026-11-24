@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
 
 const following = process.argv.includes('--following');
@@ -24,17 +28,39 @@ async function waitForMarker(file) {
   throw Error('The long-reply fixture did not publish all fragments.');
 }
 
-async function prepareInputSampling(app, page, composer) {
-  const box = await composer.boundingBox();
-  const area = { x: Math.ceil(box.x), y: Math.ceil(box.y), width: 56, height: 24 };
+async function observeDesktopDraft(app, area) {
+  const origin = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentBounds());
+  const script = fileURLToPath(new URL('./observe-draft-x11.py', import.meta.url));
+  const observer = spawn('python3.9', [script, origin.x + area.x, origin.y + area.y, area.width, area.height],
+    { stdio: ['pipe', 'pipe', 'inherit'] });
+  await once(observer, 'spawn');
+  const lines = createInterface({ input: observer.stdout });
+  const replies = lines[Symbol.asyncIterator]();
+  return {
+    async request(command) {
+      observer.stdin.write(command + '\n');
+      const { value, done } = await replies.next();
+      assert.ok(!done, 'The X11 draft observer exited before acknowledging ' + command);
+      return JSON.parse(value);
+    },
+    close() {
+      lines.close();
+      observer.kill();
+    },
+  };
+}
+
+async function prepareInputSampling(app, page, composer, area, desktop) {
   await composer.evaluate(element => { element.style.caretColor = 'transparent'; });
   const pixels = async value => {
     await composer.fill(value);
     await settleFrame(page);
-    return app.evaluate(async ({ BrowserWindow }, rect) => {
+    const captured = await app.evaluate(async ({ BrowserWindow }, rect) => {
       const capture = await BrowserWindow.getAllWindows()[0].webContents.capturePage(rect);
       return capture.toBitmap().toString('hex');
     }, area);
+    if (desktop) await desktop.request(value);
+    return captured;
   };
   const inserted = await pixels('MMW');
   const removed = await pixels('MM');
@@ -83,11 +109,18 @@ async function prepareInputSampling(app, page, composer) {
     }
   }), { append, expected: append ? inserted : removed });
   // Verify both paint events and exact pixels before recording timed inputs.
+  if (desktop) await desktop.request('observe');
   await input(true);
   await input(false);
+  if (desktop) {
+    await settleFrame(page);
+    const warmup = await desktop.request('finish');
+    assert.deepEqual(warmup.edits.map(edit => edit.value), ['MMW', 'MM']);
+  }
   return async () => {
     const startFrames = await app.evaluate(() => globalThis.spanLongReplyInput.frames);
     await composer.evaluate(element => { element.spanInputStages.length = 0; });
+    if (desktop) await desktop.request('observe');
     const samples = [];
     for (let index = 0; index < 14; index++) {
       await delay(index % 2 ? 139 : 73);
@@ -100,20 +133,31 @@ async function prepareInputSampling(app, page, composer) {
     await settleFrame(page);
     const received = await composer.evaluate(element => element.spanInputStages);
     assert.deepEqual(received.map(event => event.value), samples.map((_, index) => index % 2 ? 'MM' : 'MMW'));
+    const desktopPaints = desktop && await desktop.request('finish');
+    if (desktopPaints) assert.deepEqual(desktopPaints.edits.map(edit => edit.value), received.map(event => event.value));
     const stages = samples.map(({ sentAt }, index) => {
       const { receivedAt, frameRequestedAt } = received[index];
       assert.ok(Number.isFinite(frameRequestedAt), 'Each edit must reach a renderer animation frame.');
-      return { inputMs: receivedAt - sentAt, animationFrameMs: frameRequestedAt - sentAt };
+      return {
+        inputMs: receivedAt - sentAt,
+        animationFrameMs: frameRequestedAt - sentAt,
+        desktopMs: desktopPaints ? desktopPaints.edits[index].shownAt - sentAt : undefined,
+      };
     });
     const latencies = samples.map(({ latency }) => latency);
-    const sorted = [...latencies].sort((a, b) => a - b);
-    return { samples: latencies, stages, p95Ms: sorted[Math.ceil(sorted.length * .95) - 1], observedFrames: frames - startFrames };
+    const p95 = values => [...values].sort((a, b) => a - b)[Math.ceil(values.length * .95) - 1];
+    return {
+      samples: latencies, stages, p95Ms: p95(latencies),
+      observedFrames: frames - startFrames, desktopCaptures: desktopPaints?.captures,
+      desktopP95Ms: desktopPaints ? p95(stages.map(stage => stage.desktopMs)) : undefined,
+    };
   };
 }
 
 async function check(binary, label) {
   const profile = await mkdtemp(join(tmpdir(), 'span-long-reply-'));
   let app;
+  let desktop;
   try {
     if (following) await writeFile(join(profile, 'fast'), '');
     app = await electron.launch({
@@ -150,7 +194,13 @@ async function check(binary, label) {
       });
       await latest.waitFor();
     }
-    const sampleInput = linux && baseline ? await prepareInputSampling(app, page, composer) : undefined;
+    let sampleInput;
+    if (linux && baseline) {
+      const box = await composer.boundingBox();
+      const area = { x: Math.ceil(box.x), y: Math.ceil(box.y), width: 56, height: 24 };
+      if (following) desktop = await observeDesktopDraft(app, area);
+      sampleInput = await prepareInputSampling(app, page, composer, area, desktop);
+    }
     await settleFrame(page);
     const headingOffset = () => heading.evaluate(element =>
       element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top);
@@ -237,6 +287,7 @@ async function check(binary, label) {
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,
       layouts: end.LayoutCount - start.LayoutCount };
   } finally {
+    desktop?.close();
     await app?.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 3 });
   }
