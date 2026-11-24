@@ -333,7 +333,8 @@ pub fn run() -> Result<()> {
                         &output,
                         "item/completed",
                         json!({"threadId":THREAD,"turnId":turn,"item":{"type":"dynamicToolCall","id":format!("{turn}-tool"),
-                            "tool":"核对异常项","status":"completed","output":"  发现一项配置异常。\n"}}),
+                            "tool":"核对异常项","status":"completed",
+                            "output":format!("  发现一项配置异常。\n{}", "  保留后续检查记录。\n".repeat(18))}}),
                     )?;
                     notice(
                         &output,

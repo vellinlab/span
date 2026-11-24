@@ -373,13 +373,13 @@ p { margin-block: 0 12px; }
 .card-path { display: block; overflow-wrap: anywhere; color: var(--muted); padding: 3px 0; font-size: 12px; }
 .tool-output-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .tool-output-heading .icon-button { width: 26px; height: 26px; }
+.card-body :is(.text-scroll, .output-scroll) { max-height: clamp(72px, calc(100cqh - 145px), 250px); }
 .card-body .output-scroll { padding: 4px 8px; border-radius: 4px; background: var(--canvas); scrollbar-width: thin; }
 .diff-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
 .diff-toolbar :is(.card-path, select) { flex: 1; min-width: 0; }
 .diff-toolbar select { font: 12px/18px var(--mono); padding: 3px 6px; }
 .diff-toolbar > button { margin-inline-start: auto; }
 .card-body .text-scroll {
-  max-height: clamp(72px, calc(100cqh - 145px), 250px);
   padding: 0;
   border-radius: 4px;
   background: var(--canvas);

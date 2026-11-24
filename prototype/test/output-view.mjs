@@ -6,6 +6,7 @@ import { _electron as electron } from 'playwright';
 
 const [candidate, screenshot, baseline] = process.argv.slice(2);
 const lastLine = 'warning: 已核对全部命令输出。';
+const shortResult = '  发现一项配置异常。\n' + '  保留后续检查记录。\n'.repeat(18);
 
 async function check(binary, legacy, screenshot) {
   const profile = await mkdtemp(join(tmpdir(), 'span-output-'));
@@ -89,12 +90,17 @@ async function check(binary, legacy, screenshot) {
     await viewport.waitFor({ state: 'detached' });
     const shortTool = timeline.locator('[data-card="tool"]').filter({ hasText: '核对异常项' });
     await shortTool.locator('summary').click();
-    assert.equal(await shortTool.locator('pre').textContent(), '  发现一项配置异常。\n');
+    const shortOutput = shortTool.locator('pre');
+    assert.equal(await shortOutput.textContent(), shortResult);
+    assert.ok(await shortOutput.evaluate(element => {
+      const available = Math.max(72, element.closest('.timeline').clientHeight - 145);
+      return element.scrollHeight > element.clientHeight && element.clientHeight <= available + 1;
+    }));
     assert.equal(await shortTool.locator('.output-line').count(), 0);
     assert.equal(await shortTool.getByRole('navigation').count(), 0);
     await shortTool.getByRole('button', { name: '复制输出' }).click();
     await shortTool.locator('[title="已复制输出"]').waitFor();
-    assert.equal(await readClipboard(), '  发现一项配置异常。\n');
+    assert.equal(await readClipboard(), shortResult);
     return { mountedAtStart, mountedAtEnd, rawLines: 20_001, rawCharacters: raw.length };
   } finally {
     await app?.close();
