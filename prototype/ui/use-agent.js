@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createAgent, mergeSessions, sessionKey } from './agent.js';
 import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 
 const PAGE_SIZE = 20;
 
-export function useAgent(config, { report, clearError, jumpToLatest }) {
+export function useAgent(config, { report, clearError, jumpToLatest, suspendTimeline }) {
   const [api, setApi] = useState(null);
   const [connection, setConnection] = useState('connecting');
   const [route, setRoute] = useState('');
@@ -13,7 +13,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [archived, setArchived] = useState(false);
   const [session, setSession] = useState(null);
-  const [rows, setRows] = useState([]);
+  const [rows, publishRows] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(false);
   const [run, setRun] = useState(null);
@@ -37,6 +37,29 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
   const pendingSend = useRef(null);
   const queue = useRef([]);
   const frame = useRef(0);
+  const bufferedRows = useRef(rows);
+  const publicationPaused = useRef(false);
+  const updateRows = useCallback(update => {
+    bufferedRows.current = update(bufferedRows.current);
+    if (!publicationPaused.current) publishRows(bufferedRows.current);
+  }, []);
+  const flushTimeline = useCallback(() => {
+    frame.current = 0;
+    const events = queue.current;
+    queue.current = [];
+    updateRows(previous => applyTimeline(previous, events));
+  }, [updateRows]);
+
+  const pausePublication = suspendTimeline && requests.length === 0;
+  useLayoutEffect(() => {
+    publicationPaused.current = pausePublication;
+    if (pausePublication) return;
+    // Include the current batch when an approval or file dismissal reveals the conversation.
+    if (frame.current) {
+      cancelAnimationFrame(frame.current);
+      flushTimeline();
+    } else publishRows(bufferedRows.current);
+  }, [pausePublication, flushTimeline]);
 
   function clearTimeline() {
     layer.current++;
@@ -49,7 +72,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
     cancelAnimationFrame(frame.current);
     frame.current = 0;
     queue.current = [];
-    setRows([]);
+    updateRows(() => []);
     setCursor(null);
     setSession(null);
     setRequests([]);
@@ -91,12 +114,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
       case 'item':
       case 'delta':
         queue.current.push(event);
-        if (!frame.current) frame.current = requestAnimationFrame(() => {
-          frame.current = 0;
-          const events = queue.current;
-          queue.current = [];
-          setRows(previous => applyTimeline(previous, events));
-        });
+        if (!frame.current) frame.current = requestAnimationFrame(flushTimeline);
         break;
       case 'run':
         changeRun(event.run);
@@ -127,13 +145,13 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
         setMembers(previous => [...previous.filter(member => member.id !== event.member.id), event.member]);
         break;
       case 'queuedInput':
-        setRows(previous => previous.map(row => row.clientId === event.clientId ? { ...row, queued: event.state } : row));
+        updateRows(previous => previous.map(row => row.clientId === event.clientId ? { ...row, queued: event.state } : row));
         break;
     }
   }
 
   function readPage(history, runVersion) {
-    setRows(previous => mergeHistory(previous, historyRows(history.items)));
+    updateRows(previous => mergeHistory(previous, historyRows(history.items)));
     setCursor(history.cursor);
     const restored = history.items.findLast(item => item.run.status === 'running');
     if (restored && runVersion === callbacks.current.run) changeRun(restored.run);
@@ -260,7 +278,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
     try {
       const history = await request;
       if (scope !== layer.current) return;
-      setRows(previous => mergeHistory(previous, historyRows(history.items)));
+      updateRows(previous => mergeHistory(previous, historyRows(history.items)));
       setCursor(history.cursor);
     } catch (error) {
       if (scope === layer.current) report(error);
@@ -270,7 +288,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
         setLoading(false);
       }
     }
-  }, [cursor, report]);
+  }, [cursor, report, updateRows]);
 
   function guard() {
     return connection === 'ready' && agent.current && !loading && !busy.current && !currentRun.current;
@@ -322,7 +340,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
       const ref = await ensureSession(client, text.slice(0, 48), scope);
       if (!ref) return false;
       const input = [{ kind: 'text', text }];
-      setRows(previous => [...previous, { kind: 'user', text, clientId, key: clientId,
+      updateRows(previous => [...previous, { kind: 'user', text, clientId, key: clientId,
         turnId: steering?.id, optimistic: true, queued: steering && delivery === 'followUp' ? 'queued' : undefined }]);
       added = true;
       if (steering && delivery === 'followUp') {
@@ -337,7 +355,7 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
       return scope === layer.current;
     } catch (error) {
       if (scope !== layer.current) return false;
-      if (added) setRows(previous => previous.filter(row => row.key !== clientId || !row.optimistic));
+      if (added) updateRows(previous => previous.filter(row => row.key !== clientId || !row.optimistic));
       setRun(currentRun.current);
       report(error);
       return false;

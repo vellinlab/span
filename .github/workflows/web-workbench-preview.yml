@@ -63,6 +63,19 @@ jobs:
           rm -r "$artifacts/catalog-baseline/resources/app/dist"
           cp -a "$source_dir/prototype/dist" "$artifacts/catalog-baseline/resources/app/"
           printf '%s\n' "$baseline" > "$artifacts/catalog-baseline-commit.txt"
+      - name: Prepare the baseline renderer for streaming under file preview
+        run: |
+          baseline=e92b0193424d6a29de9a23a23a58a34ae6d91bef
+          artifacts=/tmp/span-workbench-artifacts
+          source_dir=$(mktemp -d)
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git archive "$baseline" prototype | tar -x -C "$source_dir"
+          npm --prefix "$source_dir/prototype" ci --no-audit --no-fund
+          npm --prefix "$source_dir/prototype" run build
+          cp -al "$artifacts/linux" "$artifacts/covered-baseline"
+          rm -r "$artifacts/covered-baseline/resources/app/dist"
+          cp -a "$source_dir/prototype/dist" "$artifacts/covered-baseline/resources/app/"
+          printf '%s\n' "$baseline" > "$artifacts/covered-baseline-commit.txt"
       - name: Verify on AlmaLinux 8 and compare with Span 0.1.0
         run: |
           baseline=span-0.1.0-1.el8.x86_64.rpm
@@ -90,6 +103,7 @@ jobs:
             /tmp/span-workbench-artifacts/*.json
             /tmp/span-workbench-artifacts/glibc-service.txt
             /tmp/span-workbench-artifacts/pty-baseline-commit.txt
+            /tmp/span-workbench-artifacts/covered-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -116,6 +130,7 @@ jobs:
           bash prototype/test/package.sh win32 prototype/core/target/release/span-workbench-core.exe preview
           node prototype/test/smoke.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench.png"
           node prototype/test/catalog.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench-catalog.png"
+          node prototype/test/covered-transcript.mjs "$PWD/preview/span-preview.exe"
           powershell.exe -NoProfile -Command 'Compress-Archive -Path preview -DestinationPath span-web-windows-x86_64.zip'
       - name: Publish Windows preview and screenshot
         if: always()

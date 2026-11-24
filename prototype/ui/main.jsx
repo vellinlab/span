@@ -65,7 +65,8 @@ function App() {
   const closeTerminal = useCallback(() => setTerminal(false), []);
   const report = useCallback(error => setError(error.message), []);
   const clearError = useCallback(() => setError(''), []);
-  const work = useAgent(config, { report, clearError, jumpToLatest });
+  const previewCoversConversation = previewOverlay && Boolean(preview && !preview.parked);
+  const work = useAgent(config, { report, clearError, jumpToLatest, suspendTimeline: previewCoversConversation });
   const { api, connection, route, sessions, session, rows, loading, run, goal } = work;
   const catalogQuery = sidebarOpen && tab === 'sessions' && searchOpen ? query.trim() : '';
   const catalogSearch = useCatalogSearch(api, catalogQuery, work.archived, connection === 'ready', work.catalogRevision);
@@ -73,7 +74,7 @@ function App() {
   const running = run?.status === 'running';
   const interaction = work.requests[0];
   const previewBlocked = previewOverlay && Boolean(interaction);
-  const readingOverlay = previewOverlay && Boolean(preview && !preview.parked) && !previewBlocked;
+  const readingOverlay = previewCoversConversation && !interaction;
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
