@@ -156,7 +156,7 @@ async function prepareInputSampling(app, page, composer, area, desktop) {
   };
 }
 
-async function checkToolOutput(app, page, composer, profile, rendererPid, label) {
+async function checkToolOutput(app, page, composer, profile, rendererPid, label, trial) {
   await composer.fill('验证流式命令输出。');
   await composer.press('Enter');
   const command = page.getByTestId('transcript').locator('[data-card="command"]').filter({ hasText: 'workspace verify --all' });
@@ -204,6 +204,10 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label)
     await writeFile(join(profile, 'finish'), '');
     await page.getByRole('button', { name: '发送', exact: true }).waitFor();
     await output.getByText('workspace/source/stream_072.rs', { exact: false }).waitFor();
+    if (screenshot && trial === 0) {
+      await settleFrame(page);
+      await page.screenshot({ path: `${screenshot}-${label}.png` });
+    }
     return { label, startPssKiB, endPssKiB, typing,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
@@ -236,7 +240,7 @@ async function check(binary, label, trial) {
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
-    if (toolOutput) return await checkToolOutput(app, page, composer, profile, rendererPid, label);
+    if (toolOutput) return await checkToolOutput(app, page, composer, profile, rendererPid, label, trial);
     if (grouped) {
       assert.equal(await transcript.getAttribute('data-items'), '2901');
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();

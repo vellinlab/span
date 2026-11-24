@@ -97,7 +97,7 @@ jobs:
             following-reply:ed7985bab09e6eb610298d73200028aa93028b9c \
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
             startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af \
-            streaming-output:6ab5c6bcbcd93498e4e3f8e0d2e08e4adb3f6594 \
+            streaming-output:a72ab369c6d75ffa7462476080d622918617c243 \
             grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51
           do
             target="${spec%%:*}-baseline"

@@ -1,4 +1,44 @@
 export const LINES_PER_PAGE = 8192;
+const OUTPUT_CHECKPOINT_INTERVAL = 256;
+
+export function appendOutput(previous, fragment, text) {
+  if (!previous || previous.depth >= OUTPUT_CHECKPOINT_INTERVAL) return { fragment: text, depth: 0 };
+  return { previous, fragment, depth: previous.depth + 1 };
+}
+
+// Only index chunks newer than the last committed view. A replaced or
+// compacted chain starts again at its full-text checkpoint.
+export function indexOutput(output, previous) {
+  const fragments = [];
+  let node = output;
+  while (node && node !== previous?.output) {
+    fragments.push(node.fragment);
+    node = node.previous;
+  }
+  const pages = node ? previous.pages.slice() : [''];
+  let lines = node ? previous.lines : 0;
+  for (const fragment of fragments.reverse()) {
+    for (let start = 0; start < fragment.length;) {
+      if (lines === LINES_PER_PAGE) {
+        pages.push('');
+        lines = 0;
+      }
+      let end = start;
+      while (lines < LINES_PER_PAGE) {
+        const newline = fragment.indexOf('\n', end);
+        if (newline < 0) {
+          end = fragment.length;
+          break;
+        }
+        end = newline + 1;
+        lines++;
+      }
+      pages[pages.length - 1] += fragment.slice(start, end);
+      start = end;
+    }
+  }
+  return { output, pages, lines };
+}
 
 export function indexText(text, updateContext, previous) {
   const append = previous && !updateContext && text.startsWith(previous.text);

@@ -104,7 +104,7 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/output-view.mjs \
     /artifacts/linux/span-preview /artifacts/el8-workbench-output.png /artifacts/output-baseline/span-preview | tee /artifacts/output-view.json
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
-    /artifacts/linux/span-preview /artifacts/streaming-output-baseline/span-preview \
+    /artifacts/linux/span-preview /artifacts/streaming-output-baseline/span-preview /artifacts/el8-streaming-tool-output \
     --tool-output | tee /artifacts/streaming-output.json
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 

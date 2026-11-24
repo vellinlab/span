@@ -1,4 +1,5 @@
 import { mergeAgentMember } from './delegation.js';
+import { appendOutput } from './text-pages.js';
 
 export const itemKey = ({ turnId, id }) => JSON.stringify([turnId, id]);
 
@@ -225,7 +226,9 @@ function addItem(state, item, final) {
   if (first === undefined) {
     // Empty placeholders reserve their position but mount no content.
     positions.set(key, [rows.length]);
-    write(rows.length, { ...item, key, final });
+    const row = { ...item, key, final };
+    if (item.kind === 'command' && !final) row.outputChunks = appendOutput(undefined, '', item.text ?? '');
+    write(rows.length, row);
     return;
   }
 
@@ -245,6 +248,9 @@ function addItem(state, item, final) {
   const updated = { ...row, ...item, final };
   if ((item.kind === 'command' || item.kind === 'tool') && !item.text && row.text) {
     updated.text = row.text;
+  }
+  if (item.kind === 'command' && item.text) {
+    updated.outputChunks = final ? undefined : appendOutput(undefined, '', item.text);
   }
   write(first, updated);
 }
@@ -275,6 +281,7 @@ function addDelta(state, delta) {
   } : { ...previous };
 
   row.text = (row.text ?? '') + text;
+  if (kind === 'command') row.outputChunks = appendOutput(previous?.outputChunks, text, row.text);
   if (kind === 'patch') row.files ??= [];
 
   if (split || !previous) {

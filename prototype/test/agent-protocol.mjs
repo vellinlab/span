@@ -4,7 +4,7 @@ import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
-import { indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
+import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
 import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
@@ -28,6 +28,30 @@ test('append-only readers reuse completed log lines and rebuild when the backend
   const replaced = '短输出\n';
   assert.deepEqual(indexText(replaced, undefined, continued), indexText(replaced));
   assert.deepEqual(readTextPage(replaced, undefined, undefined, undefined, last), readTextPage(replaced));
+});
+
+test('command output indexes only new chunks and can jump to a replaced or compacted log', () => {
+  const item = { kind: 'command', id: 'log', turnId: 'turn', status: 'running',
+    text: '检查\r\n'.repeat(LINES_PER_PAGE - 1) + '末行\r' };
+  const add = text => ({ kind: 'delta', delta: { id: item.id, turnId: item.turnId, kind: 'command', text } });
+  const first = applyTimeline([], [{ kind: 'item', item, final: false }]);
+  const initial = indexOutput(first[0].outputChunks);
+  for (const branch of ['一', '二']) {
+    const [row] = applyTimeline(first, [add('\n'), add(branch)]);
+    const index = indexOutput(row.outputChunks, initial);
+    assert.equal(index.pages.join(''), row.text);
+    assert.deepEqual(index.pages, [item.text + '\n', branch]);
+    assert.deepEqual(initial.pages, [item.text]);
+  }
+
+  const comments = Array.from({ length: 300 }, (_, i) => add(`记录 ${i}\n`));
+  const [log] = applyTimeline(first, comments);
+  const rebuilt = indexOutput(log.outputChunks, initial);
+  assert.equal(rebuilt.pages.join(''), log.text);
+  assert.ok(log.outputChunks.depth < comments.length);
+  const [final] = applyTimeline([log], [{ kind: 'item', item: { ...item, text: '最终输出' }, final: true }]);
+  assert.equal(final.outputChunks, undefined);
+  assert.equal(final.text, '最终输出');
 });
 
 test('file references round-trip with Windows and Linux paths and survive an echo without a client ID', () => {

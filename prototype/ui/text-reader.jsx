@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AlertCircle, Check, Copy } from 'lucide-react';
-import { indexText, LINES_PER_PAGE, readTextPage } from './text-pages.js';
+import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from './text-pages.js';
 
 const LINE_HEIGHT = 18;
 const estimateLine = () => LINE_HEIGHT;
@@ -29,14 +29,19 @@ function TextViewport({ data, text, kind, label, position, page, scroll }) {
   </pre>;
 }
 
-export function TextReader({ text, plain = false, kind, label, pagesLabel, position, scroll, updateContext, classify }) {
+export function TextReader({ text, output, plain = false, kind, label, pagesLabel, position, scroll, updateContext, classify }) {
   const [view, setView] = useState(position ?? { page: 0 });
   const previous = useRef({});
-  const index = useMemo(() => plain ? undefined : indexText(text, updateContext, previous.current.index), [plain, text, updateContext]);
+  const index = useMemo(() => {
+    if (plain) return;
+    const last = previous.current.index;
+    return output ? indexOutput(output, last) : indexText(text, updateContext, last?.output ? undefined : last);
+  }, [plain, text, output, updateContext]);
   const pages = index?.pages ?? FIRST_PAGE;
   const current = Math.min(view.page, pages.length - 1);
-  const { start, context } = pages[current];
-  const pageText = text.slice(start, pages[current + 1]?.start);
+  const page = pages[current];
+  const context = page.context;
+  const pageText = typeof page === 'string' ? page : text.slice(page.start, pages[current + 1]?.start);
   const data = useMemo(() => plain ? null : readTextPage(pageText, context, updateContext, classify, previous.current.data),
     [plain, pageText, context, updateContext, classify]);
   useLayoutEffect(() => { previous.current = { index, data }; }, [index, data]);

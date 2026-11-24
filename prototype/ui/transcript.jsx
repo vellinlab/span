@@ -39,19 +39,21 @@ function ArtifactList({ artifacts, openArtifact, openImage, label }) {
 const largeOutputSize = 16 * 1024;
 const largeOutputRefreshMs = 125;
 
-function ToolOutput({ text, cwd, streaming }) {
+function ToolOutput({ row }) {
   const scroll = useRef(null);
-  const deferred = useDeferredValue(text);
-  const output = streaming ? deferred : text;
-  const committed = useRef({ text: output, time: -Infinity });
+  const streaming = !row.final && row.status === 'running';
+  const deferred = useDeferredValue(row);
+  const latest = streaming ? deferred : row;
+  const committed = useRef({ row: latest, time: -Infinity });
   const [released, setReleased] = useState(-Infinity);
   const previous = committed.current;
-  const pending = streaming && previous.text?.length > largeOutputSize &&
-    output?.length >= previous.text.length && output !== previous.text &&
+  const previousText = previous.row.text;
+  const pending = streaming && !latest.outputChunks && previousText?.length > largeOutputSize &&
+    latest.text?.length >= previousText.length && latest.text !== previousText &&
     released !== previous.time && performance.now() - previous.time < largeOutputRefreshMs;
-  const visible = pending ? previous.text : output;
+  const visible = pending ? previous.row : latest;
   useLayoutEffect(() => {
-    if (committed.current.text !== visible) committed.current = { text: visible, time: performance.now() };
+    if (committed.current.row !== visible) committed.current = { row: visible, time: performance.now() };
   }, [visible]);
   useEffect(() => {
     if (!pending) return;
@@ -59,14 +61,15 @@ function ToolOutput({ text, cwd, streaming }) {
     const timer = setTimeout(() => setReleased(time), Math.max(0, time + largeOutputRefreshMs - performance.now()));
     return () => clearTimeout(timer);
   }, [pending, previous]);
-  const long = visible && (visible.length > largeOutputSize || visible.split('\n', 32).length === 32);
+  const text = visible.text;
+  const long = text && (text.length > largeOutputSize || text.split('\n', 32).length === 32);
   return <>
-    {cwd && <code className="card-path">{cwd}</code>}
-    {visible && <div className="tool-output">
+    {row.cwd && <code className="card-path">{row.cwd}</code>}
+    {text && <div className="tool-output">
       <div className="tool-output-heading"><span>输出</span>
-        <CopyTextButton text={text} label="复制输出" copiedLabel="已复制输出" />
+        <CopyTextButton text={row.text} label="复制输出" copiedLabel="已复制输出" />
       </div>
-      <TextReader text={visible} plain={!long} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
+      <TextReader text={text} output={visible.outputChunks} plain={!long} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
     </div>}
   </>;
 }
@@ -196,7 +199,7 @@ const TranscriptRow = memo(function TranscriptRow({
       }
       if (command || hasContext) detail = titleRef => <>
         {command && <CommandText command={command} titleRef={titleRef} force={!hasContext} />}
-        {hasContext && <ToolOutput text={row.text} cwd={row.cwd} streaming={status === 'running'} />}
+        {hasContext && <ToolOutput row={row} />}
       </>;
       break;
     }
@@ -215,13 +218,13 @@ const TranscriptRow = memo(function TranscriptRow({
           <dt>路径</dt><dd><code>{path}</code></dd>
           {row.source && <><dt>来源</dt><dd>{row.source}</dd></>}
         </dl>}
-        {row.text && <ToolOutput text={row.text} streaming={status === 'running'} />}
+        {row.text && <ToolOutput row={row} />}
       </>;
       break;
     case 'search':
       title = row.query;
       if (row.url || row.text) detail = () => <>{row.url && <SourceLink url={row.url}>{row.url}</SourceLink>}
-        {row.text && <ToolOutput text={row.text} />}</>;
+        {row.text && <ToolOutput row={row} />}</>;
       break;
     case 'delegation': {
       title = row.action;
