@@ -34,6 +34,24 @@ def widget(*args):
     ).strip()
 
 
+def process_role(process, root_pid):
+    if process == root_pid:
+        return "main"
+    try:
+        args = Path(f"/proc/{process}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+        return "exited"
+    for arg in args:
+        if arg in (b"--type=renderer", b"--type=gpu-process", b"--type=utility", b"--type=zygote"):
+            return arg.decode().split("=")[1]
+    executable = os.path.basename(args[0])
+    if executable == b"span-workbench-core":
+        return "agent-fixture" if b"--fixture" in args else "workbench-service"
+    if executable in (b"sh", b"bash", b"dash", b"sleep"):
+        return "shell"
+    return "other"
+
+
 def stats(pid):
     children = {}
     ticks = {}
@@ -49,18 +67,24 @@ def stats(pid):
     for process in app:
         app.extend(children.get(process, []))
     memory = dict.fromkeys(("Pss", "Rss", "Private_Dirty"), 0)
+    roles = {}
     for process in app:
         try:
             lines = Path(f"/proc/{process}/smaps_rollup").read_text().splitlines()
         except OSError:
             continue
+        group = roles.setdefault(process_role(process, pid), dict.fromkeys((*memory, "processes"), 0))
+        group["processes"] += 1
         for line in lines:
             key, _, value = line.partition(":")
             if key in memory:
-                memory[key] += int(value.split()[0])
+                kib = int(value.split()[0])
+                memory[key] += kib
+                group[key] += kib
     app_ticks = sum(ticks.get(process, 0) for process in app)
     memory.update(tree_cpu_ms=1000 * app_ticks / CLOCK_TICKS,
-                  main_cpu_ms=1000 * ticks.get(pid, 0) / CLOCK_TICKS, processes=len(app))
+                  main_cpu_ms=1000 * ticks.get(pid, 0) / CLOCK_TICKS,
+                  processes=len(app), by_role=roles)
     return memory
 
 
@@ -123,8 +147,10 @@ def benchmark(name, binary):
                     if not try_until(port_file.is_file, 12):
                         raise RuntimeError("Could not open the benchmark automation port")
                     port = port_file.read_text().splitlines()[0]
-                    subprocess.run(["/artifacts/node", "prototype/test/prepare-benchmark.mjs",
-                                    port, command], check=True, timeout=28)
+                    browser = ["/artifacts/node", "prototype/test/prepare-benchmark.mjs", port]
+                    subprocess.run([*browser, "--wait-for-history"], check=True, timeout=28)
+                    before_terminal = stats(app.pid)
+                    subprocess.run([*browser, command], check=True, timeout=28)
                 else:
                     xdo("key", "ctrl+shift+a")
                     widget("click", "打开会话")
@@ -212,11 +238,22 @@ def benchmark(name, binary):
                 end = stats(app.pid)
                 record = {"app": name, "memory_kib": {key: end[key] for key in
                           ("Pss", "Rss", "Private_Dirty")}, "processes": end["processes"],
+                          "by_role": end["by_role"],
                           "cpu_tree_ms": end["tree_cpu_ms"] - start_stats["tree_cpu_ms"],
                           "cpu_main_ms": end["main_cpu_ms"] - start_stats["main_cpu_ms"],
                           "scroll": sample(scroll), "scroll_no_pixel_change": timeouts,
                           "resize_geometry": sample(geometry), "resize_visible": sample(drag),
                           "resize_error": resize_error}
+                if candidate:
+                    subprocess.run([*browser, "--close-terminal"], check=True, timeout=15)
+                    after_close = stats(app.pid)
+                    time.sleep(2)
+                    after_settle = stats(app.pid)
+                    record["terminal_memory_kib"] = {
+                        stage: {key: measurement[key] for key in ("Pss", "Rss", "Private_Dirty", "by_role")}
+                        for stage, measurement in (("before_open", before_terminal), ("active", end),
+                                                   ("closed", after_close), ("settled_2s", after_settle))
+                    }
                 print(json.dumps(record), flush=True)
                 return record
             except Exception:
