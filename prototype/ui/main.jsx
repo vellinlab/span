@@ -62,6 +62,7 @@ function App() {
   const previewTrigger = useRef(null);
   const previewFocus = useRef(null);
   const interactionRegion = useRef(null);
+  const reasoningHadFocus = useRef(false);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
   const closeTerminal = useCallback(() => setTerminal(false), []);
@@ -111,12 +112,16 @@ function App() {
   }, [refKey]);
 
   useLayoutEffect(() => {
-    if (!reasoningOpen || showReasoning) return;
-    const focused = document.getElementById('reasoning-panel')?.contains(document.activeElement);
-    panelScope.current++;
-    panelTrigger.current = null;
-    setPanel(null);
-    if (focused) input.current?.focus({ preventScroll: true });
+    if (showReasoning) return;
+    const focused = reasoningHadFocus.current || (reasoningOpen &&
+      document.getElementById('reasoning-panel')?.contains(document.activeElement));
+    reasoningHadFocus.current = false;
+    if (reasoningOpen) {
+      panelScope.current++;
+      panelTrigger.current = null;
+      setPanel(null);
+    }
+    if (focused) (interactionRegion.current ?? input.current)?.focus({ preventScroll: true });
   }, [reasoningOpen, showReasoning]);
 
   useLayoutEffect(() => {
@@ -602,7 +607,7 @@ function App() {
               </div>
               <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host}
                 focusTarget={interactionRegion} returnFocus={input} />
-              {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningOpen} returnFocus={input}
+              {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningOpen} hadFocus={reasoningHadFocus}
                 toggle={event => reasoningOpen ? closePanel() : showPanel('reasoning', event.currentTarget)} />}
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />

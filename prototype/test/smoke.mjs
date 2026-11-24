@@ -239,9 +239,12 @@ try {
   await reasoningPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
   await reasoningPanel.waitFor({ state: 'detached' });
   assert.ok(await liveReasoning.evaluate(element => element === document.activeElement));
-  await page.getByRole('button', { name: '停止', exact: true }).click();
+  await liveReasoning.press('Enter');
+  await page.getByRole('button', { name: '停止', exact: true }).evaluate(button => button.click());
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await liveReasoning.waitFor({ state: 'detached' });
+  await reasoningPanel.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => element === document.activeElement));
   assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - reasoningAnchor) <= 2);
   await reasoningJump.click();
   await transcript.getByText('流式输出已接通。', { exact: true }).waitFor();

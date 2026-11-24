@@ -7,14 +7,14 @@ export const ReasoningText = memo(function ReasoningText({ row }) {
     section?.trim() && <Markdown key={JSON.stringify([source, index])} text={section} />))}</div>;
 });
 
-export const ReasoningStrip = memo(function ReasoningStrip({ preview, expanded, toggle, returnFocus }) {
+export const ReasoningStrip = memo(function ReasoningStrip({ preview, expanded, toggle, hadFocus }) {
   const trigger = useRef(null);
   useLayoutEffect(() => {
     const button = trigger.current;
     return () => {
-      if (document.activeElement === button) returnFocus.current?.focus({ preventScroll: true });
+      hadFocus.current = document.activeElement === button;
     };
-  }, [returnFocus]);
+  }, [hadFocus]);
   return <button type="button" ref={trigger} className="reasoning-strip" data-card="live-reasoning"
     aria-label="实时推理摘要" aria-describedby="live-reasoning-preview" aria-expanded={expanded}
     aria-controls={expanded ? 'reasoning-panel' : undefined} onClick={toggle}>
