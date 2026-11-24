@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
-  Image, ListChecks, Search, Terminal, Users, Wrench,
+  Folder, Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
@@ -37,7 +37,8 @@ function ArtifactList({ artifacts, openArtifact, openImage, label }) {
 }
 
 const largeOutputSize = 16 * 1024;
-const largeOutputRefreshMs = 125;
+const streamedOutputRefreshMs = 64;
+const snapshotOutputRefreshMs = 125;
 
 function ToolOutput({ row }) {
   const scroll = useRef(null);
@@ -48,9 +49,10 @@ function ToolOutput({ row }) {
   const [released, setReleased] = useState(-Infinity);
   const previous = committed.current;
   const previousText = previous.row.text;
-  const pending = streaming && !latest.outputChunks && previousText?.length > largeOutputSize &&
+  const refreshMs = latest.outputChunks ? streamedOutputRefreshMs : snapshotOutputRefreshMs;
+  const pending = streaming && previousText?.length > largeOutputSize &&
     latest.text?.length >= previousText.length && latest.text !== previousText &&
-    released !== previous.time && performance.now() - previous.time < largeOutputRefreshMs;
+    released !== previous.time && performance.now() - previous.time < refreshMs;
   const visible = pending ? previous.row : latest;
   useLayoutEffect(() => {
     if (committed.current.row !== visible) committed.current = { row: visible, time: performance.now() };
@@ -58,20 +60,20 @@ function ToolOutput({ row }) {
   useEffect(() => {
     if (!pending) return;
     const { time } = previous;
-    const timer = setTimeout(() => setReleased(time), Math.max(0, time + largeOutputRefreshMs - performance.now()));
+    const timer = setTimeout(() => setReleased(time), Math.max(0, time + refreshMs - performance.now()));
     return () => clearTimeout(timer);
-  }, [pending, previous]);
+  }, [pending, previous, refreshMs]);
   const text = visible.text;
   const long = text && (text.length > largeOutputSize || text.split('\n', 32).length === 32);
-  return <>
-    {row.cwd && <code className="card-path">{row.cwd}</code>}
-    {text && <div className="tool-output">
-      <div className="tool-output-heading"><span>输出</span>
-        <CopyTextButton text={row.text} label="复制输出" copiedLabel="已复制输出" />
-      </div>
-      <TextReader text={text} output={visible.outputChunks} plain={!long} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
-    </div>}
-  </>;
+  if (!text) return row.cwd && <code className="card-path">{row.cwd}</code>;
+  return <div className="tool-output">
+    <div className="tool-output-heading">
+      {row.cwd ? <span className="output-directory"><Folder size={13} role="img" aria-label="工作目录" />
+        <code>{row.cwd}</code></span> : <span>输出</span>}
+      <CopyTextButton text={row.text} label="复制输出" copiedLabel="已复制输出" />
+    </div>
+    <TextReader text={text} output={visible.outputChunks} plain={!long} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
+  </div>;
 }
 
 function CommandText({ command, titleRef, force }) {

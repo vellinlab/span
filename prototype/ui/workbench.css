@@ -495,7 +495,10 @@ p { margin-block: 0 12px; }
 .tool-context dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .tool-context + .tool-output { margin-top: 6px; }
 .tool-output-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
-.tool-output-heading .icon-button { width: 26px; height: 26px; }
+.tool-output-heading .icon-button { flex: 0 0 26px; width: 26px; height: 26px; }
+.output-directory { display: flex; align-items: flex-start; gap: 6px; min-width: 0; line-height: 18px; }
+.output-directory svg { flex: none; margin-top: 2px; }
+.output-directory code { overflow-wrap: anywhere; }
 .command-source { margin-bottom: 4px; }
 .card-body .command-text {
   max-height: clamp(44px, calc(100cqh - 140px), 116px);

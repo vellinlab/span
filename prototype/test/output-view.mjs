@@ -63,6 +63,14 @@ async function check(binary, legacy, screenshot) {
       return { mountedCharacters: displayed.length };
     }
     assert.equal(await command.locator('.command-text').count(), 0);
+    const heading = command.locator('.tool-output-heading');
+    const directory = heading.locator('code');
+    assert.match(await directory.textContent(), /[\\/]sample$/);
+    await heading.getByRole('img', { name: '工作目录' }).waitFor();
+    const pathBox = await directory.boundingBox();
+    const copyBox = await heading.getByRole('button', { name: '复制输出' }).boundingBox();
+    assert.ok(pathBox.x + pathBox.width <= copyBox.x && pathBox.y < copyBox.y + copyBox.height &&
+      copyBox.y < pathBox.y + pathBox.height, 'The working directory and copy button share the output header');
 
     const lines = viewport.locator('.output-line');
     await lines.getByText('prepare', { exact: false }).waitFor();
