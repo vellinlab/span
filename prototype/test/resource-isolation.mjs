@@ -31,14 +31,16 @@ async function terminalLine(page, command, result) {
 }
 
 async function echoSample(app, page, key) {
-  await app.evaluate(key => {
+  await app.evaluate((_, key) => {
     const state = globalThis.spanTerminalEcho;
+    const pixels = state.pixels[key];
+    if (!pixels) throw Error(`No reference pixels for terminal key ${key}`);
     state.result = new Promise(resolve => {
       const timer = setTimeout(() => {
         state.pending = undefined;
         resolve(null);
       }, 2000);
-      state.pending = { key, started: performance.now(), finish: ms => {
+      state.pending = { pixels, started: performance.now(), finish: ms => {
         clearTimeout(timer);
         state.pending = undefined;
         resolve(ms);
@@ -64,20 +66,24 @@ async function prepareEchoFrames(app, page) {
     await page.keyboard.press(key);
     await page.waitForFunction(key => [...document.querySelectorAll('.xterm-rows > div')]
       .some(row => row.textContent.trim() === `span_echo_${key}`), key, { timeout: interactionTimeoutMs });
-    const screenshot = await page.screenshot({ clip: area, timeout: interactionTimeoutMs });
-    references[key] = screenshot.toString('base64');
+    await settle(page);
+    references[key] = await app.evaluate(async ({ BrowserWindow }, area) => {
+      const contents = BrowserWindow.getAllWindows()[0].webContents;
+      const image = await Promise.race([contents.capturePage(), new Promise(resolve => setTimeout(resolve, 4000))]);
+      if (!image) throw Error('The terminal reference frame was not captured');
+      return image.crop(area).toBitmap().toString('hex');
+    }, area);
   }
   assert.ok(references.a && references.b && references.a !== references.b, 'The two terminal keys must paint different pixels');
   console.log('Captured different reference pixels for both keys. Verifying frame notifications.');
-  await app.evaluate(({ BrowserWindow, nativeImage }, { area, references }) => {
-    const bitmap = png => nativeImage.createFromBuffer(Buffer.from(png, 'base64')).toBitmap();
-    const pixels = { a: bitmap(references.a), b: bitmap(references.b) };
+  await app.evaluate(({ BrowserWindow }, { area, references }) => {
+    const pixels = { a: Buffer.from(references.a, 'hex'), b: Buffer.from(references.b, 'hex') };
     const state = { frames: 0, pixels };
     globalThis.spanTerminalEcho = state;
     BrowserWindow.getAllWindows()[0].webContents.beginFrameSubscription(false, image => {
       state.frames++;
       const pending = state.pending;
-      if (pending && image.crop(area).toBitmap().equals(state.pixels[pending.key])) {
+      if (pending && image.crop(area).toBitmap().equals(pending.pixels)) {
         pending.finish(performance.now() - pending.started);
       }
     });
