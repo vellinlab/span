@@ -187,15 +187,6 @@ async function check(binary, label) {
     });
     await initialTail.waitFor();
     await tailInView();
-    if (!following) {
-      // Let the initial Markdown measurement finish following the tail before moving up to read.
-      await settleFrame(page);
-      await heading.evaluate(element => {
-        const timeline = element.closest('.timeline');
-        timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 28;
-      });
-      await latest.waitFor();
-    }
     let sampleInput;
     if (linux && baseline) {
       const box = await composer.boundingBox();
@@ -206,9 +197,28 @@ async function check(binary, label) {
     await settleFrame(page);
     const headingOffset = () => heading.evaluate(element =>
       element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top);
-    const position = following ? undefined : await headingOffset();
-    if (!following) assert.ok(Math.abs(position - 28) <= 2,
-      `Expected to start reading the reply at 28 pixels, observed ${position}.`);
+    let position;
+    if (!following) {
+      await heading.evaluate(async element => {
+        const timeline = element.closest('.timeline');
+        // The first scroll can mount nearby rows and change their estimated heights.
+        let stableFrames = 0;
+        for (let frame = 0; frame < 30; frame++) {
+          const offset = element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+          if (Math.abs(offset - 28) <= 2) {
+            if (++stableFrames === 3) return;
+          } else {
+            stableFrames = 0;
+            timeline.scrollTop += offset - 28;
+          }
+          await new Promise(requestAnimationFrame);
+        }
+        throw new Error('Could not settle the initial reading position.');
+      });
+      await latest.waitFor();
+      position = await headingOffset();
+      assert.ok(Math.abs(position - 28) <= 2, `Expected to start reading the reply at 28 pixels, observed ${position}.`);
+    }
 
     const observation = await heading.evaluateHandle(element => {
       const parent = element.closest('.prose');
