@@ -109,7 +109,7 @@ async function prepareEchoFrames(app, page) {
   await echoSample(app, page, 'b');
 }
 
-async function terminalInteraction(app, page, screenshot) {
+async function terminalInteraction(app, page, screenshot, recordEcho) {
   const script = fileURLToPath(new URL('./terminal-echo.cjs', import.meta.url));
   await terminalLine(page, `"${process.execPath}" "${script}"`, 'span_echo_ready');
   console.log('The raw terminal fixture is ready. Capturing reference pixels.');
@@ -133,8 +133,9 @@ async function terminalInteraction(app, page, screenshot) {
     return globalThis.spanTerminalEcho.frames;
   });
   assert.ok(frames >= idleMs.length + streamingMs.length + 2);
+  await recordEcho({ idleMs, streamingMs, frames });
   assert.match(await page.locator('.xterm-rows').innerText(), /span_interaction_\d+/);
-  await page.keyboard.press('q');
+  await page.keyboard.press(linux ? 'q' : 'f');
   console.log('The echo samples reached matching frames. Checking the final terminal output and reopening.');
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')].some(row => {
     if (row.textContent.trim() !== '绘_echo_final') return false;
@@ -145,12 +146,12 @@ async function terminalInteraction(app, page, screenshot) {
     assert.match(await page.locator('.xterm-rows').innerText(), /绘_echo_final[\s\S]*\[终端已退出\]/);
   }
   await page.screenshot({ path: screenshot, timeout: interactionTimeoutMs });
+  if (!linux) await page.keyboard.press('q');
   await page.getByRole('button', { name: '关闭终端' }).click();
   await page.locator('.terminal-canvas').waitFor({ state: 'detached' });
   await page.getByRole('button', { name: '切换终端' }).click();
   await terminalLine(page, linux ? `printf '%s_%s\\n' span_echo reopened` : 'echo span_echo_reopened', 'span_echo_reopened');
   assert.doesNotMatch(await page.locator('.xterm-rows').innerText(), /绘_echo_final/);
-  return { idleMs, streamingMs, frames };
 }
 
 async function output(page) {
@@ -214,7 +215,7 @@ async function snapshot(app, page, cdp, pid) {
   return { renderer, mainCpuMs: native.mainCpuMs, dom, usedHeapBytes: heap.usedSize, ...scene };
 }
 
-async function trial(workload, variant, executable) {
+async function trial(workload, variant, executable, recordEcho) {
   const profile = await mkdtemp(join(tmpdir(), 'span-resource-'));
   let app;
   let interactionWatchdog;
@@ -241,7 +242,8 @@ async function trial(workload, variant, executable) {
       await openTerminal();
       const screenshot = reportPath.replace(/\.json$/, `-${variant}-terminal-end.png`);
       try {
-        return { workload, variant, ...await terminalInteraction(app, page, screenshot) };
+        await terminalInteraction(app, page, screenshot, recordEcho);
+        return;
       } catch (error) {
         console.error(`${variant} terminal interaction failed`, error);
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.endFrameSubscription())
@@ -308,9 +310,11 @@ for (const workload of ['idle', 'output', 'scroll', 'reflow', 'reflow', 'scroll'
 }
 if (baselineBinary) {
   for (const variant of ['candidate', 'baseline']) {
-    const sample = await run('interaction', variant);
-    report.interaction.push(sample);
-    await publish();
-    console.log(`${variant} terminal echo in ms: ${JSON.stringify({ idle: sample.idleMs, streaming: sample.streamingMs })}`);
+    const executable = variant === 'baseline' ? baselineBinary : binary;
+    await trial('interaction', variant, executable, async sample => {
+      report.interaction.push({ workload: 'interaction', variant, ...sample });
+      await publish();
+      console.log(`${variant} terminal echo in ms: ${JSON.stringify({ idle: sample.idleMs, streaming: sample.streamingMs })}`);
+    });
   }
 }

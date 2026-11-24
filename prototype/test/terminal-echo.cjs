@@ -9,21 +9,26 @@ let line = 0;
 stdout.write('\x1b[?1049h');
 const echo = key => stdout.write(`\x1b[1;1Hspan_echo_${key}\x1b[K\x1b[2;1H`);
 stdin.on('data', key => {
+  if (key === 'f') {
+    clearInterval(output);
+    stdout.write(`\x1b[${stdout.rows};1H\x1b[2K\x1b[32m绘_echo_final\x1b[0m`);
+    return;
+  }
   if (key === 'q') {
     clearInterval(output);
     stdin.setRawMode(false);
     stdin.pause();
-    const final = Buffer.from('绘');
     const windows = process.platform === 'win32';
-    const split = windows ? final.length : 1;
     stdout.write('\x1b[?1049l');
+    if (windows) return;
+    const final = Buffer.from('绘');
     setTimeout(() => {
-      stdout.write(windows ? '\x1b[32m' : '\x1b[3');
+      stdout.write('\x1b[3');
       setTimeout(() => {
-        if (!windows) stdout.write('2m');
-        stdout.write(final.subarray(0, split));
+        stdout.write('2m');
+        stdout.write(final.subarray(0, 1));
         setTimeout(() => {
-          stdout.write(final.subarray(split));
+          stdout.write(final.subarray(1));
           stdout.write('_echo_final\x1b[0m\r\n');
         }, 25);
       }, 25);
