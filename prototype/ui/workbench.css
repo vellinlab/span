@@ -371,26 +371,31 @@ p { margin-block: 0 12px; }
   line-height: 18px;
 }
 .card-path { display: block; overflow-wrap: anywhere; color: var(--muted); padding: 3px 0; font-size: 12px; }
+.tool-output-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.tool-output-heading .icon-button { width: 26px; height: 26px; }
+.card-body .output-scroll { padding: 4px 8px; border-radius: 4px; background: var(--canvas); scrollbar-width: thin; }
 .diff-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
 .diff-toolbar :is(.card-path, select) { flex: 1; min-width: 0; }
 .diff-toolbar select { font: 12px/18px var(--mono); padding: 3px 6px; }
 .diff-toolbar > button { margin-inline-start: auto; }
-.card-body .diff-scroll {
+.card-body .text-scroll {
   max-height: clamp(72px, calc(100cqh - 145px), 250px);
   padding: 0;
   border-radius: 4px;
   background: var(--canvas);
-  line-height: var(--diff-line-height);
+  line-height: var(--text-line-height);
   tab-size: 4;
   scrollbar-width: thin;
 }
-.diff-rail { display: block; position: relative; }
-.diff-line { position: absolute; inset-inline: 0; height: var(--diff-line-height); }
+.output-scroll { overscroll-behavior: contain; }
+.text-rail { display: block; position: relative; }
+.text-line { position: absolute; inset-inline: 0; height: var(--text-line-height); }
+.output-line { padding-inline: 8px; }
 .diff-line[data-tone="meta"] { color: #bad1ef; }
 .diff-line[data-tone="add"] { color: #b8e2c1; background: #67997023; }
 .diff-line[data-tone="remove"] { color: #edc0b6; background: #ae5e5026; }
-.diff-pages { display: flex; justify-content: flex-end; align-items: center; gap: 6px; padding-top: 4px; font-size: 12px; }
-.diff-pages span, .diff-empty { color: var(--muted); }
+.text-pages { display: flex; justify-content: flex-end; align-items: center; gap: 6px; padding-top: 4px; font-size: 12px; }
+.text-pages span, .diff-empty { color: var(--muted); }
 .diff-empty { margin: 0; }
 .plan-list, .member-list, .artifact-list { margin: 0; padding: 0; list-style: none; }
 .plan-list li { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }

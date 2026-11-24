@@ -73,6 +73,20 @@ fn patch_sample(turn: &str) -> Value {
     ]})
 }
 
+fn command_output(turn: &str, cwd: &Path) -> Value {
+    let mut text = format!("    prepare\t{}\n", "index workspace ".repeat(12));
+    for index in 1..20_000 {
+        writeln!(
+            text,
+            "    检查 {index:05}\tworkspace/source/feature_{index:05}.rs"
+        )
+        .unwrap();
+    }
+    text.push_str("warning: 已核对全部命令输出。\n");
+    json!({"type":"commandExecution","id":format!("{turn}-output"),"command":"workspace verify --all",
+        "cwd":cwd,"status":"failed","exitCode":3,"aggregatedOutput":text})
+}
+
 fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str) -> Value {
     let mut entries = vec![json!({"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
         "gitInfo":{"branch":"prototype/web-workbench"}})];
@@ -300,6 +314,32 @@ pub fn run() -> Result<()> {
                         "item/completed",
                         json!({"threadId":THREAD,"turnId":turn,"item":{"type":"agentMessage",
                             "id":format!("{turn}-patch-result"),"text":"已记录文件变更。\n\n```text\npatch preview ready\n```"}}),
+                    )?;
+                    background.store(false, Ordering::Release);
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":THREAD,"turn":{"id":turn,"status":"completed","items":[]}}),
+                    )?;
+                    continue;
+                }
+                if params["input"][0]["text"] == "验证完整命令输出。" {
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,"item":command_output(&turn, &cwd)}),
+                    )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,"item":{"type":"dynamicToolCall","id":format!("{turn}-tool"),
+                            "tool":"核对异常项","status":"completed","output":"  发现一项配置异常。\n"}}),
+                    )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-output-result"),
+                            "text":"**检查已结束。** 命令退出码为 3，末尾记录了异常。"}}),
                     )?;
                     background.store(false, Ordering::Release);
                     notice(

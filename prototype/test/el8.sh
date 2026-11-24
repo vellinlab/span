@@ -87,6 +87,8 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/covered-transcript.mjs
     /artifacts/linux/span-preview /artifacts/covered-baseline/span-preview | tee /artifacts/covered-transcript.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/patch-view.mjs \
     /artifacts/linux/span-preview /artifacts/el8-workbench-patch.png /artifacts/covered-baseline/span-preview | tee /artifacts/patch-view.json
+taskset -c "$pressure_cpu" /artifacts/node prototype/test/output-view.mjs \
+    /artifacts/linux/span-preview /artifacts/el8-workbench-output.png /artifacts/output-baseline/span-preview | tee /artifacts/output-view.json
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 
 widget_socket="$fixture/widgets.sock"

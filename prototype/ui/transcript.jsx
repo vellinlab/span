@@ -1,4 +1,4 @@
-import { memo, useCallback, useLayoutEffect, useReducer, useRef } from 'react';
+import { memo, useCallback, useDeferredValue, useLayoutEffect, useReducer, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight, Brain, Check, ChevronRight, Circle, CodeXml, FileCode2, FileText, GitBranch,
@@ -7,9 +7,9 @@ import {
 import { Markdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
+import { CopyTextButton, TextReader } from './text-reader.jsx';
 import { timelineLayout, visibleRow } from './timeline.js';
 
-const truncate = text => text.length > 256 * 1024 ? text.slice(0, 256 * 1024) + '\n…' : text;
 const statusLabels = {
   pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
 };
@@ -38,6 +38,22 @@ function ArtifactList({ artifacts, openArtifact }) {
       : file.path ? <button type="button" title={file.path} onClick={() => openArtifact(file)}>{file.name}</button>
         : <span>{file.name}</span>}
   </li>)}</ul>;
+}
+
+function ToolOutput({ text, cwd }) {
+  const scroll = useRef(null);
+  const visible = useDeferredValue(text);
+  const long = visible && (visible.length > 16 * 1024 || visible.split('\n', 32).length === 32);
+  return <>
+    {cwd && <code className="card-path">{cwd}</code>}
+    {visible && <div className="tool-output">
+      <div className="tool-output-heading"><span>输出</span>
+        <CopyTextButton text={text} label="复制输出" copiedLabel="已复制输出" />
+      </div>
+      {long ? <TextReader text={visible} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
+        : <pre className="output-scroll" tabIndex={0} aria-label="工具输出">{visible}</pre>}
+    </div>}
+  </>;
 }
 
 function Card({ icon: Icon, type, title, status, hint, expanded, toggle, children }) {
@@ -89,8 +105,7 @@ const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openS
     case 'command':
       title = row.command || '执行命令';
       hint = row.exitCode != null && row.exitCode !== 0 ? `退出码 ${row.exitCode}` : undefined;
-      if (row.text || row.cwd) detail = () => <>{row.cwd && <code className="card-path">{row.cwd}</code>}
-        {row.text && <pre>{truncate(row.text)}</pre>}</>;
+      if (row.text || row.cwd) detail = () => <ToolOutput text={row.text} cwd={row.cwd} />;
       break;
     case 'patch':
       title = row.files?.length ? '文件变更' : '本轮差异';
@@ -100,12 +115,12 @@ const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openS
     case 'tool':
       title = row.name || '调用工具';
       hint = row.source;
-      if (row.text) detail = () => <pre>{truncate(row.text)}</pre>;
+      if (row.text) detail = () => <ToolOutput text={row.text} />;
       break;
     case 'search':
       title = row.query;
       if (row.url || row.text) detail = () => <>{row.url && <SourceLink url={row.url}>{row.url}</SourceLink>}
-        {row.text && <pre>{truncate(row.text)}</pre>}</>;
+        {row.text && <ToolOutput text={row.text} />}</>;
       break;
     case 'delegation':
       title = row.action;
@@ -183,7 +198,7 @@ export const Transcript = memo(function Transcript({
   return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
     data-items={rows.length} onScroll={onScroll}
     onWheel={event => {
-      if (event.deltaY < 0 && scroll.current.scrollTop < 160 && !event.target.closest('.diff-scroll')) onScroll();
+      if (event.deltaY < 0 && scroll.current.scrollTop < 160 && !event.target.closest('.text-scroll, .output-scroll')) onScroll();
     }}>
     {rows.length ? <div className="reading-column rail" style={{ height }}>
       {virtualRows.map(item => {

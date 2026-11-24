@@ -76,6 +76,19 @@ jobs:
           rm -r "$artifacts/covered-baseline/resources/app/dist"
           cp -a "$source_dir/prototype/dist" "$artifacts/covered-baseline/resources/app/"
           printf '%s\n' "$baseline" > "$artifacts/covered-baseline-commit.txt"
+      - name: Prepare the baseline renderer for command output
+        run: |
+          baseline=a60db7ad82b8c970d75b1e60ef31d44c89c996a7
+          artifacts=/tmp/span-workbench-artifacts
+          source_dir=$(mktemp -d)
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git archive "$baseline" prototype | tar -x -C "$source_dir"
+          npm --prefix "$source_dir/prototype" ci --no-audit --no-fund
+          npm --prefix "$source_dir/prototype" run build
+          cp -al "$artifacts/linux" "$artifacts/output-baseline"
+          rm -r "$artifacts/output-baseline/resources/app/dist"
+          cp -a "$source_dir/prototype/dist" "$artifacts/output-baseline/resources/app/"
+          printf '%s\n' "$baseline" > "$artifacts/output-baseline-commit.txt"
       - name: Verify on AlmaLinux 8 and compare with Span 0.1.0
         run: |
           baseline=span-0.1.0-1.el8.x86_64.rpm
@@ -104,6 +117,7 @@ jobs:
             /tmp/span-workbench-artifacts/glibc-service.txt
             /tmp/span-workbench-artifacts/pty-baseline-commit.txt
             /tmp/span-workbench-artifacts/covered-baseline-commit.txt
+            /tmp/span-workbench-artifacts/output-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -142,6 +156,7 @@ jobs:
           node prototype/test/catalog.mjs "$binary" "$PWD/windows-workbench-catalog.png"
           node prototype/test/covered-transcript.mjs "$binary"
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
+          node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Publish Windows preview and screenshot
         if: always()
