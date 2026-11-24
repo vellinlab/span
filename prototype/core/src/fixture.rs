@@ -150,6 +150,12 @@ fn history() -> Vec<Value> {
                         "content":[{"type":"text","text":"请检查长会话、终端和文件预览的表现。"}]}),
                     json!({"id":format!("result-{number}"),"type":"agentMessage","text":reply}),
                 ]
+            } else if number == 90 {
+                vec![
+                    json!({"id":"history-command-90","type":"commandExecution","command":"workspace verify --history",
+                        "status":"completed","exitCode":0,"aggregatedOutput":"已核对第 90 项历史记录。\n保留命令卡片的展开状态。\n"}),
+                    json!({"id":format!("result-{number}"),"type":"agentMessage","text":reply}),
+                ]
             } else {
                 vec![json!({"id":format!("result-{number}"),"type":"agentMessage","text":reply})]
             };

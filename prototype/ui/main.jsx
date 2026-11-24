@@ -57,6 +57,7 @@ function App() {
   const scroll = useRef(null);
   const catalogScroll = useRef({ scope: '', top: 0 });
   const searchScroll = useRef({ scope: '', top: 0 });
+  const readingViews = useRef(new Map());
   const previewScope = useRef(0);
   const previewRegion = useRef(null);
   const previewTrigger = useRef(null);
@@ -68,12 +69,19 @@ function App() {
   const closeTerminal = useCallback(() => setTerminal(false), []);
   const report = useCallback(error => setError(error.message), []);
   const clearError = useCallback(() => setError(''), []);
+  const rememberReadingView = useCallback((key, view) => {
+    const recent = readingViews.current;
+    recent.delete(key);
+    if (view.anchor || view.expansion.length) recent.set(key, view);
+    if (recent.size > 24) recent.delete(recent.keys().next().value);
+  }, []);
   const previewCoversConversation = previewOverlay && Boolean(preview && !preview.parked);
   const work = useAgent(config, { report, clearError, jumpToLatest, suspendTimeline: previewCoversConversation });
   const { api, connection, route, sessions, session, rows, loading, run, goal } = work;
   const catalogQuery = sidebarOpen && tab === 'sessions' && searchOpen ? query.trim() : '';
   const catalogSearch = useCatalogSearch(api, catalogQuery, work.archived, connection === 'ready', work.catalogRevision);
   const refKey = sessionKey(session?.ref);
+  const rememberedReading = readingViews.current.get(refKey);
   const running = run?.status === 'running';
   const interaction = work.requests[0];
   const liveReasoning = turnReasoning(rows, running ? run.id : undefined);
@@ -230,11 +238,12 @@ function App() {
   }
 
   function openSession(entry) {
-    if (loading || running || connection !== 'ready' || sessionKey(entry.ref) === refKey) return;
+    const key = sessionKey(entry.ref);
+    if (loading || running || connection !== 'ready' || key === refKey) return;
     closePanel();
     if (readingOverlay) dismissPreview();
     else previewScope.current++;
-    work.open(entry);
+    work.open(entry, readingViews.current.get(key));
   }
 
   const latestWork = useRef();
@@ -576,7 +585,8 @@ function App() {
       <div className="workspace-area" data-preview-overlay={previewOverlay || undefined}>
         <main className="main" inert={readingOverlay}>
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
-            <Transcript key={refKey} rows={rows} cursor={work.cursor} loadOlder={work.loadOlder} loading={loading}
+            <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
+              rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
               liveReasoningKey={liveReasoning?.key}
               jumpToLatest={jumpToLatest} scroll={scroll} onScrollPosition={setShowLatest} openSession={openRef}
               openArtifact={openArtifact} canOpenSession={!running && !loading && connection === 'ready'} />
@@ -593,7 +603,7 @@ function App() {
                 }}>重新连接</button>}
                 <button className="icon-button" type="button" aria-label="关闭错误提示" onClick={clearError}><X size={16} /></button>
               </div>}
-              {loading && !rows.length && <div className="live" role="status"><i />正在加载会话</div>}
+              {loading && !rows.length && <div className="live" role="status"><i />{rememberedReading?.anchor ? '正在恢复阅读位置' : '正在加载会话'}</div>}
               <div className="composer-overlay">
                 <AgentPanel panel={panel} work={work} reasoning={reasoningOpen ? liveReasoning : undefined}
                   setPanel={value => value ? setPanel(value) : closePanel()} report={report} openSession={openRef} />

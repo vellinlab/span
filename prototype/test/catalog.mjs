@@ -35,6 +35,65 @@ try {
 
   await page.getByText('第 160 项', { exact: false }).waitFor();
   await waitForCount(42);
+  const timeline = page.getByTestId('transcript');
+  const jumpToLatest = page.getByRole('button', { name: '滚到最新消息' });
+  const historyCommand = timeline.locator('[data-card="command"]').filter({ hasText: 'workspace verify --history' });
+  for (const count of [41, 61, 82]) {
+    await timeline.evaluate(element => { element.scrollTop = 100; });
+    await page.waitForFunction(count => Number(document.querySelector('[data-testid="transcript"]').dataset.items) === count, count);
+  }
+  await timeline.evaluate(async element => {
+    element.scrollTop = 200;
+    const nextFrame = () => new Promise(requestAnimationFrame);
+    for (let step = 0; step < 12; step++) {
+      await nextFrame();
+      if (element.querySelector('[data-card="command"]')) return;
+      element.scrollTop += element.clientHeight / 2;
+    }
+  });
+  await historyCommand.locator('summary').click();
+  await historyCommand.getByText('已核对第 90 项历史记录。', { exact: false }).waitFor();
+  const readAnchor = () => timeline.evaluate(element => {
+    const view = element.getBoundingClientRect();
+    const row = [...element.querySelectorAll('.message[data-empty="false"]')].find(item => {
+      const rect = item.getBoundingClientRect();
+      return rect.bottom > view.top && rect.top < view.bottom;
+    });
+    return row && { text: row.textContent, top: row.getBoundingClientRect().top - view.top };
+  });
+  await historyCommand.evaluate(async element => {
+    const timeline = element.closest('.timeline');
+    timeline.scrollTop += element.closest('.message').getBoundingClientRect().top - timeline.getBoundingClientRect().top + 17;
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  });
+  const beforeReadingSwitch = await readAnchor();
+  assert.match(beforeReadingSwitch.text, /workspace verify --history/);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reading.png') });
+  const openThread = async name => {
+    await tree.getByRole('treeitem', { name, exact: true }).click();
+    await page.locator('.breadcrumb strong').filter({ hasText: new RegExp(`^${name}$`) }).waitFor();
+  };
+  await openThread('目录会话 0002');
+  await timeline.getByText('第 160 项', { exact: false }).waitFor();
+  assert.equal(await historyCommand.count(), 0);
+  await openThread('工作台架构评审');
+  await historyCommand.getByText('已核对第 90 项历史记录。', { exact: false }).waitFor();
+  const restoredReading = await readAnchor();
+  assert.equal(restoredReading.text, beforeReadingSwitch.text);
+  assert.ok(Math.abs(restoredReading.top - beforeReadingSwitch.top) <= 2, JSON.stringify({ beforeReadingSwitch, restoredReading }));
+  assert.equal(await timeline.getAttribute('data-items'), '82');
+  assert.ok(await timeline.locator('.message').count() < 30);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reading-restored.png') });
+  await jumpToLatest.click();
+  await jumpToLatest.waitFor({ state: 'detached' });
+  await openThread('目录会话 0002');
+  await timeline.getByText('第 160 项', { exact: false }).waitFor();
+  await openThread('工作台架构评审');
+  await timeline.getByText('第 160 项', { exact: false }).waitFor();
+  assert.equal(Number(await timeline.getAttribute('data-items')), 21);
+  assert.equal(await jumpToLatest.count(), 0);
+
   assert.ok(await items.count() < 33);
   const hierarchy = await items.first().evaluate(parent => {
     const textX = row => row.querySelector('span').getBoundingClientRect().left;
@@ -161,7 +220,7 @@ try {
   await page.getByRole('tree', { name: '已归档会话' }).getByRole('treeitem', { name: '归档会话示例' }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-search.png') });
   assert.equal(await loadMore.count(), 0);
-  console.log('Verified catalog navigation, append anchoring, search beyond loaded pages, retry, search pagination and archive scope.');
+  console.log('Verified session reading position, expanded history cards, catalog navigation, append anchoring, and search.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

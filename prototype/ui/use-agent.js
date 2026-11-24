@@ -15,6 +15,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
   const [session, setSession] = useState(null);
   const [rows, publishRows] = useState([]);
   const [cursor, setCursor] = useState(null);
+  const [historyPages, setHistoryPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [run, setRun] = useState(null);
   const [requests, setRequests] = useState([]);
@@ -74,6 +75,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
     queue.current = [];
     updateRows(() => []);
     setCursor(null);
+    setHistoryPages(0);
     setSession(null);
     setRequests([]);
     setGoal(null);
@@ -150,9 +152,10 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
     }
   }
 
-  function readPage(history, runVersion) {
+  function readPage(history, runVersion, pageCount) {
     updateRows(previous => mergeHistory(previous, historyRows(history.items)));
     setCursor(history.cursor);
+    setHistoryPages(pageCount);
     const restored = history.items.findLast(item => item.run.status === 'running');
     if (restored && runVersion === callbacks.current.run) changeRun(restored.run);
   }
@@ -166,7 +169,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
     });
   }
 
-  async function loadSession(client, entry, opening) {
+  async function loadSession(client, entry, opening, view) {
     const previous = active.current?.ref;
     const scope = clearTimeline();
     clearError();
@@ -197,8 +200,23 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
         if (scope === layer.current && goalVersion === callbacks.current.goal) setGoal(value);
       }).catch(() => {});
 
-      const history = state.history ?? await client.sessions.history(selected.ref, { limit: PAGE_SIZE });
-      if (scope === layer.current) readPage(history, runVersion);
+      let page = state.history ?? await client.sessions.history(selected.ref, { limit: PAGE_SIZE });
+      const pages = [page.items];
+      const seen = new Set();
+      const target = view?.anchor?.turnId;
+      // Restore the part of history already read, with one extra page for new turns.
+      while (scope === layer.current && target && pages.length <= view.pages && page.cursor && !seen.has(page.cursor)
+        && !page.items.some(turn => turn.id === target)) {
+        seen.add(page.cursor);
+        try {
+          page = await client.sessions.history(selected.ref, { limit: PAGE_SIZE, cursor: page.cursor });
+          pages.push(page.items);
+        } catch (error) {
+          if (scope === layer.current) report(error);
+          break;
+        }
+      }
+      if (scope === layer.current) readPage({ items: pages.reverse().flat(), cursor: page.cursor }, runVersion, pages.length);
     } catch (error) {
       if (scope === layer.current) report(error);
     } finally {
@@ -280,6 +298,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
       if (scope !== layer.current) return;
       updateRows(previous => mergeHistory(previous, historyRows(history.items)));
       setCursor(history.cursor);
+      setHistoryPages(previous => previous + 1);
     } catch (error) {
       if (scope === layer.current) report(error);
     } finally {
@@ -294,13 +313,13 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
     return connection === 'ready' && agent.current && !loading && !busy.current && !currentRun.current;
   }
 
-  function open(entry) {
+  function open(entry, view) {
     if (!guard() || sessionKey(entry.ref) === active.current?.key) return;
     if (entry.ref.backend !== config.backend || (entry.ref.location.host ?? '') !== config.ssh) {
       report(new Error('请先连接此会话所在的 Agent 和主机。'));
       return;
     }
-    return loadSession(agent.current, entry);
+    return loadSession(agent.current, entry, undefined, view);
   }
 
   function reset() {
@@ -447,7 +466,7 @@ export function useAgent(config, { report, clearError, jumpToLatest, suspendTime
   }
 
   return {
-    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, loading, run, requests,
+    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyPages, loading, run, requests,
     goal, usage, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
     refreshDelegation, delegate, manageTeam,
     list: (showArchived = archived, more = false) => list(agent.current, showArchived, more ? sessionCursor : null),

@@ -1,5 +1,5 @@
-import { memo, useCallback, useDeferredValue, useLayoutEffect, useReducer, useRef } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { memo, useCallback, useDeferredValue, useLayoutEffect, useReducer, useRef, useState } from 'react';
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight, Brain, Check, ChevronRight, Circle, CodeXml, FileCode2, FileText, GitBranch,
   Image, ListChecks, Search, Terminal, Users, Wrench,
@@ -144,21 +144,56 @@ const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openS
     title={title} hint={hint} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
+function readAnchor(element, rows) {
+  if (element.scrollHeight - element.clientHeight - element.scrollTop < 40) return;
+  const viewport = element.getBoundingClientRect();
+  for (const item of element.querySelectorAll('.message[data-empty="false"]')) {
+    const rect = item.getBoundingClientRect();
+    if (rect.bottom > viewport.top && rect.top < viewport.bottom) {
+      const { key, itemKey, turnId } = rows[Number(item.dataset.index)];
+      return { key, itemKey, turnId, top: rect.top - viewport.top };
+    }
+  }
+}
+
+function anchorIndex(rows, anchor, hiddenKey) {
+  let fallback = -1;
+  for (const [index, row] of rows.entries()) {
+    if (row.turnId !== anchor.turnId || row.key === hiddenKey || !visibleRow(row)) continue;
+    if (row.key === anchor.key || row.key === anchor.itemKey) return index;
+    if (fallback === -1) fallback = index;
+  }
+  return fallback;
+}
+
 export const Transcript = memo(function Transcript({
-  rows, liveReasoningKey, cursor, loadOlder, loading, jumpToLatest, scroll, onScrollPosition, openSession, openArtifact, canOpenSession,
+  rows, liveReasoningKey, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
+  onScrollPosition, openSession, openArtifact, canOpenSession,
 }) {
-  const expanded = useRef(new Map());
+  const expanded = useRef(null);
+  if (!expanded.current) expanded.current = new Map(remembered?.expansion);
+  const [restore, setRestore] = useState(remembered?.anchor);
+  const latest = useRef(null);
   const following = useRef(true);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const toggle = useCallback((key, open) => {
+    expanded.current.delete(key);
     expanded.current.set(key, open);
     updateExpansion();
   }, []);
+  const target = restore && !loading ? anchorIndex(rows, restore, liveReasoningKey) : -1;
   const layout = timelineLayout(rows);
   const estimate = useCallback(index => layout.getItemKey(index) === liveReasoningKey ? 0 : layout.estimateSize(index), [layout, liveReasoningKey]);
+  const rangeExtractor = useCallback(range => {
+    const indexes = defaultRangeExtractor(range);
+    if (target < indexes[0]) return [target, ...indexes];
+    if (target > indexes.at(-1)) return [...indexes, target];
+    return indexes;
+  }, [target]);
   const virtual = useVirtualizer({
     count: rows.length, getScrollElement: () => scroll.current,
     getItemKey: layout.getItemKey, estimateSize: liveReasoningKey ? estimate : layout.estimateSize,
+    rangeExtractor: target >= 0 ? rangeExtractor : defaultRangeExtractor,
     overscan: 6, paddingStart: 20, paddingEnd: 14,
     anchorTo: 'end', followOnAppend: true, scrollEndThreshold: 40,
   });
@@ -166,12 +201,53 @@ export const Transcript = memo(function Transcript({
   const height = virtual.getTotalSize();
 
   useLayoutEffect(() => {
-    if (jumpToLatest.current && rows.length) {
-      jumpToLatest.current = false;
-      following.current = true;
-      virtual.scrollToEnd();
+    latest.current = { rows, historyPages, restore };
+  }, [rows, historyPages, restore]);
+
+  useLayoutEffect(() => {
+    const element = scroll.current;
+    return () => {
+      if (!viewKey || latest.current?.restore || !latest.current?.rows.length) return;
+      remember(viewKey, { anchor: readAnchor(element, latest.current.rows), pages: latest.current.historyPages,
+        expansion: Array.from(expanded.current).slice(-64) });
+    };
+  }, [viewKey, remember, scroll]);
+
+  useLayoutEffect(() => {
+    if (!restore || loading || !rows.length) return;
+    const element = scroll.current;
+    const item = target >= 0 && element.querySelector(`.message[data-index="${target}"]`);
+    if (!item) {
+      setRestore(undefined);
+      return;
     }
-  }, [rows, virtual, jumpToLatest]);
+    let frame;
+    following.current = false;
+    function align(attempts) {
+      const rect = item.getBoundingClientRect();
+      const top = Math.max(restore.top, 1 - rect.height);
+      const delta = rect.top - element.getBoundingClientRect().top - top;
+      if (Math.abs(delta) > 1) virtual.scrollToOffset(element.scrollTop + delta);
+      // Nearby rows can be measured for the first time after the initial scroll.
+      if (attempts) frame = requestAnimationFrame(() => align(attempts - 1));
+      else {
+        jumpToLatest.current = false;
+        following.current = element.scrollHeight - element.clientHeight - element.scrollTop < 40;
+        onScrollPosition(!following.current);
+        setRestore(undefined);
+      }
+    }
+    align(2);
+    return () => cancelAnimationFrame(frame);
+  }, [rows.length, virtual, jumpToLatest, scroll, onScrollPosition, restore, loading, target]);
+
+  useLayoutEffect(() => {
+    if (restore || !jumpToLatest.current || !rows.length) return;
+    jumpToLatest.current = false;
+    following.current = true;
+    virtual.scrollToEnd();
+    onScrollPosition(false);
+  }, [rows, virtual, jumpToLatest, onScrollPosition, restore]);
 
   useLayoutEffect(() => {
     const element = scroll.current;
@@ -187,6 +263,7 @@ export const Transcript = memo(function Transcript({
   }, [scroll, virtual]);
 
   function onScroll() {
+    if (restore) return;
     const element = scroll.current;
     const atBottom = element.scrollHeight - element.clientHeight - element.scrollTop < 40;
     following.current = atBottom;
@@ -199,7 +276,7 @@ export const Transcript = memo(function Transcript({
     onWheel={event => {
       if (event.deltaY < 0 && scroll.current.scrollTop < 160 && !event.target.closest('.text-scroll, .output-scroll')) onScroll();
     }}>
-    {rows.length ? <div className="reading-column rail" style={{ height }}>
+    {rows.length ? <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
       {virtualRows.map(item => {
         const row = rows[item.index];
         const depth = Math.max(0, Math.min(3, row.depth ?? 0));
