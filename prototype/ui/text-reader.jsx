@@ -5,6 +5,7 @@ import { AlertCircle, Check, Copy } from 'lucide-react';
 const LINES_PER_PAGE = 8192;
 const LINE_HEIGHT = 18;
 const estimateLine = () => LINE_HEIGHT;
+const FIRST_PAGE = [{ start: 0 }];
 
 function pageStarts(text, updateContext) {
   const pages = [{ start: 0 }];
@@ -33,35 +34,35 @@ function readLines(text, context, updateContext, classify) {
   return { rows, columns };
 }
 
-function TextViewport({ data, kind, label, position, page, scroll }) {
+function TextViewport({ data, text, kind, label, position, page, scroll }) {
   const initialPosition = useRef(position);
-  const { rows, columns } = data;
-  const virtual = useVirtualizer({ count: rows.length, getScrollElement: () => scroll.current,
-    estimateSize: estimateLine, overscan: 8, initialOffset: () => initialPosition.current?.top ?? 0 });
+  const virtual = useVirtualizer({ count: data?.rows.length ?? 0, getScrollElement: () => scroll.current,
+    enabled: Boolean(data), estimateSize: estimateLine, overscan: 8,
+    initialOffset: () => initialPosition.current?.top ?? scroll.current?.scrollTop ?? 0 });
 
   useLayoutEffect(() => {
     if (initialPosition.current) scroll.current.scrollTo(initialPosition.current);
   }, [scroll]);
 
-  return <pre ref={scroll} className={`text-scroll ${kind}-scroll`} tabIndex={0} aria-label={label} data-page={page}
+  return <pre ref={scroll} className={`${data ? 'text-scroll ' : ''}${kind}-scroll`} tabIndex={0} aria-label={label} data-page={page}
     style={{ '--text-line-height': `${LINE_HEIGHT}px` }}>
-    <code className="text-rail" style={{ height: virtual.getTotalSize(), minWidth: `max(100%, ${columns}ch)` }}>
+    {data ? <code className="text-rail" style={{ height: virtual.getTotalSize(), minWidth: `max(100%, ${data.columns}ch)` }}>
       {virtual.getVirtualItems().map(({ key, index, start }) => <span key={key} className={`text-line ${kind}-line`}
-        data-tone={rows[index].tone} style={{ top: start }}>{rows[index].text}{'\n'}</span>)}
-    </code>
+        data-tone={data.rows[index].tone} style={{ top: start }}>{data.rows[index].text}{'\n'}</span>)}
+    </code> : text}
   </pre>;
 }
 
-export function TextReader({ text, kind, label, pagesLabel, position, scroll, updateContext, classify }) {
+export function TextReader({ text, plain = false, kind, label, pagesLabel, position, scroll, updateContext, classify }) {
   const [view, setView] = useState(position ?? { page: 0 });
-  const pages = useMemo(() => pageStarts(text, updateContext), [text, updateContext]);
+  const pages = useMemo(() => plain ? FIRST_PAGE : pageStarts(text, updateContext), [plain, text, updateContext]);
   const current = Math.min(view.page, pages.length - 1);
   const { start, context } = pages[current];
   const pageText = text.slice(start, pages[current + 1]?.start);
-  const data = useMemo(() => readLines(pageText, context, updateContext, classify),
-    [pageText, context, updateContext, classify]);
+  const data = useMemo(() => plain ? null : readLines(pageText, context, updateContext, classify),
+    [plain, pageText, context, updateContext, classify]);
   return <>
-    <TextViewport key={current} data={data} kind={kind} label={label} position={view.page === current ? view : null}
+    <TextViewport key={current} data={data} text={pageText} kind={kind} label={label} position={view.page === current ? view : null}
       page={current} scroll={scroll} />
     {pages.length > 1 && <nav className="text-pages" aria-label={pagesLabel}>
       <button type="button" disabled={!current} onClick={() => setView({ page: current - 1 })}>上一段</button>

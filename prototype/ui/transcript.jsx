@@ -50,8 +50,7 @@ function ToolOutput({ text, cwd }) {
       <div className="tool-output-heading"><span>输出</span>
         <CopyTextButton text={text} label="复制输出" copiedLabel="已复制输出" />
       </div>
-      {long ? <TextReader text={visible} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
-        : <pre className="output-scroll" tabIndex={0} aria-label="工具输出">{visible}</pre>}
+      <TextReader text={visible} plain={!long} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
     </div>}
   </>;
 }
