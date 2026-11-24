@@ -620,15 +620,15 @@ p { margin-block: 0 12px; }
   min-width: 0;
   border-left: 1px solid var(--line);
 }
+.preview[hidden] { display: none; }
+.preview-content:focus-visible { outline-offset: -2px; }
 .preview-content { flex: 1; overflow: auto; padding: 14px; scrollbar-width: thin; }
 .preview-content pre { font-size: 12px; }
 .preview-content img { max-width: 100%; display: block; margin: auto; }
 
-@media (max-width: 1020px) {
-  .preview {
-    position: absolute;
-    z-index: 1;
-    inset: 0 0 0 auto;
-    width: min(450px, 100%);
-  }
+.workspace-area[data-preview-overlay] .preview {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 0 auto;
+  width: min(450px, 100%);
 }

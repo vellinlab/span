@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowDown, ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
@@ -20,6 +20,14 @@ const connectionLabels = { ready: '已连接', connecting: '正在连接', offli
 const routeLabels = { shared: '共享后台', stdio: '独立进程', fixture: '演示数据', remote: '远程服务' };
 const extensionCommands = { '/mcp': 'mcp', '/skills': 'skill', '/plugins': 'plugin', '/apps': 'connector', '/tools': 'tool' };
 const extensionTitles = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
+const previewOverlayQuery = window.matchMedia('(max-width: 1020px)');
+
+function subscribePreviewOverlay(onChange) {
+  previewOverlayQuery.addEventListener('change', onChange);
+  return () => previewOverlayQuery.removeEventListener('change', onChange);
+}
+
+const isPreviewOverlay = () => previewOverlayQuery.matches;
 
 function App() {
   const [config, setConfig] = useState(null);
@@ -39,6 +47,7 @@ function App() {
   const [directory, setDirectory] = useState('');
   const [entries, setEntries] = useState([]);
   const [preview, setPreview] = useState(null);
+  const previewOverlay = useSyncExternalStore(subscribePreviewOverlay, isPreviewOverlay);
   const jumpToLatest = useRef(true);
   const input = useRef(null);
   const search = useRef(null);
@@ -47,6 +56,9 @@ function App() {
   const catalogScroll = useRef({ scope: '', top: 0 });
   const searchScroll = useRef({ scope: '', top: 0 });
   const previewScope = useRef(0);
+  const previewRegion = useRef(null);
+  const restorePreviewFocus = useRef(false);
+  const interactionRegion = useRef(null);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
   const closeTerminal = useCallback(() => setTerminal(false), []);
@@ -59,6 +71,7 @@ function App() {
   const refKey = sessionKey(session?.ref);
   const running = run?.status === 'running';
   const interaction = work.requests[0];
+  const previewBlocked = previewOverlay && Boolean(interaction);
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
@@ -88,6 +101,20 @@ function App() {
     setShowLatest(false);
     setCommandIndex(0);
   }, [refKey]);
+
+  useLayoutEffect(() => {
+    const restoreFocus = restorePreviewFocus.current;
+    restorePreviewFocus.current = false;
+    if (!preview || preview.parked) return;
+    if (previewBlocked) {
+      setPreview({ ...preview, parked: true });
+      if (previewRegion.current?.contains(document.activeElement)) {
+        interactionRegion.current?.focus({ preventScroll: true });
+      }
+    } else if (restoreFocus) {
+      previewRegion.current?.querySelector('.preview-content')?.focus({ preventScroll: true });
+    }
+  }, [preview, previewBlocked]);
 
   async function readPreview(cwd, path) {
     const scope = ++previewScope.current;
@@ -221,6 +248,11 @@ function App() {
   function closePreview() {
     previewScope.current++;
     setPreview(null);
+  }
+
+  function restorePreview() {
+    restorePreviewFocus.current = true;
+    setPreview({ ...preview, parked: false });
   }
 
   function showConnection() {
@@ -431,6 +463,9 @@ function App() {
       <div className="titlebar-content">
         <div className="breadcrumb"><Folder size={15} /><span title={session?.cwd || cwd}>{workspace}</span>
           <span aria-hidden="true" className="breadcrumb-separator">/</span><strong title={name}>{name}</strong></div>
+        {preview?.parked && <button className="icon-button" aria-label="恢复文件预览" aria-controls="file-preview"
+          title={previewBlocked ? '处理请求后可恢复文件预览' : `恢复文件预览 · ${preview.path}`}
+          disabled={previewBlocked} onClick={restorePreview}><FileText size={16} /></button>}
         <button className="icon-button terminal-toggle" aria-label="切换终端" title="切换终端"
           aria-pressed={terminal} onClick={() => setTerminal(value => !value)}><SquareTerminal size={16} /></button>
       </div>
@@ -487,7 +522,7 @@ function App() {
           <button aria-pressed={tab === 'files'} onClick={() => setTab('files')}><Folder size={16} />文件</button>
         </nav>
       </Sidebar>}
-      <div className="workspace-area">
+      <div className="workspace-area" data-preview-overlay={previewOverlay || undefined}>
         <main className="main">
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
             <Transcript key={refKey} rows={rows} cursor={work.cursor} loadOlder={work.loadOlder} loading={loading}
@@ -518,7 +553,8 @@ function App() {
                   </button>)}
                 </div>}
               </div>
-              <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host} returnFocus={input} />
+              <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host}
+                focusTarget={interactionRegion} returnFocus={input} />
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
@@ -555,11 +591,11 @@ function App() {
             <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer} onClose={closeTerminal} />
           </Suspense>}
         </main>
-        {preview && <aside className="preview">
+        {preview && <aside className="preview" id="file-preview" aria-label="文件预览" hidden={preview.parked} ref={previewRegion}>
           <header><FileText size={16} /><strong title={preview.path}>{preview.path}</strong>
             <button className="icon-button right" aria-label="关闭预览" title="关闭预览" onClick={closePreview}><X size={16} /></button>
           </header>
-          <div className="preview-content">{preview.kind === 'image' ? <img alt={preview.path} src={`data:${preview.mime};base64,${preview.data}`} />
+          <div className="preview-content" tabIndex={0}>{preview.kind === 'image' ? <img alt={preview.path} src={`data:${preview.mime};base64,${preview.data}`} />
             : preview.kind === 'markdown' ? <Markdown text={preview.data} /> : <pre>{preview.data}</pre>}</div>
         </aside>}
       </div>

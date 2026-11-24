@@ -286,19 +286,34 @@ try {
   const wasTerminalOpen = await terminalToggle.getAttribute('aria-pressed') === 'true';
   if (!wasTerminalOpen) await terminalToggle.click();
   await page.locator('section.terminal-panel').waitFor();
+  const preview = page.getByRole('complementary', { name: '文件预览' });
+  const restorePreview = page.getByRole('button', { name: '恢复文件预览' });
+  let fileContent;
+  if (!process.env.SPAN_TEST_SSH_ALIAS) {
+    await page.getByRole('button', { name: '文件', exact: true }).click();
+    await page.getByRole('button', { name: 'README.md' }).click();
+    const content = preview.locator('.preview-content');
+    await content.focus();
+    fileContent = await content.elementHandle();
+    assert.ok(await approval.isVisible());
+  }
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
+  if (fileContent) {
+    await preview.waitFor({ state: 'hidden' });
+    await restorePreview.waitFor();
+    assert.equal(await restorePreview.isEnabled(), false);
+    assert.ok(await approval.evaluate(element => document.activeElement === element));
+  }
   assert.ok(await page.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    const refuse = rect('.approval-actions button');
+    const hit = document.elementFromPoint(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2);
     return rect('.timeline').height > 0 && rect('.approval-context').bottom <= rect('.approval-body').bottom &&
       rect('.approval-actions').bottom <= rect('.composer').top && rect('.terminal-canvas').height >= 70 &&
-      rect('.composer').bottom <= rect('.terminal-panel').top;
+      rect('.composer').bottom <= rect('.terminal-panel').top && Boolean(hit?.closest('.approval-actions button'));
   }), 'History, approval scope and actions, the composer and terminal fit at the minimum window size');
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval-compact.png') });
-  await app.evaluate(({ BrowserWindow }, [width, height]) =>
-    BrowserWindow.getAllWindows()[0].setContentSize(width, height), windowSize);
-  await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);
-  if (!wasTerminalOpen) await terminalToggle.click();
   await approval.getByRole('button', { name: '拒绝' }).press('Enter');
   const question = page.getByRole('region', { name: 'Agent 请求输入' });
   await question.waitFor();
@@ -310,6 +325,18 @@ try {
   assert.ok(await composer.evaluate(element => document.activeElement === element));
   await latest.click();
   await page.getByText('审批回复：拒绝，已收到回答。', { exact: true }).waitFor();
+  if (fileContent) {
+    await restorePreview.click();
+    await preview.getByText('README.md', { exact: true }).waitFor();
+    assert.ok(await fileContent.evaluate(element => element.isConnected && document.activeElement === element));
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-preview-restored.png') });
+    await preview.getByRole('button', { name: '关闭预览' }).click();
+    console.log('Verified the compact approval suspended the file preview and resumed the same view with keyboard focus.');
+  }
+  await app.evaluate(({ BrowserWindow }, [width, height]) =>
+    BrowserWindow.getAllWindows()[0].setContentSize(width, height), windowSize);
+  await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);
+  if (!wasTerminalOpen) await terminalToggle.click();
   console.log('Verified long approvals, action visibility, queued input, focus and the backend reply.');
   await composer.fill('/goal clear');
   await composer.press('Enter');

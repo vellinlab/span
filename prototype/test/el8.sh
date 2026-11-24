@@ -82,7 +82,7 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/terminal-pressure.mjs 
     /artifacts/span-workbench-pty-baseline | tee /artifacts/terminal-pressure.json
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
 /artifacts/node prototype/test/catalog.mjs /artifacts/linux/span-preview /artifacts/el8-catalog.png
-SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview "" webgl
+SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench-local.png webgl
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 
 widget_socket="$fixture/widgets.sock"

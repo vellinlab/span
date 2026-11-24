@@ -81,10 +81,9 @@ function InteractionCard({ request, count, respond, item, host, focusTarget, onF
   </section>;
 }
 
-export function Interactions({ requests, respond, item, host, returnFocus }) {
+export function Interactions({ requests, respond, item, host, focusTarget, returnFocus }) {
   const request = requests[0];
   const key = request ? JSON.stringify([request.turnId, request.id]) : null;
-  const focusTarget = useRef(null);
   const hadFocus = useRef(false);
   useLayoutEffect(() => {
     if (!hadFocus.current) return;
@@ -93,7 +92,7 @@ export function Interactions({ requests, respond, item, host, returnFocus }) {
       hadFocus.current = false;
       returnFocus.current?.focus({ preventScroll: true });
     }
-  }, [key, returnFocus]);
+  }, [key, focusTarget, returnFocus]);
   return request && <InteractionCard key={key} request={request} count={requests.length} respond={respond} item={item} host={host}
     focusTarget={focusTarget} onFocus={() => { hadFocus.current = true; }} onBlur={event => {
       if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) hadFocus.current = false;
