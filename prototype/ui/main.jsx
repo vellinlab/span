@@ -357,10 +357,10 @@ function App() {
     return () => window.removeEventListener('keydown', onShortcut);
   }, []);
 
-  function showPanel(kind, trigger = null) {
-    panelScope.current++;
+  function showPanel(kind, trigger = null, options = {}) {
+    const id = ++panelScope.current;
     panelTrigger.current = trigger;
-    setPanel({ kind, focus: Boolean(trigger) });
+    setPanel({ kind, id, focus: Boolean(trigger), ...options });
     setSuggesting(false);
     if (kind === 'usage') work.refreshUsage().catch(report);
     if (kind === 'agents') work.refreshDelegation().catch(report);
@@ -450,7 +450,7 @@ function App() {
       }
       case '/goal': {
         if (!args || args === 'status' || args === 'edit') {
-          showPanel('goal');
+          showPanel('goal', input.current, { editGoal: args === 'edit' });
           if (session) await work.goalAction();
           return true;
         }

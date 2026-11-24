@@ -80,26 +80,59 @@ function RuntimeSettings({ api, models, options, setOptions }) {
   </div>;
 }
 
-function GoalPanel({ goal, action, report }) {
-  const [objective, setObjective] = useState(goal?.objective ?? '');
-  const [budget, setBudget] = useState(goal?.budget ?? '');
+function GoalPanel({ goal, action, report, editOnOpen }) {
+  const [editing, setEditing] = useState(() => editOnOpen || !goal);
+  const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [edited, setEdited] = useState(false);
-  useEffect(() => {
-    if (!edited) {
-      setObjective(goal?.objective ?? '');
-      setBudget(goal?.budget ?? '');
-    }
-  }, [goal?.objective, goal?.budget, edited]);
+  const version = useRef(0);
+  const form = useRef(null);
+  const content = useRef(null);
+  const readingPosition = useRef(0);
+  const objectiveInput = useRef(null);
+  const editButton = useRef(null);
+  const moveFocus = useRef(editOnOpen);
+  const showEditor = editing || !goal;
+  const toggleStatus = goal?.status === 'active' ? 'pause' : goal?.status === 'paused' ? 'resume' : null;
+  const objective = draft?.objective ?? goal?.objective ?? '';
+  const budget = draft?.budget ?? goal?.budget ?? '';
+  const trimmed = useMemo(() => showEditor ? objective.trim() : '', [showEditor, objective]);
+
+  useLayoutEffect(() => {
+    content.current.scrollTop = showEditor ? 0 : readingPosition.current;
+  }, [showEditor]);
+  useLayoutEffect(() => {
+    if (!moveFocus.current) return;
+    moveFocus.current = false;
+    (showEditor ? objectiveInput : editButton).current?.focus({ preventScroll: true });
+  });
+
+  function edit(field, value) {
+    version.current++;
+    setDraft(current => ({ objective, budget, ...current, [field]: value }));
+  }
+
+  function changeEditor(open, focus = true) {
+    if (open && !showEditor) readingPosition.current = content.current.scrollTop;
+    moveFocus.current = focus;
+    setEditing(open);
+  }
+
   async function update(value) {
     if (busy) return;
+    const submitted = version.current;
+    const wasFocused = form.current?.contains(form.current.ownerDocument.activeElement);
     setBusy(true);
     try {
       const updated = await action(value);
-      if (value.kind === 'set' || value.kind === 'clear') setEdited(false);
-      if (value.kind === 'clear' && updated === null) {
-        setObjective('');
-        setBudget('');
+      const saved = value.kind === 'set' && updated;
+      const cleared = value.kind === 'clear' && updated === null;
+      if (submitted === version.current && (saved || cleared)) {
+        setDraft(null);
+        readingPosition.current = 0;
+        const panel = form.current;
+        const focused = panel?.ownerDocument.activeElement;
+        const restore = panel && (panel.contains(focused) || (cleared && wasFocused && focused === panel.ownerDocument.body));
+        changeEditor(Boolean(cleared), Boolean(restore));
       }
     } catch (error) {
       report(error);
@@ -107,17 +140,32 @@ function GoalPanel({ goal, action, report }) {
       setBusy(false);
     }
   }
-  return <form className="goal-form" onSubmit={event => {
+  return <form ref={form} className="goal-panel-main" onSubmit={event => {
     event.preventDefault();
-    if (objective.trim()) update({ kind: 'set', objective: objective.trim(), budget: budget === '' ? undefined : Number(budget) });
+    if (trimmed) update({ kind: 'set', objective: trimmed, budget: budget === '' ? undefined : Number(budget) });
   }}>
-    <label>目标<textarea rows={3} value={objective} required onChange={event => { setObjective(event.target.value); setEdited(true); }} /></label>
-    <label>Token 预算<input type="number" min={1} step={1} value={budget} placeholder="可选" onChange={event => { setBudget(event.target.value); setEdited(true); }} /></label>
-    <div className="panel-actions">
-      <button type="submit" className="primary" disabled={busy || !objective.trim()}>保存目标</button>
-      {goal?.status === 'active' && <button type="button" disabled={busy} onClick={() => update({ kind: 'pause' })}>暂停</button>}
-      {goal?.status === 'paused' && <button type="button" disabled={busy} onClick={() => update({ kind: 'resume' })}>继续</button>}
-      {goal && <button type="button" disabled={busy} onClick={() => update({ kind: 'clear' })}>清除</button>}
+    <div className="agent-panel-content" ref={content}>
+      {showEditor ? <div className="goal-form">
+        <label>目标<textarea ref={objectiveInput} rows={3} value={objective} required
+          onChange={event => edit('objective', event.target.value)} /></label>
+        <label>Token 预算<input type="number" min={1} step={1} value={budget} placeholder="可选"
+          onChange={event => edit('budget', event.target.value)} /></label>
+      </div> : <p className="goal-objective" tabIndex={0}>{goal.objective}</p>}
+    </div>
+    <div className="panel-actions goal-actions">
+      {showEditor ? <>
+        {goal && <button type="button" aria-disabled={busy} onClick={() => {
+          if (busy) return;
+          setDraft(null);
+          changeEditor(false);
+        }}>取消</button>}
+        <button type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>保存目标</button>
+      </> : <>
+        <button type="button" aria-disabled={busy} onClick={() => update({ kind: 'clear' })}>清除</button>
+        {toggleStatus && <button type="button" aria-disabled={busy}
+          onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : '继续'}</button>}
+        <button type="button" ref={editButton} aria-disabled={busy} onClick={() => { if (!busy) changeEditor(true); }}>编辑</button>
+      </>}
     </div>
   </form>;
 }
@@ -270,7 +318,7 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
   const close = useRef(null);
   const content = useRef(null);
   useLayoutEffect(() => {
-    if (panel?.focus) close.current?.focus({ preventScroll: true });
+    if (panel?.focus && !panel.editGoal) close.current?.focus({ preventScroll: true });
   }, [panel]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
@@ -286,9 +334,9 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
       {usage && <small className="goal-usage" title={usage}>{usage}</small>}
       <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
     </header>
-    <div className="agent-panel-content" ref={content}>
+    {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal}
+      action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
-      {panel.kind === 'goal' && <GoalPanel key={work.session?.ref.id} goal={work.goal} action={work.goalAction} report={report} />}
       {panel.kind === 'reasoning' && <ReasoningText rows={reasoning} scroll={content} />}
       {panel.kind === 'usage' && <UsagePanel usage={work.usage} refresh={work.refreshUsage} report={report} />}
       {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
@@ -298,7 +346,7 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
           <strong>{item.label}</strong><small>{item.status ?? (item.enabled == null ? item.source : item.enabled ? '已启用' : '已停用')}</small>
           {item.description && <p>{item.description}</p>}
         </li>)}</ul> : <p>没有可显示的{extensionLabels[panel.extension]}。</p>)}
-    </div>
+    </div>}
   </section>;
 }
 

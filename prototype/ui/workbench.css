@@ -912,7 +912,15 @@ p { margin-block: 0 12px; }
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
+.goal-panel-main { display: flex; flex-direction: column; min-height: 0; }
+.agent-panel[data-kind="goal"] header .icon-button { width: 26px; height: 26px; }
+.goal-panel-main > .agent-panel-content { padding-block: 8px; }
+.goal-objective { margin: 0; line-height: 21px; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.goal-actions { flex: none; padding: 4px 8px; border-top: 1px solid var(--line); justify-content: flex-end; }
+.goal-actions button { min-height: 28px; padding-block: 3px; }
+.goal-actions button[aria-disabled="true"] { cursor: default; opacity: .5; }
 .settings-grid, .goal-form, .usage-panel, .agent-groups, .delegation-form { display: grid; gap: 10px; }
 .agent-setting { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 8px; }
 .agent-setting span, .goal-form label, .panel-output, .panel-link { color: var(--muted); }

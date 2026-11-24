@@ -21,7 +21,7 @@ const app = await electron.launch({
     ...(exerciseWebgl ? ['--use-gl=angle', '--use-angle=swiftshader']
       : [linux ? '--disable-webgl' : '--terminal-renderer=dom']),
   ],
-  env: { ...process.env, SPAN_PREVIEW_PROFILE: profile },
+  env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_STREAM_GATE: profile },
 });
 
 async function checkAlignment(page) {
@@ -219,27 +219,73 @@ try {
   await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
   await composer.fill(Array(12).fill('保留长草稿，准备继续核对会话。').join('\n'));
   await goal.press('Enter');
+  const editGoal = goalPanel.getByRole('button', { name: '编辑', exact: true });
+  const saveGoal = goalPanel.getByRole('button', { name: '保存目标' });
+  const goalInput = goalPanel.getByRole('textbox', { name: '目标', exact: true });
+  const goalBudget = goalPanel.getByRole('spinbutton', { name: 'Token 预算' });
+  const goalText = goalPanel.locator('.goal-objective');
+  assert.equal(await goalText.textContent(), '验证会话目标');
+  assert.equal(await goalInput.count(), 0);
+  await editGoal.press('Enter');
+  assert.ok(await goalInput.evaluate(field => field === document.activeElement));
+  const longGoal = Array.from({ length: 10 }, (_, index) =>
+    `第 ${index + 1} 项。对照窗口尺寸、输入响应与会话恢复，记录对应的验收证据。`).join('\n');
+  await goalInput.fill(longGoal);
+  await goalBudget.fill('40000');
+  await saveGoal.press('Enter');
+  await goalText.waitFor();
+  assert.equal(await goalText.textContent(), longGoal);
+  assert.ok(await editGoal.evaluate(button => button === document.activeElement));
   const compactGoal = await goalPanel.evaluate(panel => {
     const bounds = panel.getBoundingClientRect();
     const timeline = document.querySelector('.timeline').getBoundingClientRect();
     const card = document.querySelector('.goal-strip').getBoundingClientRect();
     const close = panel.querySelector('header button').getBoundingClientRect();
     const body = panel.querySelector('.agent-panel-content');
+    const actions = panel.querySelector('.goal-actions').getBoundingClientRect();
     const hit = document.elementFromPoint(close.left + close.width / 2, close.top + close.height / 2);
     return { fits: bounds.top >= timeline.top + 4 && bounds.bottom < card.top,
-      scrolls: body.scrollHeight > body.clientHeight, closeVisible: panel.querySelector('header button').contains(hit) };
+      scrolls: body.scrollTop === 0 && body.scrollHeight > body.clientHeight,
+      closeVisible: panel.querySelector('header button').contains(hit),
+      actionsVisible: actions.top > body.getBoundingClientRect().top && actions.bottom <= bounds.bottom };
   });
-  assert.deepEqual(compactGoal, { fits: true, scrolls: true, closeVisible: true });
+  assert.deepEqual(compactGoal, { fits: true, scrolls: true, closeVisible: true, actionsVisible: true });
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact.png') });
-  const saveGoal = goalPanel.getByRole('button', { name: '保存目标' });
-  await saveGoal.scrollIntoViewIfNeeded();
+  await editGoal.press('Enter');
   assert.ok(await saveGoal.evaluate(button => {
     const bounds = button.getBoundingClientRect();
     return button.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
   }));
+  if (!process.env.SPAN_TEST_SSH_ALIAS) {
+    await goalInput.fill('验收延迟目标保存。');
+    await saveGoal.press('Enter');
+    await goalPanel.getByText('320 / 40,000 tokens', { exact: true }).waitFor();
+    const newer = '确认后保留的目标草稿。';
+    await goalInput.fill(newer);
+    await goalBudget.fill('64000');
+    await goalInput.focus();
+    await goalInput.evaluate(field => field.setSelectionRange(2, 6));
+    await writeFile(join(profile, 'goal-save'), '');
+    await goal.getByText('验收延迟目标保存。', { exact: true }).waitFor();
+    await goalPanel.locator('button[type="submit"][aria-disabled="false"]').waitFor();
+    assert.equal(await goalInput.inputValue(), newer);
+    assert.equal(await goalBudget.inputValue(), '64000');
+    assert.deepEqual(await goalInput.evaluate(field => [
+      field === document.activeElement, field.selectionStart, field.selectionEnd,
+    ]), [true, 2, 6]);
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-edit.png') });
+    await saveGoal.press('Enter');
+    await goalPanel.getByText(newer, { exact: true }).waitFor();
+  }
   await dismissGoal.press('Escape');
   await goalPanel.waitFor({ state: 'detached' });
   assert.ok(await goal.evaluate(button => button === document.activeElement));
+  await composer.fill('/goal edit');
+  await composer.press('Enter');
+  assert.ok(await goalInput.evaluate(field => field === document.activeElement));
+  await goalInput.press('Escape');
+  await goalPanel.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(field => field === document.activeElement));
   await composer.fill('/');
   const commandList = page.locator('.command-list');
   await commandList.waitFor();

@@ -1001,6 +1001,24 @@ pub fn run() -> Result<()> {
             "thread/goal/get" => json!({"goal":goal}),
             "thread/goal/set" => {
                 if let Some(objective) = params["objective"].as_str() {
+                    if objective == "验收延迟目标保存。"
+                        && let Some(gate) =
+                            env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                    {
+                        goal["tokensUsed"] = json!(320);
+                        notice(
+                            &output,
+                            "thread/goal/updated",
+                            json!({"threadId":THREAD,"goal":goal}),
+                        )?;
+                        if !wait_for_stream_gate(&gate.join("goal-save"), &AtomicBool::new(true)) {
+                            send(
+                                &output,
+                                json!({"id":id,"error":{"code":-32603,"message":"目标保存验收超时。"}}),
+                            )?;
+                            continue;
+                        }
+                    }
                     goal = json!({"objective":objective,"tokenBudget":params["tokenBudget"],"tokensUsed":0});
                 }
                 if !goal.is_null() {
