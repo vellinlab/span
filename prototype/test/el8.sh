@@ -120,7 +120,8 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     --reasoning-following | tee /artifacts/reasoning-following.json
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs \
-    /artifacts/linux/span-preview /artifacts/resource-isolation.json
+    /artifacts/linux/span-preview /artifacts/resource-isolation.json \
+    /artifacts/terminal-baseline/span-preview "$(cat /artifacts/terminal-baseline-commit.txt)"
 
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &

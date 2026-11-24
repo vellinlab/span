@@ -6,6 +6,9 @@ import '@xterm/xterm/css/xterm.css';
 
 let generation = Math.trunc(performance.timeOrigin * 1_000);
 const ACK_BYTES = 64 * 1024;
+const OUTPUT_GAP_MS = 96;
+const OUTPUT_BATCH_MS = 64;
+const INPUT_PRIORITY_MS = 140;
 
 export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, onClose }) {
   const element = useRef(null);
@@ -40,6 +43,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
           return;
         }
         host.dataset.renderer = 'webgl';
+        flushOutput();
         fit.fit();
         webgl.onContextLoss(() => {
           webgl.dispose();
@@ -56,24 +60,61 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       if (!closed) setError(error.message);
     });
     let unacknowledged = 0;
+    let lastOutput = -Infinity;
+    let prioritizeInputUntil = 0;
+    let outputTimer;
+    let queuedOutput = [];
+    let queuedBytes = 0;
+    const writeOutput = bytes => {
+      unacknowledged += bytes.length;
+      if (unacknowledged < ACK_BYTES) {
+        terminal.write(bytes);
+        return;
+      }
+      const processed = unacknowledged;
+      unacknowledged = 0;
+      terminal.write(bytes, () => { if (!closed) update('ack', { bytes: processed }); });
+    };
+    function flushOutput() {
+      if (!queuedBytes) return;
+      clearTimeout(outputTimer);
+      outputTimer = undefined;
+      const batch = queuedOutput;
+      queuedOutput = [];
+      queuedBytes = 0;
+      // Keep the PTY chunks in order and let xterm parse this batch before repainting its rows.
+      for (const bytes of batch) writeOutput(bytes);
+    }
     const unsubscribe = window.span.onEvent(packet => {
       if (packet.generation !== source) return;
       if (packet.event === 'terminal') {
         const bytes = Uint8Array.fromBase64(packet.data);
-        unacknowledged += bytes.length;
-        if (unacknowledged >= ACK_BYTES) {
-          const processed = unacknowledged;
-          unacknowledged = 0;
-          terminal.write(bytes, () => { if (!closed) update('ack', { bytes: processed }); });
+        const now = performance.now();
+        const continuous = now - lastOutput < OUTPUT_GAP_MS;
+        lastOutput = now;
+        // Show the first output and interactive echo immediately. Coalesce only continuous DOM output.
+        if (!continuous || now < prioritizeInputUntil || host.dataset.renderer === 'webgl') {
+          flushOutput();
+          writeOutput(bytes);
         } else {
-          terminal.write(bytes);
+          queuedOutput.push(bytes);
+          queuedBytes += bytes.length;
+          if (queuedBytes >= ACK_BYTES) flushOutput();
+          else outputTimer ??= setTimeout(flushOutput, OUTPUT_BATCH_MS);
         }
       }
-      if (packet.event === 'terminal-closed') terminal.writeln('\r\n[终端已退出]');
+      if (packet.event === 'terminal-closed') {
+        flushOutput();
+        terminal.writeln('\r\n[终端已退出]');
+      }
       if (packet.event === 'terminal-error') setError(packet.data);
     });
     update('start', { cwd: workspace, ssh, cols: terminal.cols, rows: terminal.rows });
-    const input = terminal.onData(data => update('write', { data }));
+    const input = terminal.onData(data => {
+      prioritizeInputUntil = performance.now() + INPUT_PRIORITY_MS;
+      flushOutput();
+      update('write', { data });
+    });
     const size = terminal.onResize(value => update('resize', value));
     let frame;
     const observer = new ResizeObserver(() => {
@@ -83,6 +124,8 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     observer.observe(host);
     return () => {
       closed = true;
+      clearTimeout(outputTimer);
+      queuedOutput = [];
       cancelAnimationFrame(frame);
       observer.disconnect();
       unsubscribe();

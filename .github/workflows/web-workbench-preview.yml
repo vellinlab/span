@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  TERMINAL_RENDERER_BASELINE: ca5959c94a8bfe1db2b42387b95431621b2687fc
+
 concurrency:
   group: span-web-workbench-${{ github.ref }}
   cancel-in-progress: true
@@ -90,7 +93,7 @@ jobs:
           rm -r "$artifacts/output-baseline/resources/app/dist"
           cp -a "$source_dir/prototype/dist" "$artifacts/output-baseline/resources/app/"
           printf '%s\n' "$baseline" > "$artifacts/output-baseline-commit.txt"
-      - name: Prepare the baseline renderers for streaming, hidden windows and startup
+      - name: Prepare the baseline renderers for streaming, startup and terminal output
         run: |
           artifacts=/tmp/span-workbench-artifacts
           for spec in \
@@ -102,7 +105,8 @@ jobs:
             reasoning:2b2da807b5ec4496e20eece8df6d54763e2379e3 \
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
             reasoning-following:fec399648c3366d3b5d0c54ff8bb988b94edab96 \
-            grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51
+            grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51 \
+            terminal:"$TERMINAL_RENDERER_BASELINE"
           do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
@@ -186,6 +190,16 @@ jobs:
           '
           cmp preview/span-preview.exe verified-preview/preview/span-preview.exe
           diff -qr preview/resources/app verified-preview/preview/resources/app
+      - name: Prepare the baseline renderer for terminal output
+        run: |
+          source_dir=$(mktemp -d)
+          git fetch --no-tags --depth=1 origin "$TERMINAL_RENDERER_BASELINE"
+          git archive "$TERMINAL_RENDERER_BASELINE" prototype | tar -x -C "$source_dir"
+          npm --prefix "$source_dir/prototype" ci --no-audit --no-fund
+          npm --prefix "$source_dir/prototype" run build
+          cp -R verified-preview/preview terminal-baseline
+          rm -r terminal-baseline/resources/app/dist
+          cp -R "$source_dir/prototype/dist" terminal-baseline/resources/app/
       - name: Verify the extracted Windows preview and native ConPTY
         run: |
           node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
@@ -203,7 +217,8 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
-          node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json"
+          node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
+            "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE"
           bash prototype/test/install-pi.sh "$PWD/pi-test"
           node prototype/test/real-pi.mjs "$binary" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
           mv preview-under-test.zip span-web-windows-x86_64.zip
