@@ -13,6 +13,16 @@ const allowed = new Set([
 ]);
 const terminalEvents = new Set(['terminal', 'terminal-error', 'terminal-closed']);
 const maxClipboardLength = 64 * 1024 * 1024;
+const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+const selectedImages = new Set();
+
+function rememberImage(file) {
+  const normalized = path.normalize(file);
+  if (!imageExtensions.includes(path.extname(normalized).slice(1).toLowerCase())) return;
+  selectedImages.delete(normalized);
+  selectedImages.add(normalized);
+  if (selectedImages.size > 96) selectedImages.delete(selectedImages.values().next().value);
+}
 
 app.setName('Span Workbench Preview');
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-lcd-text');
@@ -125,7 +135,29 @@ ipcMain.handle('span:workspace', (event, choose) => {
 ipcMain.handle('span:choose-files', async event => {
   if (!trusted(event)) throw new Error('无效的工作台请求。');
   const result = await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] });
-  return result.canceled ? [] : result.filePaths.map(file => ({ path: file, name: path.basename(file) }));
+  if (result.canceled) return [];
+  return result.filePaths.map(file => {
+    rememberImage(file);
+    return { path: file, name: path.basename(file) };
+  });
+});
+
+ipcMain.handle('span:preview-image', async (event, file) => {
+  if (!trusted(event) || typeof file !== 'string' || file.includes('\0') || !path.isAbsolute(file) ||
+    !imageExtensions.includes(path.extname(file).slice(1).toLowerCase())) throw new Error('无效的图片位置。');
+  const normalized = path.normalize(file);
+  if (!selectedImages.has(normalized)) {
+    const result = await dialog.showOpenDialog(window, {
+      title: '选择会话中的原图',
+      defaultPath: path.basename(normalized),
+      filters: [{ name: '图片', extensions: imageExtensions }],
+      properties: ['openFile'],
+    });
+    if (result.canceled) return null;
+    if (!result.filePaths[0] || path.normalize(result.filePaths[0]) !== normalized) throw new Error('请选择会话中记录的原图。');
+    rememberImage(normalized);
+  }
+  return request('files.preview', { cwd: path.dirname(normalized), path: path.basename(normalized), imageOnly: true });
 });
 
 ipcMain.handle('span:link', (event, url) => {

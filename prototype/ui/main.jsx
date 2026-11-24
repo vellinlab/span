@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
-import { FileReferenceName } from './file-reference-name.jsx';
+import { FileReferenceName, ImageReference } from './file-reference-name.jsx';
 import { imageFileName, maxFileReferences } from './file-references.js';
 import { Interactions } from './interactions.jsx';
 import { Markdown, prepareMarkdown } from './markdown.jsx';
@@ -35,6 +35,16 @@ function subscribePreviewOverlay(onChange) {
 }
 
 const isPreviewOverlay = () => previewOverlayQuery.matches;
+
+function workspaceRelativePath(cwd, filename) {
+  const windows = /^[a-z]:[\\/]|^\\\\/i.test(cwd);
+  const slashes = value => windows ? value.replaceAll('\\', '/') : value;
+  const path = slashes(filename);
+  if (!/^(?:\/|[a-z]:\/)/i.test(path)) return path;
+  const root = slashes(cwd).replace(/\/$/, '') + '/';
+  const compare = value => windows ? value.toLowerCase() : value;
+  return compare(path).startsWith(compare(root)) ? path.slice(root.length) : null;
+}
 
 function App() {
   const [config, setConfig] = useState(null);
@@ -180,23 +190,38 @@ function App() {
         interactionRegion.current?.focus({ preventScroll: true });
       }
     } else if (focus === 'content' || (readingOverlay && !previewRegion.current?.contains(document.activeElement))) {
-      previewRegion.current?.querySelector('.preview-content')?.focus({ preventScroll: true });
+      const target = preview.attachment ? '.preview-close' : '.preview-content';
+      previewRegion.current?.querySelector(target)?.focus({ preventScroll: true });
     }
   }, [preview, previewBlocked, readingOverlay]);
 
-  async function readPreview(cwd, path) {
+  const loadPreview = useCallback(async (read, path, attachment = false) => {
     const scope = ++previewScope.current;
     const trigger = document.activeElement === document.body ? null : document.activeElement;
     try {
-      const result = await window.span.request('files.preview', { cwd, path });
-      if (scope === previewScope.current) {
+      const result = await read();
+      if (result && scope === previewScope.current) {
         previewTrigger.current = trigger;
-        setPreview({ ...result, path });
+        if (attachment) previewFocus.current = 'content';
+        setPreview({ ...result, path, scope, attachment });
       }
     } catch (error) {
       if (scope === previewScope.current) report(error);
     }
-  }
+  }, [report]);
+
+  const readPreview = useCallback((cwd, path) =>
+    loadPreview(() => window.span.request('files.preview', { cwd, path }), path), [loadPreview]);
+
+  const previewCwd = session?.cwd || config?.cwd;
+  const openImage = useCallback(file => {
+    const path = previewCwd && workspaceRelativePath(previewCwd, file.path);
+    const read = path
+      ? () => window.span.request('files.preview', { cwd: previewCwd, path, imageOnly: true })
+      : () => window.span.previewImage(file.path);
+    return loadPreview(read, file.name, true);
+  }, [previewCwd, loadPreview]);
+  const previewImage = config?.ssh || !window.span.previewImage ? undefined : openImage;
 
   function selectFile(entry) {
     const path = [directory, entry.name].filter(Boolean).join('/');
@@ -223,7 +248,7 @@ function App() {
       return;
     }
     readPreview(cwd, absolute ? path.slice(root.length) : path);
-  }, [session?.cwd, config, report]);
+  }, [session?.cwd, config, report, readPreview]);
 
   function closePanel() {
     panelScope.current++;
@@ -265,7 +290,7 @@ function App() {
     if (!work.reset()) return false;
     closePanel();
     setTab('sessions');
-    if (readingOverlay) dismissPreview('composer');
+    if (readingOverlay || preview?.attachment) dismissPreview('composer');
     else {
       previewScope.current++;
       input.current?.focus();
@@ -277,7 +302,7 @@ function App() {
     const key = sessionKey(entry.ref);
     if (loading || running || connection !== 'ready' || key === refKey) return;
     closePanel();
-    if (readingOverlay) dismissPreview();
+    if (readingOverlay || preview?.attachment) dismissPreview();
     else previewScope.current++;
     work.open(entry, readingViews.current.get(key));
   }
@@ -594,9 +619,9 @@ function App() {
   async function archiveFromTitle() {
     if (!await work.archive()) return;
     closePanel();
+    if (readingOverlay || preview?.attachment) dismissPreview(archiveTrigger.current ? null : 'composer');
     if (archiveTrigger.current) archiveTrigger.current.focus();
-    else if (readingOverlay) dismissPreview('composer');
-    else input.current?.focus();
+    else if (!readingOverlay && !preview?.attachment) input.current?.focus();
   }
 
   return <div className={`workbench${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
@@ -696,7 +721,7 @@ function App() {
               rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
               liveReasoningTurn={liveReasoning?.turnId} activeTurnId={run?.id}
               jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
-              openArtifact={openArtifact} canOpenSession={!running && !loading && connection === 'ready'} />
+              openArtifact={openArtifact} openImage={previewImage} canOpenSession={!running && !loading && connection === 'ready'} />
             <div className="composer-wrap reading-column">
               {!rows.length && !session && !loading && !error && <div className="welcome"><h1>开始新会话</h1></div>}
               {error && <div className="error">
@@ -734,9 +759,10 @@ function App() {
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
                 {files.length > 0 && <ul className="composer-files" aria-label="待发送的附件">
                   {files.map(file => <li className="file-reference" key={file.path}>
-                    {file.kind === 'image' ? <Image size={14} role="img" aria-label="图片" /> : <FileText size={14} aria-hidden="true" />}
-                    <FileReferenceName name={file.name} path={file.path} />
-                    <button type="button" aria-label={'移除附件 · ' + file.name} onClick={() => {
+                    {file.kind === 'image' ? <ImageReference file={file} onPreview={previewImage} /> : <>
+                      <FileText size={14} aria-hidden="true" /><FileReferenceName name={file.name} path={file.path} />
+                    </>}
+                    <button type="button" className="attachment-remove" aria-label={'移除附件 · ' + file.name} onClick={() => {
                       edit(composerKey, draft, files.filter(other => other.path !== file.path));
                       input.current?.focus();
                     }}><X size={13} /></button>
@@ -784,11 +810,16 @@ function App() {
               closePreview();
             }
           }}>
-          <header><FileText size={16} /><strong title={preview.path}>{preview.path}</strong>
-            <button className="icon-button right" aria-label="关闭预览" title="关闭预览" onClick={closePreview}><X size={16} /></button>
+          <header>{preview.kind === 'image' ? <Image size={16} /> : <FileText size={16} />}<strong title={preview.path}>{preview.path}</strong>
+            <button className="icon-button right preview-close" aria-label="关闭预览" title="关闭预览" onClick={closePreview}><X size={16} /></button>
           </header>
-          <div className="preview-content" tabIndex={0}>{preview.kind === 'image' ? <img alt={preview.path} src={`data:${preview.mime};base64,${preview.data}`} />
-            : preview.kind === 'markdown' ? <Markdown text={preview.data} /> : <pre>{preview.data}</pre>}</div>
+          <div className="preview-content" data-kind={preview.kind} tabIndex={0}>
+            {preview.kind === 'image' ? preview.imageError ? <p role="status">无法显示这张图片。</p>
+              : <img alt={preview.path} src={`data:${preview.mime};base64,${preview.data}`} onError={() => {
+                setPreview(current => current?.scope === preview.scope ? { ...current, data: undefined, imageError: true } : current);
+              }} />
+              : preview.kind === 'markdown' ? <Markdown text={preview.data} /> : <pre>{preview.data}</pre>}
+          </div>
         </aside>}
       </div>
     </div>

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
-import { FileReferenceName } from './file-reference-name.jsx';
+import { FileReferenceName, ImageReference } from './file-reference-name.jsx';
 import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
@@ -22,14 +22,16 @@ function SourceLink({ url, children }) {
   }}>{children}<ArrowUpRight size={12} /></a>;
 }
 
-function ArtifactList({ artifacts, openArtifact, label }) {
+function ArtifactList({ artifacts, openArtifact, openImage, label }) {
   return <ul className="artifact-list" aria-label={label}>{artifacts.map(file => <li key={file.id}
     className={file.reference ? 'file-reference' : undefined}>
-    {file.kind === 'image' ? <Image size={14} role="img" aria-label="图片" /> : <FileText size={14} aria-hidden="true" />}
-    {file.reference ? <FileReferenceName name={file.name} path={file.path} />
-      : file.url && /^https?:\/\//i.test(file.url) ? <SourceLink url={file.url}>{file.name}</SourceLink>
-      : file.path ? <button type="button" title={file.path} onClick={() => openArtifact(file)}>{file.name}</button>
-        : <span title={file.path}>{file.name}</span>}
+    {file.reference && file.kind === 'image' ? <ImageReference file={file} onPreview={openImage} /> : <>
+      {file.kind === 'image' ? <Image size={14} role="img" aria-label="图片" /> : <FileText size={14} aria-hidden="true" />}
+      {file.reference ? <FileReferenceName name={file.name} path={file.path} />
+        : file.url && /^https?:\/\//i.test(file.url) ? <SourceLink url={file.url}>{file.name}</SourceLink>
+        : file.path ? <button type="button" title={file.path} onClick={() => openArtifact(file)}>{file.name}</button>
+          : <span title={file.path}>{file.name}</span>}
+    </>}
   </li>)}</ul>;
 }
 
@@ -115,14 +117,15 @@ function delegationStatus(members) {
 }
 
 const TranscriptRow = memo(function TranscriptRow({
-  row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openArtifact, canOpenSession,
+  row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openArtifact, openImage, canOpenSession,
   streaming, following, scroll,
 }) {
   if (row.kind === 'user') return <div className="user-message" data-attachment-only={(!row.text && !row.queued) || undefined}>
     {row.attachments?.length && row.text ? <span>{row.text}</span> : row.text}
     {row.queued && row.queued !== 'delivered' && <small className="queued-input">
       {row.queued === 'cancelled' ? '已取消排队' : '等待当前任务结束'}
-    </small>}{Boolean(row.attachments?.length) && <ArtifactList artifacts={row.attachments} openArtifact={openArtifact} label="已发送的附件" />}
+    </small>}{Boolean(row.attachments?.length) && <ArtifactList artifacts={row.attachments} openArtifact={openArtifact}
+      openImage={openImage} label="已发送的附件" />}
   </div>;
   if (row.kind === 'message') return <div className={row.phase === 'commentary' ? 'agent-commentary' : 'agent-reply'}>
     <StreamingMarkdown text={row.text} streaming={streaming} following={following} scroll={scroll} />
@@ -266,7 +269,7 @@ function anchorIndex(rows, layout, anchor, reasoningTurn) {
 
 export const Transcript = memo(function Transcript({
   rows, liveReasoningTurn, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
-  onScrollPosition, openSession, openArtifact, canOpenSession, showLatest,
+  onScrollPosition, openSession, openArtifact, openImage, canOpenSession, showLatest,
 }) {
   const expanded = useRef(null);
   if (!expanded.current) expanded.current = new Map(remembered?.expansion);
@@ -451,7 +454,7 @@ export const Transcript = memo(function Transcript({
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
               streaming={streaming} following={streaming && !showLatest} scroll={scroll}
               expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
-              toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />)}
+              toggle={toggle} openSession={openSession} openArtifact={openArtifact} openImage={openImage} canOpenSession={canOpenSession} />)}
         </div>;
       })}
     </div> : null}

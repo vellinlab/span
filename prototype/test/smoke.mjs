@@ -547,6 +547,7 @@ try {
   const draftFiles = page.getByRole('list', { name: '待发送的附件' });
   const fileName = '会话交接记录.txt';
   const imageName = '会话窗口示意.png';
+  const previewImageName = '预览图片 · ' + imageName;
   if (process.env.SPAN_TEST_SSH_ALIAS) {
     assert.equal(await attach.count(), 0);
   } else {
@@ -568,7 +569,14 @@ try {
     };
     await pick([reference, image, removed]);
     await draftFiles.getByTitle(removed, { exact: true }).waitFor();
-    await draftFiles.getByRole('img', { name: '图片' }).waitFor();
+    const draftImage = draftFiles.getByRole('button', { name: previewImageName, exact: true });
+    await draftImage.press('Enter');
+    const closeImage = preview.getByRole('button', { name: '关闭预览' });
+    await page.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
+    assert.ok(await closeImage.evaluate(element => document.activeElement === element));
+    await closeImage.press('Escape');
+    await preview.waitFor({ state: 'detached' });
+    assert.ok(await draftImage.evaluate(element => document.activeElement === element));
     await pick([reference]);
     assert.equal(await draftFiles.getByRole('listitem').count(), 3);
     await draftFiles.getByRole('button', { name: '移除附件 · ' + removedName }).press('Enter');
@@ -595,9 +603,23 @@ try {
   if (!process.env.SPAN_TEST_SSH_ALIAS) {
     const sentFiles = transcript.getByRole('list', { name: '已发送的附件' });
     await sentFiles.getByText(fileName, { exact: true }).waitFor();
-    await sentFiles.getByRole('listitem').filter({ hasText: imageName }).getByRole('img', { name: '图片' }).waitFor();
+    const sentImage = sentFiles.getByRole('button', { name: previewImageName, exact: true });
+    await sentImage.waitFor();
     assert.equal(await transcript.getByText('Span 附件路径', { exact: false }).count(), 0);
     assert.equal(await draftFiles.count(), 0);
+    const previousSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+    await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
+    await sentImage.focus();
+    const readingTop = await transcript.evaluate(element => element.scrollTop);
+    await sentImage.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
+    assert.ok(await page.locator('main').evaluate(element => element.inert));
+    await preview.getByRole('button', { name: '关闭预览' }).press('Escape');
+    await preview.waitFor({ state: 'detached' });
+    assert.ok(await sentImage.evaluate(element => document.activeElement === element));
+    assert.equal(await transcript.evaluate(element => element.scrollTop), readingTop);
+    await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), previousSize);
   }
   await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
   assert.ok(await composer.evaluate((element, initialHeight) =>

@@ -239,7 +239,8 @@ fn files(params: &Value) -> Result<Value> {
 }
 
 fn preview(params: &Value) -> Result<Value> {
-    const MAX: u64 = 256 * 1024;
+    const MAX_TEXT: u64 = 256 * 1024;
+    const MAX_IMAGE: u64 = 4 * 1024 * 1024;
     let path = entry_path(params)?;
     if !fs::metadata(&path)?.is_file() {
         return Err("请选择一个普通文件。".into());
@@ -249,19 +250,30 @@ fn preview(params: &Value) -> Result<Value> {
         .and_then(|ext| ext.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let mut bytes = Vec::new();
-    fs::File::open(path)?
-        .take(MAX + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX {
-        return Err("预览支持不超过 256 KiB 的文件。".into());
-    }
-    if let Some(image) = match ext.as_str() {
+    let image = match ext.as_str() {
         "png" => Some("image/png"),
         "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
         "webp" => Some("image/webp"),
         _ => None,
-    } {
+    };
+    if params["imageOnly"] == true && image.is_none() {
+        return Err("请选择 PNG、JPEG、GIF 或 WebP 图片。".into());
+    }
+    let limit = if image.is_some() { MAX_IMAGE } else { MAX_TEXT };
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(if image.is_some() {
+            "图片预览支持不超过 4 MiB 的文件。"
+        } else {
+            "文本预览支持不超过 256 KiB 的文件。"
+        }
+        .into());
+    }
+    if let Some(image) = image {
         return Ok(json!({"kind":"image","mime":image,"data":STANDARD.encode(bytes)}));
     }
     let text = String::from_utf8(bytes).map_err(|_| "暂不支持这种文件格式。")?;
