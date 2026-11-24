@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { ArrowUpRight, Check, Circle, CircleAlert, CircleDot, CircleSlash } from 'lucide-react';
 import { sessionKey } from './agent.js';
+import { transientAgentStatus } from './delegation.js';
 
 export const agentStatusLabels = {
   pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
@@ -9,11 +10,12 @@ const statusIcons = { pending: Circle, running: CircleDot, completed: Check, fai
 
 export const memberName = member => member.name || member.role || member.id;
 
-export function AgentStatus({ status }) {
+export function AgentStatus({ status, recorded }) {
   if (!agentStatusLabels[status]) return null;
   const Icon = statusIcons[status] ?? Circle;
-  return <span className="agent-state" data-status={status}>
-    <Icon size={13} aria-hidden="true" />{agentStatusLabels[status]}
+  const historical = recorded && transientAgentStatus(status);
+  return <span className="agent-state" data-status={status} data-recorded={historical || undefined}>
+    <Icon size={13} aria-hidden="true" />{historical && '当时'}{agentStatusLabels[status]}
   </span>;
 }
 
@@ -30,7 +32,7 @@ export const AgentMemberList = memo(function AgentMemberList({ members, parentNa
         disabled={!canOpenSession} onClick={() => openSession(member.session)}>
         {label}<ArrowUpRight size={13} aria-hidden="true" />
       </button> : label}
-      <AgentStatus status={member.status} />
+      <AgentStatus status={member.status} recorded={member.recorded} />
       {metadata && <small className="agent-member-meta" title={metadata}>{metadata}</small>}
       {showDetail && member.detail && <p className="agent-member-detail">{member.detail}</p>}
     </li>;

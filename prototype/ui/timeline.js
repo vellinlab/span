@@ -1,17 +1,11 @@
+import { mergeAgentMember } from './delegation.js';
+
 export const itemKey = ({ turnId, id }) => JSON.stringify([turnId, id]);
 
 const reasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
 const positionsByRows = new WeakMap();
 const layoutByRows = new WeakMap();
 const membersByRows = new WeakMap();
-
-export function mergeAgentMember(members, member) {
-  const merged = { ...members.get(member.id) };
-  for (const [key, value] of Object.entries(member)) {
-    if (value != null) merged[key] = value;
-  }
-  members.set(member.id, merged);
-}
 
 export function delegatedMembers(rows) {
   let members = membersByRows.get(rows);

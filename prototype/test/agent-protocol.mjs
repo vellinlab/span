@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
+import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
@@ -72,6 +73,42 @@ test('delegation metadata survives sparse events and unrelated timeline updates 
   })]);
   assert.deepEqual(delegatedMembers(finished).get('child'), { ...member, status: 'completed', detail: 'Checked.' });
   assert.equal(recorded.get('child').status, 'running');
+});
+
+test('roster refresh applies the new snapshot and preserves only changes made during the request', () => {
+  const before = [
+    { id: 'idle', name: 'Previously known', status: 'running' },
+    { id: 'updated', name: 'Reviewer', status: 'pending', model: 'old-model' },
+    { id: 'evicted', name: 'Gone' },
+  ];
+  const updates = new Map();
+  const partial = { id: 'updated', detail: 'Still checking.' };
+  const finished = { id: 'updated', status: 'completed' };
+  recordRosterUpdate(updates, partial.id, partial);
+  recordRosterUpdate(updates, finished.id, finished);
+  const previous = updateRoster(updateRoster(before, partial.id, partial), finished.id, finished);
+  assert.deepEqual(reconcileRoster(previous, [
+    { id: 'idle', status: 'cancelled' },
+    { id: 'updated', model: 'new-model', status: 'running' },
+    { id: 'new', status: 'pending' },
+  ], updates), [
+    { id: 'idle', name: 'Previously known', status: 'cancelled' },
+    { id: 'updated', name: 'Reviewer', status: 'completed', model: 'new-model', detail: 'Still checking.' },
+    { id: 'new', status: 'pending' },
+  ]);
+});
+
+test('a delayed snapshot cannot recreate a closed team or bring back its old tasks', () => {
+  const snapshot = [
+    { id: 'closed', name: 'Closed', members: [], tasks: [{ id: 'old' }] },
+    { id: 'restarted', name: 'Old team', members: [], tasks: [{ id: 'old-task' }] },
+  ];
+  const updates = new Map();
+  recordRosterUpdate(updates, 'closed', null);
+  recordRosterUpdate(updates, 'restarted', null);
+  const replacement = { id: 'restarted', name: 'New team', members: [] };
+  recordRosterUpdate(updates, replacement.id, replacement);
+  assert.deepEqual(reconcileRoster([replacement], snapshot, updates), [replacement]);
 });
 
 test('session identities are scoped by backend and host, and the factory rejects unknown backends', () => {

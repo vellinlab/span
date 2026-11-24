@@ -2,8 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
+import { mergeAgentMember } from './delegation.js';
 import { ReasoningText } from './reasoning.jsx';
-import { delegatedMembers, mergeAgentMember } from './timeline.js';
+import { delegatedMembers } from './timeline.js';
 
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', limited: '达到用量上限', unknown: '状态未知',

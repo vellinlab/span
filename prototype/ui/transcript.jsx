@@ -5,6 +5,7 @@ import {
   Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
+import { transientAgentStatus } from './delegation.js';
 import { Markdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
@@ -72,12 +73,12 @@ function CommandText({ command, titleRef, force }) {
   </div>;
 }
 
-function Card({ icon: Icon, type, title, status, statusText, statusNote, hint, expanded, toggle, children }) {
+function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, expanded, toggle, children }) {
   const titleRef = useRef(null);
   const statusLabel = statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
   const head = <><Icon size={15} className="card-icon" /><span className="card-title" ref={titleRef} title={title}>{title}</span>
     {hint && <span className="card-hint" title={hint}>{hint}</span>}
-    {(statusLabel || statusNote) && <span className="card-status" data-status={status}>
+    {(statusLabel || statusNote) && <span className="card-status" data-status={status} data-recorded={recordedStatus || undefined}>
       {statusLabel && <span>{statusLabel}</span>}
       {statusLabel && statusNote && <span aria-hidden="true">·</span>}
       {statusNote && <span>{statusNote}</span>}
@@ -98,16 +99,20 @@ const cardIcons = {
 };
 
 function delegationStatus(members) {
-  const counts = new Map();
-  for (const { status } of members) counts.set(status, (counts.get(status) ?? 0) + 1);
-  const status = ['failed', 'running', 'pending', 'cancelled', 'completed', 'unknown'].find(state => counts.has(state));
-  if (!status) return {};
-  const label = statusLabels[status];
-  return { status, text: members.length > 1 ? `${counts.get(status)} 个${label}` : label };
+  for (const status of ['failed', 'running', 'pending', 'cancelled', 'completed', 'unknown']) {
+    const matching = members.filter(member => member.status === status);
+    if (!matching.length) continue;
+    const current = transientAgentStatus(status) ? matching.filter(member => !member.recorded) : matching;
+    const recorded = current.length === 0;
+    const label = statusLabels[status];
+    const text = members.length === 1 ? label : `${(recorded ? matching : current).length} 个${label}`;
+    return { status, text: recorded ? `当时${members.length > 1 ? ' ' : ''}${text}` : text, recorded };
+  }
+  return {};
 }
 
 const TranscriptRow = memo(function TranscriptRow({
-  row, activePlan, roster, currentKey, expanded, toggle, openSession, openArtifact, canOpenSession,
+  row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openArtifact, canOpenSession,
 }) {
   if (row.kind === 'user') return <div className="user-message">
     {row.text}{row.queued && row.queued !== 'delivered' && <small className="queued-input">
@@ -118,7 +123,7 @@ const TranscriptRow = memo(function TranscriptRow({
     <Markdown text={row.text} />
   </div>;
 
-  let title, hint, detail, statusText, statusNote;
+  let title, hint, detail, recordedStatus, statusText, statusNote;
   let status = row.final && row.status === 'running' ? undefined : row.status;
   switch (row.kind) {
     case 'reasoning':
@@ -181,13 +186,18 @@ const TranscriptRow = memo(function TranscriptRow({
       const members = (row.members ?? []).map(member => {
         const known = roster.get(member.id);
         return { ...member, name: member.name || known?.name, role: member.role || known?.role,
-          model: member.model || known?.model, session: member.session ?? known?.session };
+          model: member.model || known?.model, session: member.session ?? known?.session,
+          recorded: !liveDelegation || Boolean(known?.status && known.status !== member.status) };
       });
       if (!expanded && members.length) hint = members.length === 1 ? memberName(members[0]) : `${members.length} 个代理`;
       const aggregate = delegationStatus(members);
       if (!status || status === 'completed' || (status === 'running' && aggregate.status === 'failed')) {
         status = aggregate.status ?? status;
         statusText = aggregate.text;
+        recordedStatus = aggregate.recorded;
+      } else if (!liveDelegation && transientAgentStatus(status)) {
+        recordedStatus = true;
+        statusText = `当时${statusLabels[status]}`;
       }
       if (members.length || row.text) detail = () => <>
         {row.text && <Markdown text={row.text} />}
@@ -206,7 +216,8 @@ const TranscriptRow = memo(function TranscriptRow({
       break;
   }
 
-  return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} statusText={statusText} statusNote={statusNote}
+  return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} recordedStatus={recordedStatus}
+    statusText={statusText} statusNote={statusNote}
     title={title} hint={hint} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
@@ -429,6 +440,7 @@ export const Transcript = memo(function Transcript({
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
           {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)} toggle={toggleGroup} />
             : <TranscriptRow row={row} activePlan={activePlan}
+              liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
               expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
               toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />)}

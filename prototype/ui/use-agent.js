@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createAgent, mergeSessions, sessionKey } from './agent.js';
+import { reconcileRoster, recordRosterUpdate, updateRoster } from './delegation.js';
 import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 
 const PAGE_SIZE = 20;
@@ -36,6 +37,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const callbacks = useRef({ goal: 0, run: 0, catalog: 0 });
   const pendingPage = useRef(null);
   const pendingSend = useRef(null);
+  const rosterRefresh = useRef(null);
   const queue = useRef([]);
   const frame = useRef(0);
   const bufferedRows = useRef(rows);
@@ -69,6 +71,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     busy.current = false;
     pendingPage.current = null;
     pendingSend.current = null;
+    rosterRefresh.current = null;
     jumpToLatest.current = true;
     cancelAnimationFrame(frame.current);
     frame.current = 0;
@@ -94,6 +97,13 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     setRun(currentRun.current);
   }
 
+  function changeRoster(kind, id, entry) {
+    const updates = rosterRefresh.current?.[kind];
+    if (updates) recordRosterUpdate(updates, id, entry);
+    const update = kind === 'members' ? setMembers : setTeams;
+    update(previous => updateRoster(previous, id, entry));
+  }
+
   function receive(event) {
     if (event.kind === 'connection') {
       setRoute(event.route);
@@ -101,6 +111,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     }
     if (event.kind === 'disconnected') {
       changeRun(null);
+      rosterRefresh.current = null;
       busy.current = false;
       setRequests([]);
       setConnection('offline');
@@ -141,10 +152,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
           ? { ...entry, ...event.info } : entry));
         break;
       case 'team':
-        setTeams(previous => [...previous.filter(team => team.id !== event.team.id), event.team]);
+        changeRoster('teams', event.team.id, event.team);
         break;
       case 'member':
-        setMembers(previous => [...previous.filter(member => member.id !== event.member.id), event.member]);
+        changeRoster('members', event.member.id, event.member);
         break;
       case 'queuedInput':
         updateRows(previous => previous.map(row => row.clientId === event.clientId ? { ...row, queued: event.state } : row));
@@ -285,7 +296,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     });
     return () => {
       disposed = true;
-      if (agent.current === client) agent.current = null;
+      if (agent.current === client) {
+        agent.current = null;
+        rosterRefresh.current = null;
+      }
       client.close();
       cancelAnimationFrame(frame.current);
     };
@@ -430,27 +444,35 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   async function refreshDelegation() {
     if (!active.current || (!agent.current?.delegation?.members && !agent.current?.delegation?.teams)) return;
     await withSession(async (client, ref) => {
-      const scope = layer.current;
-      const [newMembers, newTeams] = await Promise.all([
-        client.delegation.members?.(ref), client.delegation.teams?.(ref),
-      ]);
-      if (scope !== layer.current) return;
-      if (newMembers) setMembers(previous => [...new Map([...newMembers, ...previous].map(member => [member.id, member])).values()]);
-      if (newTeams) setTeams(previous => [...new Map([...newTeams, ...previous].map(team => [team.id, team])).values()]);
+      const refresh = { members: new Map(), teams: new Map() };
+      rosterRefresh.current = refresh;
+      try {
+        const [newMembers, newTeams] = await Promise.all([
+          client.delegation.members?.(ref), client.delegation.teams?.(ref),
+        ]);
+        if (rosterRefresh.current !== refresh) return;
+        // Replay only changes that arrived after this request began.
+        if (newMembers) setMembers(previous => reconcileRoster(previous, newMembers, refresh.members));
+        if (newTeams) setTeams(previous => reconcileRoster(previous, newTeams, refresh.teams));
+      } catch (error) {
+        if (rosterRefresh.current === refresh) throw error;
+      } finally {
+        if (rosterRefresh.current === refresh) rosterRefresh.current = null;
+      }
     });
   }
 
   async function delegate(action) {
     const member = await withSession((client, ref) => client.delegation.act(ref, action));
-    if (member) setMembers(previous => [...previous.filter(entry => entry.id !== member.id), member]);
+    if (member) changeRoster('members', member.id, member);
   }
 
   async function manageTeam(action) {
     const scope = layer.current;
     const team = await withSession((client, ref) => client.delegation.manageTeam(ref, action));
     if (scope !== layer.current) return;
-    if (team) setTeams(previous => [...previous.filter(entry => entry.id !== team.id), team]);
-    else if (action.kind === 'close') setTeams(previous => previous.filter(entry => entry.id !== action.teamId));
+    if (team) changeRoster('teams', team.id, team);
+    else if (action.kind === 'close') changeRoster('teams', action.teamId, null);
   }
 
   async function special(action) {

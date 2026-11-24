@@ -157,6 +157,7 @@ export interface AgentAdapter {
     observe: boolean;
     actions?: DelegationAction['kind'][];
     teamActions?: TeamAction['kind'][];
+    /** Complete lists for the session. Events received during a request take precedence. */
     members?(ref: SessionRef): Promise<AgentMember[]>;
     teams?(ref: SessionRef): Promise<Team[]>;
     act?(ref: SessionRef, action: DelegationAction): Promise<AgentMember | void>;

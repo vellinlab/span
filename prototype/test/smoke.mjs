@@ -504,6 +504,10 @@ try {
   const spawnCard = agentCards.filter({ hasText: '启动子代理' });
   const waitCard = agentCards.filter({ hasText: '等待子代理' });
   await spawnCard.getByText(agentName, { exact: true }).waitFor();
+  await spawnCard.locator('.card-status[data-recorded="true"]').getByText('当时进行中', { exact: true }).waitFor();
+  await spawnCard.locator('summary').press('Enter');
+  await spawnCard.locator('.agent-state[data-recorded="true"]').getByText('当时进行中', { exact: true }).waitFor();
+  await spawnCard.locator('summary').press('Enter');
   await waitCard.getByText('1 个失败', { exact: true }).waitFor();
   assert.equal(await waitCard.getByRole('list', { name: '代理成员' }).count(), 0);
   await waitCard.locator('summary').press('Enter');
@@ -517,6 +521,7 @@ try {
   const rosterAgent = agents.getByRole('button', { name: openAgent });
   await rosterAgent.waitFor();
   await agents.getByText('fixture-review', { exact: true }).waitFor();
+  await agents.getByText('已完成', { exact: true }).waitFor();
   await agents.getByText('失败', { exact: true }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-agents-panel.png') });
   await rosterAgent.press('Enter');
