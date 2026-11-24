@@ -556,7 +556,7 @@ p { margin-block: 0 12px; }
 .output-scroll { overscroll-behavior: contain; }
 .text-rail { display: block; position: relative; }
 .text-line { position: absolute; inset-inline: 0; height: var(--text-line-height); }
-.output-line { padding-inline: 8px; }
+.output-line, .diff-line { padding-inline: 8px; }
 .diff-line[data-tone="meta"] { color: #bad1ef; }
 .diff-line[data-tone="add"] { color: #b8e2c1; background: #67997023; }
 .diff-line[data-tone="remove"] { color: #edc0b6; background: #ae5e5026; }
