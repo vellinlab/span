@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
-import { Markdown } from './markdown.jsx';
+import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, TextReader } from './text-reader.jsx';
@@ -113,6 +113,7 @@ function delegationStatus(members) {
 
 const TranscriptRow = memo(function TranscriptRow({
   row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openArtifact, canOpenSession,
+  streaming, following, scroll,
 }) {
   if (row.kind === 'user') return <div className="user-message">
     {row.text}{row.queued && row.queued !== 'delivered' && <small className="queued-input">
@@ -120,7 +121,7 @@ const TranscriptRow = memo(function TranscriptRow({
     </small>}{Boolean(row.attachments?.length) && <ArtifactList artifacts={row.attachments} openArtifact={openArtifact} />}
   </div>;
   if (row.kind === 'message') return <div className={row.phase === 'commentary' ? 'agent-commentary' : undefined}>
-    <Markdown text={row.text} />
+    <StreamingMarkdown text={row.text} streaming={streaming} following={following} scroll={scroll} />
   </div>;
 
   let title, hint, detail, recordedStatus, statusText, statusNote;
@@ -260,7 +261,7 @@ function anchorIndex(rows, layout, anchor, hiddenKey) {
 
 export const Transcript = memo(function Transcript({
   rows, liveReasoningKey, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
-  onScrollPosition, openSession, openArtifact, canOpenSession,
+  onScrollPosition, openSession, openArtifact, canOpenSession, showLatest,
 }) {
   const expanded = useRef(null);
   if (!expanded.current) expanded.current = new Map(remembered?.expansion);
@@ -436,12 +437,14 @@ export const Transcript = memo(function Transcript({
         const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + Number(Boolean(layout.nested?.has(item.index)));
         const show = row.key !== liveReasoningKey && Boolean(visibleRow(row));
         const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
+        const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);
         return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
           {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)} toggle={toggleGroup} />
             : <TranscriptRow row={row} activePlan={activePlan}
               liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
+              streaming={streaming} following={streaming && !showLatest} scroll={scroll}
               expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
               toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />)}
         </div>;

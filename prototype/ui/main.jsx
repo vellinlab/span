@@ -601,7 +601,7 @@ function App() {
             <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
               rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
               liveReasoningKey={liveReasoning?.key} activeTurnId={run?.id}
-              jumpToLatest={jumpToLatest} scroll={scroll} onScrollPosition={setShowLatest} openSession={openRef}
+              jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
               openArtifact={openArtifact} canOpenSession={!running && !loading && connection === 'ready'} />
             <div className="composer-wrap reading-column">
               {!rows.length && !session && !loading && !error && <div className="welcome"><h1>开始新会话</h1></div>}

@@ -272,6 +272,7 @@ p { margin-block: 0 12px; }
   padding-inline-start: calc(var(--depth, 0) * 15px);
 }
 .message[data-empty="true"][data-kind] { padding: 0; }
+.message-tail { position: absolute; inset: auto auto 0 0; width: 1px; height: 1px; pointer-events: none; }
 .agent-commentary { color: #c8ced0; }
 .user-message {
   width: fit-content;

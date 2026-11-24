@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Copy, Terminal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -28,3 +28,30 @@ export const Markdown = memo(function Markdown({ text }) {
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>
   </div>;
 });
+
+export function StreamingMarkdown({ text, streaming, following, scroll }) {
+  const tail = useRef(null);
+  const committed = useRef(text);
+  const [tailNear, setTailNear] = useState(true);
+  const observeTail = streaming && text.length >= 4096;
+  // Keep formatting visible corrections and the final reply, even when the
+  // reader is far from the part receiving append-only updates.
+  const canWait = observeTail && !following && !tailNear && text.startsWith(committed.current);
+  const displayed = canWait ? committed.current : text;
+
+  useLayoutEffect(() => {
+    committed.current = displayed;
+  }, [displayed]);
+  useEffect(() => {
+    if (!observeTail || !scroll.current) return;
+    const observer = new IntersectionObserver(([entry]) => setTailNear(entry.isIntersecting),
+      { root: scroll.current, rootMargin: '0px 0px 192px 0px' });
+    observer.observe(tail.current);
+    return () => observer.disconnect();
+  }, [observeTail, scroll]);
+
+  return <>
+    <Markdown text={displayed} />
+    {observeTail && <span aria-hidden="true" className="message-tail" ref={tail} />}
+  </>;
+}

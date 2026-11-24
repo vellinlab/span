@@ -3,8 +3,9 @@ use serde_json::{Value, json};
 use std::{
     env,
     fmt::Write as _,
+    fs,
     io::{self, BufRead, BufWriter},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -172,6 +173,74 @@ fn history() -> Vec<Value> {
 
 fn notice(output: &Output, method: &str, params: Value) -> io::Result<()> {
     send(output, json!({"method":method,"params":params}))
+}
+
+fn wait_for_stream_gate(path: &Path, running: &AtomicBool) -> bool {
+    for _ in 0..3_000 {
+        if !running.load(Ordering::Acquire) {
+            return false;
+        }
+        if path.is_file() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    false
+}
+
+fn long_reply(
+    output: &Output,
+    running: &AtomicBool,
+    thread_id: &str,
+    turn: &str,
+    gate: &Path,
+) -> io::Result<()> {
+    let item = format!("{turn}-long-reply");
+    let send_delta = |delta: &str| {
+        notice(
+            output,
+            "item/agentMessage/delta",
+            json!({"threadId":thread_id,"turnId":turn,"itemId":item,"delta":delta}),
+        )
+    };
+    let mut answer =
+        String::from("## 长回复的开头\n\n[复核链接](https://example.com/span)和正文可以选择。\n\n");
+    for index in 1..=144 {
+        writeln!(
+            answer,
+            "**第 {index:03} 项。** 检查缩进、滚动位置和长行换行。工作台会保留这段选区和原始的代码。\n"
+        )
+        .unwrap();
+    }
+    answer.push_str("### 预置正文末尾\n\n");
+    send_delta(&answer)?;
+    let mut complete = false;
+    if wait_for_stream_gate(&gate.join("append"), running) {
+        for index in 1..=40 {
+            if !running.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            let fragment = format!("追加记录 {index:03}。继续核对正在生成的结果。\n\n");
+            answer.push_str(&fragment);
+            send_delta(&fragment)?;
+            thread::sleep(Duration::from_millis(75));
+        }
+        fs::write(gate.join("appended"), b"")?;
+        complete = wait_for_stream_gate(&gate.join("finish"), running);
+    }
+    answer.push_str("**长回复已全部生成。**");
+    notice(
+        output,
+        "item/completed",
+        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":item,"phase":"final_answer","text":answer}}),
+    )?;
+    running.store(false, Ordering::Release);
+    let status = if complete { "completed" } else { "interrupted" };
+    notice(
+        output,
+        "turn/completed",
+        json!({"threadId":thread_id,"turn":{"id":turn,"status":status,"items":[]}}),
+    )
 }
 
 fn plan_notice(output: &Output, thread_id: &str, turn: &str, completed: usize) -> io::Result<()> {
@@ -381,6 +450,16 @@ pub fn run() -> Result<()> {
                 if params["input"][0]["text"] == "验证任务计划。" {
                     plan_notice(&output, &thread_id, &turn, 1)?;
                     active_plan = Some(turn);
+                    continue;
+                }
+                if params["input"][0]["text"] == "验证长回复末尾。"
+                    && let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                {
+                    let output = output.clone();
+                    let background = background.clone();
+                    thread::spawn(move || {
+                        let _ = long_reply(&output, &background, &thread_id, &turn, &gate);
+                    });
                     continue;
                 }
                 if params["input"][0]["text"] == "验证子代理导航。" {
