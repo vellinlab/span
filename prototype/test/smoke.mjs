@@ -295,7 +295,8 @@ try {
     const content = preview.locator('.preview-content');
     await content.focus();
     fileContent = await content.elementHandle();
-    assert.ok(await approval.isVisible());
+    assert.ok(await approval.evaluate(element =>
+      element.getBoundingClientRect().right <= document.querySelector('#file-preview').getBoundingClientRect().left));
   }
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
@@ -329,9 +330,18 @@ try {
     await restorePreview.click();
     await preview.getByText('README.md', { exact: true }).waitFor();
     assert.ok(await fileContent.evaluate(element => element.isConnected && document.activeElement === element));
+    assert.equal(await page.locator('main[inert]').count(), 1);
+    assert.ok(await preview.evaluate(element => element.offsetWidth === element.parentElement.offsetWidth));
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-preview-restored.png') });
-    await preview.getByRole('button', { name: '关闭预览' }).click();
-    console.log('Verified the compact approval suspended the file preview and resumed the same view with keyboard focus.');
+    await terminalToggle.click();
+    await preview.waitFor({ state: 'hidden' });
+    assert.equal(await terminalToggle.getAttribute('aria-pressed'), 'true');
+    await restorePreview.click();
+    await fileContent.press('Escape');
+    await preview.waitFor({ state: 'detached' });
+    assert.equal(await fileContent.evaluate(element => element.isConnected), false);
+    assert.ok(await page.getByRole('button', { name: 'README.md' }).evaluate(element => element === document.activeElement));
+    console.log('Verified the compact preview fills the workspace, yields to approval or terminal, and restores keyboard focus.');
   }
   await app.evaluate(({ BrowserWindow }, [width, height]) =>
     BrowserWindow.getAllWindows()[0].setContentSize(width, height), windowSize);

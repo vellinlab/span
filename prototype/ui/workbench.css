@@ -629,6 +629,6 @@ p { margin-block: 0 12px; }
 .workspace-area[data-preview-overlay] .preview {
   position: absolute;
   z-index: 1;
-  inset: 0 0 0 auto;
-  width: min(450px, 100%);
+  inset: 0;
+  border-left: 0;
 }

@@ -57,7 +57,8 @@ function App() {
   const searchScroll = useRef({ scope: '', top: 0 });
   const previewScope = useRef(0);
   const previewRegion = useRef(null);
-  const restorePreviewFocus = useRef(false);
+  const previewTrigger = useRef(null);
+  const previewFocus = useRef(null);
   const interactionRegion = useRef(null);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
@@ -72,6 +73,7 @@ function App() {
   const running = run?.status === 'running';
   const interaction = work.requests[0];
   const previewBlocked = previewOverlay && Boolean(interaction);
+  const readingOverlay = previewOverlay && Boolean(preview && !preview.parked) && !previewBlocked;
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
@@ -103,24 +105,35 @@ function App() {
   }, [refKey]);
 
   useLayoutEffect(() => {
-    const restoreFocus = restorePreviewFocus.current;
-    restorePreviewFocus.current = false;
+    const focus = previewFocus.current;
+    previewFocus.current = null;
+    if (focus === 'trigger') {
+      const trigger = previewTrigger.current;
+      previewTrigger.current = null;
+      (trigger?.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
+    } else if (focus === 'composer') {
+      input.current?.focus({ preventScroll: true });
+    }
     if (!preview || preview.parked) return;
     if (previewBlocked) {
       setPreview({ ...preview, parked: true });
       if (previewRegion.current?.contains(document.activeElement)) {
         interactionRegion.current?.focus({ preventScroll: true });
       }
-    } else if (restoreFocus) {
+    } else if (focus === 'content' || (readingOverlay && !previewRegion.current?.contains(document.activeElement))) {
       previewRegion.current?.querySelector('.preview-content')?.focus({ preventScroll: true });
     }
-  }, [preview, previewBlocked]);
+  }, [preview, previewBlocked, readingOverlay]);
 
   async function readPreview(cwd, path) {
     const scope = ++previewScope.current;
+    const trigger = document.activeElement === document.body ? null : document.activeElement;
     try {
       const result = await window.span.request('files.preview', { cwd, path });
-      if (scope === previewScope.current) setPreview({ ...result, path });
+      if (scope === previewScope.current) {
+        previewTrigger.current = trigger;
+        setPreview({ ...result, path });
+      }
     } catch (error) {
       if (scope === previewScope.current) report(error);
     }
@@ -163,8 +176,7 @@ function App() {
   }
 
   function applyConfig(next) {
-    previewScope.current++;
-    setPreview(null);
+    dismissPreview();
     setEntries([]);
     setDirectory('');
     closePanel();
@@ -189,13 +201,19 @@ function App() {
     if (!work.reset()) return false;
     closePanel();
     setTab('sessions');
-    input.current?.focus();
+    if (readingOverlay) dismissPreview('composer');
+    else {
+      previewScope.current++;
+      input.current?.focus();
+    }
     return true;
   }
 
   function openSession(entry) {
     if (loading || running || connection !== 'ready' || sessionKey(entry.ref) === refKey) return;
     closePanel();
+    if (readingOverlay) dismissPreview();
+    else previewScope.current++;
     work.open(entry);
   }
 
@@ -245,14 +263,27 @@ function App() {
     }).catch(report);
   }
 
-  function closePreview() {
+  function dismissPreview(focus = null) {
     previewScope.current++;
+    previewFocus.current = focus;
+    if (focus !== 'trigger') previewTrigger.current = null;
     setPreview(null);
   }
 
+  function closePreview() {
+    dismissPreview('trigger');
+  }
+
   function restorePreview() {
-    restorePreviewFocus.current = true;
+    previewFocus.current = 'content';
     setPreview({ ...preview, parked: false });
+  }
+
+  function toggleTerminal() {
+    if (readingOverlay) {
+      setPreview({ ...preview, parked: true });
+      setTerminal(true);
+    } else setTerminal(value => !value);
   }
 
   function showConnection() {
@@ -467,7 +498,7 @@ function App() {
           title={previewBlocked ? '处理请求后可恢复文件预览' : `恢复文件预览 · ${preview.path}`}
           disabled={previewBlocked} onClick={restorePreview}><FileText size={16} /></button>}
         <button className="icon-button terminal-toggle" aria-label="切换终端" title="切换终端"
-          aria-pressed={terminal} onClick={() => setTerminal(value => !value)}><SquareTerminal size={16} /></button>
+          aria-pressed={terminal && !readingOverlay} onClick={toggleTerminal}><SquareTerminal size={16} /></button>
       </div>
     </header>
     <div className="layout">
@@ -523,7 +554,7 @@ function App() {
         </nav>
       </Sidebar>}
       <div className="workspace-area" data-preview-overlay={previewOverlay || undefined}>
-        <main className="main">
+        <main className="main" inert={readingOverlay}>
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
             <Transcript key={refKey} rows={rows} cursor={work.cursor} loadOlder={work.loadOlder} loading={loading}
               activeTurnId={running ? run.id : undefined}
@@ -591,7 +622,13 @@ function App() {
             <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer} onClose={closeTerminal} />
           </Suspense>}
         </main>
-        {preview && <aside className="preview" id="file-preview" aria-label="文件预览" hidden={preview.parked} ref={previewRegion}>
+        {preview && <aside className="preview" id="file-preview" aria-label="文件预览" hidden={preview.parked} ref={previewRegion}
+          onKeyDown={event => {
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              closePreview();
+            }
+          }}>
           <header><FileText size={16} /><strong title={preview.path}>{preview.path}</strong>
             <button className="icon-button right" aria-label="关闭预览" title="关闭预览" onClick={closePreview}><X size={16} /></button>
           </header>
