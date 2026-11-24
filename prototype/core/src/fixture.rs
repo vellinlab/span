@@ -823,7 +823,7 @@ pub fn run() -> Result<()> {
             "model/list" => {
                 json!({"data":[{"id":"fixture","model":"fixture","displayName":"Fixture",
                 "isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}],
-                "serviceTiers":[{"id":"priority","name":"Fast"}],"inputModalities":["text"]}]})
+                "serviceTiers":[{"id":"priority","name":"Fast"}],"inputModalities":["text","image"]}]})
             }
             "account/rateLimits/read" => {
                 if let Some((turn, prompted)) = review.as_mut() {

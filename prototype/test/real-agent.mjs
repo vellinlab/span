@@ -1,10 +1,14 @@
 import { _electron as electron } from 'playwright';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 
-const [binary, route = 'stdio', ssh] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const [binary, route = 'stdio', ssh] = args.filter(arg => arg !== '--image');
+const imageTest = args.includes('--image');
+const expected = imageTest ? 'Span preview sent an image.' : 'Span preview is connected.';
+const imageName = '会话验收.png';
 const profile = await mkdtemp(join(tmpdir(), 'span-real-'));
 const open = () => electron.launch({
   executablePath: binary,
@@ -24,9 +28,28 @@ try {
     await page.getByRole('button', { name: '连接 SSH' }).click();
   }
   await (ssh ? ready.filter({ hasText: ssh }) : ready).waitFor({ timeout: 30_000 });
-  await page.getByRole('textbox', { name: '消息' }).fill('Check the preview connection.');
+  if (imageTest) {
+    await page.getByRole('button', { name: 'Agent 控件', exact: true }).click();
+    await page.getByRole('button', { name: '运行设置', exact: true }).click();
+    const vision = page.locator('option[value="gpt-6.2-sol"]');
+    const model = page.getByRole('combobox').filter({ has: vision });
+    await vision.waitFor({ state: 'attached' });
+    await model.selectOption('gpt-6.2-sol');
+    await page.getByRole('button', { name: '关闭面板' }).click();
+    const image = join(profile, imageName);
+    await writeFile(image, Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFUlEQVR4nGPUqihkYGBgYGBgYoABABNLAReRfidRAAAAAElFTkSuQmCC',
+      'base64',
+    ));
+    await app.evaluate(({ dialog }, image) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [image] });
+    }, image);
+    await page.getByRole('button', { name: '添加本机文件' }).click();
+    await page.getByRole('list', { name: '待发送的附件' }).getByRole('img', { name: '图片' }).waitFor();
+  }
+  await page.getByRole('textbox', { name: '消息' }).fill(imageTest ? 'Check the preview image.' : 'Check the preview connection.');
   await page.getByRole('button', { name: '发送', exact: true }).click();
-  const reply = page.getByText('Span preview is connected.', { exact: true });
+  const reply = page.getByText(expected, { exact: true });
   const alert = page.getByRole('alert');
   await reply.or(alert).first().waitFor({ timeout: 20_000 });
   if (await alert.isVisible()) throw new Error(await alert.innerText());
@@ -52,8 +75,10 @@ try {
   await resumed.locator(`.connection[data-route="${route}"]`).filter({ has: resumed.locator('i.ready') })
     .filter({ hasText: ssh ?? '本机' }).waitFor({ timeout: 30_000 });
   await resumed.locator('.breadcrumb strong').getByText(title, { exact: true }).waitFor();
-  await resumed.getByTestId('transcript').getByText('Span preview is connected.', { exact: true }).waitFor();
-  console.log(`Verified real Codex on ${ssh ? 'SSH' : 'the local host'} using ${route} transport, including automatic session restore.`);
+  await resumed.getByTestId('transcript').getByText(expected, { exact: true }).waitFor();
+  if (imageTest) await resumed.getByRole('list', { name: '已发送的附件' }).getByRole('listitem')
+    .filter({ hasText: imageName }).getByRole('img', { name: '图片' }).waitFor();
+  console.log(`Verified real Codex on ${ssh ? 'SSH' : 'the local host'} using ${route} transport, including automatic session restore${imageTest ? ' with a native image' : ''}.`);
 } finally {
   await app?.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

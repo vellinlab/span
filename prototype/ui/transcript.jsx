@@ -25,7 +25,7 @@ function SourceLink({ url, children }) {
 function ArtifactList({ artifacts, openArtifact, label }) {
   return <ul className="artifact-list" aria-label={label}>{artifacts.map(file => <li key={file.id}
     className={file.reference ? 'file-reference' : undefined}>
-    {file.kind === 'image' ? <Image size={14} aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}
+    {file.kind === 'image' ? <Image size={14} role="img" aria-label="图片" /> : <FileText size={14} aria-hidden="true" />}
     {file.reference ? <FileReferenceName name={file.name} path={file.path} />
       : file.url && /^https?:\/\//i.test(file.url) ? <SourceLink url={file.url}>{file.name}</SourceLink>
       : file.path ? <button type="button" title={file.path} onClick={() => openArtifact(file)}>{file.name}</button>

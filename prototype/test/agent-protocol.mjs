@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
-import { fileReferenceArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
+import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
@@ -16,7 +16,7 @@ test('file references round-trip with Windows and Linux paths and survive an ech
     { kind: 'file', path: 'C:\\工作区\\结果.txt', name: '结果.txt' },
   ];
   const text = '检查文件。\n保留原文。';
-  const attachments = fileReferenceArtifacts(files);
+  const attachments = attachmentArtifacts(files);
   const wire = fileReferenceText([{ kind: 'text', text }, ...files], true);
   assert.deepEqual(parseFileReferences(wire), { text, attachments });
   assert.deepEqual(parseFileReferences(fileReferenceText(files, true)), { text: '', attachments });

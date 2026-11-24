@@ -2,12 +2,12 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { createRoot } from 'react-dom/client';
 import {
   ArrowDown, ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
-  GitBranch, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
+  GitBranch, Image, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
 import { FileReferenceName } from './file-reference-name.jsx';
-import { maxFileReferences } from './file-references.js';
+import { imageFileName, maxFileReferences } from './file-references.js';
 import { Interactions } from './interactions.jsx';
 import { Markdown, prepareMarkdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
@@ -116,6 +116,7 @@ function App() {
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
   const localFiles = Boolean(api?.localFileReferences && window.span.chooseFiles);
+  const canSendImages = Boolean(localFiles && api.localImageInputs && !running && selectedModel()?.inputs.includes('image'));
   const canAttach = localFiles && connection === 'ready' && !loading && !interaction && (!running || canSteer || canQueue);
   const canSendDraft = Boolean(draft.trim() || files.length);
   const commands = agentCommands(api, work.models, work.options);
@@ -283,7 +284,7 @@ function App() {
 
   const latestWork = useRef();
   latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch,
-    composerKey, draft, files, localFiles };
+    composerKey, draft, files, localFiles, canSendImages };
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
   const loadCatalogPage = useCallback(() => {
@@ -500,6 +501,9 @@ function App() {
     let dispatched = false;
     try {
       if (known && files.length) throw new Error('请先移除附件，再运行会话命令。');
+      if (!canSendImages && files.some(file => file.kind === 'image')) {
+        throw new Error(running ? '请等当前任务结束，再发送图片。' : '当前模型不支持图片。请选择支持图片的模型，或移除图片。');
+      }
       const nativePrompt = known && !api.execute && api.commands?.some(item => '/' + item.id === command[1])
         && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
       if (!known || nativePrompt) prepareMarkdown().catch(() => {});
@@ -526,7 +530,9 @@ function App() {
       if (!picked.length || !current.localFiles || current.composerKey !== composerKey || scope !== work.timelineScope()) return;
       const selected = new Map(current.files.map(file => [file.path, file]));
       for (const file of picked) {
-        selected.set(file.path, file);
+        if (!selected.has(file.path)) selected.set(file.path, {
+          ...file, kind: current.canSendImages && imageFileName(file.name) ? 'image' : 'file',
+        });
         if (selected.size > maxFileReferences) throw new Error(`最多附加 ${maxFileReferences} 个文件。`);
       }
       edit(composerKey, current.draft, [...selected.values()]);
@@ -724,7 +730,7 @@ function App() {
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
                 {files.length > 0 && <ul className="composer-files" aria-label="待发送的附件">
                   {files.map(file => <li className="file-reference" key={file.path}>
-                    <FileText size={14} aria-hidden="true" />
+                    {file.kind === 'image' ? <Image size={14} role="img" aria-label="图片" /> : <FileText size={14} aria-hidden="true" />}
                     <FileReferenceName name={file.name} path={file.path} />
                     <button type="button" aria-label={'移除附件 · ' + file.name} onClick={() => {
                       edit(composerKey, draft, files.filter(other => other.path !== file.path));
@@ -741,7 +747,8 @@ function App() {
                   }} onKeyDown={textareaKey} />
                 <div className="composer-bar">
                   {localFiles && <button type="button" className="icon-button composer-attach" aria-label="添加本机文件"
-                    title="添加本机文件" disabled={!canAttach} onClick={addFiles}><Paperclip size={16} /></button>}
+                    title={canSendImages ? '添加本机文件，支持的图片会作为图片发送' : '添加本机文件'}
+                    disabled={!canAttach} onClick={addFiles}><Paperclip size={16} /></button>}
                   <button type="button" className="composer-control connection" aria-label="主机" data-route={route || undefined}
                     title={[backendName, host, connectionLabel, routeLabels[route]].filter(Boolean).join(' · ')}
                     onClick={showConnection}>

@@ -546,13 +546,16 @@ try {
   const attach = page.getByRole('button', { name: '添加本机文件', exact: true });
   const draftFiles = page.getByRole('list', { name: '待发送的附件' });
   const fileName = '会话交接记录.txt';
+  const imageName = '会话窗口示意.png';
   if (process.env.SPAN_TEST_SSH_ALIAS) {
     assert.equal(await attach.count(), 0);
   } else {
     const reference = join(profile, fileName);
+    const image = join(profile, imageName);
     const removedName = '较长文件名用于核对会话附件的省略和键盘移除.txt';
     const removed = join(profile, removedName);
-    await Promise.all([writeFile(reference, '附件验收'), writeFile(removed, '这份文件应从草稿移除')]);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAFUlEQVR4nGPUqihkYGBgYGBgYoABABNLAReRfidRAAAAAElFTkSuQmCC', 'base64');
+    await Promise.all([writeFile(reference, '附件验收'), writeFile(removed, '这份文件应从草稿移除'), writeFile(image, png)]);
     const pick = async paths => {
       await app.evaluate(({ dialog }, filePaths) => {
         dialog.showOpenDialog = async (_window, options) => ({
@@ -563,13 +566,14 @@ try {
       await attach.click();
       await page.waitForFunction(() => document.activeElement === document.querySelector('.composer textarea'));
     };
-    await pick([reference, removed]);
+    await pick([reference, image, removed]);
     await draftFiles.getByTitle(removed, { exact: true }).waitFor();
+    await draftFiles.getByRole('img', { name: '图片' }).waitFor();
     await pick([reference]);
-    assert.equal(await draftFiles.getByRole('listitem').count(), 2);
+    assert.equal(await draftFiles.getByRole('listitem').count(), 3);
     await draftFiles.getByRole('button', { name: '移除附件 · ' + removedName }).press('Enter');
     assert.ok(await composer.evaluate(element => document.activeElement === element));
-    assert.equal(await draftFiles.getByRole('listitem').count(), 1);
+    assert.equal(await draftFiles.getByRole('listitem').count(), 2);
     assert.equal(await draftFiles.getByText(fileName, { exact: true }).getAttribute('title'), reference);
     await page.getByTestId('session-catalog').getByRole('treeitem', { name: previousTitle, exact: true }).click();
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
@@ -589,7 +593,9 @@ try {
   await transcript.getByText('草稿已成功重试。', { exact: true }).waitFor();
   assert.equal(await transcript.getByText(retryDraft, { exact: true }).count(), 1);
   if (!process.env.SPAN_TEST_SSH_ALIAS) {
-    await transcript.getByRole('list', { name: '已发送的附件' }).getByText(fileName, { exact: true }).waitFor();
+    const sentFiles = transcript.getByRole('list', { name: '已发送的附件' });
+    await sentFiles.getByText(fileName, { exact: true }).waitFor();
+    await sentFiles.getByRole('listitem').filter({ hasText: imageName }).getByRole('img', { name: '图片' }).waitFor();
     assert.equal(await transcript.getByText('Span 附件路径', { exact: false }).count(), 0);
     assert.equal(await draftFiles.count(), 0);
   }

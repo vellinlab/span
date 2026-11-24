@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createAgent, mergeSessions, sessionKey } from './agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from './delegation.js';
-import { fileReferenceArtifacts } from './file-references.js';
+import { attachmentArtifacts } from './file-references.js';
 import { rememberWorkspace, savedSession } from './recent-workspaces.js';
 import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 
@@ -461,6 +461,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     const client = agent.current;
     const steering = currentRun.current;
     if (!client || connection !== 'ready' || loading || busy.current || (files.length && !client.localFileReferences) ||
+      (!client.localImageInputs && files.some(file => file.kind === 'image')) ||
       (steering && !(delivery === 'followUp' ? client.turns.followUp : client.turns.steer))) return false;
     const scope = layer.current;
     clearError();
@@ -474,9 +475,13 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       const ref = await ensureSession(client, (text || files[0]?.name || '').slice(0, 48), scope);
       if (!ref) return false;
       const input = text ? [{ kind: 'text', text }] : [];
-      for (const file of files) input.push({ kind: 'file', ...file });
+      for (const file of files) input.push(file.kind === 'image'
+        ? { kind: 'image', path: file.path }
+        : { kind: 'file', path: file.path, name: file.name });
       updateRows(previous => [...previous, { kind: 'user', text, clientId, key: clientId,
-        ...(files.length && { attachments: fileReferenceArtifacts(files) }),
+        ...(files.length && { attachments: attachmentArtifacts([
+          ...files.filter(file => file.kind !== 'image'), ...files.filter(file => file.kind === 'image'),
+        ]) }),
         turnId: steering?.id, optimistic: true, queued: steering && delivery === 'followUp' ? 'queued' : undefined }]);
       added = true;
       onDispatch?.();

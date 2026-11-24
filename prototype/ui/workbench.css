@@ -599,6 +599,7 @@ p { margin-block: 0 12px; }
   white-space: nowrap;
 }
 .file-reference > svg, .file-reference button { color: var(--muted); }
+.file-reference > svg[role="img"] { color: var(--accent); }
 .artifact-list li.file-reference { max-width: min(174px, 100%); }
 .file-reference-name, .file-reference-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .file-reference-name:has(> span) { display: inline-flex; }

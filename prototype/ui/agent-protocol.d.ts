@@ -132,6 +132,7 @@ export interface AgentAdapter {
   open(): Promise<void>;
   close(): void;
   localFileReferences?: boolean;
+  localImageInputs?: boolean;
   sessions: {
     list(options: { cursor?: string; archived?: boolean }): Promise<Page<Session>>;
     search?(options: { query: string; cursor?: string; archived?: boolean }): Promise<Page<Session>>;

@@ -252,6 +252,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
 
   return {
     localFileReferences: location.kind === 'local',
+    localImageInputs: native && location.kind === 'local',
     async open() {
       await window.span.request('agent.start', { backend, cwd, ssh: location.kind === 'ssh' ? location.host : undefined, generation });
       await rpc.ready();

@@ -10,11 +10,14 @@ export function fileReferenceText(parts, local) {
   return (text ? text + '\n\n' : '') + header + files.map(file => '- ' + JSON.stringify(file.path)).join('\n');
 }
 
-export function fileReferenceArtifacts(files) {
-  return files.map(({ path, name }, index) => ({
-    id: 'reference:' + index, kind: 'file', name, path, reference: true,
+export function attachmentArtifacts(files) {
+  return files.map(({ path, name, kind = 'file' }, index) => ({
+    id: 'reference:' + index, kind, name, path, reference: true,
   }));
 }
+
+export const imageFileName = name => /\.(?:png|jpe?g|gif|webp)$/i.test(name);
+export const attachmentName = path => (path.startsWith('/') ? path.split('/') : path.split(/[\\/]/)).at(-1);
 
 function referenceStart(text) {
   const start = text.lastIndexOf(header);
@@ -41,11 +44,11 @@ export function parseFileReferences(text) {
       if (typeof path !== 'string' || !/^(?:\/|[a-z]:[\\/]|\\\\)/i.test(path) || path.includes('\0')) {
         throw new Error('Expected an absolute file path.');
       }
-      const name = (path.startsWith('/') ? path.split('/') : path.split(/[\\/]/)).at(-1);
+      const name = attachmentName(path);
       if (!name) throw new Error('Expected a filename.');
       return { path, name };
     });
-    return { text: start ? text.slice(0, start - 2) : '', attachments: fileReferenceArtifacts(files) };
+    return { text: start ? text.slice(0, start - 2) : '', attachments: attachmentArtifacts(files) };
   } catch {
     return { text };
   }

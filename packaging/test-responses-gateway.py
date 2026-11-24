@@ -8,6 +8,8 @@ from pathlib import Path
 
 
 MODEL = "span-ci-model"
+IMAGE_MODEL = "gpt-6.2-sol"
+IMAGE_PROMPT = "Check the preview image."
 PATCH = """*** Begin Patch
 *** Add File: span-ci-result.txt
 +Patched by the App Server.
@@ -26,8 +28,6 @@ class Responses(BaseHTTPRequestHandler):
             request = json.loads(
                 self.rfile.read(int(self.headers["Content-Length"]))
             )
-            if request.get("model") != MODEL:
-                raise ValueError("Unexpected model in request")
             self.send_events(self.events(request))
         except (KeyError, StopIteration, ValueError) as error:
             self.send_error(400, str(error))
@@ -41,6 +41,9 @@ class Responses(BaseHTTPRequestHandler):
             for text in item["content"]
             if text.get("type") == "input_text"
         )
+        expected_model = IMAGE_MODEL if latest_prompt == IMAGE_PROMPT else MODEL
+        if request.get("model") != expected_model:
+            raise ValueError("Unexpected model in request")
         if latest_prompt == SECOND_PROMPT:
             if not any(
                 item.get("role") == "assistant"
@@ -71,6 +74,12 @@ class Responses(BaseHTTPRequestHandler):
                 item = self.message("first-message", FIRST_REPLY)
         elif latest_prompt == "Check the preview connection.":
             item = self.message("preview-message", "Span preview is connected.")
+        elif latest_prompt == IMAGE_PROMPT:
+            message = next(item for item in reversed(inputs) if item.get("role") == "user")
+            images = [part for part in message["content"] if part.get("type") == "input_image"]
+            if len(images) != 1 or not images[0].get("image_url", "").startswith("data:image/"):
+                raise ValueError("The selected local image did not reach the model as image input")
+            item = self.message("preview-image-message", "Span preview sent an image.")
         else:
             raise ValueError("Unexpected prompt in request")
         response_id = f"fixture-{self.server.responses + 1}"

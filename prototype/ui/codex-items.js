@@ -1,4 +1,4 @@
-import { parseFileReferences } from './file-references.js';
+import { attachmentName, parseFileReferences } from './file-references.js';
 
 /** @type {Record<string, import('./agent-protocol').AgentStatus>} */
 const agentStates = {
@@ -36,8 +36,9 @@ export function normalizeItem(item, turnId, ref) {
       const attachments = [...references, ...content.filter(part => part.type !== 'text').map((part, index) => ({
         id: String(index),
         kind: /image/i.test(part.type) ? 'image' : 'file',
-        name: part.name ?? nameOf(part.path) ?? '图片',
+        name: part.name ?? (part.type === 'localImage' && part.path ? attachmentName(part.path) : nameOf(part.path)) ?? '图片',
         path: part.path,
+        ...(part.type === 'localImage' && { reference: true }),
       }))];
       return { ...base, kind: 'user', clientId: item.clientId, text, attachments };
     }
