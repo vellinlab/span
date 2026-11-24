@@ -300,14 +300,34 @@ const ActivityGroup = memo(function ActivityGroup({ group, open, toggle, release
   </div>;
 });
 
+function firstVisibleMessage(element, viewport) {
+  for (const item of element.querySelectorAll('.message[data-empty="false"]')) {
+    const content = item.firstElementChild?.getBoundingClientRect();
+    if (content && content.bottom > viewport.top && content.top < viewport.bottom) return item;
+  }
+}
+
 function readAnchor(element, rows, layout) {
   if (element.scrollHeight - element.clientHeight - element.scrollTop < 40) return;
   const viewport = element.getBoundingClientRect();
-  for (const item of element.querySelectorAll('.message[data-empty="false"]')) {
-    const content = item.firstElementChild?.getBoundingClientRect();
-    if (content && content.bottom > viewport.top && content.top < viewport.bottom) {
-      const { key, itemKey, turnId } = layout.rowAt(rows, Number(item.dataset.index));
-      return { key, itemKey, turnId, top: item.getBoundingClientRect().top - viewport.top };
+  const item = firstVisibleMessage(element, viewport);
+  if (item) {
+    const { key, itemKey, turnId } = layout.rowAt(rows, Number(item.dataset.index));
+    return { key, itemKey, turnId, top: item.getBoundingClientRect().top - viewport.top };
+  }
+}
+
+function readTextAnchor(element) {
+  const viewport = element.getBoundingClientRect();
+  const prose = firstVisibleMessage(element, viewport)?.querySelector('.prose');
+  const bounds = prose?.getBoundingClientRect();
+  if (!bounds || bounds.top >= viewport.top || bounds.bottom <= viewport.top) return;
+  for (const offset of [1, 13, 25]) {
+    const range = element.ownerDocument.caretRangeFromPoint(bounds.left + 2, viewport.top + offset);
+    if (range?.startContainer.nodeType !== Node.TEXT_NODE || !prose.contains(range.startContainer)) continue;
+    const line = range.getBoundingClientRect();
+    if (line.height && line.bottom > viewport.top && line.top < viewport.bottom) {
+      return { range, top: line.top - viewport.top, scrollTop: element.scrollTop };
     }
   }
 }
@@ -338,7 +358,7 @@ export const Transcript = memo(function Transcript({
   const latest = useRef(null);
   const following = useRef(true);
   const followAfterFold = useRef(false);
-  const viewportHeight = useRef(0);
+  const viewportSize = useRef(null);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const inspect = useCallback((key, open) => {
     if (open) {
@@ -497,15 +517,41 @@ export const Transcript = memo(function Transcript({
 
   useLayoutEffect(() => {
     const element = scroll.current;
-    viewportHeight.current = element.clientHeight;
+    const window = element.ownerDocument.defaultView;
+    const columnWidth = () => element.firstElementChild?.getBoundingClientRect().width;
+    viewportSize.current = { height: element.clientHeight, windowWidth: window.innerWidth };
+    let readingWidth = columnWidth();
+    let anchor;
+    const rememberPosition = () => {
+      anchor = following.current || latest.current?.restore ? undefined : readTextAnchor(element);
+    };
+    element.addEventListener('scrollend', rememberPosition);
     const observer = new ResizeObserver(() => {
-      const nextHeight = element.clientHeight;
-      if (nextHeight === viewportHeight.current) return;
-      viewportHeight.current = nextHeight;
-      if (following.current && virtual.options.count) virtual.scrollToEnd();
+      const previous = viewportSize.current;
+      const height = element.clientHeight;
+      const windowWidth = window.innerWidth;
+      viewportSize.current = { height, windowWidth };
+      const width = columnWidth();
+      const rewrap = windowWidth !== previous.windowWidth && width !== readingWidth;
+      readingWidth = width;
+      if (following.current && virtual.options.count && (height !== previous.height || rewrap)) virtual.scrollToEnd();
+      if (!rewrap || following.current || latest.current?.restore || !anchor ||
+        element.scrollTop !== anchor.scrollTop || anchor.range.startContainer.nodeType !== Node.TEXT_NODE ||
+        !element.contains(anchor.range.startContainer)) return;
+      // The virtualizer can preserve the row, while the first visible line moves inside it.
+      const line = anchor.range.getBoundingClientRect();
+      if (!line.height) return;
+      const delta = line.top - element.getBoundingClientRect().top - anchor.top;
+      if (Math.abs(delta) > 1) {
+        element.scrollTop += delta;
+        anchor.scrollTop = element.scrollTop;
+      }
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      element.removeEventListener('scrollend', rememberPosition);
+    };
   }, [scroll, virtual]);
 
   function onScroll() {
@@ -513,7 +559,7 @@ export const Transcript = memo(function Transcript({
     const element = scroll.current;
     const height = element.clientHeight;
     // A resize can scroll the list before its observer has restored the viewport.
-    if (height !== viewportHeight.current) return;
+    if (height !== viewportSize.current?.height || element.ownerDocument.defaultView.innerWidth !== viewportSize.current.windowWidth) return;
     const atBottom = element.scrollHeight - height - element.scrollTop < 40;
     following.current = atBottom;
     if (atBottom && inspectedCard) setInspectedCard(null);

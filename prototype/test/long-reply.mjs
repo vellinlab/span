@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
+import { captureWindowDesktop, dragWindowEdge } from './window-edge.mjs';
 
 const following = process.argv.includes('--following');
 const grouped = process.argv.includes('--grouped-history');
@@ -90,6 +91,81 @@ async function checkSidebarReflow(app, page, transcript, latest, tailInView) {
     const viewport = element.closest('.timeline').getBoundingClientRect();
     return text.top >= viewport.top && text.bottom <= viewport.bottom;
   }), 'Resizing while following should keep the final text visible.');
+}
+
+async function checkWindowReflow(app, page, transcript, latest, tailInView) {
+  const setWidth = async width => {
+    await app.evaluate(({ BrowserWindow }, width) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window.setPosition(20, 20);
+      window.setContentSize(width, 640);
+      window.focus();
+    }, width);
+    await page.waitForFunction(width => innerWidth === width && innerHeight === 640, width);
+  };
+  const passage = transcript.getByText('第 080 项。', { exact: true }).locator('..');
+  const measure = () => passage.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return { top: bounds.top - element.closest('.timeline').getBoundingClientRect().top,
+      height: bounds.height, width: bounds.width, left: bounds.left };
+  });
+  const resize = async distance => {
+    const width = await page.evaluate(() => innerWidth);
+    const expected = Math.max(740, width + distance);
+    const started = Date.now();
+    const [handle] = await Promise.all([
+      page.waitForFunction(target => Math.abs(innerWidth - target) <= 4 &&
+        { width: innerWidth, at: Date.now() }, expected, { timeout: 8000 }),
+      dragWindowEdge(app, distance),
+    ]);
+    const geometry = await handle.jsonValue();
+    await handle.dispose();
+    await settleFrame(page);
+    return { width: await page.evaluate(() => innerWidth), geometryMs: geometry.at - started, started };
+  };
+  const capture = async (name, timing) => {
+    if (screenshot) await captureWindowDesktop(app, `${screenshot}-window-${name}.png`);
+    if (timing) return { width: timing.width, geometryMs: timing.geometryMs,
+      desktopCaptureMs: screenshot ? Date.now() - timing.started : undefined };
+  };
+
+  await setWidth(880);
+  await placeInTimeline(passage, 8);
+  await latest.waitFor();
+  const before = await measure();
+  await capture('wide');
+  const narrowTiming = await resize(-145);
+  const narrow = await measure();
+  assert.ok(narrow.height > before.height && narrow.width < before.width, 'The window resize must wrap the text.');
+  assert.ok(Math.abs(narrow.top - before.top) <= 2, `The paragraph moved during window reflow: ${before.top} -> ${narrow.top}.`);
+  const reflow = await capture('narrow', narrowTiming);
+  await resize(140);
+  assert.ok(Math.abs((await measure()).top - before.top) <= 2, 'Widening the window should keep the same paragraph visible.');
+
+  const foldSidebar = page.getByRole('button', { name: '收起侧栏', exact: true });
+  await foldSidebar.click();
+  await setWidth(960);
+  await placeInTimeline(passage, 8);
+  const centerBefore = await measure();
+  const centerTiming = await resize(-80);
+  const centerAfter = await measure();
+  assert.equal(centerAfter.width, centerBefore.width);
+  assert.equal(centerAfter.height, centerBefore.height);
+  assert.notEqual(centerAfter.left, centerBefore.left);
+  assert.ok(Math.abs(centerAfter.top - centerBefore.top) <= 2, 'Recentering the reading column should preserve its offset.');
+  const centered = await capture('centered', centerTiming);
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+
+  await latest.click();
+  await tailInView();
+  await resize(-145);
+  await tailInView();
+  assert.ok(await transcript.getByText('长回复已全部生成。', { exact: true }).evaluate(element => {
+    const text = element.getBoundingClientRect();
+    const viewport = element.closest('.timeline').getBoundingClientRect();
+    return text.top >= viewport.top && text.bottom <= viewport.bottom;
+  }), 'Resizing the window while following should keep the final text visible.');
+  return { reflow, centered };
 }
 
 async function waitForMarker(file) {
@@ -682,7 +758,9 @@ async function check(binary, label, trial) {
       assert.equal(await transcript.getByRole('link', { name: '后补引用' }).getAttribute('href'),
         'https://example.com/span/reference');
     }
+    let windowResize;
     if (!following && !grouped && label === 'candidate' && trial === 0) {
+      windowResize = await checkWindowReflow(app, page, transcript, latest, tailInView);
       await checkSidebarReflow(app, page, transcript, latest, tailInView);
     }
     const link = transcript.getByRole('link', { name: '复核链接' });
@@ -692,7 +770,7 @@ async function check(binary, label, trial) {
       selection.selectAllChildren(element);
       return selection.toString();
     }), '复核链接');
-    return { label, following, grouped, mutationBatches, maxBatchGapMs, startPssKiB, endPssKiB, typing,
+    return { label, following, grouped, mutationBatches, maxBatchGapMs, startPssKiB, endPssKiB, typing, windowResize,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,
