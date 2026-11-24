@@ -163,14 +163,14 @@ p { margin-block: 0 12px; }
 .catalog-tree { position: relative; }
 .catalog-tree:focus-visible { outline: none; }
 .catalog-tree [role="treeitem"] {
-  position: absolute;
-  inset: 0 0 auto;
   height: var(--catalog-row-height);
   display: flex;
   align-items: center;
   border-radius: 7px;
   cursor: pointer;
 }
+.catalog-group { position: absolute; inset-inline: 0; }
+.catalog-heading { position: sticky; inset-block-start: 0; z-index: 1; background: var(--panel); }
 .catalog-workspace {
   gap: 7px;
   padding-inline: 8px;
@@ -179,7 +179,13 @@ p { margin-block: 0 12px; }
 .catalog-workspace:not([aria-expanded]) .group-chevron { visibility: hidden; }
 .activity summary::-webkit-details-marker { display: none; }
 .catalog-workspace[aria-expanded="true"] .group-chevron, .activity details[open] .card-chevron { transform: rotate(90deg); }
-.catalog-tree .catalog-session { margin-inline-start: 43px; padding-inline: 12px; color: #c3c4c5; }
+.catalog-tree .catalog-session {
+  position: absolute;
+  inset: 0 0 auto;
+  margin-inline-start: 43px;
+  padding-inline: 12px;
+  color: #c3c4c5;
+}
 .catalog-session::after { content: ""; position: absolute; inset-block: 0; inset-inline-start: -9px; border-inline-start: 1px solid var(--line); }
 .catalog-tree [role="treeitem"]:not([aria-disabled="true"]):hover { background: var(--hover); }
 .catalog-tree [aria-disabled="true"] { color: var(--muted); cursor: default; }

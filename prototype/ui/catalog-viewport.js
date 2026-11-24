@@ -47,9 +47,16 @@ export function useCatalogViewport(rows, indexes, scope, scrollPosition) {
     let top = saved.scope === scope ? saved.top : 0;
     // Keep the same row at the same screen position if another group grows above it.
     if (previous?.scope === scope && previous.rows.length && previous.rows !== rows) {
+      // A focus-induced scroll can reach the DOM before its scroll event.
+      if (offsets.at(-1) >= previous.offsets.at(-1)) top = element.scrollTop;
       const old = rowAt(previous.offsets, top);
-      const next = indexes.get(previous.rows[old].key);
+      const anchor = previous.rows[old];
+      const next = indexes.get(anchor.key);
       if (next !== undefined) top += offsets[next] - previous.offsets[old];
+      else if (anchor.parent !== undefined) {
+        const group = indexes.get(previous.rows[anchor.parent].key);
+        if (group !== undefined) top = offsets[group];
+      }
     }
     if (element.scrollTop !== top) element.scrollTop = top;
     const position = { scope, top: element.scrollTop };
@@ -95,17 +102,22 @@ export function useCatalogViewport(rows, indexes, scope, scrollPosition) {
   function ensureVisible(index) {
     const element = scroll.current;
     const top = offsets[index];
-    const bottom = offsets[index + 1];
-    if (top < element.scrollTop) element.scrollTop = top;
+    const bottom = top + catalogRowHeight;
+    const above = rows[index].parent === undefined ? 0 : catalogRowHeight;
+    if (top < element.scrollTop + above) element.scrollTop = top - above;
     else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight;
     updateScroll.current();
   }
 
   function visibleRange() {
     const element = scroll.current;
+    const top = element.scrollTop;
+    const first = rowAt(offsets, top);
+    const group = rows[first]?.parent ?? first;
+    const covered = offsets[group] < top ? Math.min(top + catalogRowHeight, offsets[rows[group].end]) : top;
     return {
-      start: rowAt(offsets, element.scrollTop),
-      end: rowAt(offsets, element.scrollTop + element.clientHeight - 1),
+      start: rowAt(offsets, covered),
+      end: rowAt(offsets, top + element.clientHeight - 1),
     };
   }
 

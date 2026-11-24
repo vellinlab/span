@@ -24,7 +24,8 @@ function catalogRows(sessions, project, archived, filter, collapsed) {
     const parent = rows.length;
     const key = JSON.stringify(['workspace', workspace]);
     const expanded = entries.length ? !collapsed?.has(key) : undefined;
-    rows.push({ key, title: directoryName(workspace), workspace, expanded, position: ++position, siblings: groups.size });
+    rows.push({ key, title: directoryName(workspace), workspace, expanded, position: ++position, siblings: groups.size,
+      end: parent + 1 + (expanded ? entries.length : 0) });
     if (expanded) entries.forEach((entry, index) => rows.push({
       ...entry, parent, position: index + 1, siblings: entries.length,
     }));
@@ -32,12 +33,12 @@ function catalogRows(sessions, project, archived, filter, collapsed) {
   return rows;
 }
 
-const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selected, disabled }) {
+const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selected, disabled, owns }) {
   return <div id={id} role="treeitem" aria-level={row.entry ? 2 : 1}
-    aria-posinset={row.position} aria-setsize={row.siblings} aria-expanded={row.expanded}
+    aria-label={row.title} aria-owns={owns} aria-posinset={row.position} aria-setsize={row.siblings} aria-expanded={row.expanded}
     aria-current={selected ? 'true' : undefined} aria-disabled={row.entry && disabled ? true : undefined}
     className={row.entry ? 'catalog-session' : 'catalog-workspace'} data-active={active} data-catalog-index={index}
-    title={row.workspace ?? row.title} style={{ transform: `translateY(${top}px)` }}>
+    title={row.workspace ?? row.title} style={top === undefined ? undefined : { transform: `translateY(${top}px)` }}>
     {!row.entry && <>
       <ChevronRight className="group-chevron" size={12} aria-hidden="true" />
       <Folder size={15} aria-hidden="true" />
@@ -129,6 +130,13 @@ export const SessionCatalog = memo(function SessionCatalog({
     if (active < band.start) mounted.unshift(active);
     else mounted.push(active);
   }
+  const mountedGroups = new Map();
+  for (const index of mounted) {
+    const parent = rows[index].parent;
+    const group = parent ?? index;
+    if (!mountedGroups.has(group)) mountedGroups.set(group, []);
+    if (parent !== undefined) mountedGroups.get(group).push(index);
+  }
   return <div className="side-list workspaces" data-testid="session-catalog" ref={scroll} data-items={rows.length}>
     {rows.length > 0 && <div className="catalog-tree" role="tree" aria-label={archived ? '已归档会话' : '工作区会话'} tabIndex={0}
       aria-activedescendant={active === undefined ? undefined : `${prefix}-${active}`}
@@ -145,10 +153,20 @@ export const SessionCatalog = memo(function SessionCatalog({
         setActiveKey(row.key);
         activate(row);
       }} onKeyDown={onKeyDown} style={{ height: offsets.at(-1), '--catalog-row-height': `${catalogRowHeight}px` }}>
-      {mounted.map(index => {
-        const row = rows[index];
-        return <CatalogRow key={row.key} row={row} id={`${prefix}-${index}`} index={index} top={offsets[index]}
-          active={index === active} selected={row.key === selected} disabled={disabled} />;
+      {Array.from(mountedGroups, ([group, children]) => {
+        const row = rows[group];
+        const top = offsets[group];
+        const groupId = `${prefix}-${group}`;
+        const childrenId = children.length ? `${groupId}-children` : undefined;
+        return <div className="catalog-group" key={row.key} style={{ top, height: offsets[row.end] - top }}>
+          <div className="catalog-heading">
+            <CatalogRow row={row} id={groupId} index={group} active={group === active} owns={childrenId} />
+          </div>
+          {childrenId && <div role="group" id={childrenId}>
+            {children.map(index => <CatalogRow key={rows[index].key} row={rows[index]} id={`${prefix}-${index}`} index={index}
+              top={offsets[index] - top} active={index === active} selected={rows[index].key === selected} disabled={disabled} />)}
+          </div>}
+        </div>;
       })}
     </div>}
     {!rows.length && (filter || archived) && <p className="search-empty">{filter ? '没有匹配的会话' : '没有归档会话'}</p>}

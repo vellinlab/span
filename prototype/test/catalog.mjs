@@ -21,8 +21,14 @@ try {
   const waitForCount = count => page.waitForFunction(count =>
     Number(document.querySelector('[data-testid="session-catalog"]')?.dataset.items) === count, count);
   function visibleAnchor(element) {
-    const top = element.getBoundingClientRect().top;
-    const row = [...element.querySelectorAll('[role="treeitem"]')].find(row => row.getBoundingClientRect().bottom > top);
+    const { top, bottom } = element.getBoundingClientRect();
+    const pinned = element.ownerDocument.elementFromPoint(element.getBoundingClientRect().left + 100, top + 1)
+      ?.closest('.catalog-heading');
+    const cutoff = pinned?.getBoundingClientRect().bottom ?? top;
+    const row = [...element.querySelectorAll('.catalog-session')].find(row => {
+      const bounds = row.getBoundingClientRect();
+      return bounds.bottom > cutoff && bounds.top < bottom;
+    });
     return row && { text: row.textContent, top: row.getBoundingClientRect().top - top };
   }
   const firstVisible = () => catalog.evaluate(visibleAnchor);
@@ -32,7 +38,8 @@ try {
   assert.ok(await items.count() < 33);
   const hierarchy = await items.first().evaluate(parent => {
     const textX = row => row.querySelector('span').getBoundingClientRect().left;
-    const child = parent.nextElementSibling;
+    const children = document.getElementById(parent.getAttribute('aria-owns'));
+    const child = children.firstElementChild;
     return { indent: textX(child) - textX(parent), selected: child.getAttribute('aria-current') };
   });
   assert.ok(hierarchy.indent >= 6 && hierarchy.selected === 'true', JSON.stringify(hierarchy));
@@ -50,6 +57,33 @@ try {
     return blank;
   });
   assert.deepEqual(blankJumps, [], 'Fast scrollbar jumps leave rendered rows on screen');
+
+  const transition = await catalog.evaluate(async element => {
+    const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+    const listTop = element.getBoundingClientRect().top;
+    const first = element.querySelector('.catalog-group');
+    const boundary = first.offsetHeight;
+    const y = heading => heading.getBoundingClientRect().top - listTop;
+    element.scrollTop = Math.floor(boundary / 2);
+    await frame();
+    const pinned = y(first.querySelector('.catalog-heading'));
+    element.scrollTop = boundary - 16;
+    await frame();
+    const headings = element.querySelectorAll('.catalog-heading');
+    const push = [y(headings[0]), y(headings[1])];
+    element.scrollTop = boundary;
+    await frame();
+    const next = element.ownerDocument.elementFromPoint(element.getBoundingClientRect().left + 100, listTop + 1)
+      ?.closest('.catalog-heading');
+    return { pinned, push, next: next?.textContent, nextTop: next && y(next) };
+  });
+  assert.deepEqual(transition, { pinned: 0, push: [-16, 16], next: 'second-workspace', nextTop: 0 });
+  await tree.getByRole('treeitem', { name: 'second-workspace' }).click();
+  await waitForCount(22);
+  assert.equal(await tree.getByRole('treeitem', { name: 'second-workspace' }).getAttribute('aria-expanded'), 'false');
+  await tree.getByRole('treeitem', { name: 'second-workspace' }).click();
+  await waitForCount(42);
+
   await tree.focus();
   await tree.press('Home');
   const project = items.first();
@@ -62,6 +96,14 @@ try {
   await tree.press('End');
   await tree.getByRole('treeitem', { name: '目录会话 0039' }).waitFor();
   assert.equal(await current(), '目录会话 0039');
+  for (let index = 0; index < 18; index++) await tree.press('ArrowUp');
+  const focusedVisible = await tree.evaluate(element => {
+    const row = document.getElementById(element.getAttribute('aria-activedescendant'));
+    const heading = row.closest('.catalog-group').querySelector('.catalog-heading');
+    return row.getBoundingClientRect().top >= heading.getBoundingClientRect().bottom;
+  });
+  assert.ok(focusedVisible, 'Keyboard focus stays below the sticky heading');
+  await tree.press('End');
 
   await loadMore.focus();
   const beforeAppend = await firstVisible();
@@ -97,7 +139,7 @@ try {
   await page.getByRole('button', { name: '归档', exact: true }).click();
   await page.getByRole('tree', { name: '已归档会话' }).getByRole('treeitem', { name: '归档会话示例' }).waitFor();
   assert.equal(await loadMore.count(), 0);
-  console.log('Verified viewport mounting, keyboard navigation, search, append anchoring, tab restoration and archive.');
+  console.log('Verified viewport mounting, sticky group transitions, keyboard navigation, search, append anchoring, tab restoration and archive.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });
