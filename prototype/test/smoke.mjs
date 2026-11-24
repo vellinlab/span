@@ -117,7 +117,7 @@ try {
   await page.mouse.move(area.x + area.width / 2, area.y + 150);
   await transcript.evaluate(element => { element.scrollTop = 25; });
   await page.mouse.wheel(0, -300);
-  await page.waitForFunction(() => Number(document.querySelector('[data-items]').dataset.items) >= 41);
+  await page.waitForFunction(() => Number(document.querySelector('[data-testid="transcript"]').dataset.items) >= 41);
   assert.ok(await transcript.locator('.message').count() < 30);
 
   await page.getByRole('button', { name: '文件', exact: true }).click();
