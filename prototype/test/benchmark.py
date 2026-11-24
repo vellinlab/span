@@ -172,10 +172,11 @@ def benchmark(name, binary):
                     xdo("key", "ctrl+shift+h")
                     widget("mouse", "工作台架构评审")
                     widget("state", "复制会话 ID", "showing")
-                    widget("contains", "第 160 项")
                     hx, hy, hw, hh = map(int, widget("bounds", "对话记录").split())
+                    # The older GTK build can open the last page at its first visible row.
                     xdo("mousemove", hx + hw // 2, hy + hh // 2,
                         "click", "--repeat", 40, "--delay", 20, 5)
+                    widget("contains", "第 160 项")
                     widget("click", "会话页终端面板")
                 time.sleep(.9)
 
