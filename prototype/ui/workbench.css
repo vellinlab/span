@@ -564,14 +564,53 @@ p { margin-block: 0 12px; }
 .artifact-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .artifact-list li button { color: var(--accent); padding: 1px 6px; text-align: left; }
 .user-message .artifact-list { margin-top: 6px; }
+.user-message[data-attachment-only] .artifact-list { margin-top: 0; }
 .queued-input { display: block; color: var(--muted); font-size: 11px; }
 
+.composer-files, .user-message .artifact-list:has(.file-reference) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.composer-files {
+  list-style: none;
+  margin: 0 0 5px;
+  padding: 2px;
+  max-height: 56px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.composer-files::-webkit-scrollbar { width: 6px; }
+.composer-files::-webkit-scrollbar-thumb { border-radius: 3px; background: #ffffff24; }
+.composer-wrap:has(.approval) .composer-files { max-height: 28px; }
+.file-reference, .artifact-list li.file-reference {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: min(216px, 100%);
+  background: #ffffff08;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.file-reference > svg, .file-reference button { color: var(--muted); }
+.artifact-list li.file-reference { max-width: min(174px, 100%); }
+.file-reference-name, .file-reference-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-reference-name:has(> span) { display: inline-flex; }
+.file-reference button { display: grid; place-items: center; flex: none; margin-inline-end: -3px; padding: 2px; }
+
 .composer-wrap {
-  --approval-height: clamp(96px, calc(100cqb - 218px), min(36vh, 300px));
+  --approval-height: clamp(96px, calc(100cqb - 218px - var(--draft-files-height, 0px)), min(36vh, 300px));
   flex: none;
   position: relative;
   padding-block: 5px 15px;
 }
+.composer-wrap:has(.composer-files) { --draft-files-height: 33px; }
 .conversation-empty .composer-wrap { max-width: 600px; }
 .composer {
   border-radius: 18px;
@@ -601,7 +640,7 @@ p { margin-block: 0 12px; }
 .conversation-empty .composer textarea { min-height: 48px; }
 .composer-wrap:has(.approval) .composer textarea {
   /* Reserve the approval height, goal, controls and a line of history. */
-  max-height: max(48px, min(156px, 25cqb, 100cqb - var(--approval-height) - 168px));
+  max-height: max(48px, min(156px, 25cqb, 100cqb - var(--approval-height) - 168px - var(--draft-files-height, 0px)));
 }
 .composer-bar {
   display: flex;
@@ -621,6 +660,7 @@ p { margin-block: 0 12px; }
   color: #dedede;
 }
 .composer-bar .connection { min-width: 0; max-width: 48%; }
+.composer-bar .composer-attach { width: 28px; height: 28px; flex: none; }
 .connection i, .live i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #999; }
 .connection i.ready { background: var(--accent); }
 .connection i.connecting, .live i { background: #cbba91; }

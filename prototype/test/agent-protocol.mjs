@@ -2,12 +2,37 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
+import { fileReferenceArtifacts, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
 const session = (backend, location) => ({ backend, location, id: 'thread' });
+
+test('file references round-trip with Windows and Linux paths and survive an echo without a client ID', () => {
+  const files = [
+    { kind: 'file', path: '/tmp/核对 "A"\\结果.txt', name: '核对 "A"\\结果.txt' },
+    { kind: 'file', path: 'C:\\工作区\\结果.txt', name: '结果.txt' },
+  ];
+  const text = '检查文件。\n保留原文。';
+  const attachments = fileReferenceArtifacts(files);
+  const wire = fileReferenceText([{ kind: 'text', text }, ...files], true);
+  assert.deepEqual(parseFileReferences(wire), { text, attachments });
+  assert.deepEqual(parseFileReferences(fileReferenceText(files, true)), { text: '', attachments });
+  assert.throws(() => fileReferenceText(files, false), /本机 Agent/);
+  const ordinaryText = text + '\n\n' + wire.slice(wire.indexOf('Span 附件路径')).replaceAll('/tmp/', '') + '\n其他文字';
+  assert.deepEqual(parseFileReferences(ordinaryText), { text: ordinaryText });
+
+  const first = { kind: 'user', text: '', key: 'first', optimistic: true, attachments: attachments.slice(0, 1) };
+  const second = { ...first, key: 'second', attachments: attachments.slice(1) };
+  const echo = { kind: 'user', text: '', id: 'echo', turnId: 'turn', attachments: second.attachments };
+  const rows = applyTimeline([first, second], [{ kind: 'item', item: echo, final: true }]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0], first);
+  assert.equal(rows[1].key, second.key);
+  assert.equal(rows[1].id, echo.id);
+});
 
 test('timeline layout survives streaming text and changes when rows become visible', () => {
   const item = { kind: 'message', turnId: 'turn', id: 'reply', text: '' };

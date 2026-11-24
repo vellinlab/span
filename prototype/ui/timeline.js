@@ -159,6 +159,13 @@ function addReasoning({ rows, positions, write }, data, final, delta) {
   write(index, { ...previous, ...(delta ? {} : data), key, id, turnId, kind: 'reasoning', sections, final, preview });
 }
 
+function sameFileReferences(left, right) {
+  if (!left?.[0]?.reference && !right?.[0]?.reference) return true;
+  const a = left?.filter(file => file.reference) ?? [];
+  const b = right?.filter(file => file.reference) ?? [];
+  return a.length === b.length && a.every((file, index) => file.path === b[index].path);
+}
+
 function addItem(state, item, final) {
   if (item.kind === 'reasoning') return addReasoning(state, item, final, false);
   const { rows, positions, write } = state;
@@ -168,7 +175,8 @@ function addItem(state, item, final) {
   if (item.kind === 'user' && first === undefined) {
     const index = rows.findIndex(row => row.optimistic && (item.clientId
       ? row.clientId === item.clientId
-      : row.text === item.text && (!row.turnId || row.turnId === item.turnId)));
+      : row.text === item.text && (!row.turnId || row.turnId === item.turnId)
+        && sameFileReferences(row.attachments, item.attachments)));
     if (index !== -1) {
       write(index, { ...item, key: rows[index].key, itemKey: key, final });
       positions.set(key, [index]);

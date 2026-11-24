@@ -1,5 +1,6 @@
 import { connectRpc } from './agent-rpc.js';
 import { normalizeItem, normalizeLimits, normalizeRun, normalizeUsage, patches, planSteps } from './codex-items.js';
+import { fileReferenceText } from './file-references.js';
 
 const featureBackend = 'codex';
 const permissions = [
@@ -27,13 +28,16 @@ const deltaKinds = {
 };
 
 /** @param {import('./agent-protocol').Input[]} parts */
-function inputs(parts) {
+function inputs(parts, local) {
+  if (parts.some(part => part.kind === 'file')) {
+    const text = fileReferenceText(parts, local);
+    parts = [{ kind: 'text', text }, ...parts.filter(part => part.kind !== 'file' && part.kind !== 'text')];
+  }
   return parts.map(part => {
     switch (part.kind) {
       case 'text': return { type: 'text', text: part.text, text_elements: [] };
       case 'image': return part.path ? { type: 'localImage', path: part.path } : { type: 'image', url: part.url };
       case 'skill': return { type: 'skill', name: part.name, path: part.path };
-      case 'file':
       case 'mention': return { type: 'mention', name: part.name, path: part.path };
       default: throw new Error('输入类型不受支持。');
     }
@@ -247,6 +251,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   }
 
   return {
+    localFileReferences: location.kind === 'local',
     async open() {
       await window.span.request('agent.start', { backend, cwd, ssh: location.kind === 'ssh' ? location.host : undefined, generation });
       await rpc.ready();
@@ -305,7 +310,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     turns: {
       async start(thread, input, options, clientId) {
         /** @type {Record<string, unknown>} */
-        const params = { threadId: thread.id, input: inputs(input), summary: 'auto' };
+        const params = { threadId: thread.id, input: inputs(input, location.kind === 'local'), summary: 'auto' };
         if (native) params.clientUserMessageId = clientId;
         if (options.model) params.model = options.model;
         if (options.effort) params.effort = options.effort;
@@ -327,7 +332,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       stop: (thread, turnId) => request('turn/interrupt', { threadId: thread.id, turnId }),
       ...(native && {
         steer: (thread, expectedTurnId, input, clientId) => request('turn/steer', {
-          threadId: thread.id, expectedTurnId, clientUserMessageId: clientId, input: inputs(input),
+          threadId: thread.id, expectedTurnId, clientUserMessageId: clientId, input: inputs(input, location.kind === 'local'),
         }),
         compact: thread => request('thread/compact/start', { threadId: thread.id }),
         async review(thread, target) {

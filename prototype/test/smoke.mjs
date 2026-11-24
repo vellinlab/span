@@ -1,6 +1,6 @@
 import { _electron as electron } from 'playwright';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -543,13 +543,51 @@ try {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-composer-welcome.png') });
   const retryDraft = '验证新会话草稿重试。';
   await composer.fill(retryDraft);
+  const attach = page.getByRole('button', { name: '添加本机文件', exact: true });
+  const draftFiles = page.getByRole('list', { name: '待发送的附件' });
+  const fileName = '会话交接记录.txt';
+  if (process.env.SPAN_TEST_SSH_ALIAS) {
+    assert.equal(await attach.count(), 0);
+  } else {
+    const reference = join(profile, fileName);
+    const removedName = '较长文件名用于核对会话附件的省略和键盘移除.txt';
+    const removed = join(profile, removedName);
+    await Promise.all([writeFile(reference, '附件验收'), writeFile(removed, '这份文件应从草稿移除')]);
+    const pick = async paths => {
+      const pending = page.waitForEvent('filechooser');
+      await attach.click();
+      await (await pending).setFiles(paths);
+    };
+    await pick([reference, removed]);
+    await draftFiles.getByTitle(removed, { exact: true }).waitFor();
+    await pick([reference]);
+    assert.equal(await draftFiles.getByRole('listitem').count(), 2);
+    await draftFiles.getByRole('button', { name: '移除附件 · ' + removedName }).press('Enter');
+    assert.ok(await composer.evaluate(element => document.activeElement === element));
+    assert.equal(await draftFiles.getByRole('listitem').count(), 1);
+    assert.equal(await draftFiles.getByText(fileName, { exact: true }).getAttribute('title'), reference);
+    await page.getByTestId('session-catalog').getByRole('treeitem', { name: previousTitle, exact: true }).click();
+    await transcript.getByText('第 160 项', { exact: false }).waitFor();
+    assert.equal(await draftFiles.count(), 0);
+    assert.equal(await composer.inputValue(), '这段草稿留在原会话。');
+    await page.getByRole('button', { name: /新会话/ }).click();
+    await draftFiles.getByText(fileName, { exact: true }).waitFor();
+    assert.equal(await composer.inputValue(), retryDraft);
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-composer-files.png') });
+  }
   await composer.press('Enter');
   await page.getByRole('alert').getByText('模拟发送失败，请重试。', { exact: true }).waitFor();
   assert.equal(await composer.inputValue(), retryDraft);
+  if (!process.env.SPAN_TEST_SSH_ALIAS) await draftFiles.getByText(fileName, { exact: true }).waitFor();
   assert.equal(await transcript.getByText(retryDraft, { exact: true }).count(), 0);
   await composer.press('Enter');
   await transcript.getByText('草稿已成功重试。', { exact: true }).waitFor();
   assert.equal(await transcript.getByText(retryDraft, { exact: true }).count(), 1);
+  if (!process.env.SPAN_TEST_SSH_ALIAS) {
+    await transcript.getByRole('list', { name: '已发送的附件' }).getByText(fileName, { exact: true }).waitFor();
+    assert.equal(await transcript.getByText('Span 附件路径', { exact: false }).count(), 0);
+    assert.equal(await draftFiles.count(), 0);
+  }
   await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
   assert.ok(await composer.evaluate((element, initialHeight) =>
     element.clientHeight <= initialHeight - 12, welcomeInputHeight), 'The empty composer leaves more room for the reply.');

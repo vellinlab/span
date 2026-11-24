@@ -1,4 +1,5 @@
 import { connectRpc } from './agent-rpc.js';
+import { fileReferenceText, parseFileReferences } from './file-references.js';
 import { piDelta, piMessage, piRunStatus, piText, piTool, piTurnId, piTurns } from './pi-items.js';
 
 const wire = {
@@ -16,11 +17,6 @@ const modelLevels = model => thinkingLevels.filter((level, index) => {
   const mapped = model.thinkingLevelMap?.[level];
   return mapped !== null && (index < 5 || mapped !== undefined);
 });
-const textInput = input => {
-  if (input.some(part => part.kind !== 'text')) throw new Error('当前 Pi 输入入口支持文本。');
-  return input.map(part => part.text).join('\n');
-};
-
 export function createPi({ generation, cwd, location, onEvent }) {
   const searchPaths = new Map();
   const pending = [];
@@ -256,14 +252,17 @@ export function createPi({ generation, cwd, location, onEvent }) {
   }
 
   async function ask(type, input, clientId, delivery) {
-    const ticket = { clientId, text: textInput(input), delivery };
+    if (input.some(part => part.kind !== 'text' && part.kind !== 'file')) {
+      throw new Error('当前 Pi 输入入口支持文本和本机附件路径。');
+    }
+    const ticket = { clientId, text: fileReferenceText(input, location.kind === 'local'), delivery };
     pending.push(ticket);
     try {
       const result = await request(type, { message: ticket.text });
       if (result?.disposition === 'handled' && pending.includes(ticket)) {
         pending.splice(pending.indexOf(ticket), 1);
         inputStatus(ticket, 'delivered');
-        item({ kind: 'user', id: 'handled:' + clientId, turnId: run.id, text: ticket.text, clientId }, true);
+        item({ kind: 'user', id: 'handled:' + clientId, turnId: run.id, ...parseFileReferences(ticket.text), clientId }, true);
         if (delivery === 'prompt') {
           turnCount--;
           settle(false);
@@ -303,6 +302,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
 
   return {
     commands,
+    localFileReferences: location.kind === 'local',
     async open() {
       await window.span.request('agent.start', { generation, cwd, backend: 'pi', ssh: location.host });
       await rpc.ready();

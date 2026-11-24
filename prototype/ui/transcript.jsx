@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
+import { FileReferenceName } from './file-reference-name.jsx';
 import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
@@ -21,12 +22,14 @@ function SourceLink({ url, children }) {
   }}>{children}<ArrowUpRight size={12} /></a>;
 }
 
-function ArtifactList({ artifacts, openArtifact }) {
-  return <ul className="artifact-list">{artifacts.map(file => <li key={file.id}>
-    {file.kind === 'image' ? <Image size={14} /> : <FileText size={14} />}
-    {file.url && /^https?:\/\//i.test(file.url) ? <SourceLink url={file.url}>{file.name}</SourceLink>
+function ArtifactList({ artifacts, openArtifact, label }) {
+  return <ul className="artifact-list" aria-label={label}>{artifacts.map(file => <li key={file.id}
+    className={file.reference ? 'file-reference' : undefined}>
+    {file.kind === 'image' ? <Image size={14} aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}
+    {file.reference ? <FileReferenceName name={file.name} path={file.path} />
+      : file.url && /^https?:\/\//i.test(file.url) ? <SourceLink url={file.url}>{file.name}</SourceLink>
       : file.path ? <button type="button" title={file.path} onClick={() => openArtifact(file)}>{file.name}</button>
-        : <span>{file.name}</span>}
+        : <span title={file.path}>{file.name}</span>}
   </li>)}</ul>;
 }
 
@@ -115,10 +118,11 @@ const TranscriptRow = memo(function TranscriptRow({
   row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openArtifact, canOpenSession,
   streaming, following, scroll,
 }) {
-  if (row.kind === 'user') return <div className="user-message">
-    {row.text}{row.queued && row.queued !== 'delivered' && <small className="queued-input">
+  if (row.kind === 'user') return <div className="user-message" data-attachment-only={(!row.text && !row.queued) || undefined}>
+    {row.attachments?.length && row.text ? <span>{row.text}</span> : row.text}
+    {row.queued && row.queued !== 'delivered' && <small className="queued-input">
       {row.queued === 'cancelled' ? '已取消排队' : '等待当前任务结束'}
-    </small>}{Boolean(row.attachments?.length) && <ArtifactList artifacts={row.attachments} openArtifact={openArtifact} />}
+    </small>}{Boolean(row.attachments?.length) && <ArtifactList artifacts={row.attachments} openArtifact={openArtifact} label="已发送的附件" />}
   </div>;
   if (row.kind === 'message') return <div className={row.phase === 'commentary' ? 'agent-commentary' : 'agent-reply'}>
     <StreamingMarkdown text={row.text} streaming={streaming} following={following} scroll={scroll} />

@@ -2,10 +2,12 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { createRoot } from 'react-dom/client';
 import {
   ArrowDown, ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
-  GitBranch, PanelLeftClose, PanelLeftOpen, Search, Square, SquarePen, SquareTerminal, X,
+  GitBranch, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
+import { FileReferenceName } from './file-reference-name.jsx';
+import { maxFileReferences } from './file-references.js';
 import { Interactions } from './interactions.jsx';
 import { Markdown, prepareMarkdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
@@ -57,6 +59,8 @@ function App() {
   const previewOverlay = useSyncExternalStore(subscribePreviewOverlay, isPreviewOverlay);
   const jumpToLatest = useRef(true);
   const input = useRef(null);
+  const filePicker = useRef(null);
+  const pickerScope = useRef(null);
   const search = useRef(null);
   const searchTrigger = useRef(null);
   const archiveTrigger = useRef(null);
@@ -95,8 +99,10 @@ function App() {
   const refKey = sessionKey(session?.ref);
   const composerKey = draftKey(config, session?.ref);
   const activeDraft = drafts.get(composerKey);
-  const draft = activeDraft === dispatchedDraft ? '' : (activeDraft?.text ?? '');
-  const setDraft = text => edit(composerKey, text);
+  const visibleDraft = activeDraft === dispatchedDraft ? undefined : activeDraft;
+  const draft = visibleDraft?.text ?? '';
+  const files = visibleDraft?.files ?? [];
+  const setDraft = text => edit(composerKey, text, files);
   const rememberedReading = readingViews.current.get(refKey);
   const running = run?.status === 'running';
   const interaction = work.requests[0];
@@ -110,8 +116,11 @@ function App() {
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
+  const localFiles = Boolean(api?.localFileReferences && window.span.filePath);
+  const canAttach = localFiles && connection === 'ready' && !loading && !interaction && (!running || canSteer || canQueue);
+  const canSendDraft = Boolean(draft.trim() || files.length);
   const commands = agentCommands(api, work.models, work.options);
-  const suggestions = suggesting && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
+  const suggestions = suggesting && !files.length && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
     ? commands.filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
 
   useEffect(() => {
@@ -481,8 +490,8 @@ function App() {
 
   async function submit(raw = draft, delivery = running && !canSteer && canQueue ? 'followUp' : 'steer') {
     const text = raw.trim();
-    if (!text || connection !== 'ready' || loading) return;
-    const submitted = raw === draft ? activeDraft : setDraft(raw);
+    if ((!text && !files.length) || connection !== 'ready' || loading) return;
+    const submitted = raw === draft ? visibleDraft : setDraft(raw);
     const scope = work.timelineScope();
     setSuggesting(false);
     const command = text.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
@@ -490,6 +499,7 @@ function App() {
       (command[1] === '/diff' && rows.some(row => row.kind === 'patch')));
     let dispatched = false;
     try {
+      if (known && files.length) throw new Error('请先移除附件，再运行会话命令。');
       const nativePrompt = known && !api.execute && api.commands?.some(item => '/' + item.id === command[1])
         && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
       if (!known || nativePrompt) prepareMarkdown().catch(() => {});
@@ -497,12 +507,32 @@ function App() {
         : await work.send(text, effectiveOptions(), delivery, () => {
           dispatched = true;
           setDispatchedDraft(submitted);
-        });
+        }, files);
       if (sent) clearSent(submitted);
     } catch (error) {
       if (work.timelineScope() === scope) report(error);
     } finally {
       if (dispatched) setDispatchedDraft(current => current === submitted ? undefined : current);
+    }
+  }
+
+  function addFiles(event) {
+    const picker = event.currentTarget;
+    try {
+      if (!canAttach || pickerScope.current !== work.timelineScope() || !picker.files.length) return;
+      const selected = new Map(files.map(file => [file.path, file]));
+      for (const file of picker.files) {
+        const path = window.span.filePath(file);
+        if (!path) throw new Error('无法取得所选文件的本机路径。');
+        selected.set(path, { path, name: file.name });
+        if (selected.size > maxFileReferences) throw new Error(`最多附加 ${maxFileReferences} 个文件。`);
+      }
+      edit(composerKey, draft, [...selected.values()]);
+      input.current?.focus();
+    } catch (error) {
+      report(error);
+    } finally {
+      picker.value = '';
     }
   }
 
@@ -690,6 +720,16 @@ function App() {
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
+                {files.length > 0 && <ul className="composer-files" aria-label="待发送的附件">
+                  {files.map(file => <li className="file-reference" key={file.path}>
+                    <FileText size={14} aria-hidden="true" />
+                    <FileReferenceName name={file.name} path={file.path} />
+                    <button type="button" aria-label={'移除附件 · ' + file.name} onClick={() => {
+                      edit(composerKey, draft, files.filter(other => other.path !== file.path));
+                      input.current?.focus();
+                    }}><X size={13} /></button>
+                  </li>)}
+                </ul>}
                 <textarea ref={input} rows={1} placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '描述要完成的任务…'}
                   aria-label="消息" value={draft} onFocus={() => setSuggesting(true)} onBlur={() => setSuggesting(false)}
                   onChange={event => {
@@ -698,6 +738,14 @@ function App() {
                     setCommandIndex(0);
                   }} onKeyDown={textareaKey} />
                 <div className="composer-bar">
+                  {localFiles && <>
+                    <input type="file" multiple hidden ref={filePicker} onChange={addFiles} />
+                    <button type="button" className="icon-button composer-attach" aria-label="添加本机文件" title="添加本机文件"
+                      disabled={!canAttach} onClick={() => {
+                        pickerScope.current = work.timelineScope();
+                        filePicker.current.click();
+                      }}><Paperclip size={16} /></button>
+                  </>}
                   <button type="button" className="composer-control connection" aria-label="主机" data-route={route || undefined}
                     title={[backendName, host, connectionLabel, routeLabels[route]].filter(Boolean).join(' · ')}
                     onClick={showConnection}>
@@ -711,9 +759,9 @@ function App() {
                   {connection === 'ready' && <AgentMenu work={work} onSelect={showPanel} />}
                   {running && api?.turns.stop && <button type="button" className="send stop" aria-label="停止" disabled={!run.id}
                     onClick={() => work.stop().catch(report)}><Square size={13} fill="currentColor" /></button>}
-                  {(!running || ((canSteer || canQueue) && draft.trim())) && <button className="send" type="submit" aria-label={running ? canSteer ? '追加' : '排队' : '发送'}
+                  {(!running || ((canSteer || canQueue) && canSendDraft)) && <button className="send" type="submit" aria-label={running ? canSteer ? '追加' : '排队' : '发送'}
                     title={canSteer && canQueue ? 'Enter 追加，Alt+Enter 排队' : undefined}
-                    disabled={!draft.trim() || connection !== 'ready' || loading}><ArrowUp size={16} /></button>}
+                    disabled={!canSendDraft || connection !== 'ready' || loading}><ArrowUp size={16} /></button>}
                 </div>
               </form>
             </div>

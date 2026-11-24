@@ -433,7 +433,8 @@ pub fn run() -> Result<()> {
                 json!({"data":page,"nextCursor":(start > 0).then(|| start.to_string())})
             }
             "turn/start" => {
-                let retry_draft = params["input"][0]["text"] == "验证新会话草稿重试。";
+                let submitted = params["input"][0]["text"].as_str().unwrap_or_default();
+                let retry_draft = submitted.lines().next() == Some("验证新会话草稿重试。");
                 if retry_draft && !draft_send_failed {
                     draft_send_failed = true;
                     send(
@@ -466,12 +467,12 @@ pub fn run() -> Result<()> {
                     "item/completed",
                     json!({"threadId":thread_id,"turnId":turn,"item":user_item}),
                 )?;
-                let fixture_reply = match params["input"][0]["text"].as_str() {
-                    Some("验证新会话草稿重试。") => Some("草稿已成功重试。"),
-                    Some("整理检查结果，给出可复查的步骤。") => {
-                        Some(READING_REVIEW)
-                    }
-                    _ => None,
+                let fixture_reply = if retry_draft {
+                    Some("草稿已成功重试。")
+                } else if submitted == "整理检查结果，给出可复查的步骤。" {
+                    Some(READING_REVIEW)
+                } else {
+                    None
                 };
                 if let Some(text) = fixture_reply {
                     notice(

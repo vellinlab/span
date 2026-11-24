@@ -1,3 +1,5 @@
+import { parseFileReferences } from './file-references.js';
+
 /** @type {Record<string, import('./agent-protocol').AgentStatus>} */
 const agentStates = {
   pendingInit: 'pending', pending: 'pending', inProgress: 'running', running: 'running',
@@ -29,13 +31,14 @@ export function normalizeItem(item, turnId, ref) {
   switch (item.type) {
     case 'userMessage': {
       const content = item.content ?? [];
-      const text = content.filter(part => part.type === 'text').map(part => part.text).join('\n');
-      const attachments = content.filter(part => part.type !== 'text').map((part, index) => ({
+      const raw = content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+      const { text, attachments: references = [] } = parseFileReferences(raw);
+      const attachments = [...references, ...content.filter(part => part.type !== 'text').map((part, index) => ({
         id: String(index),
         kind: /image/i.test(part.type) ? 'image' : 'file',
         name: part.name ?? nameOf(part.path) ?? '图片',
         path: part.path,
-      }));
+      }))];
       return { ...base, kind: 'user', clientId: item.clientId, text, attachments };
     }
     case 'agentMessage':

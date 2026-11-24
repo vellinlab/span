@@ -9,8 +9,8 @@ export function draftKey(config, session) {
 export function useDrafts() {
   const [drafts, setDrafts] = useState(() => new Map());
 
-  function edit(key, text) {
-    const entry = text ? { text } : undefined;
+  function edit(key, text, files) {
+    const entry = text || files?.length ? { text, files } : undefined;
     setDrafts(previous => {
       if (!entry && !previous.has(key)) return previous;
       const next = new Map(previous);

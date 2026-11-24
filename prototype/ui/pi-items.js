@@ -1,3 +1,5 @@
+import { parseFileReferences } from './file-references.js';
+
 export const piText = content => typeof content === 'string' ? content
   : (content ?? []).filter(block => block.type === 'text').map(block => block.text).join('');
 
@@ -20,7 +22,7 @@ export function piTool(turnId, id, name, args, result, isError) {
 
 export function piMessage(turnId, index, message, tools, clientId) {
   if (message.role === 'user') {
-    return [{ id: 'user:' + index, turnId, kind: 'user', text: piText(message.content), clientId }];
+    return [{ id: 'user:' + index, turnId, kind: 'user', ...parseFileReferences(piText(message.content)), clientId }];
   }
   if (message.role === 'toolResult') {
     const { name = message.toolName, args } = tools.get(message.toolCallId) ?? {};

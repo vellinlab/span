@@ -11,6 +11,8 @@ const [binary, piPath, screenshot, ssh] = process.argv.slice(2);
 const profile = await mkdtemp(join(tmpdir(), 'span-pi-preview-'));
 const state = process.env.SPAN_TEST_PI_STATE ?? join(profile, "Pi's state");
 const localWorkspace = join(profile, 'Pi 工作区');
+const referenceName = '工作区检查.txt';
+const localReference = join(localWorkspace, referenceName);
 const prompts = [];
 const initialPrompt = '核对 Pi 的推理、工具与用量。';
 const resumePrompt = '继续刚才保存的 Pi 会话。';
@@ -31,10 +33,13 @@ const gateway = createServer(async (request, response) => {
     const { messages, model } = JSON.parse(body);
     assert.equal(model, 'span-pi');
     const userMessages = messages.filter(message => message.role === 'user');
-    const prompt = JSON.stringify(userMessages.at(-1)?.content);
+    const content = userMessages.at(-1)?.content;
+    const prompt = typeof content === 'string' ? content
+      : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
     const tool = messages.findLast(message => message.role === 'tool');
     const initial = prompt.includes(initialPrompt);
     assert.ok(initial || prompt.includes(resumePrompt));
+    if (initial && !ssh) assert.ok(prompt.includes('- ' + JSON.stringify(localReference)));
     if (!initial) assert.ok(messages.some(message => message.role === 'assistant' &&
       JSON.stringify(message.content).includes(firstAnswer)));
     if (tool) assert.ok(JSON.stringify(tool.content).includes('pi tool result'));
@@ -105,7 +110,10 @@ export default function (pi) {
 }
 `);
   if (ssh) execFileSync('chown', ['-R', 'span-preview-ci:span-preview-ci', state]);
-  else await mkdir(localWorkspace);
+  else {
+    await mkdir(localWorkspace);
+    await writeFile(localReference, '本机附件验收');
+  }
 
   async function open(selectConnection = false) {
     app = await electron.launch({
@@ -142,6 +150,14 @@ export default function (pi) {
   const composer = page.getByRole('textbox', { name: '消息' });
   const send = async text => { await composer.fill(text); await composer.press('Enter'); };
   const transcript = page.getByTestId('transcript');
+  const attach = page.getByRole('button', { name: '添加本机文件', exact: true });
+  if (ssh) assert.equal(await attach.count(), 0);
+  else {
+    const picked = page.waitForEvent('filechooser');
+    await attach.click();
+    await (await picked).setFiles(localReference);
+    await page.getByRole('list', { name: '待发送的附件' }).getByText(referenceName, { exact: true }).waitFor();
+  }
   await send(initialPrompt);
   const reasoning = page.getByRole('button', { name: '实时推理摘要' });
   await reasoning.getByText('先核对 Pi 会话。', { exact: true }).waitFor();
@@ -230,6 +246,8 @@ export default function (pi) {
   const resumed = await open();
   await resumed.page.locator('.breadcrumb strong').getByText('Pi 原生会话验收', { exact: true }).waitFor();
   await resumed.page.getByTestId('transcript').getByText(firstAnswer, { exact: true }).waitFor();
+  if (!ssh) await resumed.page.getByRole('list', { name: '已发送的附件' })
+    .getByText(referenceName, { exact: true }).waitFor();
   if (!ssh) assert.equal(await resumed.page.locator('.breadcrumb > span').first().getAttribute('title'), localWorkspace);
   else assert.equal(await resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: ssh, exact: true }).count(), 0);
   await verifyArchive(resumed.page.getByTestId('transcript'));

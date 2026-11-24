@@ -17,6 +17,7 @@ export type Input =
 export type Artifact = {
   id: string; name: string; path?: string; url?: string; mime?: string;
   kind: 'file' | 'image' | 'link' | 'diff';
+  reference?: boolean;
 };
 export type Model = Choice & {
   isDefault?: boolean; inputs: Input['kind'][]; efforts: Choice[]; defaultEffort?: string;
@@ -130,6 +131,7 @@ export type AdapterDefinition = {
 export interface AgentAdapter {
   open(): Promise<void>;
   close(): void;
+  localFileReferences?: boolean;
   sessions: {
     list(options: { cursor?: string; archived?: boolean }): Promise<Page<Session>>;
     search?(options: { query: string; cursor?: string; archived?: boolean }): Promise<Page<Session>>;
