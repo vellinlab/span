@@ -16,9 +16,23 @@ export function fileReferenceArtifacts(files) {
   }));
 }
 
-export function parseFileReferences(text) {
+function referenceStart(text) {
   const start = text.lastIndexOf(header);
-  if (start < 0 || (start > 0 && text.slice(start - 2, start) !== '\n\n')) return { text };
+  return start === 0 || (start >= 2 && text.slice(start - 2, start) === '\n\n') ? start : -1;
+}
+
+export function fileReferencePreview(text) {
+  if (!text) return text;
+  const start = referenceStart(text);
+  if (start < 0 || !text.startsWith('- "', start + header.length)) return text;
+  if (start) return text.slice(0, start - 2);
+  const first = text.split('\n', 2).join('\n');
+  return parseFileReferences(first).attachments?.[0]?.name ?? '文件附件';
+}
+
+export function parseFileReferences(text) {
+  const start = referenceStart(text);
+  if (start < 0) return { text };
   const lines = text.slice(start + header.length).split('\n', maxFileReferences + 1);
   if (lines.length > maxFileReferences || lines.some(line => !line.startsWith('- "'))) return { text };
   try {

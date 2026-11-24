@@ -1,5 +1,5 @@
 import { connectRpc } from './agent-rpc.js';
-import { fileReferenceText, parseFileReferences } from './file-references.js';
+import { fileReferencePreview, fileReferenceText, parseFileReferences } from './file-references.js';
 import { piDelta, piMessage, piRunStatus, piText, piTool, piTurnId, piTurns } from './pi-items.js';
 
 const wire = {
@@ -194,7 +194,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
       cursor: page.cursor,
       items: page.items.map(entry => {
         searchPaths.set(entry.id, entry.path);
-        return { ref: ref(entry.id), cwd: entry.cwd, title: entry.title, preview: entry.preview,
+        return { ref: ref(entry.id), cwd: entry.cwd, title: entry.title, preview: fileReferencePreview(entry.preview),
           updatedAt: Date.parse(entry.created) };
       }),
     };

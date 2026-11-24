@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
-import { fileReferenceArtifacts, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
+import { fileReferenceArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
@@ -20,6 +20,8 @@ test('file references round-trip with Windows and Linux paths and survive an ech
   const wire = fileReferenceText([{ kind: 'text', text }, ...files], true);
   assert.deepEqual(parseFileReferences(wire), { text, attachments });
   assert.deepEqual(parseFileReferences(fileReferenceText(files, true)), { text: '', attachments });
+  assert.equal(fileReferencePreview(wire.slice(0, -5)), text);
+  assert.equal(fileReferencePreview(fileReferenceText(files, true)), files[0].name);
   assert.throws(() => fileReferenceText(files, false), /本机 Agent/);
   const ordinaryText = text + '\n\n' + wire.slice(wire.indexOf('Span 附件路径')).replaceAll('/tmp/', '') + '\n其他文字';
   assert.deepEqual(parseFileReferences(ordinaryText), { text: ordinaryText });

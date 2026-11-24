@@ -1,6 +1,6 @@
 import { connectRpc } from './agent-rpc.js';
 import { normalizeItem, normalizeLimits, normalizeRun, normalizeUsage, patches, planSteps } from './codex-items.js';
-import { fileReferenceText } from './file-references.js';
+import { fileReferencePreview, fileReferenceText } from './file-references.js';
 
 const featureBackend = 'codex';
 const permissions = [
@@ -104,7 +104,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   const ref = id => ({ backend, location, id });
   const session = (thread, overrides = { cwd: undefined }) => ({
     ref: ref(thread.id), cwd: thread.cwd ?? overrides.cwd, title: thread.name,
-    preview: thread.preview, branch: thread.gitInfo?.branch, updatedAt: thread.updatedAt,
+    preview: fileReferencePreview(thread.preview), branch: thread.gitInfo?.branch, updatedAt: thread.updatedAt,
   });
   const normalizeTurn = turn => ({
     id: turn.id, run: normalizeRun(turn),
