@@ -257,10 +257,27 @@ try {
   await goalPanel.getByRole('button', { name: '暂停', exact: true }).click();
   await goal.getByText('已暂停', { exact: true }).waitFor();
   await editGoal.click();
-  assert.ok(await saveGoal.evaluate(button => {
-    const bounds = button.getBoundingClientRect();
-    return button.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
-  }));
+  const editorFits = await goalInput.evaluate(field => {
+    const editor = field.closest('form');
+    const budget = editor.querySelector('input[type="number"]');
+    const save = editor.querySelector('button[type="submit"]');
+    const rect = control => control.getBoundingClientRect();
+    const reachable = control => {
+      const { x, y, width, height } = rect(control);
+      return control.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+    };
+    const budgetTop = rect(budget).top;
+    const scrollTop = field.scrollTop;
+    field.scrollTop = field.scrollHeight;
+    const scrolls = field.scrollTop > scrollTop && rect(budget).top === budgetTop;
+    field.scrollTop = scrollTop;
+    return scrolls && field.clientHeight >= 42 && reachable(field) && reachable(budget) && reachable(save)
+      && Math.abs(rect(budget).top - rect(save).top) <= 1;
+  });
+  assert.ok(editorFits, 'The editor scrolls independently and the budget and save stay in the same visible row');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-editor-compact.png') });
+  await goalInput.press('Tab');
+  assert.ok(await goalBudget.evaluate(field => field === document.activeElement));
   if (!process.env.SPAN_TEST_SSH_ALIAS) {
     await goalInput.fill('验收延迟目标保存。');
     await saveGoal.press('Enter');

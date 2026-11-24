@@ -98,7 +98,7 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
   const trimmed = useMemo(() => showEditor ? objective.trim() : '', [showEditor, objective]);
 
   useLayoutEffect(() => {
-    content.current.scrollTop = showEditor ? 0 : readingPosition.current;
+    if (!showEditor) content.current.scrollTop = readingPosition.current;
   }, [showEditor]);
   useLayoutEffect(() => {
     if (!moveFocus.current) return;
@@ -148,22 +148,25 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
       ? { kind: 'edit', objective: trimmed, budget: tokenBudget }
       : { kind: 'set', objective: trimmed, budget: tokenBudget ?? undefined });
   }}>
-    <div className="agent-panel-content" ref={content}>
-      {showEditor ? <div className="goal-form">
-        <label>目标<textarea ref={objectiveInput} rows={3} value={objective} required
-          onChange={event => edit('objective', event.target.value)} /></label>
-        <label>Token 预算<input type="number" min={1} step={1} value={budget} placeholder="可选"
-          onChange={event => edit('budget', event.target.value)} /></label>
-      </div> : <p className="goal-objective" tabIndex={0}>{goal.objective}</p>}
-    </div>
+    {showEditor ? <div className="goal-editor">
+      <textarea ref={objectiveInput} aria-label="目标" rows={6} value={objective} required
+        onChange={event => edit('objective', event.target.value)} />
+    </div> : <div className="agent-panel-content" ref={content}>
+      <p className="goal-objective" tabIndex={0}>{goal.objective}</p>
+    </div>}
     <div className="panel-actions goal-actions">
       {showEditor ? <>
+        <label className="goal-budget"><span>Token 预算</span>
+          <input type="number" min={1} step={1} value={budget} placeholder="可选"
+            onChange={event => edit('budget', event.target.value)} />
+        </label>
         {goal && <button type="button" aria-disabled={busy} onClick={() => {
           if (busy) return;
           setDraft(null);
           changeEditor(false);
         }}>取消</button>}
-        <button type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>保存目标</button>
+        {/* The edit button must keep its original type when its click opens the editor. */}
+        <button key="save-goal" type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>保存目标</button>
       </> : <>
         <button type="button" className="goal-clear" aria-disabled={busy}
           onClick={() => update({ kind: 'clear' })}>清除</button>
