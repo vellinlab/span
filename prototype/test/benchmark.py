@@ -169,9 +169,10 @@ def benchmark(name, binary):
                     chromium_roles, quiet_terminal = terminal_memory(app.pid, browser, "--open-terminal")
                     subprocess.run([*browser, command], check=True, timeout=28)
                 else:
-                    xdo("key", "ctrl+shift+a")
-                    widget("click", "打开会话")
+                    xdo("key", "ctrl+shift+h")
+                    widget("mouse", "工作台架构评审")
                     widget("state", "复制会话 ID", "showing")
+                    widget("contains", "第 160 项")
                     hx, hy, hw, hh = map(int, widget("bounds", "对话记录").split())
                     xdo("mousemove", hx + hw // 2, hy + hh // 2,
                         "click", "--repeat", 40, "--delay", 20, 5)
