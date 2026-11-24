@@ -5,9 +5,9 @@ stdin.setEncoding('utf8');
 stdin.resume();
 let output;
 let line = 0;
-// Reserve the first line for the echo. Scrolling output below it can never replace the sampled pixels.
-stdout.write(`\x1b[?1049h\x1b[2;${stdout.rows}r\x1b[2;1H`);
-const echo = key => stdout.write(`\x1b[s\x1b[1;1H\x1b[2Kspan_echo_${key}\x1b[u`);
+// Keep the echo in one place while progress refreshes other rows of the terminal.
+stdout.write('\x1b[?1049h');
+const echo = key => stdout.write(`\x1b[1;1Hspan_echo_${key}\x1b[K\x1b[2;1H`);
 stdin.on('data', key => {
   if (key === 'q') {
     clearInterval(output);
@@ -16,7 +16,7 @@ stdin.on('data', key => {
     const final = Buffer.from('绘');
     const windows = process.platform === 'win32';
     const split = windows ? final.length : 1;
-    stdout.write('\x1b[r\x1b[?1049l');
+    stdout.write('\x1b[?1049l');
     setTimeout(() => {
       stdout.write(windows ? '\x1b[32m' : '\x1b[3');
       setTimeout(() => {
@@ -32,7 +32,11 @@ stdin.on('data', key => {
   }
   echo(key);
   if (key === 'g') {
-    output = setInterval(() => stdout.write(`span_interaction_${++line}\r\n`), 45);
+    const progressRows = Math.max(1, stdout.rows - 2);
+    output = setInterval(() => {
+      const row = 2 + line % progressRows;
+      stdout.write(`\x1b[${row};1Hspan_interaction_${++line}\x1b[K`);
+    }, 45);
   }
 });
 echo('ready');
