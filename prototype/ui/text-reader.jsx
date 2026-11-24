@@ -36,11 +36,14 @@ function readLines(text, context, updateContext, classify) {
 
 function TextViewport({ data, text, kind, label, position, page, scroll }) {
   const initialPosition = useRef(position);
+  const mounted = useRef(false);
   const virtual = useVirtualizer({ count: data?.rows.length ?? 0, getScrollElement: () => scroll.current,
     enabled: Boolean(data), estimateSize: estimateLine, overscan: 8,
-    initialOffset: () => initialPosition.current?.top ?? scroll.current?.scrollTop ?? 0 });
+    // During a page change the shared ref can still point to the previous viewport.
+    initialOffset: () => initialPosition.current?.top ?? (mounted.current ? scroll.current?.scrollTop ?? 0 : 0) });
 
   useLayoutEffect(() => {
+    mounted.current = true;
     if (initialPosition.current) scroll.current.scrollTo(initialPosition.current);
   }, [scroll]);
 
