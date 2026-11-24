@@ -1,4 +1,13 @@
-export function connectRpc(generation, onPacket, onRoute, onClosed) {
+const jsonRpc = {
+  request: (id, method, params) => ({ id, method, params }),
+  response: packet => packet.method || packet.id == null ? undefined : {
+    id: packet.id, value: packet.result,
+    error: packet.error && Object.assign(new Error(packet.error.message), { code: packet.error.code }),
+  },
+  event: packet => Boolean(packet.method),
+};
+
+export function connectRpc(generation, onPacket, onRoute, onClosed, wire = jsonRpc) {
   const calls = new Map();
   let next = 0;
   let closed = false;
@@ -17,13 +26,15 @@ export function connectRpc(generation, onPacket, onRoute, onClosed) {
       onClosed(failure.message);
     }
     if (event !== 'agent') return;
-    const call = data.method ? null : calls.get(data.id);
-    if (call) {
-      calls.delete(data.id);
+    const response = wire.response(data);
+    if (response) {
+      const call = calls.get(response.id);
+      if (!call) return;
+      calls.delete(response.id);
       clearTimeout(call.timer);
-      if (data.error) call.reject(Object.assign(new Error(data.error.message), { code: data.error.code }));
-      else call.resolve(data.result);
-    } else if (data.method) {
+      if (response.error) call.reject(response.error);
+      else call.resolve(response.value);
+    } else if (wire.event(data)) {
       onPacket(data);
     }
   });
@@ -49,14 +60,15 @@ export function connectRpc(generation, onPacket, onRoute, onClosed) {
   // Response shapes belong to the wire protocol and are normalized by the adapter.
   /** @param {string} method @param {object | null} params @returns {Promise<any>} */
   function request(method, params = {}) {
-    const id = ++next;
+    const packet = wire.request(++next, method, params);
+    const { id } = packet;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         calls.delete(id);
         reject(new Error('Agent 响应超时。'));
       }, 30000);
       calls.set(id, { resolve, reject, timer });
-      send({ id, method, params }).catch(error => {
+      send(packet).catch(error => {
         calls.delete(id);
         clearTimeout(timer);
         reject(error);

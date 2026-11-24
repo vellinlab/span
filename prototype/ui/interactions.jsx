@@ -13,7 +13,10 @@ function InteractionInput({ field }) {
       {choices.map(choice => <option key={choice.id} value={choice.id} title={choice.description}>{choice.label}</option>)}
       {field.allowOther && <option value="@other">其他</option>}
     </select>}
-    {useText && <input name={field.id} required={field.required} type={field.secret ? 'password' : 'text'} />}
+    {useText && (field.multiline && !field.secret
+      ? <textarea name={field.id} required={field.required} defaultValue={field.prefill} rows={3} />
+      : <input name={field.id} required={field.required} type={field.secret ? 'password' : 'text'}
+        defaultValue={field.prefill} />)}
   </label>;
 }
 
@@ -57,6 +60,8 @@ function InteractionCard({ request, count, respond, item, host, focusTarget, onF
 
   const actions = <div className="approval-actions">
     {failure && <span className="approval-error" role="alert">{failure}</span>}
+    {request.cancel && <button type="button" aria-disabled={busy || undefined}
+      onClick={() => answer({ cancelled: true })}>取消</button>}
     {approval ? request.choices.map(choice => <button type="button" key={choice.id} aria-disabled={busy || undefined}
       data-effect={choice.effect} onClick={() => answer({ choice: choice.id })}>{choice.label}</button>)
       : <button className="primary" aria-disabled={busy || undefined}>提交回答</button>}

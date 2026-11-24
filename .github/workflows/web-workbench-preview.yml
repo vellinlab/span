@@ -110,6 +110,7 @@ jobs:
           done
       - name: Verify on AlmaLinux 8 and compare with Span 0.1.0
         run: |
+          bash prototype/test/install-pi.sh /tmp/span-workbench-artifacts/pi-test
           baseline=span-0.1.0-1.el8.x86_64.rpm
           curl -fLsS --retry 3 "https://github.com/${GITHUB_REPOSITORY}/releases/download/v0.1.0/$baseline"             -o "/tmp/span-workbench-artifacts/$baseline"
           printf 'f395c1d3f4679173cc314574d902311ea82ced8b736883e2f5ed44556c220148  %s\n'             "/tmp/span-workbench-artifacts/$baseline" | sha256sum --check -
@@ -180,6 +181,8 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" --following
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
+          bash prototype/test/install-pi.sh "$PWD/pi-test"
+          node prototype/test/real-pi.mjs "$binary" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Publish Windows preview and screenshot
         if: always()

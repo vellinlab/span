@@ -103,4 +103,5 @@ result=0
 python3.9 prototype/test/benchmark.py "$widget_socket" /artifacts/benchmark.json || result=$?
 python3.9 prototype/test/benchmark.py --catalog /artifacts/catalog-benchmark.json || result=$?
 bash prototype/test/backend.sh "$fixture" || result=$?
+bash prototype/test/pi-backend.sh "$fixture" || result=$?
 exit "$result"

@@ -606,6 +606,16 @@ p { margin-block: 0 12px; }
 .approval form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .approval-body { display: grid; gap: 7px; min-height: 0; padding: 8px 10px; overflow: auto; overscroll-behavior: contain; }
 .approval-body:empty { display: none; }
+.approval-body textarea {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  padding: 6px 8px;
+  border: 1px solid #ffffff24;
+  border-radius: 7px;
+  background: var(--canvas);
+  resize: vertical;
+}
 .approval-reason, .approval-context, .approval-context dd { margin: 0; }
 .approval-context div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 7px; }
 .approval-context dt { color: var(--muted); }

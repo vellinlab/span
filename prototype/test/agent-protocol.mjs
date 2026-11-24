@@ -114,7 +114,7 @@ test('a delayed snapshot cannot recreate a closed team or bring back its old tas
 test('session identities are scoped by backend and host, and the factory rejects unknown backends', () => {
   const refs = [session('codex', local), session('codex', remote), session('clue', remote)];
   assert.equal(new Set(refs.map(sessionKey)).size, refs.length);
-  assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue']);
+  assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi']);
   assert.throws(() => createAgent('missing', { location: local }), /不支持/);
 });
 

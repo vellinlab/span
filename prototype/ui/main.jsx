@@ -5,7 +5,7 @@ import {
   GitBranch, PanelLeftClose, PanelLeftOpen, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
-import { agentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
+import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
 import { Interactions } from './interactions.jsx';
 import { Markdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
@@ -471,7 +471,9 @@ function App() {
     const known = command && (commands.some(([name]) => name === command[1]) ||
       (command[1] === '/diff' && rows.some(row => row.kind === 'patch')));
     try {
-      const sent = known ? await runCommand(command[1], command[2] ?? '')
+      const nativePrompt = known && !api.execute && api.commands?.some(item => '/' + item.id === command[1])
+        && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
+      const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '')
         : await work.send(text, effectiveOptions(), delivery);
       if (sent) clearSent(submitted);
     } catch (error) {

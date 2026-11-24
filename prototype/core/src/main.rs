@@ -366,8 +366,10 @@ impl Service {
 }
 
 fn main() -> Result<()> {
-    if env::args().nth(1).as_deref() == Some("--fixture") {
-        return fixture::run();
+    match env::args().nth(1).as_deref() {
+        Some("--fixture") => return fixture::run(),
+        Some("--pi-fixture") => return agent::pi_fixture(),
+        _ => {}
     }
     let output = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
     let mut service = Service::default();

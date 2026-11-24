@@ -13,7 +13,7 @@ const number = new Intl.NumberFormat('zh-CN');
 const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息' };
 const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
 
-export function agentCommands(api, models, options) {
+export function commonAgentCommands(api, models, options) {
   if (!api) return [];
   const model = models.find(item => item.id === options.model) ?? models.find(item => item.isDefault);
   return [
@@ -39,12 +39,18 @@ export function agentCommands(api, models, options) {
       { mcp: '/mcp', skill: '/skills', plugin: '/plugins', connector: '/apps', tool: '/tools' }[kind],
       `查看${extensionLabels[kind]}`,
     ]),
-    ...(api.commands ?? []).map(command => [`/${command.id}`, command.description ?? command.label]),
   ];
 }
 
+export function agentCommands(api, models, options) {
+  const common = commonAgentCommands(api, models, options);
+  const names = new Set(common.map(([name]) => name));
+  const native = (api?.commands ?? []).filter(command => !names.has('/' + command.id));
+  return [...common, ...native.map(command => ['/' + command.id, command.description ?? command.label])];
+}
+
 const effortNames = {
-  none: '关闭', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高', ultra: 'Ultra',
+  none: '关闭', off: '关闭', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高', ultra: 'Ultra',
 };
 
 function Selector({ label, choices, value, blank, onChange }) {

@@ -17,11 +17,13 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 | Codex | 已注册。本机或 SSH 接入 App Server。使用原生目标、用量、规划、审批、模型和速度档位。时间线显示子代理活动，成员可打开对应会话。 |
 | Clue | 已注册。本机或 SSH 使用现有的 `clue app-server` 兼容路径。使用基础会话和回合操作。 |
 | Claude Code | 协议可映射 SDK 的会话、流式内容、审批、检查点和子代理。Agent Teams 通过独立的成员、任务和团队操作表示，按可用性启用。 |
-| Pi Agent | 协议可映射 RPC 的会话历史、模型和思考级别、`steer`、`follow_up`、会话统计和扩展命令。扩展提供的目标或协作能力由适配器声明。 |
+| Pi Agent | 已注册。本机和 SSH 启动 `pi --mode rpc`，使用 Pi 自己保存的会话。支持模型和思考级别、`steer`、`follow_up`、会话统计、扩展命令及交互。 |
 
 [Claude Code Agent SDK](https://code.claude.com/docs/en/headless) · [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) · [Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc-commands.md)
 
 接入后端时，在 `ui/agent.js` 注册适配器工厂。使用本地或 SSH 进程的适配器在 Rust 服务中声明启动方式。实现会话和回合的基础操作，按能力提供可选操作。界面按能力显示控件，并消费统一事件。后端专属操作使用带命名空间的命令和事件。
+
+Pi 可以使用 PATH 中的 CLI。本机也可用 `SPAN_PI_PATH` 指定可执行文件。工作台读取 Pi 为当前工作区返回的会话目录，通过 Pi RPC 恢复会话，并显示当前历史分支。扩展注册的命令可从斜杠菜单发送给 Pi。 [Pi RPC 协议](https://github.com/earendil-works/pi/blob/v1.6.0/packages/coding-agent/docs/rpc.md)
 
 推理卡片读取后端提供的摘要。命令、补丁、任务计划、子代理、工具调用和用户交互使用专用条目。实时增量按接收顺序刷新，历史向上分页，折叠的详情在展开时渲染。
 

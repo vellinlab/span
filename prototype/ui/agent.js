@@ -1,7 +1,8 @@
 import { codexAdapter, clueAdapter } from './codex.js';
+import { piAdapter } from './pi.js';
 
 /** @type {import('./agent-protocol').AdapterDefinition[]} */
-const definitions = [codexAdapter, clueAdapter];
+const definitions = [codexAdapter, clueAdapter, piAdapter];
 
 export const agentBackends = definitions.map(({ id, label, locations }) => ({ id, label, locations }));
 

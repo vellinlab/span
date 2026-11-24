@@ -122,6 +122,14 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       setUsage(previous => ({ ...previous, limits: event.limits }));
       return;
     }
+    if (event.kind === 'connectionInteraction' || event.kind === 'connectionInteractionResolved') {
+      const id = event.request?.id ?? event.id;
+      setRequests(previous => {
+        const remaining = previous.filter(request => request.id !== id);
+        return event.kind === 'connectionInteraction' ? [...remaining, event.request] : remaining;
+      });
+      return;
+    }
     if (sessionKey(event.session) !== active.current?.key) return;
     switch (event.kind) {
       case 'item':
@@ -504,7 +512,9 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       if (currentRun.current) return client.turns.stop(ref, currentRun.current.id);
     }),
     respond: (id, reply) => {
-      if (!api || api !== agent.current || sessionKey(session?.ref) !== active.current?.key) {
+      const request = requests.find(entry => entry.id === id);
+      if (!api || api !== agent.current || !request ||
+        (request.scope !== 'connection' && sessionKey(session?.ref) !== active.current?.key)) {
         throw new Error('此请求已经结束。');
       }
       return api.interactions.respond(id, reply);

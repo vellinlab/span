@@ -6,12 +6,15 @@ use async_tungstenite::{
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::{
+    cell::OnceCell,
     env, io,
     path::{Path, PathBuf},
     process::Stdio,
     thread,
     time::Duration,
 };
+mod pi;
+pub(super) use pi::fixture as pi_fixture;
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -35,6 +38,7 @@ exec codex app-server
 enum Backend {
     Codex,
     Clue,
+    Pi,
 }
 
 impl Backend {
@@ -44,6 +48,8 @@ impl Backend {
             (Self::Codex, false) => "codex",
             (Self::Clue, true) => "clue.exe",
             (Self::Clue, false) => "clue",
+            (Self::Pi, true) => "pi.exe",
+            (Self::Pi, false) => "pi",
         }
     }
 }
@@ -66,6 +72,7 @@ impl Agent {
         let backend = match params["backend"].as_str() {
             Some("codex") => Backend::Codex,
             Some("clue") => Backend::Clue,
+            Some("pi") => Backend::Pi,
             _ => return Err("未知的 Agent 后端。".into()),
         };
         let location = if params["demo"] == true {
@@ -368,6 +375,27 @@ async fn serve(
     generation: u64,
 ) -> Result<()> {
     match (backend, location) {
+        (Backend::Pi, location) => {
+            let (process, catalog) = match location {
+                Location::Ssh(target) => (
+                    spawn(ssh(&target).args(["pi", "--mode", "rpc"]))?,
+                    pi::Catalog::Ssh(target),
+                ),
+                Location::Local(cwd) => {
+                    (pi::start_local(backend.binary(), &cwd)?, pi::Catalog::Local)
+                }
+                Location::Fixture => (
+                    spawn(Command::new(env::current_exe()?).arg("--pi-fixture"))?,
+                    pi::Catalog::Fixture,
+                ),
+            };
+            let route = if matches!(catalog, pi::Catalog::Fixture) {
+                "fixture"
+            } else {
+                "stdio"
+            };
+            stdio_process(process, requests, output, generation, route, Some(catalog)).await?;
+        }
         (_, Location::Fixture) => {
             let process = spawn(Command::new(env::current_exe()?).arg("--fixture"))?;
             stdio(process, requests, output, generation, "fixture").await?;
@@ -463,22 +491,59 @@ async fn serve(
 }
 
 async fn stdio(
+    process: Process,
+    requests: mpsc::Receiver<Value>,
+    output: &Output,
+    generation: u64,
+    route: &str,
+) -> io::Result<()> {
+    stdio_process(process, requests, output, generation, route, None).await
+}
+
+async fn stdio_process(
     mut process: Process,
     mut requests: mpsc::Receiver<Value>,
     output: &Output,
     generation: u64,
     route: &str,
+    pi_catalog: Option<pi::Catalog>,
 ) -> io::Result<()> {
     event(output, "agent-route", generation, json!(route))?;
+    let pi_session_file = OnceCell::new();
     let read = async {
         let mut line = Vec::new();
         loop {
             read_line(&mut process.output, &mut line).await?;
-            deliver(&line, output, generation)?;
+            if let Ok(value) = serde_json::from_slice::<Value>(&line) {
+                if pi_catalog.is_some()
+                    && value["type"] == "response"
+                    && value["command"] == "get_state"
+                    && let Some(file) = value["data"]["sessionFile"].as_str()
+                    && !file.is_empty()
+                {
+                    let _ = pi_session_file.set(file.to_owned());
+                }
+                event(output, "agent", generation, value)?;
+            }
         }
     };
     let write = async {
         while let Some(packet) = requests.recv().await {
+            if let Some(catalog) = &pi_catalog
+                && packet["type"] == "span_list_sessions"
+            {
+                let result = pi::catalog(catalog, pi_session_file.get(), &packet).await;
+                let response = match result {
+                    Ok(data) => {
+                        json!({"id":packet["id"],"type":"response","success":true,"data":data})
+                    }
+                    Err(error) => {
+                        json!({"id":packet["id"],"type":"response","success":false,"error":error.to_string()})
+                    }
+                };
+                event(output, "agent", generation, response)?;
+                continue;
+            }
             let mut data = serde_json::to_vec(&packet)?;
             data.push(b'\n');
             process.input.write_all(&data).await?;

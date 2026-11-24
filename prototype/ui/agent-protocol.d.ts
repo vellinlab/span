@@ -77,16 +77,19 @@ export type ItemDelta = { id: string; turnId: string } & (
   | { kind: 'message' | 'plan' | 'command' | 'patch'; text: string }
 );
 export type InteractionField = {
-  id: string; label: string; description?: string; secret?: boolean;
+  id: string; label: string; description?: string; secret?: boolean; multiline?: boolean; prefill?: string;
   options?: Choice[]; allowOther?: boolean; required?: boolean;
 };
-export type Interaction = { id: string; title: string; detail?: string; turnId?: string; itemId?: string } & (
+export type Interaction = {
+  id: string; title: string; detail?: string; turnId?: string; itemId?: string; cancel?: boolean;
+  scope?: 'connection';
+} & (
   | { kind: 'approval'; choices: (Choice & { effect?: 'allow' | 'deny' })[];
       operation?: { kind: 'command' | 'files' | 'network' | 'permissions'; command?: string; cwd?: string;
         target?: string; protocol?: string; root?: string; permissions?: Json } }
   | { kind: 'input'; fields: InteractionField[] }
 );
-export type InteractionReply = { choice: string } | { values: Record<string, string> };
+export type InteractionReply = { choice: string } | { values: Record<string, string> } | { cancelled: true };
 export type ExtensionKind = 'tool' | 'mcp' | 'skill' | 'plugin' | 'connector';
 export type Extension = Choice & {
   kind: ExtensionKind; status?: string; enabled?: boolean; source?: string;
@@ -95,6 +98,8 @@ export type ExtensionAction = 'enable' | 'disable' | 'install' | 'uninstall' | '
 export type Event =
   | { kind: 'connection'; route: 'shared' | 'stdio' | 'fixture' | 'remote' }
   | { kind: 'disconnected'; error?: string }
+  | { kind: 'connectionInteraction'; request: Interaction }
+  | { kind: 'connectionInteractionResolved'; id: string }
   | { kind: 'quota'; limits: NonNullable<Usage['limits']> }
   | ({ session: SessionRef } & (
       | { kind: 'item'; item: TimelineItem; final: boolean }
