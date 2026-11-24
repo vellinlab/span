@@ -97,6 +97,7 @@ jobs:
             following-reply:ed7985bab09e6eb610298d73200028aa93028b9c \
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
             startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af \
+            streaming-output:6ab5c6bcbcd93498e4e3f8e0d2e08e4adb3f6594 \
             grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51
           do
             target="${spec%%:*}-baseline"
@@ -146,6 +147,7 @@ jobs:
             /tmp/span-workbench-artifacts/following-reply-baseline-commit.txt
             /tmp/span-workbench-artifacts/startup-loading-baseline-commit.txt
             /tmp/span-workbench-artifacts/grouped-history-baseline-commit.txt
+            /tmp/span-workbench-artifacts/streaming-output-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -187,6 +189,7 @@ jobs:
           node prototype/test/long-reply.mjs "$binary"
           node prototype/test/long-reply.mjs "$binary" --following
           node prototype/test/long-reply.mjs "$binary" --grouped-history
+          node prototype/test/long-reply.mjs "$binary" --tool-output
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           bash prototype/test/install-pi.sh "$PWD/pi-test"

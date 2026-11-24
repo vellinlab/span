@@ -41,9 +41,19 @@ async function check(binary, legacy, screenshot) {
     await summary.click();
     const viewport = command.locator('pre');
     await viewport.waitFor();
-    await command.evaluate(element => {
+    await command.evaluate(async element => {
       const timeline = element.closest('.timeline');
-      timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 6;
+      let stableFrames = 0;
+      for (let frame = 0; frame < 30; frame++) {
+        const delta = element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 6;
+        if (Math.abs(delta) <= 1) {
+          if (++stableFrames === 3) return;
+        } else {
+          stableFrames = 0;
+          timeline.scrollTop += delta;
+        }
+        await new Promise(requestAnimationFrame);
+      }
     });
     if (screenshot) await page.screenshot({ path: screenshot });
     if (legacy) {
@@ -59,6 +69,7 @@ async function check(binary, legacy, screenshot) {
     const mountedAtStart = await lines.count();
     assert.ok(mountedAtStart > 0 && mountedAtStart <= 40);
     const navigation = command.getByRole('navigation', { name: '输出分页' });
+    await navigation.getByText('1–8192 行', { exact: true }).waitFor();
     assert.ok(await navigation.evaluate(element => {
       const view = element.closest('.timeline').getBoundingClientRect();
       const controls = element.getBoundingClientRect();
@@ -79,8 +90,12 @@ async function check(binary, legacy, screenshot) {
     const next = navigation.getByRole('button', { name: '下一段' });
     await next.click();
     await lines.getByText('feature_08192.rs', { exact: false }).waitFor();
-    await next.click();
+    await navigation.getByText('8193–16384 行', { exact: true }).waitFor();
+    await next.press('Enter');
     await lines.getByText('feature_16384.rs', { exact: false }).waitFor();
+    await navigation.getByText('16385–20001 行', { exact: true }).waitFor();
+    assert.equal(await next.getAttribute('aria-disabled'), 'true');
+    assert.ok(await next.evaluate(element => element === document.activeElement));
     await viewport.evaluate(element => element.scrollTo({ top: 1e8, left: 0 }));
     await lines.getByText(lastLine, { exact: true }).waitFor();
     const mountedAtEnd = await lines.count();

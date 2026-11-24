@@ -1,38 +1,11 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AlertCircle, Check, Copy } from 'lucide-react';
+import { indexText, LINES_PER_PAGE, readTextPage } from './text-pages.js';
 
-const LINES_PER_PAGE = 8192;
 const LINE_HEIGHT = 18;
 const estimateLine = () => LINE_HEIGHT;
 const FIRST_PAGE = [{ start: 0 }];
-
-function pageStarts(text, updateContext) {
-  const pages = [{ start: 0 }];
-  let lines = 0;
-  let context;
-  for (let start = 0, end; (end = text.indexOf('\n', start)) !== -1 && end < text.length - 1; start = end + 1) {
-    if (updateContext) context = updateContext(context, text, start);
-    if (++lines % LINES_PER_PAGE === 0) pages.push({ start: end + 1, context });
-  }
-  return pages;
-}
-
-function readLines(text, context, updateContext, classify) {
-  const lines = text.split(/\r?\n/);
-  if (lines.at(-1) === '') lines.pop();
-  let columns = 0;
-  const rows = lines.map(line => {
-    if (updateContext) context = updateContext(context, line, 0);
-    let width = 0;
-    for (const char of line) {
-      width += char === '\t' ? 4 - (width % 4) : char.codePointAt(0) >= 0x2e80 ? 2 : 1;
-    }
-    columns = Math.max(columns, width);
-    return { text: line, tone: classify?.(line, context) };
-  });
-  return { rows, columns };
-}
 
 function TextViewport({ data, text, kind, label, position, page, scroll }) {
   const initialPosition = useRef(position);
@@ -58,19 +31,24 @@ function TextViewport({ data, text, kind, label, position, page, scroll }) {
 
 export function TextReader({ text, plain = false, kind, label, pagesLabel, position, scroll, updateContext, classify }) {
   const [view, setView] = useState(position ?? { page: 0 });
-  const pages = useMemo(() => plain ? FIRST_PAGE : pageStarts(text, updateContext), [plain, text, updateContext]);
+  const previous = useRef({});
+  const index = useMemo(() => plain ? undefined : indexText(text, updateContext, previous.current.index), [plain, text, updateContext]);
+  const pages = index?.pages ?? FIRST_PAGE;
   const current = Math.min(view.page, pages.length - 1);
   const { start, context } = pages[current];
   const pageText = text.slice(start, pages[current + 1]?.start);
-  const data = useMemo(() => plain ? null : readLines(pageText, context, updateContext, classify),
+  const data = useMemo(() => plain ? null : readTextPage(pageText, context, updateContext, classify, previous.current.data),
     [plain, pageText, context, updateContext, classify]);
+  useLayoutEffect(() => { previous.current = { index, data }; }, [index, data]);
   return <>
     <TextViewport key={current} data={data} text={pageText} kind={kind} label={label} position={view.page === current ? view : null}
       page={current} scroll={scroll} />
     {pages.length > 1 && <nav className="text-pages" aria-label={pagesLabel}>
-      <button type="button" disabled={!current} onClick={() => setView({ page: current - 1 })}>上一段</button>
+      <span className="text-page-lines">{current * LINES_PER_PAGE + 1}–{current * LINES_PER_PAGE + data.rows.length} 行</span>
+      <button type="button" aria-disabled={!current} onClick={() => { if (current) setView({ page: current - 1 }); }}>上一段</button>
       <span aria-live="polite">{current + 1} / {pages.length}</span>
-      <button type="button" disabled={current === pages.length - 1} onClick={() => setView({ page: current + 1 })}>下一段</button>
+      <button type="button" aria-disabled={current === pages.length - 1}
+        onClick={() => { if (current < pages.length - 1) setView({ page: current + 1 }); }}>下一段</button>
     </nav>}
   </>;
 }

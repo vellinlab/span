@@ -12,6 +12,7 @@ import { _electron as electron } from 'playwright';
 
 const following = process.argv.includes('--following');
 const grouped = process.argv.includes('--grouped-history');
+const toolOutput = process.argv.includes('--tool-output');
 const [candidate, baseline, screenshot] = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const linux = process.platform === 'linux';
 const lastFragment = `追加记录 ${following ? '160' : '040'}。继续核对正在生成的结果。`;
@@ -26,7 +27,7 @@ async function waitForMarker(file) {
     if (existsSync(file)) return;
     await delay(25);
   }
-  throw Error('The long-reply fixture did not publish all fragments.');
+  throw Error('The fixture did not publish all fragments.');
 }
 
 async function observeDesktopDraft(app, area) {
@@ -155,6 +156,61 @@ async function prepareInputSampling(app, page, composer, area, desktop) {
   };
 }
 
+async function checkToolOutput(app, page, composer, profile, rendererPid, label) {
+  await composer.fill('验证流式命令输出。');
+  await composer.press('Enter');
+  const command = page.getByTestId('transcript').locator('[data-card="command"]').filter({ hasText: 'workspace verify --all' });
+  await command.locator('summary').press('Enter');
+  const output = command.getByLabel('工具输出');
+  const next = command.getByRole('button', { name: '下一段' });
+  await next.press('Enter');
+  await next.press('Enter');
+  await output.getByText('feature_16384.rs', { exact: false }).waitFor();
+  let desktop;
+  try {
+    let sampleInput;
+    if (linux && baseline) {
+      const box = await composer.boundingBox();
+      const area = { x: Math.ceil(box.x), y: Math.ceil(box.y), width: 56, height: 24 };
+      desktop = await observeDesktopDraft(app, area);
+      sampleInput = await prepareInputSampling(app, page, composer, area, desktop);
+    }
+    await output.evaluate(element => { element.scrollTop = 90; });
+    await settleFrame(page);
+    const offsets = () => output.evaluate(element => ({
+      log: element.scrollTop, conversation: element.closest('.timeline').scrollTop,
+    }));
+    const position = await offsets();
+    assert.equal(position.log, 90);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
+      .map(({ name, value }) => [name, value]));
+    const pss = async () => linux ? Number((await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8'))
+      .match(/^Pss:\s+(\d+) kB$/m)[1]) : undefined;
+    const startPssKiB = await pss();
+    const start = await metrics();
+    await writeFile(join(profile, 'append'), '');
+    const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
+    await settleFrame(page);
+    const end = await metrics();
+    const endPssKiB = await pss();
+    assert.deepEqual(await offsets(), position);
+    await output.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await output.getByText('workspace/source/stream_072.rs', { exact: false }).waitFor();
+    assert.equal(await output.evaluate(element => element.tabIndex), 0);
+    await writeFile(join(profile, 'finish'), '');
+    await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+    await output.getByText('workspace/source/stream_072.rs', { exact: false }).waitFor();
+    return { label, startPssKiB, endPssKiB, typing,
+      rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
+      mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
+      scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000 };
+  } finally {
+    desktop?.close();
+  }
+}
+
 async function check(binary, label, trial) {
   const profile = await mkdtemp(join(tmpdir(), 'span-long-reply-'));
   let app;
@@ -178,6 +234,7 @@ async function check(binary, label, trial) {
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
+    if (toolOutput) return await checkToolOutput(app, page, composer, profile, rendererPid, label);
     if (grouped) {
       assert.equal(await transcript.getAttribute('data-items'), '2901');
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
@@ -329,9 +386,10 @@ async function check(binary, label, trial) {
 }
 
 const trials = [];
+const alternate = grouped || toolOutput;
 for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
-  if (baseline && (!grouped || trial === 0)) trials.push(await check(baseline, 'baseline', trial));
+  if (baseline && (!alternate || trial === 0)) trials.push(await check(baseline, 'baseline', trial));
   trials.push(await check(candidate, 'candidate', trial));
-  if (baseline && grouped && trial === 1) trials.push(await check(baseline, 'baseline', trial));
+  if (baseline && alternate && trial === 1) trials.push(await check(baseline, 'baseline', trial));
 }
-console.log(JSON.stringify({ platform: process.platform, trials }, null, 2));
+console.log(JSON.stringify({ platform: process.platform, ...(toolOutput && { scenario: 'tool-output' }), trials }, null, 2));

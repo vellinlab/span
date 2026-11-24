@@ -229,6 +229,59 @@ fn wait_for_stream_gate(path: &Path, running: &AtomicBool) -> bool {
     false
 }
 
+fn stream_command_output(
+    output: &Output,
+    running: &AtomicBool,
+    cwd: &Path,
+    thread_id: &str,
+    turn: &str,
+    gate: &Path,
+) -> io::Result<()> {
+    let mut item = command_output(turn, cwd);
+    let mut text = item["aggregatedOutput"].as_str().unwrap().to_owned();
+    item["status"] = json!("inProgress");
+    item["exitCode"] = Value::Null;
+    notice(
+        output,
+        "item/started",
+        json!({"threadId":thread_id,"turnId":turn,"item":item}),
+    )?;
+    if !wait_for_stream_gate(&gate.join("append"), running) {
+        return Ok(());
+    }
+    for index in 1..=72 {
+        if !running.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let fragment = format!("    实时检查 {index:03}\tworkspace/source/stream_{index:03}.rs\n");
+        text.push_str(&fragment);
+        notice(
+            output,
+            "item/commandExecution/outputDelta",
+            json!({"threadId":thread_id,"turnId":turn,"itemId":item["id"],"delta":fragment}),
+        )?;
+        thread::sleep(Duration::from_millis(40));
+    }
+    fs::write(gate.join("appended"), b"")?;
+    if !wait_for_stream_gate(&gate.join("finish"), running) {
+        return Ok(());
+    }
+    item["aggregatedOutput"] = json!(text);
+    item["status"] = json!("completed");
+    item["exitCode"] = json!(0);
+    notice(
+        output,
+        "item/completed",
+        json!({"threadId":thread_id,"turnId":turn,"item":item}),
+    )?;
+    running.store(false, Ordering::Release);
+    notice(
+        output,
+        "turn/completed",
+        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+    )
+}
+
 fn long_reply(
     output: &Output,
     running: &AtomicBool,
@@ -546,6 +599,24 @@ pub fn run() -> Result<()> {
                     let background = background.clone();
                     thread::spawn(move || {
                         let _ = long_reply(&output, &background, &thread_id, &turn, &gate);
+                    });
+                    continue;
+                }
+                if params["input"][0]["text"] == "验证流式命令输出。"
+                    && let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                {
+                    let output = output.clone();
+                    let background = background.clone();
+                    let cwd = cwd.clone();
+                    thread::spawn(move || {
+                        let _ = stream_command_output(
+                            &output,
+                            &background,
+                            &cwd,
+                            &thread_id,
+                            &turn,
+                            &gate,
+                        );
                     });
                     continue;
                 }

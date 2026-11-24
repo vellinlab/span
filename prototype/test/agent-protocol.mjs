@@ -4,11 +4,31 @@ import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
+import { indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
 import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
 const session = (backend, location) => ({ backend, location, id: 'thread' });
+
+test('append-only readers reuse completed log lines and rebuild when the backend replaces output', () => {
+  const original = '\t检查\r\n'.repeat(LINES_PER_PAGE);
+  const initial = indexText(original);
+  assert.equal(initial.pages.length, 1);
+  const continued = indexText(original + 'next', undefined, initial);
+  assert.deepEqual(continued.pages.map(page => page.start), [0, original.length]);
+  assert.equal(initial.pages.length, 1);
+  assert.deepEqual(continued, indexText(original + 'next'));
+
+  const first = readTextPage('首行\n\t下一行\r');
+  const appendedText = first.text + '\n\n最后一行';
+  const last = readTextPage(appendedText, undefined, undefined, undefined, first);
+  assert.equal(last.rows[0], first.rows[0]);
+  assert.deepEqual(last, readTextPage(appendedText));
+  const replaced = '短输出\n';
+  assert.deepEqual(indexText(replaced, undefined, continued), indexText(replaced));
+  assert.deepEqual(readTextPage(replaced, undefined, undefined, undefined, last), readTextPage(replaced));
+});
 
 test('file references round-trip with Windows and Linux paths and survive an echo without a client ID', () => {
   const files = [
