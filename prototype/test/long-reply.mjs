@@ -40,6 +40,14 @@ async function prepareInputSampling(app, page, composer) {
   const removed = await pixels('MM');
   assert.ok(inserted.length && removed.length && inserted !== removed, 'Composer pixels must reflect the input.');
   await composer.press('End');
+  await composer.evaluate(element => {
+    element.spanInputStages = [];
+    element.addEventListener('input', () => {
+      const stage = { value: element.value, receivedAt: performance.timeOrigin + performance.now() };
+      element.spanInputStages.push(stage);
+      requestAnimationFrame(() => { stage.frameRequestedAt = performance.timeOrigin + performance.now(); });
+    });
+  });
   await app.evaluate(({ BrowserWindow }, rect) => {
     const contents = BrowserWindow.getAllWindows()[0].webContents;
     const state = { frames: 0, pending: null };
@@ -58,13 +66,14 @@ async function prepareInputSampling(app, page, composer) {
       state.pending = null;
       reject(Error('The frame observer did not see the expected draft pixels.'));
     }, 2_000);
+    const start = performance.now();
     state.pending = {
       pixels: Buffer.from(expected, 'hex'),
-      start: performance.now(),
+      start,
       resolve(latency) {
         clearTimeout(timer);
         state.pending = null;
-        resolve(latency);
+        resolve({ latency, sentAt: performance.timeOrigin + start });
       },
     };
     if (append) contents.sendInputEvent({ type: 'char', keyCode: 'W' });
@@ -78,6 +87,7 @@ async function prepareInputSampling(app, page, composer) {
   await input(false);
   return async () => {
     const startFrames = await app.evaluate(() => globalThis.spanLongReplyInput.frames);
+    await composer.evaluate(element => { element.spanInputStages.length = 0; });
     const samples = [];
     for (let index = 0; index < 14; index++) {
       await delay(index % 2 ? 139 : 73);
@@ -87,8 +97,17 @@ async function prepareInputSampling(app, page, composer) {
       BrowserWindow.getAllWindows()[0].webContents.endFrameSubscription();
       return globalThis.spanLongReplyInput.frames;
     });
-    const sorted = [...samples].sort((a, b) => a - b);
-    return { samples, p95Ms: sorted[Math.ceil(sorted.length * .95) - 1], observedFrames: frames - startFrames };
+    await settleFrame(page);
+    const received = await composer.evaluate(element => element.spanInputStages);
+    assert.deepEqual(received.map(event => event.value), samples.map((_, index) => index % 2 ? 'MM' : 'MMW'));
+    const stages = samples.map(({ sentAt }, index) => {
+      const { receivedAt, frameRequestedAt } = received[index];
+      assert.ok(Number.isFinite(frameRequestedAt), 'Each edit must reach a renderer animation frame.');
+      return { inputMs: receivedAt - sentAt, animationFrameMs: frameRequestedAt - sentAt };
+    });
+    const latencies = samples.map(({ latency }) => latency);
+    const sorted = [...latencies].sort((a, b) => a - b);
+    return { samples: latencies, stages, p95Ms: sorted[Math.ceil(sorted.length * .95) - 1], observedFrames: frames - startFrames };
   };
 }
 
