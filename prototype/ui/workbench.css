@@ -300,6 +300,7 @@ p { margin-block: 0 12px; }
 .welcome { margin-bottom: 18px; padding-inline: 2px; }
 .welcome h1 { font-size: 22px; line-height: 29px; font-weight: 600; margin: 2px 0 0; }
 .prose { line-height: 22px; overflow-wrap: anywhere; }
+.markdown-pending { min-height: 1lh; }
 .prose > :last-child { margin-bottom: 0; }
 .prose blockquote {
   margin-inline: 0;

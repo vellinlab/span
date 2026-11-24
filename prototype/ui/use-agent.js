@@ -281,21 +281,27 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   useEffect(() => {
     if (!config) return;
-    let disposed = false;
+    const controller = new AbortController();
     let disconnected = false;
+    let client;
     const location = config.ssh ? { kind: 'ssh', host: config.ssh } : { kind: 'local' };
-    const client = createAgent(config.backend, {
-      generation: ++generation.current, cwd: config.cwd, location,
-      onEvent: event => {
-        if (disposed || agent.current !== client) return;
-        if (event.kind === 'disconnected') disconnected = true;
-        receive(event);
-      },
-    });
-    const isCurrent = () => !disposed && !disconnected && agent.current === client;
-    agent.current = client;
-    setApi(client);
+    const isCurrent = () => !controller.signal.aborted && !disconnected && agent.current === client;
     async function start() {
+      const loaded = await createAgent(config.backend, {
+        generation: ++generation.current, cwd: config.cwd, location,
+        onEvent: event => {
+          if (!isCurrent()) return;
+          if (event.kind === 'disconnected') disconnected = true;
+          receive(event);
+        },
+      }, controller.signal);
+      if (controller.signal.aborted) {
+        loaded?.close();
+        return;
+      }
+      client = loaded;
+      agent.current = client;
+      setApi(client);
       await client.open();
       if (!isCurrent()) return;
       const previousId = savedSession(config);
@@ -317,18 +323,18 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       } else setConnection('ready');
     }
     start().catch(error => {
-      if (!isCurrent()) return;
+      if (controller.signal.aborted || disconnected || (client && !isCurrent())) return;
       setConnection('offline');
       report(error);
-      client.close();
+      client?.close();
     });
     return () => {
-      disposed = true;
+      controller.abort();
       if (agent.current === client) {
         agent.current = null;
         rosterRefresh.current = null;
       }
-      client.close();
+      client?.close();
       cancelAnimationFrame(frame.current);
     };
   }, [config, report, clearError]);

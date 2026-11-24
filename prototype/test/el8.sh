@@ -78,6 +78,9 @@ done
 
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 SPAN_TEST_SSH_ALIAS=span-ci-ssh
 pressure_cpu="$(python3.9 -c 'import os; print(min(os.sched_getaffinity(0)))')"
+taskset -c "$pressure_cpu" /artifacts/node prototype/test/startup-loading.mjs \
+    /artifacts/linux/span-preview /artifacts/startup-loading-baseline/span-preview /artifacts/el8-workbench-startup.png \
+    | tee /artifacts/startup-loading.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/terminal-pressure.mjs /artifacts/linux/resources/app/bin/span-workbench-core \
     /artifacts/span-workbench-pty-baseline | tee /artifacts/terminal-pressure.json
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png

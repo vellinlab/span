@@ -21,7 +21,7 @@ const textInput = input => {
   return input.map(part => part.text).join('\n');
 };
 
-function definePi({ generation, cwd, location, onEvent }) {
+export function createPi({ generation, cwd, location, onEvent }) {
   const searchPaths = new Map();
   const pending = [];
   const dialogs = new Map();
@@ -410,5 +410,3 @@ function definePi({ generation, cwd, location, onEvent }) {
     },
   };
 }
-
-export const piAdapter = { id: 'pi', label: 'Pi', locations: ['local', 'ssh'], create: definePi };

@@ -89,12 +89,13 @@ jobs:
           rm -r "$artifacts/output-baseline/resources/app/dist"
           cp -a "$source_dir/prototype/dist" "$artifacts/output-baseline/resources/app/"
           printf '%s\n' "$baseline" > "$artifacts/output-baseline-commit.txt"
-      - name: Prepare the baseline renderers for a long streaming reply
+      - name: Prepare the baseline renderers for streaming and startup
         run: |
           artifacts=/tmp/span-workbench-artifacts
           for spec in \
             long-reply:3b8abac80eb31c73f4360a0721bb5c8823ab575e \
-            following-reply:ed7985bab09e6eb610298d73200028aa93028b9c
+            following-reply:ed7985bab09e6eb610298d73200028aa93028b9c \
+            startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af
           do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
@@ -140,6 +141,7 @@ jobs:
             /tmp/span-workbench-artifacts/output-baseline-commit.txt
             /tmp/span-workbench-artifacts/long-reply-baseline-commit.txt
             /tmp/span-workbench-artifacts/following-reply-baseline-commit.txt
+            /tmp/span-workbench-artifacts/startup-loading-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -174,6 +176,7 @@ jobs:
         run: |
           node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
           binary="$PWD/verified-preview/preview/span-preview.exe"
+          node prototype/test/startup-loading.mjs "$binary" "" "$PWD/windows-workbench-startup.png" | tee windows-workbench-startup.json
           node prototype/test/smoke.mjs "$binary" "$PWD/windows-workbench.png"
           node prototype/test/catalog.mjs "$binary" "$PWD/windows-workbench-catalog.png"
           node prototype/test/covered-transcript.mjs "$binary"
@@ -192,4 +195,5 @@ jobs:
           path: |
             span-web-windows-x86_64.zip
             windows-workbench*.png
+            windows-workbench-startup.json
           if-no-files-found: warn

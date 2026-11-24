@@ -112,11 +112,11 @@ test('a delayed snapshot cannot recreate a closed team or bring back its old tas
   assert.deepEqual(reconcileRoster([replacement], snapshot, updates), [replacement]);
 });
 
-test('session identities are scoped by backend and host, and the factory rejects unknown backends', () => {
+test('session identities are scoped by backend and host, and the factory rejects unknown backends', async () => {
   const refs = [session('codex', local), session('codex', remote), session('clue', remote)];
   assert.equal(new Set(refs.map(sessionKey)).size, refs.length);
   assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi']);
-  assert.throws(() => createAgent('missing', { location: local }), /不支持/);
+  await assert.rejects(createAgent('missing', { location: local }), /不支持/);
 });
 
 test('workspace recovery keeps session IDs scoped to their Agent and location', () => {
@@ -155,6 +155,13 @@ test('workspace recovery keeps session IDs scoped to their Agent and location', 
   }
 });
 
+test('a cancelled optional adapter load never registers transport listeners', async () => {
+  const controller = new AbortController();
+  const loading = createAgent('pi', { location: local, generation: 1, onEvent() {} }, controller.signal);
+  controller.abort();
+  assert.equal(await loading, undefined);
+});
+
 test('Codex adapter translates RPC, streams summaries, and routes different interaction replies', async () => {
   const handlers = new Set();
   const requests = [];
@@ -184,7 +191,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     },
   } };
 
-  const agent = createAgent('codex', { generation: 9, cwd: '/work', location: remote, onEvent: event => events.push(event) });
+  const agent = await createAgent('codex', { generation: 9, cwd: '/work', location: remote, onEvent: event => events.push(event) });
   try {
     await agent.open();
     assert.deepEqual(events.shift(), { kind: 'connection', route: 'shared' });
@@ -242,7 +249,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
   }
   assert.equal(handlers.size, 0);
 
-  const clue = createAgent('clue', { generation: 10, cwd: '/work', location: local, onEvent() {} });
+  const clue = await createAgent('clue', { generation: 10, cwd: '/work', location: local, onEvent() {} });
   assert.equal(typeof clue.sessions.resume, 'function');
   assert.equal(clue.sessions.search, undefined);
   assert.equal(clue.goal, undefined);
@@ -263,7 +270,7 @@ test('transport startup surfaces the backend diagnostic before sending initializ
       }
     },
   } };
-  const agent = createAgent('codex', { generation: 1, cwd: '/work', location: local, onEvent() {} });
+  const agent = await createAgent('codex', { generation: 1, cwd: '/work', location: local, onEvent() {} });
   try {
     await assert.rejects(agent.open(), /Codex executable unavailable/);
     assert.deepEqual(requested, ['agent.start']);
@@ -415,7 +422,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
       }
     },
   } };
-  const agent = createAgent('pi', { location: remote, cwd: '/local/work', generation: source, onEvent: event => events.push(event) });
+  const agent = await createAgent('pi', { location: remote, cwd: '/local/work', generation: source, onEvent: event => events.push(event) });
   t.after(() => { agent.close(); delete globalThis.window; });
   await agent.open();
   assert.equal(events[0].route, 'stdio');

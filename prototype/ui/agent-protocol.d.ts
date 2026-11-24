@@ -121,8 +121,10 @@ export type AdapterContext = {
 };
 export type AdapterDefinition = {
   id: string; label: string; locations: AgentLocation['kind'][];
-  create(context: AdapterContext): AgentAdapter;
-};
+} & (
+  | { create(context: AdapterContext): AgentAdapter; load?: never }
+  | { create?: never; load(): Promise<(context: AdapterContext) => AgentAdapter> }
+);
 
 /** Only advertised operations are exposed by the UI. Cursors and IDs are opaque. */
 export interface AgentAdapter {

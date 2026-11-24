@@ -7,7 +7,7 @@ import {
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
 import { Interactions } from './interactions.jsx';
-import { Markdown } from './markdown.jsx';
+import { Markdown, prepareMarkdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
 import { startupWorkspace } from './recent-workspaces.js';
 import { directoryName, SessionCatalog } from './session-catalog.jsx';
@@ -84,6 +84,10 @@ function App() {
   const adoptDraft = useCallback((connection, ref) => move(draftKey(connection), draftKey(connection, ref)), [move]);
   const work = useAgent(config, { report, clearError, adoptDraft, jumpToLatest, suspendTimeline: previewCoversConversation });
   const { api, connection, route, sessions, session, rows, loading, run, goal } = work;
+  const hasSession = Boolean(session);
+  useEffect(() => {
+    if (hasSession) prepareMarkdown().catch(() => {});
+  }, [hasSession]);
   const catalogQuery = sidebarOpen && tab === 'sessions' && searchOpen ? query.trim() : '';
   const catalogSearch = useCatalogSearch(api, catalogQuery, work.archived, connection === 'ready', work.catalogRevision);
   const refKey = sessionKey(session?.ref);
@@ -486,6 +490,7 @@ function App() {
     try {
       const nativePrompt = known && !api.execute && api.commands?.some(item => '/' + item.id === command[1])
         && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
+      if (!known || nativePrompt) prepareMarkdown().catch(() => {});
       const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '')
         : await work.send(text, effectiveOptions(), delivery, () => {
           dispatched = true;

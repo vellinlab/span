@@ -362,6 +362,7 @@ pub fn run() -> Result<()> {
         let params = &packet["params"];
         let result = match packet["method"].as_str().unwrap_or_default() {
             "initialize" => json!({"userAgent":"Span preview fixture"}),
+            "thread/list" if catalog_mode == "empty" => json!({"data":[],"nextCursor":null}),
             "thread/list" => {
                 if catalog_mode == "paged"
                     && params["searchTerm"] == "目录会话 0119"
