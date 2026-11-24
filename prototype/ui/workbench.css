@@ -62,7 +62,7 @@ p { margin-block: 0 12px; }
   grid-template-columns: subgrid;
 }
 .topbar { user-select: none; app-region: drag; }
-.brand, .titlebar-content, .breadcrumb { display: flex; align-items: center; min-width: 0; }
+.brand, .titlebar-content, .titlebar-location, .breadcrumb { display: flex; align-items: center; min-width: 0; }
 .brand {
   gap: 9px;
   padding: 0 8px 0 max(16px, calc(env(titlebar-area-x, 0px) + 5px));
@@ -80,7 +80,9 @@ p { margin-block: 0 12px; }
   padding: 0 8px 0 18px;
   margin-right: calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px));
 }
-.breadcrumb { flex: 1; gap: 9px; color: var(--muted); font-size: 13px; overflow: hidden; }
+.titlebar-location { --branch-min-width: 52px; flex: 1; gap: 6px; }
+.breadcrumb { flex: 1 0 auto; max-width: 100%; gap: 9px; color: var(--muted); font-size: 13px; overflow: hidden; }
+.titlebar-location:has(.branch) .breadcrumb { max-width: calc(100% - var(--branch-min-width) - 6px); }
 .breadcrumb strong { color: #ededed; font-size: 14px; font-weight: 600; }
 .breadcrumb span:first-of-type { max-width: 42%; }
 .breadcrumb-separator { color: #808080; }
@@ -88,8 +90,8 @@ p { margin-block: 0 12px; }
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  max-width: min(36%, 192px);
+  min-width: var(--branch-min-width);
+  max-width: 192px;
   padding: 2px 4px;
   color: var(--muted);
   font: 12px/16px var(--mono);

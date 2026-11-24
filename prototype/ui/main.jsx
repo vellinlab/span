@@ -531,9 +531,11 @@ function App() {
         </button>
       </div>
       <div className="titlebar-content">
-        <div className="breadcrumb"><Folder size={15} /><span title={session?.cwd || cwd}>{workspace}</span>
-          <span aria-hidden="true" className="breadcrumb-separator">/</span><strong title={name}>{name}</strong></div>
-        {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
+        <div className="titlebar-location">
+          <div className="breadcrumb"><Folder size={15} /><span title={session?.cwd || cwd}>{workspace}</span>
+            <span aria-hidden="true" className="breadcrumb-separator">/</span><strong title={name}>{name}</strong></div>
+          {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
+        </div>
         {preview?.parked && <button className="icon-button" aria-label="恢复文件预览" aria-controls="file-preview"
           title={previewBlocked ? '处理请求后可恢复文件预览' : `恢复文件预览 · ${preview.path}`}
           disabled={previewBlocked} onClick={restorePreview}><FileText size={16} /></button>}

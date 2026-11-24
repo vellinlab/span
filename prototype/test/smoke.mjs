@@ -334,8 +334,11 @@ try {
   assert.ok(await composer.evaluate(element => element.scrollHeight > element.clientHeight));
   assert.ok(await branch.evaluate(element => {
     const bounds = element.getBoundingClientRect();
-    return bounds.left >= element.previousElementSibling.getBoundingClientRect().right &&
-      bounds.right <= element.nextElementSibling.getBoundingClientRect().left &&
+    const breadcrumb = element.previousElementSibling;
+    const title = breadcrumb.querySelector('strong');
+    return title.scrollWidth === title.clientWidth &&
+      bounds.left >= breadcrumb.getBoundingClientRect().right &&
+      bounds.right <= element.parentElement.nextElementSibling.getBoundingClientRect().left &&
       bounds.bottom <= element.closest('.topbar').getBoundingClientRect().bottom;
   }), 'The branch sits between the session title and window actions');
   assert.ok(await page.evaluate(() => {
