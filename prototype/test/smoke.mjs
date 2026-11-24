@@ -222,7 +222,12 @@ try {
   assert.equal(await archivedReasoning.count(), 0);
   assert.equal(await page.locator('#reasoning-panel').count(), 0);
   const reasoningJump = page.getByRole('button', { name: '滚到最新消息' });
-  await transcript.evaluate(element => { element.scrollTop = 300; });
+  await transcript.evaluate(async element => {
+    // Let the viewport resize for the new reasoning row before choosing a reading position.
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    element.scrollTop = 300;
+  });
   await reasoningJump.waitFor();
   const reasoningAnchor = await transcript.evaluate(element => element.scrollTop);
   await liveReasoning.getByText('确认目标卡片和输入区之间的间距。', { exact: true }).waitFor();
