@@ -148,10 +148,10 @@ function readAnchor(element, rows) {
   if (element.scrollHeight - element.clientHeight - element.scrollTop < 40) return;
   const viewport = element.getBoundingClientRect();
   for (const item of element.querySelectorAll('.message[data-empty="false"]')) {
-    const rect = item.getBoundingClientRect();
-    if (rect.bottom > viewport.top && rect.top < viewport.bottom) {
+    const content = item.firstElementChild?.getBoundingClientRect();
+    if (content && content.bottom > viewport.top && content.top < viewport.bottom) {
       const { key, itemKey, turnId } = rows[Number(item.dataset.index)];
-      return { key, itemKey, turnId, top: rect.top - viewport.top };
+      return { key, itemKey, turnId, top: item.getBoundingClientRect().top - viewport.top };
     }
   }
 }

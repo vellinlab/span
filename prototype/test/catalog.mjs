@@ -56,7 +56,7 @@ try {
   const readAnchor = () => timeline.evaluate(element => {
     const view = element.getBoundingClientRect();
     const row = [...element.querySelectorAll('.message[data-empty="false"]')].find(item => {
-      const rect = item.getBoundingClientRect();
+      const rect = item.firstElementChild.getBoundingClientRect();
       return rect.bottom > view.top && rect.top < view.bottom;
     });
     return row && { text: row.textContent, top: row.getBoundingClientRect().top - view.top };
