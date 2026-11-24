@@ -100,7 +100,8 @@ try {
   await openThread('工作台架构评审');
   await timeline.getByText('第 160 项', { exact: false }).waitFor();
   assert.equal(Number(await timeline.getAttribute('data-items')), 21);
-  assert.equal(await jumpToLatest.count(), 0);
+  await jumpToLatest.waitFor({ state: 'detached' });
+  assert.ok(await timeline.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop < 40));
   assert.equal(await composer.inputValue(), firstDraft);
   await composer.fill('');
 
