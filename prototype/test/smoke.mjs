@@ -388,6 +388,51 @@ try {
     assert.ok(await page.getByRole('button', { name: 'README.md' }).evaluate(element => element === document.activeElement));
     console.log('Verified the compact preview fills the workspace, yields to approval or terminal, and restores keyboard focus.');
   }
+  await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
+  const heading = page.locator('.breadcrumb strong');
+  const previousTitle = await heading.textContent();
+  const longTitle = '工作台架构评审与 Windows 和 EL8 桌面的窗口布局验收';
+  await composer.fill('/rename ' + longTitle);
+  await composer.press('Enter');
+  await heading.filter({ hasText: longTitle }).waitFor();
+  await grip.press('End');
+  await page.waitForFunction(() => {
+    const grip = document.querySelector('.sidebar-grip');
+    return grip.getAttribute('aria-valuenow') === grip.getAttribute('aria-valuemax');
+  });
+  const narrowTitle = await heading.evaluate(element => {
+    const location = element.closest('.titlebar-location');
+    const workspace = location.querySelector('.breadcrumb-workspace');
+    const branch = location.querySelector('.branch');
+    const terminal = location.parentElement.querySelector('.terminal-toggle').getBoundingClientRect();
+    const region = navigator.windowControlsOverlay.getTitlebarAreaRect();
+    return {
+      width: element.clientWidth, available: location.clientWidth, path: workspace.title, title: element.title,
+      workspaceNameHidden: getComputedStyle(workspace.lastElementChild).clipPath !== 'none',
+      branchNameHidden: getComputedStyle(branch.lastElementChild).clipPath !== 'none',
+      terminalFits: terminal.left >= location.getBoundingClientRect().right && terminal.right <= region.right,
+    };
+  });
+  assert.equal(narrowTitle.title, longTitle);
+  assert.ok(narrowTitle.path && narrowTitle.terminalFits);
+  const compactTitlebar = narrowTitle.available <= 250;
+  assert.equal(narrowTitle.workspaceNameHidden, compactTitlebar);
+  assert.equal(narrowTitle.branchNameHidden, compactTitlebar);
+  if (compactTitlebar) assert.ok(narrowTitle.width >= narrowTitle.available - 55);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-titlebar-narrow.png') });
+  const showSidebar = page.getByRole('button', { name: '展开侧栏' });
+  await page.getByRole('button', { name: '收起侧栏' }).press('Enter');
+  await showSidebar.waitFor();
+  assert.ok(await showSidebar.evaluate(element => element === document.activeElement));
+  assert.ok(await heading.evaluate((element, previous) => element.clientWidth > previous &&
+    getComputedStyle(element.parentElement.querySelector('.breadcrumb-workspace span')).clipPath === 'none',
+  narrowTitle.width));
+  await showSidebar.press('Enter');
+  await grip.dblclick();
+  await composer.fill('/rename ' + previousTitle);
+  await composer.press('Enter');
+  await heading.filter({ hasText: previousTitle }).waitFor();
+  console.log('Verified that a long session title keeps space beside the native window controls and sidebar.');
   await app.evaluate(({ BrowserWindow }, [width, height]) =>
     BrowserWindow.getAllWindows()[0].setContentSize(width, height), windowSize);
   await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);

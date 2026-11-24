@@ -557,8 +557,12 @@ function App() {
       </div>
       <div className="titlebar-content">
         <div className="titlebar-location">
-          <div className="breadcrumb"><Folder size={15} /><span title={session?.cwd || cwd}>{workspace}</span>
-            <span aria-hidden="true" className="breadcrumb-separator">/</span><strong title={name}>{name}</strong></div>
+          <div className="breadcrumb">
+            <span className="breadcrumb-workspace" title={session?.cwd || cwd}>
+              <Folder size={15} aria-hidden="true" /><span>{workspace}</span>
+            </span>
+            <span aria-hidden="true" className="breadcrumb-separator">/</span><strong title={name}>{name}</strong>
+          </div>
           {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
         </div>
         {preview?.parked && <button className="icon-button" aria-label="恢复文件预览" aria-controls="file-preview"

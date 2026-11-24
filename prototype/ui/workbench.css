@@ -80,12 +80,19 @@ p { margin-block: 0 12px; }
   padding: 0 8px 0 18px;
   margin-right: calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px));
 }
-.titlebar-location { --branch-min-width: 52px; flex: 1; gap: 6px; }
+.titlebar-location { --branch-min-width: 52px; flex: 1; gap: 6px; container-type: inline-size; }
 .breadcrumb { flex: 1 0 auto; max-width: 100%; gap: 9px; color: var(--muted); font-size: 13px; overflow: hidden; }
-.titlebar-location:has(.branch) .breadcrumb { max-width: calc(100% - var(--branch-min-width) - 6px); }
+.breadcrumb:has(+ .branch) { max-width: calc(100% - var(--branch-min-width) - 6px); }
 .breadcrumb strong { color: #ededed; font-size: 14px; font-weight: 600; }
-.breadcrumb span:first-of-type { max-width: 42%; }
-.breadcrumb-separator { color: #808080; }
+.breadcrumb-workspace {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 15px;
+  max-width: 42%;
+  app-region: no-drag;
+}
+.breadcrumb-separator { flex: none; color: #808080; }
 .branch {
   display: flex;
   align-items: center;
@@ -98,12 +105,22 @@ p { margin-block: 0 12px; }
   app-region: no-drag;
   user-select: text;
 }
-.breadcrumb :is(strong, span), .side-list span, .path, .preview header strong,
+.breadcrumb strong, .breadcrumb-workspace span, .side-list span, .path, .preview header strong,
 .branch span, .connection span, .composer-control span {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+@container (max-width: 250px) {
+  .breadcrumb, .branch { --branch-min-width: 25px; }
+  .breadcrumb-separator { display: none; }
+  .branch { justify-content: center; }
+  .breadcrumb-workspace span, .branch span {
+    position: absolute;
+    inline-size: 1px;
+    clip-path: inset(50%);
+  }
 }
 .icon-button {
   display: inline-grid;
