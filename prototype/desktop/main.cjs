@@ -160,6 +160,12 @@ app.whenReady().then(() => {
   window.webContents.on('did-start-navigation', event => {
     if (event.isMainFrame && !event.isSameDocument) closeTerminal();
   });
+  const publishWindowHidden = () => {
+    if (window.isDestroyed()) return;
+    window.webContents.send('span:window-hidden', window.isMinimized() || !window.isVisible());
+  };
+  for (const event of ['minimize', 'restore', 'show', 'hide']) window.on(event, publishWindowHidden);
+  window.webContents.on('did-finish-load', publishWindowHidden);
   window.webContents.on('render-process-gone', closeTerminal);
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, reply) => reply(false));
   spawnCore();

@@ -1,5 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+let windowHidden = false;
+const visibilityListeners = new Set();
+ipcRenderer.on('span:window-hidden', (_event, hidden) => {
+  if (windowHidden === hidden) return;
+  windowHidden = hidden;
+  for (const listener of visibilityListeners) listener(hidden);
+});
+
 const listeners = new Set();
 ipcRenderer.on('span:event', (_event, packet) => {
   for (const listener of listeners) listener(packet);
@@ -10,6 +18,11 @@ contextBridge.exposeInMainWorld('span', {
   workspace: (choose = false) => ipcRenderer.invoke('span:workspace', choose),
   openLink: url => ipcRenderer.invoke('span:link', url),
   copyText: text => ipcRenderer.invoke('span:copy-text', text),
+  onWindowHidden: listener => {
+    visibilityListeners.add(listener);
+    listener(windowHidden);
+    return () => visibilityListeners.delete(listener);
+  },
   onEvent: listener => {
     listeners.add(listener);
     return () => listeners.delete(listener);

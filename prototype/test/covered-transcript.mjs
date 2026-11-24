@@ -51,8 +51,12 @@ async function check(binary, label, following, cover = 'preview') {
     const position = following ? null : await readPosition();
     const preview = page.getByRole('complementary', { name: '文件预览' });
     if (cover === 'minimized') {
+      await page.evaluate(() => {
+        window.span.onWindowHidden(hidden => { window.testWindowHidden = hidden; });
+      });
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
-      await page.waitForFunction(() => document.hidden, null, { polling: 50 });
+      await page.waitForFunction(() => window.testWindowHidden === true, null, { polling: 50 });
+      assert.ok(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()));
     } else {
       await page.getByRole('button', { name: '文件', exact: true }).click();
       await page.getByRole('button', { name: 'README.md' }).click();
@@ -90,7 +94,8 @@ async function check(binary, label, following, cover = 'preview') {
 
     if (cover === 'minimized') {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
-      await page.waitForFunction(() => !document.hidden, null, { polling: 50 });
+      await page.waitForFunction(() => window.testWindowHidden === false, null, { polling: 50 });
+      assert.ok(await app.evaluate(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isMinimized()));
     } else {
       await preview.getByRole('button', { name: '关闭预览' }).click();
     }

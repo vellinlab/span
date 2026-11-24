@@ -65,16 +65,18 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   const covered = suspendTimeline && requests.length === 0;
   useLayoutEffect(() => {
-    function syncPublication() {
-      const paused = covered || document.hidden;
+    function syncPublication(windowHidden) {
+      const paused = covered || windowHidden;
       if (paused === publicationPaused.current) return;
       publicationPaused.current = paused;
       // Commit the previous batch. Revealing the conversation also publishes it.
       updateRows();
     }
-    syncPublication();
-    document.addEventListener('visibilitychange', syncPublication);
-    return () => document.removeEventListener('visibilitychange', syncPublication);
+    if (window.span.onWindowHidden) return window.span.onWindowHidden(syncPublication);
+    const onVisibilityChange = () => syncPublication(document.hidden);
+    onVisibilityChange();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [covered, updateRows]);
 
   function clearTimeline() {
