@@ -10,20 +10,27 @@ try {
   if (command === '--close-terminal') {
     await page.getByRole('button', { name: '关闭终端' }).click();
     await page.getByRole('region', { name: '终端' }).waitFor({ state: 'detached' });
-  } else {
+  } else if (command === '--wait-for-history') {
     await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 12000 });
-    if (command !== '--wait-for-history') {
-      await page.getByRole('button', { name: '切换终端' }).click();
-      const input = page.locator('.xterm-helper-textarea');
-      await input.focus();
-      await page.keyboard.type(command);
-      await page.keyboard.press('Enter');
-    }
+  } else if (command === '--open-terminal') {
+    await page.getByRole('button', { name: '切换终端' }).click();
+    await page.locator('.xterm-helper-textarea').waitFor();
+    await page.locator('.xterm-rows > div').first().waitFor();
+  } else if (!command.startsWith('--')) {
+    await page.locator('.xterm-helper-textarea').focus();
+    await page.keyboard.type(command);
+    await page.keyboard.press('Enter');
   }
-  if (command === '--wait-for-history' || command === '--close-terminal') {
-    const session = await browser.newBrowserCDPSession();
-    const { processInfo } = await session.send('SystemInfo.getProcessInfo');
-    console.log(JSON.stringify(processInfo.map(({ id, type }) => ({ id, type }))));
+  if (command.startsWith('--')) {
+    const system = await browser.newBrowserCDPSession();
+    const renderer = await page.context().newCDPSession(page);
+    if (command === '--collect-heap') await renderer.send('HeapProfiler.collectGarbage');
+    const [processes, heap, dom] = await Promise.all([
+      system.send('SystemInfo.getProcessInfo'),
+      renderer.send('Runtime.getHeapUsage'),
+      renderer.send('Memory.getDOMCounters'),
+    ]);
+    console.log(JSON.stringify({ processes: processes.processInfo.map(({ id, type }) => ({ id, type })), heap, dom }));
   }
 } finally {
   await browser.close();

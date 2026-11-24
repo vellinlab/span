@@ -44,9 +44,9 @@ jobs:
             cargo fmt --manifest-path prototype/core/Cargo.toml -- --check
             binary=prototype/core/target/release/span-workbench-core
             if [ -f /artifacts/pty-baseline-commit.txt ]; then
-              cargo build --locked --release --target-dir prototype/core/target \
+              cargo build --locked --release --target-dir /tmp/span-pty-baseline-target \
                 --manifest-path /artifacts/baseline-source/prototype/core/Cargo.toml
-              cp "$binary" /artifacts/span-workbench-pty-baseline
+              cp /tmp/span-pty-baseline-target/release/span-workbench-core /artifacts/span-workbench-pty-baseline
             fi
             cargo build --locked --release --manifest-path prototype/core/Cargo.toml
             readelf --version-info "$binary" | grep -oE "GLIBC_[0-9]+(\.[0-9]+)+" | sort -Vu > /artifacts/glibc-service.txt

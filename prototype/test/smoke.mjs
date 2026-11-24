@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
+import { burstMarker, terminalBurst } from './terminal-fixture.mjs';
 
 const [binary, screenshot, renderer] = process.argv.slice(2);
 const exerciseWebgl = renderer === 'webgl';
@@ -166,13 +167,10 @@ try {
     .some(line => line.textContent.trim() === 'span_local_pty'), null, { timeout: 10_000 });
 
   if (!verifySandbox && !exerciseWebgl) {
-    const line = 'span-pressure '.repeat(6).trimEnd();
-    await page.keyboard.type(linux
-      ? `yes '${line}' | head -c 655360; printf '\\n%s_%s\\n' span_terminal burst`
-      : `(for /l %i in (1,1,8500) do @echo ${line}) & echo span_terminal_burst`);
+    await page.keyboard.type(terminalBurst(!linux, true));
     await page.keyboard.press('Enter');
-    await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
-      .some(line => line.textContent.trim() === 'span_terminal_burst'), null, { timeout: 20_000 });
+    await page.waitForFunction(marker => [...document.querySelectorAll('.xterm-rows > div')]
+      .some(line => line.textContent.trim() === marker), burstMarker, { timeout: 25_000 });
     console.log('Verified terminal output larger than the acknowledgment window reached the screen.');
   }
 

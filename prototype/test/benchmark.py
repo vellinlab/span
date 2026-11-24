@@ -91,12 +91,17 @@ def stats(pid, chromium_roles=None):
     return memory
 
 
-def browser_roles(browser, phase):
-    report = subprocess.check_output([*browser, phase], text=True, timeout=28)
-    roles = {process["id"]: process["type"] for process in json.loads(report)}
+def terminal_memory(pid, browser, phase):
+    snapshot = json.loads(subprocess.check_output([*browser, phase], text=True, timeout=28))
+    roles = {process["id"]: process["type"] for process in snapshot["processes"]}
     if "renderer" not in roles.values():
         raise RuntimeError("Chromium did not report a renderer PID")
-    return roles
+    measurement = stats(pid, roles)
+    if "renderer" not in measurement["by_role"]:
+        raise RuntimeError("Chromium renderer PID did not match the process tree")
+    return roles, {key: measurement[key] for key in ("Pss", "Rss", "Private_Dirty", "by_role")} | {
+        "js_heap_bytes": snapshot["heap"], "dom": snapshot["dom"],
+    }
 
 
 def try_until(check, timeout=3):
@@ -160,8 +165,8 @@ def benchmark(name, binary):
                         raise RuntimeError("Could not open the benchmark automation port")
                     port = port_file.read_text().splitlines()[0]
                     browser = ["/artifacts/node", "prototype/test/prepare-benchmark.mjs", port]
-                    chromium_roles = browser_roles(browser, "--wait-for-history")
-                    before_terminal = stats(app.pid, chromium_roles)
+                    chromium_roles, before_terminal = terminal_memory(app.pid, browser, "--wait-for-history")
+                    chromium_roles, quiet_terminal = terminal_memory(app.pid, browser, "--open-terminal")
                     subprocess.run([*browser, command], check=True, timeout=28)
                 else:
                     xdo("key", "ctrl+shift+a")
@@ -257,16 +262,18 @@ def benchmark(name, binary):
                           "resize_geometry": sample(geometry), "resize_visible": sample(drag),
                           "resize_error": resize_error}
                 if candidate:
-                    if "renderer" not in end["by_role"]:
-                        raise RuntimeError("Chromium renderer PID did not match the process tree")
-                    chromium_roles = browser_roles(browser, "--close-terminal")
-                    after_close = stats(app.pid, chromium_roles)
+                    _, active_terminal = terminal_memory(app.pid, browser, "--snapshot")
+                    _, after_close = terminal_memory(app.pid, browser, "--close-terminal")
                     time.sleep(2)
-                    after_settle = stats(app.pid, chromium_roles)
+                    _, after_settle = terminal_memory(app.pid, browser, "--snapshot")
+                    _, after_diagnostic_gc = terminal_memory(app.pid, browser, "--collect-heap")
                     record["terminal_memory_kib"] = {
-                        stage: {key: measurement[key] for key in ("Pss", "Rss", "Private_Dirty", "by_role")}
-                        for stage, measurement in (("before_open", before_terminal), ("active", end),
-                                                   ("closed", after_close), ("settled_2s", after_settle))
+                        "before_open": before_terminal,
+                        "open_idle": quiet_terminal,
+                        "active": active_terminal,
+                        "closed": after_close,
+                        "settled_2s": after_settle,
+                        "after_diagnostic_gc": after_diagnostic_gc,
                     }
                 print(json.dumps(record), flush=True)
                 return record

@@ -2,19 +2,17 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
+import { burstMarker, terminalBurst } from './terminal-fixture.mjs';
 
 const [candidate, baseline] = process.argv.slice(2);
 const maxPending = 256 * 1024;
 const windows = process.platform === 'win32';
-const line = 'span-pressure '.repeat(6);
-const burst = windows
-  ? `(for /l %i in (1,1,50000) do @echo ${line.trimEnd()}) & echo span_pressure_%SPAN_CI_EMPTY%done\r`
-  : `yes '${line}' | head -c 4194304; printf '\\n%s_%s\\n' span_pressure done\r`;
+const burst = terminalBurst(windows) + '\r';
 
 async function until(condition, message) {
-  const deadline = performance.now() + 20_000;
+  const deadline = performance.now() + 30_000;
   while (!condition()) {
-    if (performance.now() >= deadline) throw new Error(message);
+    if (performance.now() >= deadline) throw new Error(message());
     await delay(15);
   }
 }
@@ -55,11 +53,13 @@ async function measure(binary, controlled) {
       pending.get(packet.id)?.(packet);
       pending.delete(packet.id);
     }
-    if (packet.event !== 'terminal' || packet.generation !== generation) return;
+    if (packet.generation !== generation) return;
+    if (packet.event === 'terminal-error') failure = new Error(packet.data);
+    if (packet.event !== 'terminal') return;
     const bytes = Buffer.from(packet.data, 'base64');
     count += bytes.length;
     tail = (tail + bytes.toString()).slice(-512);
-    complete ||= tail.includes('span_pressure_done');
+    complete ||= tail.includes(burstMarker);
     if (ack) {
       consumed += bytes.length;
       if (consumed >= 64 * 1024) {
@@ -68,10 +68,11 @@ async function measure(binary, controlled) {
       }
     }
   });
+  const diagnostic = message => () => `${message} Received ${count} bytes. Output tail ${JSON.stringify(tail)}`;
   try {
     await send('terminal.start', { cwd: process.cwd(), cols: 180, rows: 25 });
     await send('terminal.write', { data: burst });
-    await until(() => failure || count >= 192 * 1024, 'The terminal burst did not reach 192 KiB.');
+    await until(() => failure || count >= 192 * 1024, diagnostic('The terminal burst did not reach 192 KiB.'));
     await delay(600);
     if (failure) throw failure;
     const withheld = count;
@@ -83,13 +84,20 @@ async function measure(binary, controlled) {
 
     generation++;
     count = 0;
-    ack = true;
     tail = '';
     complete = false;
     await send('terminal.start', { cwd: process.cwd(), cols: 180, rows: 25 });
-    await send('terminal.ack', { generation: generation - 1, bytes: maxPending });
     await send('terminal.write', { data: burst });
-    await until(() => failure || complete, 'The burst did not reach its final line after acknowledgments.');
+    await until(() => failure || count >= 192 * 1024, diagnostic('The reopened terminal did not produce its first window.'));
+    await delay(350);
+    const nextWindow = count;
+    await send('terminal.ack', { generation: generation - 1, bytes: maxPending });
+    await delay(350);
+    assert.equal(count, nextWindow, 'An acknowledgment from the closed terminal released the reopened stream.');
+
+    ack = true;
+    await send('terminal.ack', { bytes: count });
+    await until(() => failure || complete, diagnostic('The burst did not reach its final line after acknowledgments.'));
     if (failure) throw failure;
     assert.ok(count > maxPending * 2);
     await send('terminal.close');
