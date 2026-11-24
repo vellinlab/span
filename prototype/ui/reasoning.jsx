@@ -6,7 +6,7 @@ import { hasReasoningSection } from './timeline.js';
 const ReasoningSections = memo(function ReasoningSections({ row, scroll }) {
   return <div className="reasoning-sections">{row.sections.map((text, index) => hasReasoningSection(row, index) &&
     <div key={index} className="reasoning-section">{scroll
-      ? <StreamingMarkdown text={text} streaming={!row.final} following={false} scroll={scroll} />
+      ? <StreamingMarkdown text={text} streaming={!row.final} following={false} scroll={scroll} reusePrefix />
       : <Markdown text={text} />}</div>)}</div>;
 });
 

@@ -100,6 +100,7 @@ jobs:
             streaming-output:72576f01c969e452c5f8cc66940ce110f4fb7693 \
             reasoning:2b2da807b5ec4496e20eece8df6d54763e2379e3 \
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
+            reasoning-following:fec399648c3366d3b5d0c54ff8bb988b94edab96 \
             grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51
           do
             target="${spec%%:*}-baseline"
@@ -152,6 +153,7 @@ jobs:
             /tmp/span-workbench-artifacts/streaming-output-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-details-baseline-commit.txt
+            /tmp/span-workbench-artifacts/reasoning-following-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -196,6 +198,7 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" --tool-output
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-stream" --reasoning
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-details" --reasoning-details
+          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           bash prototype/test/install-pi.sh "$PWD/pi-test"

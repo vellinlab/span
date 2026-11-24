@@ -290,7 +290,8 @@ fn stream_reasoning(
     gate: &Path,
 ) -> io::Result<()> {
     let id = format!("{turn}-streamed-summary");
-    let details = gate.join("reasoning-details").is_file();
+    let following = gate.join("reasoning-following").is_file();
+    let details = following || gate.join("reasoning-details").is_file();
     let mut initial = if details {
         let mut text =
             "### 复核顺序\n\n- 检查会话正文\n  - 保留两级缩进\n  - 核对工具结果\n\n".to_owned();
@@ -333,6 +334,21 @@ fn stream_reasoning(
             return Ok(());
         }
         delta("\r\n- 收尾复核完成。步骤 073")?;
+    }
+    if following {
+        if !wait_for_stream_gate(&gate.join("reference-prefix"), running) {
+            return Ok(());
+        }
+        notice(
+            output,
+            "item/started",
+            json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning","id":id,
+                "summary":[format!("[迟到引用]\n\n{initial}") ]}}),
+        )?;
+        if !wait_for_stream_gate(&gate.join("reference-definition"), running) {
+            return Ok(());
+        }
+        delta("\n\n[迟到引用]: https://example.com/span/reference\n\n引用检查完成。")?;
     }
     if !wait_for_stream_gate(&gate.join("finish"), running) {
         return Ok(());

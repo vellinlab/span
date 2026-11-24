@@ -7,15 +7,15 @@ export function prepareMarkdown() {
 
 const MarkdownContent = lazy(prepareMarkdown);
 
-export const Markdown = memo(function Markdown({ text }) {
+export const Markdown = memo(function Markdown({ text, reusePrefix = false }) {
   return <Suspense fallback={<div className="prose markdown-pending" aria-busy="true" />}>
-    <MarkdownContent text={text} />
+    <MarkdownContent text={text} reusePrefix={reusePrefix} />
   </Suspense>;
 });
 
 const longReplyRefreshMs = 80;
 
-export function StreamingMarkdown({ text, streaming, following, scroll }) {
+export function StreamingMarkdown({ text, streaming, following, scroll, reusePrefix }) {
   const tail = useRef(null);
   const committed = useRef({ text, time: -Infinity });
   const wasVisible = useRef(true);
@@ -51,7 +51,7 @@ export function StreamingMarkdown({ text, streaming, following, scroll }) {
   }, [observeTail, scroll]);
 
   return <>
-    <Markdown text={displayed} />
+    <Markdown text={displayed} reusePrefix={reusePrefix} />
     {observeTail && <span aria-hidden="true" className="message-tail" ref={tail} />}
   </>;
 }

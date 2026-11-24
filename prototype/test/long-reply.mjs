@@ -13,7 +13,8 @@ import { _electron as electron } from 'playwright';
 const following = process.argv.includes('--following');
 const grouped = process.argv.includes('--grouped-history');
 const toolOutput = process.argv.includes('--tool-output');
-const reasoningDetails = process.argv.includes('--reasoning-details');
+const reasoningFollowing = process.argv.includes('--reasoning-following');
+const reasoningDetails = reasoningFollowing || process.argv.includes('--reasoning-details');
 const streamedReasoning = reasoningDetails || process.argv.includes('--reasoning');
 const [candidate, baseline, screenshot] = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const linux = process.platform === 'linux';
@@ -234,11 +235,21 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
   const detail = reasoningDetails ? panel.locator('.agent-panel-content') : null;
   const heading = panel.getByRole('heading', { name: '复核顺序' });
   let detailPosition;
+  let initialHeading;
+  const revealBottom = () => page.waitForFunction(() => {
+    const region = document.querySelector('#reasoning-panel .agent-panel-content');
+    return region.scrollHeight - region.clientHeight - region.scrollTop <= 2;
+  });
   if (detail) {
     await strip.press('Enter');
     await heading.waitFor();
     await panel.locator('ul ul').getByText('保留两级缩进', { exact: true }).waitFor();
     detailPosition = await heading.boundingBox();
+    if (reasoningFollowing) {
+      initialHeading = await heading.elementHandle();
+      await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      await revealBottom();
+    }
   }
   let desktop;
   try {
@@ -287,6 +298,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     await writeFile(join(profile, 'append'), '');
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
     await strip.getByText(lastBatch, { exact: false }).waitFor();
+    if (reasoningFollowing) {
+      await panel.getByText(lastBatch, { exact: false }).waitFor();
+      await revealBottom();
+    }
     await settleFrame(page);
     const end = await metrics();
     const endPssKiB = await pss();
@@ -307,27 +322,39 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}.png` });
 
     if (detail) {
-      assert.deepEqual(await heading.boundingBox(), detailPosition);
-      assert.equal(await detail.evaluate(element => element.scrollTop), 0);
-      if (label === 'candidate') assert.equal(bodyUpdates, 0);
-      else assert.ok(bodyUpdates > 0, 'The baseline must render updates below the viewport.');
-      await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
-      await panel.getByText(lastBatch, { exact: false }).waitFor();
-      const revealBottom = () => page.waitForFunction(() => {
-        const region = document.querySelector('#reasoning-panel .agent-panel-content');
-        return region.scrollHeight - region.clientHeight - region.scrollTop <= 2;
-      });
+      if (reasoningFollowing) {
+        assert.ok(bodyUpdates >= 15, 'The summary should continue to refresh while following.');
+        assert.ok(await initialHeading.evaluate(element => element.isConnected));
+        await initialHeading.dispose();
+      } else {
+        assert.deepEqual(await heading.boundingBox(), detailPosition);
+        assert.equal(await detail.evaluate(element => element.scrollTop), 0);
+        if (label === 'candidate') assert.equal(bodyUpdates, 0);
+        else assert.ok(bodyUpdates > 0, 'The baseline must render updates below the viewport.');
+        await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
+        await panel.getByText(lastBatch, { exact: false }).waitFor();
+      }
       if (label === 'candidate') await revealBottom();
       await writeFile(join(profile, 'follow-detail'), '');
       await panel.getByText('步骤 073', { exact: false }).waitFor();
       if (label === 'candidate') await revealBottom();
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-tail.png` });
     }
+    let archived = detail ? '步骤 073' : lastBatch;
+    if (reasoningFollowing) {
+      await writeFile(join(profile, 'reference-prefix'), '');
+      await panel.getByText('[迟到引用]', { exact: true }).waitFor();
+      await writeFile(join(profile, 'reference-definition'), '');
+      const link = panel.getByRole('link', { name: '迟到引用', exact: true });
+      await link.waitFor();
+      assert.equal(await link.getAttribute('href'), 'https://example.com/span/reference');
+      archived = '引用检查完成。';
+    }
     await writeFile(join(profile, 'finish'), '');
     await strip.waitFor({ state: 'detached' });
     if (detail) await detail.waitFor({ state: 'detached' });
     await latest.click();
-    await transcript.locator('[data-card="reasoning"]').getByText(detail ? '步骤 073' : lastBatch, { exact: false }).waitFor();
+    await transcript.locator('[data-card="reasoning"]').getByText(archived, { exact: false }).waitFor();
     return { label, updates, bodyUpdates, startPssKiB, endPssKiB, typing,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
@@ -344,7 +371,7 @@ async function check(binary, label, trial) {
   try {
     if (following) await writeFile(join(profile, 'fast'), '');
     if (grouped) await writeFile(join(profile, 'grouped-history'), '');
-    if (reasoningDetails) await writeFile(join(profile, 'reasoning-details'), '');
+    if (reasoningDetails) await writeFile(join(profile, reasoningFollowing ? 'reasoning-following' : 'reasoning-details'), '');
     app = await electron.launch({
       executablePath: binary,
       args: ['--demo', '--force-device-scale-factor=1',
@@ -521,5 +548,6 @@ for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
   trials.push(await check(candidate, 'candidate', trial));
   if (baseline && alternate && trial === 1) trials.push(await check(baseline, 'baseline', trial));
 }
-const scenario = toolOutput ? 'tool-output' : reasoningDetails ? 'reasoning-details' : streamedReasoning ? 'reasoning' : undefined;
+const scenario = toolOutput ? 'tool-output' : reasoningFollowing ? 'reasoning-following' :
+  reasoningDetails ? 'reasoning-details' : streamedReasoning ? 'reasoning' : undefined;
 console.log(JSON.stringify({ platform: process.platform, scenario, trials }, null, 2));
