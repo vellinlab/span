@@ -533,9 +533,10 @@ try {
   if (await terminalToggle.getAttribute('aria-pressed') === 'true') await terminalToggle.click();
   await composer.fill('整理检查结果，给出可复查的步骤。');
   await composer.press('Enter');
-  const readingTitle = transcript.getByRole('heading', { name: '工作台会话验收', level: 1 });
+  const titleInReply = page.getByRole('heading', { name: '工作台会话验收', level: 1 });
+  const reply = transcript.locator('.agent-reply').filter({ has: titleInReply });
+  const readingTitle = reply.getByRole('heading', { level: 1 });
   await readingTitle.waitFor();
-  const reply = transcript.locator('.agent-reply').filter({ has: readingTitle });
   const table = reply.getByRole('table');
   const code = reply.locator('pre');
   const captureReading = async suffix => {
@@ -566,6 +567,10 @@ try {
       });
       await captureReading('narrow');
       await page.getByRole('button', { name: '滚到最新消息' }).click();
+      await page.waitForFunction(() => {
+        const timeline = document.querySelector('.timeline');
+        return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
+      });
     }
     await captureReading(width === 740 ? 'narrow-end' : 'wide');
   }
