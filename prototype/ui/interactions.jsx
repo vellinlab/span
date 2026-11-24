@@ -23,12 +23,12 @@ function ApprovalDetails({ request, item }) {
   const cwd = operation?.cwd || item?.cwd;
   const files = operation?.kind === 'files' ? item?.files?.map(file => file.path).filter(Boolean) : undefined;
   return <>
-    {request.detail && <p className="approval-reason">{request.detail}</p>}
     {(cwd || operation?.target || operation?.root) && <dl className="approval-context">
       {cwd && <div><dt>工作目录</dt><dd>{cwd}</dd></div>}
       {operation?.target && <div><dt>目标</dt><dd>{[operation.protocol, operation.target].filter(Boolean).join(' · ')}</dd></div>}
       {operation?.root && <div><dt>写入范围</dt><dd>{operation.root}</dd></div>}
     </dl>}
+    {request.detail && <p className="approval-reason">{request.detail}</p>}
     {command && <pre aria-label="待执行命令">{command}</pre>}
     {Boolean(files?.length) && <pre aria-label="待修改文件">{files.join('\n')}</pre>}
     {operation?.permissions && <pre aria-label="请求的权限">{JSON.stringify(operation.permissions, null, 2)}</pre>}

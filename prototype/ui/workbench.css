@@ -608,7 +608,7 @@ p { margin-block: 0 12px; }
 }
 .preview header svg, .terminal-panel header svg, .terminal-panel header span { color: var(--muted); }
 .terminal-panel {
-  flex: 0 0 clamp(155px, 29vh, 300px);
+  flex: 0 0 clamp(118px, calc(100vh - 400px), min(29vh, 300px));
   min-width: 0;
   border-top: 1px solid var(--line);
 }

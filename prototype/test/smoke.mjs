@@ -290,9 +290,10 @@ try {
   await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
   assert.ok(await page.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
-    return rect('.timeline').height > 0 && rect('.approval-actions').bottom <= rect('.composer').top &&
+    return rect('.timeline').height > 0 && rect('.approval-context').bottom <= rect('.approval-body').bottom &&
+      rect('.approval-actions').bottom <= rect('.composer').top && rect('.terminal-canvas').height >= 70 &&
       rect('.composer').bottom <= rect('.terminal-panel').top;
-  }), 'History, approval actions and the composer fit above the terminal at the minimum window size');
+  }), 'History, approval scope and actions, the composer and terminal fit at the minimum window size');
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval-compact.png') });
   await app.evaluate(({ BrowserWindow }, [width, height]) =>
     BrowserWindow.getAllWindows()[0].setContentSize(width, height), windowSize);
