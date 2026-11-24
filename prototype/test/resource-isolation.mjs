@@ -52,29 +52,26 @@ async function echoSample(app, page, key) {
 }
 
 async function prepareEchoFrames(app, page) {
-  await page.locator('.xterm-helper-textarea').focus();
-  const echoRow = page.locator('.xterm-rows > div').filter({ hasText: /^\s*span_echo_ready\s*$/ });
-  const area = await echoRow.evaluate(row => {
+  const area = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.xterm-rows > div')].find(row => row.textContent.trim() === 'span_echo_ready');
+    if (!row) throw Error('The ready line disappeared before measuring its bounds');
     const rect = row.getBoundingClientRect();
     return { x: Math.ceil(rect.left), y: Math.ceil(rect.top), width: 128, height: Math.floor(rect.height) - 1 };
-  }, undefined, { timeout: interactionTimeoutMs });
+  });
+  await page.locator('.xterm-helper-textarea').focus();
   const references = {};
   for (const key of 'ab') {
     await page.keyboard.press(key);
     await page.waitForFunction(key => [...document.querySelectorAll('.xterm-rows > div')]
       .some(row => row.textContent.trim() === `span_echo_${key}`), key, { timeout: interactionTimeoutMs });
-    await settle(page);
-    references[key] = await app.evaluate(async ({ BrowserWindow }, area) => {
-      const contents = BrowserWindow.getAllWindows()[0].webContents;
-      const image = await Promise.race([contents.capturePage(), new Promise(resolve => setTimeout(resolve, 4000))]);
-      if (!image) throw Error('The terminal reference frame was not captured');
-      return image.crop(area).toBitmap().toString('hex');
-    }, area);
+    const screenshot = await page.screenshot({ clip: area, timeout: interactionTimeoutMs });
+    references[key] = screenshot.toString('base64');
   }
   assert.ok(references.a && references.b && references.a !== references.b, 'The two terminal keys must paint different pixels');
   console.log('Captured different reference pixels for both keys. Verifying frame notifications.');
-  await app.evaluate(({ BrowserWindow }, { area, references }) => {
-    const pixels = { a: Buffer.from(references.a, 'hex'), b: Buffer.from(references.b, 'hex') };
+  await app.evaluate(({ BrowserWindow, nativeImage }, { area, references }) => {
+    const bitmap = png => nativeImage.createFromBuffer(Buffer.from(png, 'base64')).toBitmap();
+    const pixels = { a: bitmap(references.a), b: bitmap(references.b) };
     const state = { frames: 0, pixels };
     globalThis.spanTerminalEcho = state;
     BrowserWindow.getAllWindows()[0].webContents.beginFrameSubscription(false, image => {
@@ -208,6 +205,7 @@ async function trial(workload, variant, executable) {
       interactionWatchdog = setTimeout(() => {
         console.error(`${variant} terminal interaction did not finish within 45s`);
         app.process().kill();
+        process.exit(1);
       }, 45_000);
     }
     const page = await app.firstWindow();
@@ -222,6 +220,7 @@ async function trial(workload, variant, executable) {
       try {
         return { workload, variant, ...await terminalInteraction(app, page, screenshot) };
       } catch (error) {
+        console.error(`${variant} terminal interaction failed`, error);
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.endFrameSubscription())
           .catch(() => {});
         await page.screenshot({ path: screenshot, timeout: interactionTimeoutMs }).catch(() => {});
