@@ -44,23 +44,31 @@ function inputs(parts) {
  * @returns {[import('./agent-protocol').Interaction, (reply: import('./agent-protocol').InteractionReply) => object] | null}
  */
 function interaction(method, id, params) {
-  const detail = [params.reason, params.command, params.networkApprovalContext?.host, params.grantRoot].filter(Boolean).join('\n');
+  const base = { id, turnId: params.turnId, itemId: params.itemId, detail: params.reason };
   const choices = [
-    { id: 'accept', label: '允许一次' },
-    { id: 'decline', label: '拒绝' },
+    { id: 'decline', label: '拒绝', effect: 'deny' },
+    { id: 'accept', label: '允许一次', effect: 'allow' },
   ];
   if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
-    const title = method === 'item/commandExecution/requestApproval' ? '确认命令操作' : '确认修改文件';
-    return [{ id, kind: 'approval', title, detail, choices },
-      reply => ({ decision: 'choice' in reply && reply.choice === 'accept' ? 'accept' : 'decline' })];
+    const network = params.networkApprovalContext;
+    const isCommand = method === 'item/commandExecution/requestApproval';
+    const operation = network ? { kind: 'network', target: network.host, protocol: network.protocol, cwd: params.cwd }
+      : isCommand ? { kind: 'command', command: params.command, cwd: params.cwd, permissions: params.additionalPermissions }
+        : { kind: 'files', root: params.grantRoot };
+    const title = network ? '允许网络访问' : isCommand ? '确认命令操作' : '确认修改文件';
+    const available = params.availableDecisions;
+    const canAccept = !Array.isArray(available) || available.includes('accept');
+    const decisions = canAccept ? choices : choices.slice(0, 1);
+    return [{ ...base, kind: 'approval', title, operation, choices: decisions },
+      reply => ({ decision: 'choice' in reply && reply.choice === 'accept' && canAccept ? 'accept' : 'decline' })];
   }
   if (method === 'item/permissions/requestApproval') {
-    const requested = JSON.stringify(params.permissions ?? {}, null, 2);
-    return [{ id, kind: 'approval', title: '授予额外权限', detail: [detail, requested].filter(Boolean).join('\n'), choices },
+    return [{ ...base, kind: 'approval', title: '授予额外权限', choices,
+      operation: { kind: 'permissions', cwd: params.cwd, permissions: params.permissions ?? {} } },
       reply => ({ scope: 'turn', permissions: 'choice' in reply && reply.choice === 'accept' ? (params.permissions ?? {}) : {} })];
   }
   if (method === 'item/tool/requestUserInput') {
-    return [{ id, kind: 'input', title: 'Agent 请求输入', fields: (params.questions ?? []).map(question => ({
+    return [{ ...base, kind: 'input', title: 'Agent 请求输入', fields: (params.questions ?? []).map(question => ({
       id: question.id, label: question.question, secret: question.isSecret, allowOther: question.isOther,
       required: true, options: question.options?.map(option => ({ id: option.label, ...option })),
     })) }, reply => ({ answers: Object.fromEntries(Object.entries('values' in reply ? reply.values : {}).map(([key, value]) =>
@@ -126,7 +134,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         return;
       }
       const [prompt, response] = entry;
-      pending.set(prompt.id, { id, threadId, response, prompt });
+      pending.set(prompt.id, { id, threadId, response, prompt, sending: false });
       notify(threadId, { kind: 'interaction', request: prompt });
       return;
     }
@@ -178,7 +186,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         notify(threadId, { kind: 'run', run: normalizeRun(params.turn) });
         if (method === 'turn/completed') {
           for (const [key, entry] of pending) {
-            if (entry.threadId === threadId) {
+            if (entry.threadId === threadId && (!entry.prompt.turnId || entry.prompt.turnId === params.turn.id)) {
               pending.delete(key);
               notify(threadId, { kind: 'interactionResolved', id: key });
             }
@@ -196,8 +204,10 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         notify(threadId, { kind: 'usage', usage: normalizeUsage(params.tokenUsage) });
         break;
       case 'serverRequest/resolved':
-        pending.delete(String(params.requestId));
-        notify(threadId, { kind: 'interactionResolved', id: String(params.requestId) });
+        if (pending.get(String(params.requestId))?.threadId === threadId) {
+          pending.delete(String(params.requestId));
+          notify(threadId, { kind: 'interactionResolved', id: String(params.requestId) });
+        }
         break;
     }
   }
@@ -334,8 +344,17 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       async respond(id, reply) {
         const entry = pending.get(id);
         if (!entry) throw new Error('此请求已经结束。');
-        await rpc.send({ id: entry.id, result: entry.response(reply) });
-        if (pending.delete(id)) notify(entry.threadId, { kind: 'interactionResolved', id });
+        if (entry.sending) return;
+        entry.sending = true;
+        try {
+          await rpc.send({ id: entry.id, result: entry.response(reply) });
+          if (pending.get(id) === entry) {
+            pending.delete(id);
+            notify(entry.threadId, { kind: 'interactionResolved', id });
+          }
+        } finally {
+          entry.sending = false;
+        }
       },
     },
     ...(native && {

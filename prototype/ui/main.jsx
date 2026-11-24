@@ -5,7 +5,8 @@ import {
   GitBranch, PanelLeftClose, PanelLeftOpen, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
-import { agentCommands, AgentMenu, AgentPanel, GoalStrip, Interactions } from './agent-controls.jsx';
+import { agentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
+import { Interactions } from './interactions.jsx';
 import { Markdown } from './markdown.jsx';
 import { directoryName, SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
@@ -57,10 +58,12 @@ function App() {
   const catalogSearch = useCatalogSearch(api, catalogQuery, work.archived, connection === 'ready', work.catalogRevision);
   const refKey = sessionKey(session?.ref);
   const running = run?.status === 'running';
+  const interaction = work.requests[0];
+  const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
   const commands = agentCommands(api, work.models, work.options);
-  const suggestions = suggesting && !panel && draft.startsWith('/') && !draft.includes('\n')
+  const suggestions = suggesting && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
     ? commands.filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
 
   useEffect(() => {
@@ -505,7 +508,6 @@ function App() {
                 <button className="icon-button" type="button" aria-label="关闭错误提示" onClick={clearError}><X size={16} /></button>
               </div>}
               {loading && !rows.length && <div className="live" role="status"><i />正在加载会话</div>}
-              <Interactions requests={work.requests} respond={work.respond} report={report} />
               <div className="composer-overlay">
                 <AgentPanel panel={panel} work={work} setPanel={value => value ? setPanel(value) : closePanel()} report={report} openSession={openRef} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
@@ -516,6 +518,7 @@ function App() {
                   </button>)}
                 </div>}
               </div>
+              <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host} returnFocus={input} />
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
@@ -532,7 +535,8 @@ function App() {
                     onClick={showConnection}>
                     <i className={connection} /><span>{backendName} · {host}</span><ChevronDown size={12} />
                   </button>
-                  <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel : running ? '正在处理' : ''}</span>
+                  <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel :
+                    interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' : running ? '正在处理' : ''}</span>
                   {showLatest && rows.length > 0 && <button type="button" className="icon-button jump-latest" title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
                     scroll.current.scrollTop = scroll.current.scrollHeight;
                   }}><ArrowDown size={16} /></button>}

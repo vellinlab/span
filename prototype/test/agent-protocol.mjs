@@ -104,6 +104,19 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.deepEqual(requests.at(-1)[1].packet, { id: 56, result: { scope: 'turn', permissions: {} } });
     await agent.interactions.respond('second', { values: { token: 'fixture' } });
     assert.deepEqual(requests.at(-1)[1].packet.result, { answers: { token: { answers: ['fixture'] } } });
+    publish('agent', { id: 57, method: 'item/commandExecution/requestApproval', params: {
+      threadId: 'thread', turnId: 'next', itemId: 'network', command: 'shell preview', cwd: '/work',
+      networkApprovalContext: { host: 'example.test', protocol: 'https' }, availableDecisions: ['decline'],
+    } });
+    const approval = events.at(-1).request;
+    assert.deepEqual(approval.operation, { kind: 'network', target: 'example.test', protocol: 'https', cwd: '/work' });
+    assert.deepEqual(approval.choices.map(choice => choice.id), ['decline']);
+    publish('agent', { method: 'turn/completed', params: { threadId: 'thread', turn: { id: 't', status: 'completed', items: [] } } });
+    assert.equal(events.at(-1).kind, 'run');
+    const sent = requests.length;
+    await Promise.all([agent.interactions.respond('57', { choice: 'decline' }), agent.interactions.respond('57', { choice: 'decline' })]);
+    assert.equal(requests.length - sent, 1);
+    assert.deepEqual(requests.at(-1)[1].packet, { id: 57, result: { decision: 'decline' } });
   } finally {
     agent.close();
   }

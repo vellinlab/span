@@ -15,6 +15,36 @@ use std::{
 const THREAD: &str = "workspace-review";
 const TITLE: &str = "工作台架构评审";
 
+fn approval_command(turn: &str, cwd: &Path, status: &str) -> Value {
+    let command = format!(
+        "git status --short\n{}",
+        "# 这是一条用于核对滚动布局的说明。\n".repeat(34)
+    );
+    json!({"type":"commandExecution","id":format!("{turn}-approval-command"),"command":command,"cwd":cwd,"status":status})
+}
+
+fn approval_requests(output: &Output, turn: &str, cwd: &Path) -> io::Result<()> {
+    let item = approval_command(turn, cwd, "inProgress");
+    notice(
+        output,
+        "item/started",
+        json!({"threadId":THREAD,"turnId":turn,"item":item}),
+    )?;
+    send(
+        output,
+        json!({"id":"fixture-approval","method":"item/commandExecution/requestApproval",
+        "params":{"threadId":THREAD,"turnId":turn,"itemId":item["id"],"command":item["command"],"cwd":cwd,"reason":"检查长命令审批中的滚动和操作位置。"}}),
+    )?;
+    send(
+        output,
+        json!({"id":"fixture-answer","method":"item/tool/requestUserInput",
+        "params":{"threadId":THREAD,"turnId":turn,"questions":[
+            {"id":"platform","question":"验证平台","options":[{"label":"桌面","description":"原生窗口"}]},
+            {"id":"result","question":"验证结果"}
+        ]}}),
+    )
+}
+
 fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str) -> Value {
     let mut entries = vec![json!({"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
         "gitInfo":{"branch":"prototype/web-workbench"}})];
@@ -100,10 +130,50 @@ pub fn run() -> Result<()> {
     let mut goal = Value::Null;
     let mut title = TITLE.to_owned();
     let mut search_failed = false;
+    let mut review: Option<(String, bool)> = None;
+    let mut reviewed = false;
     for line in io::stdin().lock().lines() {
         let packet: Value = serde_json::from_str(&line?)?;
         let id = &packet["id"];
         if id.is_null() {
+            continue;
+        }
+        if id == "fixture-approval" {
+            reviewed = packet["result"]["decision"] == "decline";
+            if let Some((turn, _)) = &review {
+                notice(
+                    &output,
+                    "item/completed",
+                    json!({"threadId":THREAD,"turnId":turn,
+                    "item":approval_command(turn, &cwd, if reviewed { "declined" } else { "completed" })}),
+                )?;
+            }
+            continue;
+        }
+        if id == "fixture-answer" {
+            if let Some((turn, _)) = review.take() {
+                let answers = &packet["result"]["answers"];
+                let text = if reviewed
+                    && answers["platform"]["answers"][0] == "桌面"
+                    && answers["result"]["answers"][0] == "布局正常"
+                {
+                    "审批回复：拒绝，已收到回答。"
+                } else {
+                    "审批验证失败。"
+                };
+                notice(
+                    &output,
+                    "item/completed",
+                    json!({"threadId":THREAD,"turnId":turn,
+                    "item":{"type":"agentMessage","id":format!("{turn}-verification"),"text":text}}),
+                )?;
+                background.store(false, Ordering::Release);
+                notice(
+                    &output,
+                    "turn/completed",
+                    json!({"threadId":THREAD,"turn":{"id":turn,"status":"completed","items":[]}}),
+                )?;
+            }
             continue;
         }
         let params = &packet["params"];
@@ -186,6 +256,11 @@ pub fn run() -> Result<()> {
                     "item/completed",
                     json!({"threadId":THREAD,"turnId":turn,"item":user_item}),
                 )?;
+                if params["input"][0]["text"] == "验证审批与表单。" {
+                    reviewed = false;
+                    review = Some((turn, false));
+                    continue;
+                }
                 let output = output.clone();
                 let background = background.clone();
                 thread::spawn(move || {
@@ -342,6 +417,12 @@ pub fn run() -> Result<()> {
                 "serviceTiers":[{"id":"priority","name":"Fast"}],"inputModalities":["text"]}]})
             }
             "account/rateLimits/read" => {
+                if let Some((turn, prompted)) = review.as_mut() {
+                    if !*prompted {
+                        approval_requests(&output, turn, &cwd)?;
+                        *prompted = true;
+                    }
+                }
                 json!({"rateLimits":{"limitId":"codex","limitName":"Codex",
                 "primary":{"usedPercent":24,"windowDurationMins":300}}})
             }

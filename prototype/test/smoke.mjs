@@ -253,6 +253,45 @@ try {
       await page.screenshot({ path: screenshot });
     }
   }
+  await composer.fill('验证审批与表单。');
+  await composer.press('Enter');
+  await page.getByText('验证审批与表单。', { exact: true }).waitFor();
+  await transcript.evaluate(element => { element.scrollTop = 300; });
+  const latest = page.getByRole('button', { name: '滚到最新消息' });
+  await latest.waitFor();
+  const anchor = await transcript.evaluate(element => element.scrollTop);
+  await composer.fill('/usage');
+  await composer.press('Enter');
+  const approval = page.getByRole('region', { name: '确认命令操作' });
+  await approval.getByText('还有 1 项', { exact: true }).waitFor();
+  await approval.getByText(process.env.SPAN_TEST_SSH_ALIAS || '本机', { exact: true }).waitFor();
+  await approval.getByText('工作目录', { exact: true }).waitFor();
+  await page.getByText('等待审批', { exact: true }).waitFor();
+  assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - anchor) <= 2);
+  const layout = await approval.evaluate(element => {
+    const body = element.querySelector('.approval-body');
+    const actions = element.querySelector('.approval-actions');
+    const button = actions.querySelector('button').getBoundingClientRect();
+    const hit = document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2);
+    return { scrolls: body.scrollHeight > body.clientHeight, canAnswer: actions.contains(hit),
+      popoverAbove: document.querySelector('.agent-panel')?.getBoundingClientRect().bottom <= element.getBoundingClientRect().top };
+  });
+  assert.deepEqual(layout, { scrolls: true, canAnswer: true, popoverAbove: true });
+  await composer.press('Escape');
+  await page.getByRole('region', { name: '用量' }).waitFor({ state: 'detached' });
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
+  await approval.getByRole('button', { name: '拒绝' }).press('Enter');
+  const question = page.getByRole('region', { name: 'Agent 请求输入' });
+  await question.waitFor();
+  assert.ok(await question.evaluate(element => document.activeElement === element));
+  await question.getByRole('combobox', { name: '验证平台' }).selectOption('桌面');
+  await question.getByRole('textbox', { name: '验证结果' }).fill('布局正常');
+  await question.getByRole('button', { name: '提交回答' }).press('Enter');
+  await question.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => document.activeElement === element));
+  await latest.click();
+  await page.getByText('审批回复：拒绝，已收到回答。', { exact: true }).waitFor();
+  console.log('Verified long approvals, action visibility, queued input, focus and the backend reply.');
   await composer.fill('/goal clear');
   await composer.press('Enter');
   await goal.waitFor({ state: 'detached' });

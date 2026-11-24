@@ -80,8 +80,10 @@ export type InteractionField = {
   id: string; label: string; description?: string; secret?: boolean;
   options?: Choice[]; allowOther?: boolean; required?: boolean;
 };
-export type Interaction = { id: string; title: string; detail?: string } & (
-  | { kind: 'approval'; choices: Choice[] }
+export type Interaction = { id: string; title: string; detail?: string; turnId?: string; itemId?: string } & (
+  | { kind: 'approval'; choices: (Choice & { effect?: 'allow' | 'deny' })[];
+      operation?: { kind: 'command' | 'files' | 'network' | 'permissions'; command?: string; cwd?: string;
+        target?: string; protocol?: string; root?: string; permissions?: Json } }
   | { kind: 'input'; fields: InteractionField[] }
 );
 export type InteractionReply = { choice: string } | { values: Record<string, string> };

@@ -436,7 +436,12 @@ export function useAgent(config, { report, clearError, jumpToLatest }) {
     stop: () => withSession((client, ref) => {
       if (currentRun.current) return client.turns.stop(ref, currentRun.current.id);
     }),
-    respond: (id, reply) => agent.current.interactions.respond(id, reply),
+    respond: (id, reply) => {
+      if (!api || api !== agent.current || sessionKey(session?.ref) !== active.current?.key) {
+        throw new Error('此请求已经结束。');
+      }
+      return api.interactions.respond(id, reply);
+    },
     withSession,
     fork() {
       if (!guard() || !session) return;
