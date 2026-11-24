@@ -131,6 +131,7 @@ jobs:
           node prototype/test/smoke.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench.png"
           node prototype/test/catalog.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench-catalog.png"
           node prototype/test/covered-transcript.mjs "$PWD/preview/span-preview.exe"
+          node prototype/test/patch-view.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench-patch.png"
           powershell.exe -NoProfile -Command 'Compress-Archive -Path preview -DestinationPath span-web-windows-x86_64.zip'
       - name: Publish Windows preview and screenshot
         if: always()

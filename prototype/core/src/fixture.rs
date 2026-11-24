@@ -2,6 +2,7 @@ use super::{Output, Result, send};
 use serde_json::{Value, json};
 use std::{
     env,
+    fmt::Write as _,
     io::{self, BufRead, BufWriter},
     path::Path,
     sync::{
@@ -43,6 +44,33 @@ fn approval_requests(output: &Output, turn: &str, cwd: &Path) -> io::Result<()> 
             {"id":"result","question":"验证结果"}
         ]}}),
     )
+}
+
+fn patch_sample(turn: &str) -> Value {
+    let mut large = String::from(
+        "--- a/prototype/ui/workbench.css\n+++ b/prototype/ui/workbench.css\n@@ -1,5001 +1,5001 @@\n--- old source prefix\n+++ new source prefix\n",
+    );
+    for index in 1..=5000 {
+        writeln!(
+            large,
+            "-    include(record_{index:04}, \"old workbench rule\");"
+        )
+        .unwrap();
+        write!(
+            large,
+            "+    include(record_{index:04}, \"new workbench rule\");"
+        )
+        .unwrap();
+        if index == 1 {
+            write!(large, "\t// {}", "界面缩放后仍保留缩进。".repeat(8)).unwrap();
+        }
+        large.push('\n');
+    }
+    json!({"type":"fileChange","id":format!("{turn}-patch"),"status":"completed","changes":[
+        {"path":"prototype/ui/workbench.css","kind":{"type":"update"},"diff":large},
+        {"path":"prototype/REVIEW.md","kind":{"type":"update"},"diff":"@@ -8 +8 @@\n-    保留原文。\n+    保留原文和缩进。\n"},
+        {"path":"prototype/sample/README.md","kind":{"type":"update"}}
+    ]})
 }
 
 fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str) -> Value {
@@ -259,6 +287,26 @@ pub fn run() -> Result<()> {
                 if params["input"][0]["text"] == "验证审批与表单。" {
                     reviewed = false;
                     review = Some((turn, false));
+                    continue;
+                }
+                if params["input"][0]["text"] == "验证长差异与文件切换。" {
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,"item":patch_sample(&turn)}),
+                    )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":THREAD,"turnId":turn,"item":{"type":"agentMessage",
+                            "id":format!("{turn}-patch-result"),"text":"已记录文件变更。"}}),
+                    )?;
+                    background.store(false, Ordering::Release);
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":THREAD,"turn":{"id":turn,"status":"completed","items":[]}}),
+                    )?;
                     continue;
                 }
                 let output = output.clone();

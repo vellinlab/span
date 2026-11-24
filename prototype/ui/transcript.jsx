@@ -5,20 +5,13 @@ import {
   Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { Markdown } from './markdown.jsx';
+import { PatchView } from './patch-view.jsx';
 import { timelineLayout, visibleRow } from './timeline.js';
 
 const truncate = text => text.length > 256 * 1024 ? text.slice(0, 256 * 1024) + '\n…' : text;
 const statusLabels = {
   pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
 };
-
-function Diff({ text }) {
-  return <pre className="diff">{truncate(text).split('\n').map((line, index) => {
-    const tone = line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@') ? 'meta'
-      : line.startsWith('+') ? 'add' : line.startsWith('-') ? 'remove' : undefined;
-    return <span key={index} data-tone={tone}>{line}{'\n'}</span>;
-  })}</pre>;
-}
 
 function SourceLink({ url, children }) {
   return <a href={url} onClick={event => {
@@ -104,13 +97,8 @@ const TranscriptRow = memo(function TranscriptRow({ row, liveReasoning, expanded
       break;
     case 'patch':
       title = row.files?.length ? '文件变更' : '本轮差异';
-      hint = row.files?.length === 1 ? row.files[0].path : row.files?.length ? `${row.files.length} 个文件` : undefined;
-      detail = () => <>
-        {row.files?.map((file, index) => <div className="diff-file" key={file.path + index}>
-          <code className="card-path">{file.path}</code>{file.diff && <Diff text={file.diff} />}
-        </div>)}
-        {row.text && <Diff text={row.text} />}
-      </>;
+      hint = row.files?.length === 1 ? expanded ? undefined : row.files[0].path : row.files?.length ? `${row.files.length} 个文件` : undefined;
+      detail = () => <PatchView files={row.files ?? []} text={row.text} />;
       break;
     case 'tool':
       title = row.name || '调用工具';
@@ -194,7 +182,9 @@ export const Transcript = memo(function Transcript({
 
   return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
     data-items={rows.length} onScroll={onScroll}
-    onWheel={event => { if (event.deltaY < 0 && scroll.current.scrollTop < 160) onScroll(); }}>
+    onWheel={event => {
+      if (event.deltaY < 0 && scroll.current.scrollTop < 160 && !event.target.closest('.diff-scroll')) onScroll();
+    }}>
     {rows.length ? <div className="reading-column rail" style={{ height }}>
       {virtualRows.map(item => {
         const row = rows[item.index];
