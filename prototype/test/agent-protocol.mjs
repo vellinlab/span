@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
-import { applyTimeline, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, visibleRow } from '../ui/timeline.js';
+import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
@@ -57,6 +57,21 @@ test('completed activity groups preserve chronology and exclude failure, prose a
   const update = item => applyTimeline(rows, [{ kind: 'item', item, final: true }]);
   assert.equal(timelineLayout(update({ ...prose, text: 'Changed prose' })), layout);
   assert.notEqual(timelineLayout(update(command('d', { exitCode: 1 }))), layout);
+});
+
+test('delegation metadata survives sparse events and unrelated timeline updates reuse the roster', () => {
+  const turnId = 'turn';
+  const member = { id: 'child', name: 'Reviewer', role: 'review', status: 'running', session: { ...session('codex', remote), id: 'child' } };
+  const event = (id, kind, fields) => ({ kind: 'item', final: true, item: { id, turnId, kind, ...fields } });
+  const started = applyTimeline([], [event('spawn', 'delegation', { members: [member] })]);
+  const recorded = delegatedMembers(started);
+  const streaming = applyTimeline(started, [event('answer', 'message', { text: 'Work in progress.' })]);
+  assert.equal(delegatedMembers(streaming), recorded);
+  const finished = applyTimeline(streaming, [event('wait', 'delegation', {
+    members: [{ id: 'child', role: undefined, status: 'completed', detail: 'Checked.' }],
+  })]);
+  assert.deepEqual(delegatedMembers(finished).get('child'), { ...member, status: 'completed', detail: 'Checked.' });
+  assert.equal(recorded.get('child').status, 'running');
 });
 
 test('session identities are scoped by backend and host, and the factory rejects unknown backends', () => {

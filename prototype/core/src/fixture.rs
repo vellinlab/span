@@ -15,6 +15,7 @@ use std::{
 
 const THREAD: &str = "workspace-review";
 const TITLE: &str = "工作台架构评审";
+const REVIEW_AGENT: &str = "键盘导航和窄窗布局复核";
 const LONG_COMMAND: &str = concat!(
     "workspace inspect --profile desktop --path prototype/resources/workbench/verification/candidate \\\n",
     "\t--check output-and-history --keep-annotations \\\n",
@@ -278,6 +279,12 @@ pub fn run() -> Result<()> {
                 json!({"thread":{"id":format!("fixture-new-{new_thread_count}"),"cwd":cwd},
                     "cwd":cwd,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
             }
+            "thread/resume" if params["threadId"] == "fixture-subagent" => json!({
+                "thread":{"id":"fixture-subagent","name":REVIEW_AGENT,"cwd":cwd},
+                "initialTurnsPage":{"data":[{"id":"child-turn","status":"completed","items":[
+                    {"type":"agentMessage","id":"child-result","phase":"final_answer","text":"子代理的会话记录。"}
+                ]}],"nextCursor":null},"cwd":cwd,"model":"fixture"
+            }),
             "thread/resume" => {
                 let turns = if params["excludeTurns"] == true {
                     &[][..]
@@ -374,6 +381,30 @@ pub fn run() -> Result<()> {
                 if params["input"][0]["text"] == "验证任务计划。" {
                     plan_notice(&output, &thread_id, &turn, 1)?;
                     active_plan = Some(turn);
+                    continue;
+                }
+                if params["input"][0]["text"] == "验证子代理导航。" {
+                    for item in [
+                        json!({"type":"subAgentActivity","id":format!("{turn}-review-agent"),"kind":"started",
+                            "agentThreadId":"fixture-subagent","agentPath":format!("/review/{REVIEW_AGENT}"),"model":"fixture-review"}),
+                        json!({"type":"collabAgentToolCall","id":format!("{turn}-review-wait"),"tool":"wait","status":"completed",
+                            "senderThreadId":thread_id,"receiverThreadIds":["fixture-subagent","fixture-compare"],
+                            "agentsStates":{"fixture-subagent":{"status":"completed","message":"已核对键盘焦点。"},
+                            "fixture-compare":{"status":"errored","message":"截图校验失败。\n需要重新采样。"}}}),
+                        json!({"type":"agentMessage","id":format!("{turn}-review-result"),"phase":"final_answer","text":"代理导航验收完成。"}),
+                    ] {
+                        notice(
+                            &output,
+                            "item/completed",
+                            json!({"threadId":thread_id,"turnId":turn,"item":item}),
+                        )?;
+                    }
+                    background.store(false, Ordering::Release);
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+                    )?;
                     continue;
                 }
                 if params["input"][0]["text"] == "验证连续工具活动。" {

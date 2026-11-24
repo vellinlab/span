@@ -4,15 +4,13 @@ import {
   ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
   Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
+import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { Markdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, TextReader } from './text-reader.jsx';
-import { groupedTimelineLayout, timelineLayout, visibleRow } from './timeline.js';
+import { delegatedMembers, groupedTimelineLayout, timelineLayout, visibleRow } from './timeline.js';
 
-const statusLabels = {
-  pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
-};
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
 
 function SourceLink({ url, children }) {
@@ -20,16 +18,6 @@ function SourceLink({ url, children }) {
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) window.span.openLink(url).catch(() => {});
   }}>{children}<ArrowUpRight size={12} /></a>;
-}
-
-function MemberList({ members, openSession, canOpenSession }) {
-  return <ul className="member-list">{members.map(member => <li key={member.id}>
-    <span className="member-label">{member.name || member.role || member.id}</span>
-    {member.model && <span>{member.model}</span>}
-    {member.status && <span className="card-status" data-status={member.status}>{statusLabels[member.status]}</span>}
-    {member.session && <button type="button" disabled={!canOpenSession} onClick={() => openSession(member.session)}>打开会话 <ArrowUpRight size={12} /></button>}
-    {member.detail && <p>{member.detail}</p>}
-  </li>)}</ul>;
 }
 
 function ArtifactList({ artifacts, openArtifact }) {
@@ -84,9 +72,9 @@ function CommandText({ command, titleRef, force }) {
   </div>;
 }
 
-function Card({ icon: Icon, type, title, status, statusNote, hint, expanded, toggle, children }) {
+function Card({ icon: Icon, type, title, status, statusText, statusNote, hint, expanded, toggle, children }) {
   const titleRef = useRef(null);
-  const statusLabel = status !== 'completed' ? statusLabels[status] : undefined;
+  const statusLabel = statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
   const head = <><Icon size={15} className="card-icon" /><span className="card-title" ref={titleRef} title={title}>{title}</span>
     {hint && <span className="card-hint" title={hint}>{hint}</span>}
     {(statusLabel || statusNote) && <span className="card-status" data-status={status}>
@@ -109,7 +97,18 @@ const cardIcons = {
   search: Search, delegation: Users, artifact: Image, notice: GitBranch,
 };
 
-const TranscriptRow = memo(function TranscriptRow({ row, activePlan, expanded, toggle, openSession, openArtifact, canOpenSession }) {
+function delegationStatus(members) {
+  const counts = new Map();
+  for (const { status } of members) counts.set(status, (counts.get(status) ?? 0) + 1);
+  const status = ['failed', 'running', 'pending', 'cancelled', 'completed', 'unknown'].find(state => counts.has(state));
+  if (!status) return {};
+  const label = statusLabels[status];
+  return { status, text: members.length > 1 ? `${counts.get(status)} 个${label}` : label };
+}
+
+const TranscriptRow = memo(function TranscriptRow({
+  row, activePlan, roster, currentKey, expanded, toggle, openSession, openArtifact, canOpenSession,
+}) {
   if (row.kind === 'user') return <div className="user-message">
     {row.text}{row.queued && row.queued !== 'delivered' && <small className="queued-input">
       {row.queued === 'cancelled' ? '已取消排队' : '等待当前任务结束'}
@@ -119,7 +118,7 @@ const TranscriptRow = memo(function TranscriptRow({ row, activePlan, expanded, t
     <Markdown text={row.text} />
   </div>;
 
-  let title, hint, detail, statusNote;
+  let title, hint, detail, statusText, statusNote;
   let status = row.final && row.status === 'running' ? undefined : row.status;
   switch (row.kind) {
     case 'reasoning':
@@ -177,14 +176,26 @@ const TranscriptRow = memo(function TranscriptRow({ row, activePlan, expanded, t
       if (row.url || row.text) detail = () => <>{row.url && <SourceLink url={row.url}>{row.url}</SourceLink>}
         {row.text && <ToolOutput text={row.text} />}</>;
       break;
-    case 'delegation':
+    case 'delegation': {
       title = row.action;
-      if (row.members?.length) hint = `${row.members.length} 个代理`;
-      if (row.members?.length || row.text) detail = () => <>
-        {row.members?.length > 0 && <MemberList members={row.members} openSession={openSession} canOpenSession={canOpenSession} />}
+      const members = (row.members ?? []).map(member => {
+        const known = roster.get(member.id);
+        return { ...member, name: member.name || known?.name, role: member.role || known?.role,
+          model: member.model || known?.model, session: member.session ?? known?.session };
+      });
+      if (!expanded && members.length) hint = members.length === 1 ? memberName(members[0]) : `${members.length} 个代理`;
+      const aggregate = delegationStatus(members);
+      if (!status || status === 'completed' || (status === 'running' && aggregate.status === 'failed')) {
+        status = aggregate.status ?? status;
+        statusText = aggregate.text;
+      }
+      if (members.length || row.text) detail = () => <>
         {row.text && <Markdown text={row.text} />}
+        {members.length > 0 && <AgentMemberList members={members} currentKey={currentKey}
+          openSession={openSession} canOpenSession={canOpenSession} showDetail />}
       </>;
       break;
+    }
     case 'artifact':
       title = '产物';
       detail = () => <ArtifactList artifacts={row.artifacts} openArtifact={openArtifact} />;
@@ -195,7 +206,7 @@ const TranscriptRow = memo(function TranscriptRow({ row, activePlan, expanded, t
       break;
   }
 
-  return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} statusNote={statusNote}
+  return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} statusText={statusText} statusNote={statusNote}
     title={title} hint={hint} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
@@ -418,6 +429,7 @@ export const Transcript = memo(function Transcript({
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
           {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)} toggle={toggleGroup} />
             : <TranscriptRow row={row} activePlan={activePlan}
+              roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
               expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
               toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />)}
         </div>;

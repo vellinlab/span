@@ -494,6 +494,36 @@ try {
   assert.equal(await page.getByRole('alert').count(), 0);
   console.log('Verified history paging, file preview, PTY, streaming and interrupt.');
   console.log('Verified a new session keeps a rejected draft and clears it after one successful retry.');
+
+  await composer.fill('验证子代理导航。');
+  await composer.press('Enter');
+  await transcript.getByText('代理导航验收完成。', { exact: true }).waitFor();
+  const agentName = '键盘导航和窄窗布局复核';
+  const openAgent = `打开 ${agentName} 的会话`;
+  const agentCards = transcript.locator('[data-card="delegation"]');
+  const spawnCard = agentCards.filter({ hasText: '启动子代理' });
+  const waitCard = agentCards.filter({ hasText: '等待子代理' });
+  await spawnCard.getByText(agentName, { exact: true }).waitFor();
+  await waitCard.getByText('1 个失败', { exact: true }).waitFor();
+  assert.equal(await waitCard.getByRole('list', { name: '代理成员' }).count(), 0);
+  await waitCard.locator('summary').press('Enter');
+  await waitCard.getByRole('button', { name: openAgent }).waitFor();
+  await waitCard.getByText('已核对键盘焦点。', { exact: true }).waitFor();
+  await waitCard.getByText('失败', { exact: true }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-agents-card.png') });
+  await composer.fill('/agents');
+  await composer.press('Enter');
+  const agents = page.getByRole('region', { name: '代理与团队' });
+  const rosterAgent = agents.getByRole('button', { name: openAgent });
+  await rosterAgent.waitFor();
+  await agents.getByText('fixture-review', { exact: true }).waitFor();
+  await agents.getByText('失败', { exact: true }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-agents-panel.png') });
+  await rosterAgent.press('Enter');
+  await agents.waitFor({ state: 'detached' });
+  await transcript.getByText('子代理的会话记录。', { exact: true }).waitFor();
+  await page.locator('.topbar').getByText(agentName, { exact: true }).waitFor();
+  console.log('Verified delegation summaries, shared member rows, and keyboard navigation to the child session.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

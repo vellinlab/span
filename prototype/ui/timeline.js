@@ -3,6 +3,28 @@ export const itemKey = ({ turnId, id }) => JSON.stringify([turnId, id]);
 const reasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
 const positionsByRows = new WeakMap();
 const layoutByRows = new WeakMap();
+const membersByRows = new WeakMap();
+
+export function mergeAgentMember(members, member) {
+  const merged = { ...members.get(member.id) };
+  for (const [key, value] of Object.entries(member)) {
+    if (value != null) merged[key] = value;
+  }
+  members.set(member.id, merged);
+}
+
+export function delegatedMembers(rows) {
+  let members = membersByRows.get(rows);
+  if (!members) {
+    members = new Map();
+    for (const row of rows) {
+      if (row.kind !== 'delegation') continue;
+      for (const member of row.members ?? []) mergeAgentMember(members, member);
+    }
+    membersByRows.set(rows, members);
+  }
+  return members;
+}
 
 export function turnReasoning(rows, turnId) {
   if (!turnId) return;
@@ -244,10 +266,12 @@ export function applyTimeline(previous, events) {
     },
   };
   let layout = layoutByRows.get(previous);
+  let members = membersByRows.get(previous);
   const state = {
     rows,
     positions,
     write(position, row) {
+      if (row.kind === 'delegation' || rows[position]?.kind === 'delegation') members = undefined;
       if (layout) {
         const previous = rows[position];
         const activity = routineActivity(row);
@@ -266,6 +290,7 @@ export function applyTimeline(previous, events) {
   positionsByRows.set(rows, index);
   // Stable callbacks let the virtualizer retain measured offsets during text-only updates.
   if (layout) layoutByRows.set(rows, layout);
+  if (members) membersByRows.set(rows, members);
   return rows;
 }
 

@@ -1,11 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, ListChecks, SlidersHorizontal, Users, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
+import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
+import { sessionKey } from './agent.js';
 import { ReasoningText } from './reasoning.jsx';
+import { delegatedMembers, mergeAgentMember } from './timeline.js';
 
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', limited: '达到用量上限', unknown: '状态未知',
 };
-const memberStatuses = { pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止' };
 const number = new Intl.NumberFormat('zh-CN');
 const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息' };
 const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
@@ -196,47 +198,65 @@ function DelegationControls({ work, members, report }) {
     </select>}
     {chooseMember && <select required aria-label="代理" name="member">
       <option value="">选择代理</option>{(chooseTeam ? team?.members ?? [] : members).map(member =>
-        <option key={member.id} value={member.id}>{member.name ?? member.id}</option>)}
+        <option key={member.id} value={member.id}>{memberName(member)}</option>)}
     </select>}
     {textLabel && <input aria-label={textLabel} name="text" placeholder={textLabel} required />}
     {action && <button className="primary" disabled={busy}>执行</button>}
   </form>;
 }
 
+function AgentTaskList({ tasks, members }) {
+  const titles = new Map(tasks.map(task => [task.id, task.title]));
+  return <ul className="agent-member-list" aria-label="团队任务">{tasks.map(task => {
+    const assignee = task.assigneeId && members.get(task.assigneeId);
+    const dependencies = task.blockedBy?.map(id => titles.get(id) || id).join('、');
+    const metadata = [task.assigneeId && `负责人 ${assignee ? memberName(assignee) : task.assigneeId}`,
+      dependencies && `依赖 ${dependencies}`].filter(Boolean).join(' · ');
+    return <li key={task.id} className="agent-member-row">
+      <span className="agent-member-label" title={task.title}>{task.title}</span>
+      <AgentStatus status={task.status} />
+      {metadata && <small className="agent-member-meta" title={metadata}>{metadata}</small>}
+    </li>;
+  })}</ul>;
+}
+
 function AgentsPanel({ work, openSession, report }) {
-  const { rows, teams } = work;
-  const members = new Map();
-  for (const row of rows) {
-    if (row.kind !== 'delegation') continue;
-    for (const member of row.members ?? []) {
-      const known = members.get(member.id);
-      members.set(member.id, { ...known, ...Object.fromEntries(Object.entries(member).filter(([, value]) => value != null)) });
+  const { teams, members: liveMembers } = work;
+  const recordedMembers = delegatedMembers(work.rows);
+  const { members, entries, groups, parents } = useMemo(() => {
+    const members = new Map(recordedMembers);
+    const groups = new Map(teams.map(team => [team.id, []]));
+    const parents = new Map();
+    for (const member of liveMembers) mergeAgentMember(members, member);
+    for (const team of teams) {
+      for (const member of team.members) mergeAgentMember(members, { ...member, teamId: team.id });
     }
-  }
-  for (const member of work.members) members.set(member.id, { ...members.get(member.id), ...member });
-  for (const team of teams) {
-    for (const member of team.members) members.set(member.id, { ...members.get(member.id), ...member, teamId: team.id });
-  }
-  const groups = [...teams.map(team => [team.id, team.name]), [null, '子代理']];
+    const entries = [...members.values()];
+    const subagents = [];
+    for (const member of entries) {
+      (groups.get(member.teamId) ?? subagents).push(member);
+      if (member.session) parents.set(sessionKey(member.session), memberName(member));
+    }
+    groups.set(null, subagents);
+    return { members, entries, groups, parents };
+  }, [recordedMembers, liveMembers, teams]);
+  const activeKey = sessionKey(work.session?.ref);
+  const parentName = useCallback(ref => {
+    if (!ref) return;
+    const key = sessionKey(ref);
+    if (key !== activeKey) return parents.get(key) ?? ref.id;
+  }, [activeKey, parents]);
+  const canOpenSession = work.connection === 'ready' && !work.loading && !work.run;
+  const sections = groups.get(null).length ? [...teams, { id: null, name: '子代理' }] : teams;
   return <div className="agent-groups">
     {!members.size && !teams.length && <p>当前会话还没有代理活动。</p>}
-    {groups.map(([id, label]) => {
-      const entries = [...members.values()].filter(member => (member.teamId ?? null) === id);
-      const team = teams.find(team => team.id === id);
-      if (!entries.length && !team?.tasks?.length) return null;
-      return <section key={id ?? 'subagents'}><strong>{label}</strong>
-        <ul>{entries.map(member => <li key={member.id}>
-          <span title={member.id}>{member.name ?? member.role ?? member.id}</span>
-          <small>{memberStatuses[member.status]}</small>
-          {member.session && <button className="panel-link" type="button" disabled={work.loading || Boolean(work.run)}
-            onClick={() => openSession(member.session)}>打开会话</button>}
-        </li>)}</ul>
-        {team?.tasks?.length > 0 && <ul>{team.tasks.map(task => <li key={task.id}>
-          <ListChecks size={13} /><span>{task.title}</span><small>{memberStatuses[task.status]}</small>
-        </li>)}</ul>}
-      </section>;
-    })}
-    <DelegationControls key={work.session?.ref.id} work={work} members={[...members.values()]} report={report} />
+    {sections.map(({ id, name, tasks }) => <section key={id ?? 'subagents'} className="agent-group">
+      <h3>{name}</h3>
+      {groups.get(id).length > 0 && <AgentMemberList members={groups.get(id)} parentName={parentName}
+        currentKey={activeKey} openSession={openSession} canOpenSession={canOpenSession} />}
+      {tasks?.length > 0 && <AgentTaskList tasks={tasks} members={members} />}
+    </section>)}
+    <DelegationControls key={activeKey} work={work} members={entries} report={report} />
   </div>;
 }
 
