@@ -15,6 +15,11 @@ use std::{
 
 const THREAD: &str = "workspace-review";
 const TITLE: &str = "工作台架构评审";
+const LONG_COMMAND: &str = concat!(
+    "workspace inspect --profile desktop --path prototype/resources/workbench/verification/candidate \\\n",
+    "\t--check output-and-history --keep-annotations \\\n",
+    "    --include-summary"
+);
 
 fn approval_command(turn: &str, cwd: &Path, status: &str) -> Value {
     let command = format!(
@@ -373,6 +378,13 @@ pub fn run() -> Result<()> {
                         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"dynamicToolCall","id":format!("{turn}-tool"),
                             "tool":"核对异常项","status":"completed",
                             "output":format!("  发现一项配置异常。\n{}", "  保留后续检查记录。\n".repeat(18))}}),
+                    )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"id":format!("{turn}-long-command"),
+                            "type":"commandExecution","command":LONG_COMMAND,"cwd":cwd,"status":"completed",
+                            "exitCode":17,"aggregatedOutput":"检查未完成。\n"}}),
                     )?;
                     notice(
                         &output,

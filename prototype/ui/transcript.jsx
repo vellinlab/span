@@ -55,16 +55,50 @@ function ToolOutput({ text, cwd }) {
   </>;
 }
 
-function Card({ icon: Icon, type, title, status, hint, expanded, toggle, children }) {
-  const head = <><Icon size={15} className="card-icon" /><span className="card-title" title={title}>{title}</span>
+function CommandText({ command, titleRef, force }) {
+  // Keep the command available until collapse so a resize cannot remove focused text.
+  const [truncated, setTruncated] = useState(false);
+  const show = force || truncated || /[\r\n\t]| {2}/.test(command);
+
+  useLayoutEffect(() => {
+    if (show) return;
+    const title = titleRef.current;
+    if (!title) return;
+    function measure() {
+      if (title.scrollWidth <= title.clientWidth) return false;
+      setTruncated(true);
+      return true;
+    }
+    if (measure()) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(title);
+    return () => observer.disconnect();
+  }, [command, show, titleRef]);
+
+  return show && <div className="command-source">
+    <div className="tool-output-heading"><span>命令</span>
+      <CopyTextButton text={command} label="复制命令" copiedLabel="已复制命令" />
+    </div>
+    <pre className="command-text" tabIndex={0} aria-label="完整命令">{command}</pre>
+  </div>;
+}
+
+function Card({ icon: Icon, type, title, status, statusNote, hint, expanded, toggle, children }) {
+  const titleRef = useRef(null);
+  const statusLabel = status !== 'completed' ? statusLabels[status] : undefined;
+  const head = <><Icon size={15} className="card-icon" /><span className="card-title" ref={titleRef} title={title}>{title}</span>
     {hint && <span className="card-hint" title={hint}>{hint}</span>}
-    {status && status !== 'completed' && <span className="card-status" data-status={status}>{statusLabels[status]}</span>}</>;
+    {(statusLabel || statusNote) && <span className="card-status" data-status={status}>
+      {statusLabel && <span>{statusLabel}</span>}
+      {statusLabel && statusNote && <span aria-hidden="true">·</span>}
+      {statusNote && <span>{statusNote}</span>}
+    </span>}</>;
   return <div className="activity" data-card={type}>
     {children ? <details open={expanded} onToggle={event => {
       if (event.currentTarget.open !== expanded) toggle(event.currentTarget.open);
     }}>
       <summary><ChevronRight size={13} className="card-chevron" />{head}</summary>
-      {expanded && <div className="card-body">{children()}</div>}
+      {expanded && <div className="card-body">{children(titleRef)}</div>}
     </details> : <div className="card-heading"><span className="card-placeholder" />{head}</div>}
   </div>;
 }
@@ -84,7 +118,8 @@ const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openS
     <Markdown text={row.text} />
   </div>;
 
-  let title, hint, detail;
+  let title, hint, detail, statusNote;
+  let status = row.final && row.status === 'running' ? undefined : row.status;
   switch (row.kind) {
     case 'reasoning':
       title = '推理摘要';
@@ -101,11 +136,21 @@ const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openS
         </li>)}</ul>}
       </>;
       break;
-    case 'command':
-      title = row.command || '执行命令';
-      hint = row.exitCode != null && row.exitCode !== 0 ? `退出码 ${row.exitCode}` : undefined;
-      if (row.text || row.cwd) detail = () => <ToolOutput text={row.text} cwd={row.cwd} />;
+    case 'command': {
+      const command = row.command;
+      const hasContext = Boolean(row.text || row.cwd);
+      const firstBreak = command?.search(/[\r\n]/) ?? -1;
+      title = firstBreak < 0 ? command || '执行命令' : `${command.slice(0, firstBreak).trimEnd() || '执行命令'} …`;
+      if (row.exitCode != null && row.exitCode !== 0) {
+        statusNote = `退出码 ${row.exitCode}`;
+        if (!status || status === 'completed') status = 'failed';
+      }
+      if (command || hasContext) detail = titleRef => <>
+        {command && <CommandText command={command} titleRef={titleRef} force={!hasContext} />}
+        {hasContext && <ToolOutput text={row.text} cwd={row.cwd} />}
+      </>;
       break;
+    }
     case 'patch':
       title = row.files?.length ? '文件变更' : '本轮差异';
       hint = row.files?.length === 1 ? expanded ? undefined : row.files[0].path : row.files?.length ? `${row.files.length} 个文件` : undefined;
@@ -139,8 +184,7 @@ const TranscriptRow = memo(function TranscriptRow({ row, expanded, toggle, openS
       break;
   }
 
-  return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml}
-    status={row.final && row.status === 'running' ? undefined : row.status}
+  return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} statusNote={statusNote}
     title={title} hint={hint} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
@@ -278,7 +322,7 @@ export const Transcript = memo(function Transcript({
   return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
     data-items={rows.length} onScroll={onScroll}
     onWheel={event => {
-      if (event.deltaY < 0 && scroll.current.scrollTop < 160 && !event.target.closest('.text-scroll, .output-scroll')) onScroll();
+      if (event.deltaY < 0 && scroll.current.scrollTop < 160 && !event.target.closest('.text-scroll, .output-scroll, .command-text')) onScroll();
     }}>
     {rows.length ? <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
       {virtualRows.map(item => {

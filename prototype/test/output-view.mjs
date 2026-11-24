@@ -7,6 +7,11 @@ import { _electron as electron } from 'playwright';
 const [candidate, screenshot, baseline] = process.argv.slice(2);
 const lastLine = 'warning: 已核对全部命令输出。';
 const shortResult = '  发现一项配置异常。\n' + '  保留后续检查记录。\n'.repeat(18);
+const fullCommand = [
+  'workspace inspect --profile desktop --path prototype/resources/workbench/verification/candidate \\',
+  '\t--check output-and-history --keep-annotations \\',
+  '    --include-summary',
+].join('\n');
 
 async function check(binary, legacy, screenshot) {
   const profile = await mkdtemp(join(tmpdir(), 'span-output-'));
@@ -47,6 +52,7 @@ async function check(binary, legacy, screenshot) {
       assert.ok(displayed.endsWith('\n…') && !displayed.includes(lastLine));
       return { mountedCharacters: displayed.length };
     }
+    assert.equal(await command.locator('.command-text').count(), 0);
 
     const lines = viewport.locator('.output-line');
     await lines.getByText('prepare', { exact: false }).waitFor();
@@ -101,6 +107,41 @@ async function check(binary, legacy, screenshot) {
     await shortTool.getByRole('button', { name: '复制输出' }).click();
     await shortTool.locator('[title="已复制输出"]').waitFor();
     assert.equal(await readClipboard(), shortResult);
+
+    const longCard = timeline.locator('[data-card="command"]').filter({ hasText: 'workspace inspect --profile desktop' });
+    const longSummary = longCard.locator('summary');
+    const outcome = longSummary.locator('.card-status[data-status="failed"]');
+    await outcome.getByText('退出码 17', { exact: true }).waitFor();
+    await outcome.getByText('失败', { exact: true }).waitFor();
+    assert.ok(await longSummary.evaluate(element => {
+      const label = element.querySelector('.card-title');
+      const status = element.querySelector('.card-status');
+      return label.scrollWidth > label.clientWidth && status.scrollWidth === status.clientWidth &&
+        status.getBoundingClientRect().right <= element.getBoundingClientRect().right;
+    }));
+    const original = longCard.getByLabel('完整命令');
+    assert.equal(await original.count(), 0);
+    await longSummary.press('Enter');
+    await original.waitFor();
+    assert.equal(await original.textContent(), fullCommand);
+    await original.focus();
+    assert.ok(await original.evaluate(element => element === document.activeElement));
+    if (screenshot) {
+      await longCard.evaluate(async element => {
+        const frame = () => new Promise(requestAnimationFrame);
+        await frame();
+        await frame();
+        const view = element.closest('.timeline');
+        view.scrollTop += element.getBoundingClientRect().top - view.getBoundingClientRect().top - 6;
+        await frame();
+      });
+      await page.screenshot({ path: screenshot.replace(/\.png$/, '-command.png') });
+    }
+    await longCard.getByRole('button', { name: '复制命令' }).click();
+    await longCard.locator('[title="已复制命令"]').waitFor();
+    assert.equal(await readClipboard(), fullCommand);
+    await longSummary.press('Enter');
+    await original.waitFor({ state: 'detached' });
     return { mountedAtStart, mountedAtEnd, rawLines: 20_001, rawCharacters: raw.length };
   } finally {
     await app?.close();

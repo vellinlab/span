@@ -348,6 +348,8 @@ p { margin-block: 0 12px; }
 .card-hint { color: var(--muted); }
 .activity[data-card="reasoning"] .card-title { flex: none; font-weight: 500; }
 .card-status {
+  display: inline-flex;
+  gap: 4px;
   margin-left: auto;
   flex: none;
   color: var(--muted);
@@ -387,6 +389,18 @@ p { margin-block: 0 12px; }
 .card-path { display: block; overflow-wrap: anywhere; color: var(--muted); padding: 3px 0; font-size: 12px; }
 .tool-output-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
 .tool-output-heading .icon-button { width: 26px; height: 26px; }
+.command-source { margin-bottom: 4px; }
+.card-body .command-text {
+  max-height: clamp(44px, calc(100cqh - 140px), 116px);
+  padding-inline: 8px;
+  border-radius: 4px;
+  background: var(--canvas);
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+  tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .card-body :is(.text-scroll, .output-scroll) { max-height: clamp(72px, calc(100cqh - 145px), 250px); }
 .card-body .output-scroll { padding: 0 8px; border-radius: 4px; background: var(--canvas); scrollbar-width: thin; }
 .diff-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
