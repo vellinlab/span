@@ -72,6 +72,7 @@ async function prepareEchoFrames(app, page) {
     }, area);
   }
   assert.ok(references.a && references.b && references.a !== references.b, 'The two terminal keys must paint different pixels');
+  console.log('Captured different reference pixels for both keys. Verifying frame notifications.');
   await app.evaluate(({ BrowserWindow }, { area, references }) => {
     const pixels = { a: Buffer.from(references.a, 'hex'), b: Buffer.from(references.b, 'hex') };
     const state = { frames: 0, pixels };
@@ -196,13 +197,21 @@ async function snapshot(app, page, cdp, pid) {
 async function trial(workload, variant, executable) {
   const profile = await mkdtemp(join(tmpdir(), 'span-resource-'));
   let app;
+  let interactionWatchdog;
   try {
     app = await electron.launch({ executablePath: executable,
       args: ['--demo', '--force-device-scale-factor=1', '--disable-gpu', '--terminal-renderer=dom',
         ...(linux ? ['--no-sandbox', '--disable-webgl'] : [])],
       env: { ...process.env, SPAN_PREVIEW_PROFILE: profile },
     });
+    if (workload === 'interaction') {
+      interactionWatchdog = setTimeout(() => {
+        console.error(`${variant} terminal interaction did not finish within 45s`);
+        app.process().kill();
+      }, 45_000);
+    }
     const page = await app.firstWindow();
+    if (workload === 'interaction') page.setDefaultTimeout(interactionTimeoutMs);
     await resize(app, page, initialSize);
     const tail = page.getByTestId('transcript').getByText('第 160 项', { exact: false });
     await tail.waitFor();
@@ -248,8 +257,12 @@ async function trial(workload, variant, executable) {
     const diagnosticGc = await capture();
     return { workload, variant, events, activeMs, beforeOpen, beforeWorkload, active, closed, settled, diagnosticGc };
   } finally {
-    await app?.close();
-    await rm(profile, { recursive: true, force: true, maxRetries: 3 });
+    try {
+      await app?.close();
+    } finally {
+      clearTimeout(interactionWatchdog);
+      await rm(profile, { recursive: true, force: true, maxRetries: 3 });
+    }
   }
 }
 
