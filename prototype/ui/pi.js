@@ -11,6 +11,11 @@ const wire = {
 };
 
 const modelId = model => model ? model.provider + '/' + model.id : undefined;
+const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const modelLevels = model => thinkingLevels.filter((level, index) => {
+  const mapped = model.thinkingLevelMap?.[level];
+  return mapped !== null && (index < 5 || mapped !== undefined);
+});
 const textInput = input => {
   if (input.some(part => part.kind !== 'text')) throw new Error('当前 Pi 输入入口支持文本。');
   return input.map(part => part.text).join('\n');
@@ -69,13 +74,15 @@ function definePi({ generation, cwd, location, onEvent }) {
     }).catch(() => {});
   }
 
-  function beginTurn() {
+  function beginTurn(announce = true) {
     const id = piTurnId(turnCount++);
     messageIndex = 0;
     tools = new Map();
     finalReply = undefined;
     hasUser = false;
-    setRun({ id, status: 'running' });
+    const turn = { id, status: 'running' };
+    if (announce) setRun(turn);
+    else run = turn;
   }
 
   function inputStatus(input, state) {
@@ -95,8 +102,12 @@ function definePi({ generation, cwd, location, onEvent }) {
   function dialogRequest(record) {
     const { id, method, title } = record;
     if (method === 'notify') {
-      if (run && record.message) item({ kind: 'notice', id: 'notice:' + id, turnId: run.id,
-        title: 'Pi', text: record.message }, true);
+      const text = record.message?.trim();
+      if (run && text) {
+        const heading = text.split('\n', 1)[0].slice(0, 96);
+        item({ kind: 'notice', id: 'notice:' + id, turnId: run.id,
+          title: heading, text: heading === text ? undefined : text }, true);
+      }
       return;
     }
     if (!['confirm', 'select', 'input', 'editor'].includes(method)) return;
@@ -135,7 +146,11 @@ function definePi({ generation, cwd, location, onEvent }) {
       notify({ kind: 'session', info: { title: record.name } });
       return;
     }
-    if (run?.status !== 'running' && record.type === 'agent_start') beginTurn();
+    if (record.type === 'agent_start') {
+      if (run?.status !== 'running') beginTurn();
+      else setRun(run);
+      return;
+    }
     if (run?.status !== 'running') return;
     if (record.type === 'agent_settled') {
       settle(record.aborted);
@@ -153,7 +168,8 @@ function definePi({ generation, cwd, location, onEvent }) {
         if (hasUser) beginTurn();
         hasUser = true;
         const text = piText(message.content);
-        const index = pending.findIndex(input => input.text === text);
+        let index = pending.findIndex(input => input.text === text);
+        if (index < 0) index = pending.findIndex(input => input.delivery === 'prompt');
         if (index >= 0) [submitted] = pending.splice(index, 1);
         inputStatus(submitted, 'delivered');
       }
@@ -248,7 +264,12 @@ function definePi({ generation, cwd, location, onEvent }) {
         pending.splice(pending.indexOf(ticket), 1);
         inputStatus(ticket, 'delivered');
         item({ kind: 'user', id: 'handled:' + clientId, turnId: run.id, text: ticket.text, clientId }, true);
-        if (delivery === 'prompt') settle(false);
+        if (delivery === 'prompt') {
+          turnCount--;
+          settle(false);
+        }
+      } else if (result?.disposition === 'queued' && pending.includes(ticket)) {
+        inputStatus(ticket, 'queued');
       }
     } catch (error) {
       const index = pending.indexOf(ticket);
@@ -328,7 +349,7 @@ function definePi({ generation, cwd, location, onEvent }) {
       async start(session, input, options, clientId) {
         requireSession(session);
         await configure(options);
-        beginTurn();
+        beginTurn(false);
         const turn = run;
         try {
           await ask('prompt', input, clientId, 'prompt');
@@ -364,9 +385,13 @@ function definePi({ generation, cwd, location, onEvent }) {
       const result = await request('get_available_models');
       models = result.models ?? [];
       const { levels } = state?.model ? await request('get_available_thinking_levels') : { levels: [] };
-      return models.map(model => ({ id: modelId(model), label: model.name ?? model.id,
-        isDefault: modelId(model) === modelId(state?.model), inputs: ['text'],
-        efforts: model.reasoning ? (levels ?? []).map(id => ({ id, label: id })) : [], tiers: [] }));
+      return models.map(model => {
+        const id = modelId(model);
+        const isDefault = id === modelId(state?.model);
+        const efforts = model.reasoning
+          ? (isDefault ? levels ?? [] : modelLevels(model)).map(id => ({ id, label: id })) : [];
+        return { id, label: model.name ?? model.id, isDefault, inputs: ['text'], efforts, tiers: [] };
+      });
     },
     usage,
     interactions: {

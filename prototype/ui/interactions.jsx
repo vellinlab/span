@@ -14,7 +14,7 @@ function InteractionInput({ field }) {
       {field.allowOther && <option value="@other">其他</option>}
     </select>}
     {useText && (field.multiline && !field.secret
-      ? <textarea name={field.id} required={field.required} defaultValue={field.prefill} rows={3} />
+      ? <textarea name={field.id} required={field.required} defaultValue={field.prefill} rows={2} />
       : <input name={field.id} required={field.required} type={field.secret ? 'password' : 'text'}
         defaultValue={field.prefill} />)}
   </label>;

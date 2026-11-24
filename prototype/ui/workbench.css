@@ -616,6 +616,7 @@ p { margin-block: 0 12px; }
   background: var(--canvas);
   resize: vertical;
 }
+.approval-body textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .approval-reason, .approval-context, .approval-context dd { margin: 0; }
 .approval-context div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 7px; }
 .approval-context dt { color: var(--muted); }

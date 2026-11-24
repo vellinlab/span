@@ -15,6 +15,7 @@ const initialPrompt = '核对 Pi 的推理、工具与用量。';
 const resumePrompt = '继续刚才保存的 Pi 会话。';
 const firstAnswer = 'Pi 已完成工作台验收。';
 let releaseReasoning;
+let releaseTool;
 const gateway = createServer(async (request, response) => {
   try {
     assert.equal(request.url, '/v1/chat/completions');
@@ -43,6 +44,7 @@ const gateway = createServer(async (request, response) => {
       send({ reasoning_content: '先核对 Pi 会话。' });
       await new Promise(done => { releaseReasoning = done; });
       send({ reasoning_content: '\n再核对工具和用量。' });
+      await new Promise(done => { releaseTool = done; });
       send({ tool_calls: [{ index: 0, id: 'span-tool', type: 'function',
         function: { name: 'bash', arguments: JSON.stringify({ command: 'echo pi tool result' }) } }] });
       send({}, 'tool_calls', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
@@ -116,8 +118,12 @@ export default function (pi) {
   await send(initialPrompt);
   const reasoning = page.getByRole('button', { name: '实时推理摘要' });
   await reasoning.getByText('先核对 Pi 会话。', { exact: true }).waitFor();
-  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
+  const bounds = await reasoning.boundingBox();
   releaseReasoning();
+  await reasoning.getByText('再核对工具和用量。', { exact: true }).waitFor();
+  assert.deepEqual(await reasoning.boundingBox(), bounds);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
+  releaseTool();
   await transcript.getByText(firstAnswer, { exact: true }).waitFor();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   assert.equal(await reasoning.count(), 0);
@@ -129,12 +135,20 @@ export default function (pi) {
   const usage = page.getByRole('region', { name: '用量' });
   await usage.getByText('总计', { exact: true }).waitFor();
   await usage.getByRole('button', { name: '关闭面板' }).click();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
   await send('/span-form');
   const confirm = page.getByRole('region', { name: '核对 Pi 操作' });
   await confirm.getByRole('button', { name: '确认', exact: true }).click();
   const editor = page.getByRole('region', { name: '编辑 Pi 说明' });
   const answer = editor.getByRole('textbox', { name: '回答' });
   assert.equal(await answer.inputValue(), '第一行\n第二行');
+  assert.ok(await editor.evaluate(card => {
+    const field = card.querySelector('textarea').getBoundingClientRect();
+    const actions = card.querySelector('.approval-actions').getBoundingClientRect();
+    return field.bottom <= actions.top && actions.bottom <= innerHeight;
+  }));
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-editor.png') });
   await editor.getByRole('button', { name: '取消' }).click();
   await transcript.getByText('Pi 表单已取消。', { exact: true }).waitFor();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
@@ -158,6 +172,7 @@ export default function (pi) {
   console.log('Verified real Pi streaming, tools, native extension dialogs, usage, and persisted resume on ' + (ssh ?? process.platform));
 } finally {
   releaseReasoning?.();
+  releaseTool?.();
   gateway.closeAllConnections();
   gateway.close();
   await app?.close();

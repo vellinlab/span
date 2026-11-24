@@ -295,3 +295,112 @@ test('timeline updates can branch from the same rows without sharing new positio
   assert.deepEqual(second.map(row => row.text), ['Start', 'B']);
   assert.deepEqual(continued.map(row => row.text), ['Start', 'B', 'C', '?']);
 });
+
+test('Pi reconnects to its stored branch and keeps queue, tool and dialog events on the active host', async t => {
+  const events = [];
+  const sent = [];
+  const source = 38;
+  let receive;
+  const emit = data => receive({ event: 'agent', generation: source, data });
+  const message = (role, content, rest = {}) => ({ role, content, ...rest });
+  const text = value => [{ type: 'text', text: value }];
+  const entry = (id, parentId, role, content) =>
+    ({ id, parentId, type: 'message', message: message(role, content) });
+  const respond = (packet, data) => emit({ id: packet.id, type: 'response', success: true, data });
+  let branch = false;
+  let rejectPrompt = false;
+  let switching;
+  globalThis.window = { span: {
+    onEvent(callback) { receive = callback; return () => { receive = null; }; },
+    async request(method, { packet } = {}) {
+      if (method === 'agent.start') {
+        receive({ event: 'agent-route', generation: source, data: 'stdio' });
+        return;
+      }
+      if (method !== 'agent.send') return;
+      sent.push(packet);
+      if (packet.type === 'get_state') {
+        respond(packet, { sessionId: branch ? 'saved' : 'fresh', sessionFile: '/remote/work/session.jsonl' });
+      } else if (packet.type === 'span_list_sessions') {
+        respond(packet, { items: [{ id: 'saved', path: '/remote/work/saved.jsonl', cwd: '/remote/work' }], cursor: null });
+      } else if (packet.type === 'switch_session') {
+        switching = packet;
+        emit({ type: 'extension_ui_request', method: 'confirm', id: 'switch', title: '打开已保存会话' });
+      } else if (packet.type === 'extension_ui_response') {
+        assert.equal(packet.id, 'switch');
+        assert.equal(packet.confirmed, true);
+        branch = true;
+        respond(switching, { cancelled: false });
+      } else if (packet.type === 'get_entries') {
+        respond(packet, { leafId: 'answer', entries: [
+          entry('one', null, 'user', 'First'),
+          entry('two', 'one', 'assistant', text('Stored response')),
+          entry('discarded', 'one', 'assistant', text('Abandoned branch')),
+          entry('question', 'two', 'user', 'Second'),
+          entry('answer', 'question', 'assistant', text('Current branch')),
+        ] });
+      } else if (packet.type === 'prompt' && rejectPrompt) {
+        emit({ id: packet.id, type: 'response', success: false, error: 'Pi refused the prompt' });
+      } else if (packet.type === 'prompt') {
+        emit({ type: 'agent_start' });
+        emit({ type: 'message_end', message: message('user', packet.message) });
+        respond(packet, { disposition: 'started' });
+      } else if (packet.type === 'follow_up' || packet.type === 'steer') {
+        respond(packet, { disposition: 'queued' });
+      } else if (packet.type === 'clear_queue') {
+        respond(packet, { steering: [], followUp: ['queued'] });
+      } else if (packet.type === 'abort') {
+        emit({ type: 'agent_settled', aborted: true });
+        respond(packet);
+      } else if (packet.type === 'get_session_stats') {
+        respond(packet, { tokens: { total: 17 }, contextUsage: { tokens: 10, contextWindow: 100 } });
+      } else {
+        respond(packet, { commands: [] });
+      }
+    },
+  } };
+  const agent = createAgent('pi', { location: remote, cwd: '/local/work', generation: source, onEvent: event => events.push(event) });
+  t.after(() => { agent.close(); delete globalThis.window; });
+  await agent.open();
+  assert.equal(events[0].route, 'stdio');
+  const catalog = await agent.sessions.list({});
+  const ref = catalog.items[0].ref;
+  assert.equal(sessionKey(ref), sessionKey({ backend: 'pi', location: remote, id: 'saved' }));
+  const loading = agent.sessions.resume(ref, 1);
+  await Promise.resolve();
+  assert.equal(events.at(-1).kind, 'connectionInteraction');
+  await agent.interactions.respond('switch', { choice: 'yes' });
+  const opened = await loading;
+  assert.equal(opened.history.items[0].rows.at(-1).text, 'Current branch');
+  const older = await agent.sessions.history(ref, { cursor: opened.history.cursor, limit: 1 });
+  assert.equal(older.items[0].rows.at(-1).text, 'Stored response');
+  assert.equal(older.cursor, null);
+
+  const input = value => [{ kind: 'text', text: value }];
+  const run = await agent.turns.start(ref, input('created'), {}, 'sent');
+  assert.equal(run.id, 'turn:2');
+  await agent.turns.followUp(ref, input('queued'), 'queued');
+  await agent.turns.steer(ref, run.id, input('steered'), 'steered');
+  emit({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'provider summary' } });
+  emit({ type: 'tool_execution_update', toolName: 'bash', toolCallId: 'tool', args: { command: 'echo span' },
+    partialResult: { content: text('output') } });
+  assert.equal(events.at(-1).item.status, 'running');
+  emit({ type: 'tool_execution_end', toolName: 'bash', toolCallId: 'tool', args: { command: 'echo span' },
+    result: { content: text('output'), details: { exitCode: 0 } }, isError: false });
+  emit({ type: 'agent_end', willRetry: true });
+  assert.equal(events.at(-1).kind, 'item');
+  emit({ type: 'message_end', message: message('user', 'steered') });
+  await agent.turns.stop(ref, run.id);
+  assert.ok(sent.some(packet => packet.type === 'clear_queue'));
+  await Promise.resolve();
+  assert.ok(events.some(event => event.kind === 'delta' && event.delta.text === 'provider summary'));
+  assert.ok(events.some(event => event.clientId === 'steered' && event.state === 'delivered'));
+  assert.ok(events.some(event => event.clientId === 'queued' && event.state === 'cancelled'));
+  assert.ok(events.some(event => event.run?.status === 'cancelled'));
+  rejectPrompt = true;
+  await assert.rejects(agent.turns.start(ref, input('rejected'), {}, 'retry'), /refused/);
+  assert.equal(events.findLast(event => event.kind === 'run').run.status, 'failed');
+
+  assert.equal(events.filter(event => event.session).every(event => sessionKey(event.session) === sessionKey(ref)), true);
+  assert.ok(sent.filter(packet => packet.type !== 'extension_ui_response').every(packet => typeof packet.id === 'string'));
+});
