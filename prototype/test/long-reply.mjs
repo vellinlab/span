@@ -260,7 +260,12 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       desktop = await observeDesktopDraft(app, area);
       sampleInput = await prepareInputSampling(app, page, composer, area, desktop);
     }
-    await transcript.evaluate(element => { element.scrollTop -= 640; });
+    // The fixed strip changes the timeline height. Let its resize observer
+    // settle before leaving the bottom to inspect an older message.
+    await settleFrame(page);
+    await transcript.evaluate(element => {
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - 640);
+    });
     const latest = page.getByRole('button', { name: '滚到最新消息' });
     await latest.waitFor();
     await settleFrame(page);
