@@ -444,8 +444,47 @@ async function check(binary, label, trial) {
     if (grouped) {
       assert.equal(await transcript.getAttribute('data-items'), '2901');
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
+      const titleOffset = () => group.evaluate(button =>
+        button.getBoundingClientRect().top - button.closest('.timeline').getBoundingClientRect().top);
+      const closedTop = label === 'candidate' ? await titleOffset() : undefined;
+      const lastCommand = transcript.getByText('workspace verify --record 160-143', { exact: true });
       await group.press('Enter');
-      await transcript.getByText('workspace verify --record 160-143', { exact: true }).waitFor();
+      await lastCommand.waitFor();
+      if (label === 'candidate') {
+        // Deliver a height change between the viewport's top and the open group.
+        const { before, resized, restored } = await group.evaluate(async button => {
+          const viewport = button.closest('.timeline');
+          const row = button.closest('.message').previousElementSibling;
+          const titleOffset = () => button.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+          const frame = async () => {
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+          };
+          await frame();
+          if (row.getBoundingClientRect().top < viewport.getBoundingClientRect().top) {
+            throw new Error('The row being resized must be inside the viewport.');
+          }
+          const before = titleOffset();
+          const padding = row.style.paddingBottom;
+          row.style.paddingBottom = `${Number.parseFloat(getComputedStyle(row).paddingBottom) + 96}px`;
+          await frame();
+          const resized = titleOffset();
+          row.style.paddingBottom = padding;
+          await frame();
+          return { before, resized, restored: titleOffset() };
+        });
+        assert.ok(Math.abs(resized - before) <= 2 && Math.abs(restored - before) <= 2,
+          `The group moved during a late resize: ${before}, ${resized}, ${restored}.`);
+        assert.ok(await group.evaluate(button => button === document.activeElement));
+        if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-candidate-anchor.png` });
+        await group.press('Enter');
+        await lastCommand.waitFor({ state: 'detached' });
+        await settleFrame(page);
+        assert.equal(await group.getAttribute('aria-expanded'), 'false');
+        assert.ok(Math.abs(await titleOffset() - closedTop) <= 2);
+        await group.press('Enter');
+        await lastCommand.waitFor();
+      }
     }
     await composer.fill('验证长回复末尾。');
     await composer.press('Enter');

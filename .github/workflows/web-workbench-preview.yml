@@ -194,7 +194,7 @@ jobs:
           node prototype/test/covered-transcript.mjs "$binary"
           node prototype/test/long-reply.mjs "$binary"
           node prototype/test/long-reply.mjs "$binary" --following
-          node prototype/test/long-reply.mjs "$binary" --grouped-history
+          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-grouped-history" --grouped-history
           node prototype/test/long-reply.mjs "$binary" --tool-output
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-stream" --reasoning
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-details" --reasoning-details

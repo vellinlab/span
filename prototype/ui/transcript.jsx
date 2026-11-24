@@ -285,14 +285,15 @@ const TranscriptRow = memo(function TranscriptRow({
     title={title} hint={hint} path={path} expanded={expanded} scroll={scroll} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
-const ActivityGroup = memo(function ActivityGroup({ group, open, toggle }) {
+const ActivityGroup = memo(function ActivityGroup({ group, open, toggle, releaseAnchor }) {
   const count = group.end - group.start;
   const tools = count - group.commands;
   const Icon = tools ? Wrench : Terminal;
   const label = tools ? `${group.commands ? `${group.commands} 条命令 · ` : ''}${tools} 次工具调用`
     : `${count} 条命令`;
   return <div className="activity" data-card="activity-group">
-    <button type="button" className="card-heading" aria-expanded={open} onClick={() => toggle(group.key, !open)}>
+    <button type="button" className="card-heading" aria-expanded={open}
+      onClick={event => toggle(group.key, !open, event.currentTarget)} onBlur={releaseAnchor}>
       <ChevronRight size={13} className="card-chevron" /><Icon size={15} className="card-icon" />
       <span className="card-title">{label}</span>
     </button>
@@ -355,15 +356,6 @@ export const Transcript = memo(function Transcript({
     expanded.current.set(key, open);
     updateExpansion();
   }, [inspect]);
-  const toggleGroup = useCallback((key, open) => {
-    inspect(key, open);
-    setOpenGroups(previous => {
-      const next = new Set(previous);
-      if (open) next.add(key);
-      else next.delete(key);
-      return next;
-    });
-  }, [inspect]);
   const rawLayout = timelineLayout(rows);
   const layout = useMemo(() => groupedTimelineLayout(rawLayout, liveTurnId, ungroupedTurns.current, openGroups),
     [rawLayout, liveTurnId, openGroups]);
@@ -386,6 +378,22 @@ export const Transcript = memo(function Transcript({
   });
   const virtualRows = virtual.getVirtualItems();
   const height = virtual.getTotalSize();
+
+  const releaseGroupAnchor = useCallback(() => {
+    virtual.shouldAdjustScrollPositionOnItemSizeChange = undefined;
+  }, [virtual]);
+  const toggleGroup = useCallback((key, open, button) => {
+    const groupRow = button.closest('.message');
+    // Resizes between the viewport's top and the selected group also move its title.
+    virtual.shouldAdjustScrollPositionOnItemSizeChange = item => item.index < Number(groupRow.dataset.index);
+    inspect(key, open);
+    setOpenGroups(previous => {
+      const next = new Set(previous);
+      if (open) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, [inspect, virtual]);
 
   useLayoutEffect(() => {
     if (inspectedCard) onScrollPosition(virtual.getDistanceFromEnd() >= 40);
@@ -481,10 +489,11 @@ export const Transcript = memo(function Transcript({
     if (restore || !jumpToLatest.current || !rows.length) return;
     jumpToLatest.current = false;
     following.current = true;
+    releaseGroupAnchor();
     setInspectedCard(null);
     virtual.scrollToEnd();
     onScrollPosition(false);
-  }, [rows, virtual, jumpToLatest, onScrollPosition, restore]);
+  }, [rows, virtual, jumpToLatest, onScrollPosition, restore, releaseGroupAnchor]);
 
   useLayoutEffect(() => {
     const element = scroll.current;
@@ -514,7 +523,9 @@ export const Transcript = memo(function Transcript({
 
   return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
     data-items={rows.length} onScroll={onScroll}
+    onPointerDownCapture={releaseGroupAnchor} onKeyDownCapture={releaseGroupAnchor}
     onWheel={event => {
+      releaseGroupAnchor();
       if (event.deltaY < 0 && scroll.current.scrollTop < 160 &&
         !event.target.closest('.text-scroll, .output-scroll, .command-text, .plan-list')) onScroll();
     }}>
@@ -527,7 +538,8 @@ export const Transcript = memo(function Transcript({
         const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);
         return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
-          {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)} toggle={toggleGroup} />
+          {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)}
+            toggle={toggleGroup} releaseAnchor={releaseGroupAnchor} />
             : <TranscriptRow row={row} activePlan={activePlan}
               liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
