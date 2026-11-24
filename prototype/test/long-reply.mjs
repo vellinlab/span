@@ -25,6 +25,73 @@ const settleFrame = page => page.evaluate(async () => {
   await new Promise(requestAnimationFrame);
 });
 
+function placeInTimeline(locator, top) {
+  return locator.evaluate(async (element, top) => {
+    const timeline = element.closest('.timeline');
+    // Nearby rows can mount and replace their estimated heights after the first scroll.
+    let stableFrames = 0;
+    for (let frame = 0; frame < 30; frame++) {
+      const offset = element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+      if (Math.abs(offset - top) <= 2) {
+        if (++stableFrames === 3) return;
+      } else {
+        stableFrames = 0;
+        timeline.scrollTop += offset - top;
+      }
+      await new Promise(requestAnimationFrame);
+    }
+    throw new Error('Could not settle the initial reading position.');
+  }, top);
+}
+
+async function checkSidebarReflow(app, page, transcript, latest, tailInView) {
+  const size = [880, 640];
+  await app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0].setContentSize(width, height), size);
+  await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, size);
+  const passage = transcript.getByText('第 080 项。', { exact: true }).locator('..');
+  await placeInTimeline(passage, 8);
+  await latest.waitFor();
+  const measure = () => passage.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return { top: bounds.top - element.closest('.timeline').getBoundingClientRect().top, height: bounds.height };
+  });
+  const before = await measure();
+  if (screenshot) await page.screenshot({ path: `${screenshot}-sidebar-reading-before.png` });
+  const grip = page.getByRole('separator', { name: '调整侧栏宽度' });
+  const maximum = Number(await grip.getAttribute('aria-valuemax'));
+  const current = Number(await grip.getAttribute('aria-valuenow'));
+  const bounds = await grip.boundingBox();
+  const x = bounds.x + bounds.width / 2;
+  const y = bounds.y + bounds.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + maximum - current, y, { steps: 8 });
+  await settleFrame(page);
+  const dragging = await measure();
+  await page.mouse.up();
+  await settleFrame(page);
+  const resized = await measure();
+  assert.equal(Number(await grip.getAttribute('aria-valuenow')), maximum);
+  assert.ok(resized.height > before.height, 'The paragraph must wrap onto another line.');
+  assert.ok([dragging, resized].every(({ top }) => Math.abs(top - before.top) <= 2),
+    `The paragraph moved during sidebar reflow: ${before.top}, ${dragging.top}, ${resized.top}.`);
+  if (screenshot) await page.screenshot({ path: `${screenshot}-sidebar-reading-after.png` });
+  await grip.press('Home');
+  await settleFrame(page);
+  assert.ok(Math.abs((await measure()).top - before.top) <= 2, 'Keyboard resizing should keep the same paragraph in place.');
+  await latest.click();
+  await tailInView();
+  await grip.press('End');
+  await settleFrame(page);
+  await tailInView();
+  const answer = transcript.getByText('长回复已全部生成。', { exact: true });
+  assert.ok(await answer.evaluate(element => {
+    const text = element.getBoundingClientRect();
+    const viewport = element.closest('.timeline').getBoundingClientRect();
+    return text.top >= viewport.top && text.bottom <= viewport.bottom;
+  }), 'Resizing while following should keep the final text visible.');
+}
+
 async function waitForMarker(file) {
   for (let attempt = 0; attempt < 300; attempt++) {
     if (existsSync(file)) return;
@@ -528,22 +595,7 @@ async function check(binary, label, trial) {
       element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top);
     let position;
     if (!following) {
-      await heading.evaluate(async element => {
-        const timeline = element.closest('.timeline');
-        // The first scroll can mount nearby rows and change their estimated heights.
-        let stableFrames = 0;
-        for (let frame = 0; frame < 30; frame++) {
-          const offset = element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
-          if (Math.abs(offset - 28) <= 2) {
-            if (++stableFrames === 3) return;
-          } else {
-            stableFrames = 0;
-            timeline.scrollTop += offset - 28;
-          }
-          await new Promise(requestAnimationFrame);
-        }
-        throw new Error('Could not settle the initial reading position.');
-      });
+      await placeInTimeline(heading, 28);
       await latest.waitFor();
       position = await headingOffset();
       assert.ok(Math.abs(position - 28) <= 2, `Expected to start reading the reply at 28 pixels, observed ${position}.`);
@@ -629,6 +681,9 @@ async function check(binary, label, trial) {
       await tailInView();
       assert.equal(await transcript.getByRole('link', { name: '后补引用' }).getAttribute('href'),
         'https://example.com/span/reference');
+    }
+    if (!following && !grouped && label === 'candidate' && trial === 0) {
+      await checkSidebarReflow(app, page, transcript, latest, tailInView);
     }
     const link = transcript.getByRole('link', { name: '复核链接' });
     assert.equal(await link.getAttribute('href'), 'https://example.com/span');

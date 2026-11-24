@@ -522,7 +522,7 @@ export const Transcript = memo(function Transcript({
   }
 
   return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
-    data-items={rows.length} onScroll={onScroll}
+    data-items={rows.length} data-reading-history={showLatest && !restore ? 'true' : undefined} onScroll={onScroll}
     onPointerDownCapture={releaseGroupAnchor} onKeyDownCapture={releaseGroupAnchor}
     onWheel={event => {
       releaseGroupAnchor();

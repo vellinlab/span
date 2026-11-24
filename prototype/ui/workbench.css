@@ -311,6 +311,10 @@ p { margin-block: 0 12px; }
   overflow-anchor: none;
   scrollbar-gutter: stable both-edges;
 }
+/* A virtual row can contain many paragraphs. Keep the visible text anchored while the sidebar rewraps it. */
+.sidebar:has(.sidebar-grip:is(:focus-visible, [data-dragging="true"])) ~ .workspace-area .timeline[data-reading-history] {
+  overflow-anchor: auto;
+}
 .timeline::-webkit-scrollbar { width: var(--scrollbar-width); }
 .timeline::-webkit-scrollbar-thumb { border-radius: 4px; background: #ffffff24; }
 .reading-column { width: min(var(--reading-width), 100% - 2 * var(--reading-gutter)); margin-inline: auto; }
