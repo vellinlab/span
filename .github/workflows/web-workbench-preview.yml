@@ -19,7 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
           persist-credentials: false
       - name: Build renderer
         working-directory: prototype
@@ -31,11 +30,11 @@ jobs:
         run: |
           mkdir -p /tmp/span-workbench-artifacts
           cp "$(command -v node)" /tmp/span-workbench-artifacts/node
-          if git rev-parse HEAD^ >/dev/null 2>&1 && ! git diff --quiet HEAD^ HEAD -- prototype/core; then
-            mkdir /tmp/span-workbench-artifacts/baseline-source
-            git archive HEAD^ prototype/core | tar -x -C /tmp/span-workbench-artifacts/baseline-source
-            git rev-parse HEAD^ > /tmp/span-workbench-artifacts/pty-baseline-commit.txt
-          fi
+          baseline=801c589f9bf5b4ae64e67c9a055eb627461a173e
+          git fetch --no-tags --depth=1 origin "$baseline"
+          mkdir /tmp/span-workbench-artifacts/baseline-source
+          git archive "$baseline" prototype/core | tar -x -C /tmp/span-workbench-artifacts/baseline-source
+          printf '%s\n' "$baseline" > /tmp/span-workbench-artifacts/pty-baseline-commit.txt
           docker run --rm -v "$PWD:/work" -v /tmp/span-workbench-artifacts:/artifacts -w /work almalinux:8 bash -eu -c '
             dnf -y install gcc binutils curl ca-certificates
             curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/rustup.sh
@@ -43,11 +42,9 @@ jobs:
             export PATH="$HOME/.cargo/bin:$PATH"
             cargo fmt --manifest-path prototype/core/Cargo.toml -- --check
             binary=prototype/core/target/release/span-workbench-core
-            if [ -f /artifacts/pty-baseline-commit.txt ]; then
-              cargo build --locked --release --target-dir /tmp/span-pty-baseline-target \
-                --manifest-path /artifacts/baseline-source/prototype/core/Cargo.toml
-              cp /tmp/span-pty-baseline-target/release/span-workbench-core /artifacts/span-workbench-pty-baseline
-            fi
+            cargo build --locked --release --target-dir /tmp/span-pty-baseline-target \
+              --manifest-path /artifacts/baseline-source/prototype/core/Cargo.toml
+            cp /tmp/span-pty-baseline-target/release/span-workbench-core /artifacts/span-workbench-pty-baseline
             cargo build --locked --release --manifest-path prototype/core/Cargo.toml
             readelf --version-info "$binary" | grep -oE "GLIBC_[0-9]+(\.[0-9]+)+" | sort -Vu > /artifacts/glibc-service.txt
             test "$(tail -1 /artifacts/glibc-service.txt | cat - <(echo GLIBC_2.28) | sort -V | tail -1)" = GLIBC_2.28

@@ -30,6 +30,7 @@ async function measure(binary, controlled) {
   let tail = '';
   let complete = false;
   let failure;
+  let cursorReply;
   function send(method, params = {}) {
     const id = ++sequence;
     return new Promise((resolve, reject) => {
@@ -59,6 +60,10 @@ async function measure(binary, controlled) {
     const bytes = Buffer.from(packet.data, 'base64');
     count += bytes.length;
     tail = (tail + bytes.toString()).slice(-512);
+    if (windows && !cursorReply && tail.includes('\x1b[6n')) {
+      // ConPTY asks the emulator for its cursor position before it starts the Windows shell.
+      cursorReply = send('terminal.write', { data: '\x1b[1;1R' }).catch(error => { failure = error; });
+    }
     complete ||= tail.includes(burstMarker);
     if (ack) {
       consumed += bytes.length;
@@ -69,8 +74,18 @@ async function measure(binary, controlled) {
     }
   });
   const diagnostic = message => () => `${message} Received ${count} bytes. Output tail ${JSON.stringify(tail)}`;
-  try {
+  async function start() {
+    cursorReply = null;
     await send('terminal.start', { cwd: process.cwd(), cols: 180, rows: 25 });
+    if (windows) {
+      await until(() => failure || cursorReply, diagnostic('ConPTY did not request the cursor position.'));
+      await cursorReply;
+      await until(() => failure || count > 4, diagnostic('The shell did not respond after supplying the cursor position.'));
+      if (failure) throw failure;
+    }
+  }
+  try {
+    await start();
     await send('terminal.write', { data: burst });
     await until(() => failure || count >= 192 * 1024, diagnostic('The terminal burst did not reach 192 KiB.'));
     await delay(600);
@@ -86,7 +101,7 @@ async function measure(binary, controlled) {
     count = 0;
     tail = '';
     complete = false;
-    await send('terminal.start', { cwd: process.cwd(), cols: 180, rows: 25 });
+    await start();
     await send('terminal.write', { data: burst });
     await until(() => failure || count >= 192 * 1024, diagnostic('The reopened terminal did not produce its first window.'));
     await delay(350);
