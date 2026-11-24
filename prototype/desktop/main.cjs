@@ -8,9 +8,10 @@ const binary = process.platform === 'win32' ? 'span-workbench-core.exe' : 'span-
 const demo = process.argv.includes('--demo');
 const allowed = new Set([
   'agent.start', 'agent.send', 'agent.close',
-  'terminal.start', 'terminal.write', 'terminal.resize', 'terminal.close',
+  'terminal.start', 'terminal.write', 'terminal.resize', 'terminal.ack', 'terminal.close',
   'files.list', 'files.preview',
 ]);
+const terminalEvents = new Set(['terminal', 'terminal-error', 'terminal-closed']);
 
 app.setName('Span Workbench Preview');
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-lcd-text');
@@ -22,6 +23,7 @@ let window;
 let core;
 let closing = false;
 let sequence = 0;
+let terminalGeneration = null;
 const pending = new Map();
 
 function request(method, params) {
@@ -51,6 +53,7 @@ function finish(id, error, payload) {
 }
 
 function publish(packet) {
+  if (terminalEvents.has(packet.event) && packet.generation !== terminalGeneration) return;
   if (window && !window.isDestroyed()) window.webContents.send('span:event', packet);
 }
 
@@ -84,9 +87,26 @@ function trusted(event) {
     && event.senderFrame === window.webContents.mainFrame;
 }
 
+function closeTerminal() {
+  if (terminalGeneration === null) return;
+  const generation = terminalGeneration;
+  terminalGeneration = null;
+  request('terminal.close', { generation }).catch(() => {});
+}
+
 ipcMain.handle('span:request', (event, method, params) => {
   if (!trusted(event) || !allowed.has(method)) throw new Error('无效的工作台请求。');
   if (method === 'agent.start') params = { ...params, demo };
+  if (method === 'terminal.start') {
+    const generation = params?.generation;
+    if (!Number.isSafeInteger(generation) || generation <= 0) throw new Error('无效的终端标识。');
+    terminalGeneration = generation;
+    return request(method, params).catch(error => {
+      if (terminalGeneration === generation) terminalGeneration = null;
+      throw error;
+    });
+  }
+  if (method === 'terminal.close' && params?.generation === terminalGeneration) terminalGeneration = null;
   return request(method, params);
 });
 
@@ -129,6 +149,10 @@ app.whenReady().then(() => {
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.on('did-start-navigation', event => {
+    if (event.isMainFrame && !event.isSameDocument) closeTerminal();
+  });
+  window.webContents.on('render-process-gone', closeTerminal);
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, reply) => reply(false));
   spawnCore();
   window.loadFile(path.join(root, 'dist/index.html'));

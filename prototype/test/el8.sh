@@ -77,6 +77,10 @@ for _ in {1..30}; do
 done
 
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 SPAN_TEST_SSH_ALIAS=span-ci-ssh
+pty_baseline=()
+if [[ -x /artifacts/span-workbench-pty-baseline ]]; then pty_baseline=(/artifacts/span-workbench-pty-baseline); fi
+/artifacts/node prototype/test/terminal-pressure.mjs /artifacts/linux/resources/app/bin/span-workbench-core \
+    "${pty_baseline[@]}" | tee /artifacts/terminal-pressure.json
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
 SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview "" webgl
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux

@@ -10,7 +10,7 @@ use std::{
     env, fs,
     io::{self, BufRead, BufWriter, Read, Write},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex, mpsc},
     thread,
 };
 
@@ -35,13 +35,58 @@ struct Terminal {
     generation: u64,
     child: Box<dyn Child + Send + Sync>,
     master: Box<dyn MasterPty + Send>,
-    input: Box<dyn Write + Send>,
+    input: mpsc::SyncSender<String>,
+    output: Arc<TerminalOutput>,
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        self.output.close();
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+const TERMINAL_OUTPUT_WINDOW: usize = 256 * 1024;
+
+struct TerminalOutput {
+    pending: Mutex<Option<usize>>,
+    changed: Condvar,
+}
+
+impl TerminalOutput {
+    fn new() -> Self {
+        Self {
+            pending: Mutex::new(Some(0)),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn enqueue(&self, count: usize) -> bool {
+        let mut pending = self
+            .changed
+            .wait_while(self.pending.lock().unwrap(), |pending| {
+                pending.is_some_and(|bytes| bytes + count > TERMINAL_OUTPUT_WINDOW)
+            })
+            .unwrap();
+        if let Some(bytes) = &mut *pending {
+            *bytes += count;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn acknowledge(&self, count: usize) {
+        if let Some(bytes) = &mut *self.pending.lock().unwrap() {
+            *bytes = bytes.saturating_sub(count);
+        }
+        self.changed.notify_one();
+    }
+
+    fn close(&self) {
+        *self.pending.lock().unwrap() = None;
+        self.changed.notify_one();
     }
 }
 
@@ -90,15 +135,41 @@ fn terminal_start(params: &Value, output: &Output, generation: u64) -> Result<Te
     }
     command.env("TERM", "xterm-256color");
     let mut reader = pair.master.try_clone_reader()?;
-    let input = pair.master.take_writer()?;
+    let mut writer = pair.master.take_writer()?;
     let child = pair.slave.spawn_command(command)?;
     drop(pair.slave);
+    let (input, keyboard) = mpsc::sync_channel::<String>(32);
+    let write_output = output.clone();
+    thread::spawn(move || {
+        // The service must be able to read acknowledgments while a large paste waits on the PTY.
+        while let Ok(data) = keyboard.recv() {
+            if let Err(error) = writer
+                .write_all(data.as_bytes())
+                .and_then(|()| writer.flush())
+            {
+                let _ = event(
+                    &write_output,
+                    "terminal-error",
+                    generation,
+                    json!(error.to_string()),
+                );
+                break;
+            }
+        }
+    });
+
+    let flow = Arc::new(TerminalOutput::new());
+    let read_flow = flow.clone();
     let output = output.clone();
     thread::spawn(move || {
         let mut buffer = [0; 16384];
         while let Ok(count) = reader.read(&mut buffer) {
             if count == 0 {
                 break;
+            }
+            if !read_flow.enqueue(count) {
+                // Older versions of ConPTY require the output pipe to be drained during close.
+                continue;
             }
             let data = STANDARD.encode(&buffer[..count]);
             if event(&output, "terminal", generation, json!(data)).is_err() {
@@ -112,6 +183,7 @@ fn terminal_start(params: &Value, output: &Output, generation: u64) -> Result<Te
         child,
         master: pair.master,
         input,
+        output: flow,
     })
 }
 
@@ -252,12 +324,30 @@ impl Service {
             "terminal.write" => {
                 let terminal = self
                     .terminal
-                    .as_mut()
+                    .as_ref()
                     .filter(|terminal| terminal.generation == generation)
                     .ok_or("终端尚未连接。")?;
                 let input = params["data"].as_str().ok_or("无效的终端输入。")?;
-                terminal.input.write_all(input.as_bytes())?;
-                terminal.input.flush()?;
+                terminal
+                    .input
+                    .try_send(input.to_owned())
+                    .map_err(|error| match error {
+                        mpsc::TrySendError::Full(_) => "终端输入队列已满，请稍后重试。",
+                        mpsc::TrySendError::Disconnected(_) => "终端尚未连接。",
+                    })?;
+            }
+            "terminal.ack" => {
+                if let Some(terminal) = self
+                    .terminal
+                    .as_ref()
+                    .filter(|terminal| terminal.generation == generation)
+                {
+                    let bytes = params["bytes"]
+                        .as_u64()
+                        .unwrap_or(0)
+                        .min(TERMINAL_OUTPUT_WINDOW as u64);
+                    terminal.output.acknowledge(bytes as usize);
+                }
             }
             "terminal.resize" => {
                 let terminal = self

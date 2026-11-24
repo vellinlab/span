@@ -5,11 +5,13 @@ import { SquareTerminal, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 
 let generation = Math.trunc(performance.timeOrigin * 1_000);
+const ACK_BYTES = 64 * 1024;
 
 export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, onClose }) {
   const element = useRef(null);
   const [error, setError] = useState('');
   useEffect(() => {
+    setError('');
     const host = element.current;
     const source = ++generation;
     const terminal = new Terminal({
@@ -53,13 +55,22 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     }).catch(error => {
       if (!closed) setError(error.message);
     });
+    let unacknowledged = 0;
     const unsubscribe = window.span.onEvent(packet => {
       if (packet.generation !== source) return;
       if (packet.event === 'terminal') {
-        const raw = atob(packet.data);
-        terminal.write(Uint8Array.from(raw, character => character.charCodeAt(0)));
+        const bytes = Uint8Array.fromBase64(packet.data);
+        unacknowledged += bytes.length;
+        if (unacknowledged >= ACK_BYTES) {
+          const processed = unacknowledged;
+          unacknowledged = 0;
+          terminal.write(bytes, () => { if (!closed) update('ack', { bytes: processed }); });
+        } else {
+          terminal.write(bytes);
+        }
       }
       if (packet.event === 'terminal-closed') terminal.writeln('\r\n[终端已退出]');
+      if (packet.event === 'terminal-error') setError(packet.data);
     });
     update('start', { cwd: workspace, ssh, cols: terminal.cols, rows: terminal.rows });
     const input = terminal.onData(data => update('write', { data }));

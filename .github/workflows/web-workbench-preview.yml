@@ -19,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 2
           persist-credentials: false
       - name: Build renderer
         working-directory: prototype
@@ -30,14 +31,24 @@ jobs:
         run: |
           mkdir -p /tmp/span-workbench-artifacts
           cp "$(command -v node)" /tmp/span-workbench-artifacts/node
+          if git rev-parse HEAD^ >/dev/null 2>&1 && ! git diff --quiet HEAD^ HEAD -- prototype/core; then
+            mkdir /tmp/span-workbench-artifacts/baseline-source
+            git archive HEAD^ prototype/core | tar -x -C /tmp/span-workbench-artifacts/baseline-source
+            git rev-parse HEAD^ > /tmp/span-workbench-artifacts/pty-baseline-commit.txt
+          fi
           docker run --rm -v "$PWD:/work" -v /tmp/span-workbench-artifacts:/artifacts -w /work almalinux:8 bash -eu -c '
             dnf -y install gcc binutils curl ca-certificates
             curl -fsSL --retry 3 https://sh.rustup.rs -o /tmp/rustup.sh
             bash /tmp/rustup.sh -y --profile minimal --default-toolchain 1.98.1 --component rustfmt
             export PATH="$HOME/.cargo/bin:$PATH"
             cargo fmt --manifest-path prototype/core/Cargo.toml -- --check
-            cargo build --locked --release --manifest-path prototype/core/Cargo.toml
             binary=prototype/core/target/release/span-workbench-core
+            if [ -f /artifacts/pty-baseline-commit.txt ]; then
+              cargo build --locked --release --target-dir prototype/core/target \
+                --manifest-path /artifacts/baseline-source/prototype/core/Cargo.toml
+              cp "$binary" /artifacts/span-workbench-pty-baseline
+            fi
+            cargo build --locked --release --manifest-path prototype/core/Cargo.toml
             readelf --version-info "$binary" | grep -oE "GLIBC_[0-9]+(\.[0-9]+)+" | sort -Vu > /artifacts/glibc-service.txt
             test "$(tail -1 /artifacts/glibc-service.txt | cat - <(echo GLIBC_2.28) | sort -V | tail -1)" = GLIBC_2.28
           '
@@ -68,6 +79,7 @@ jobs:
             /tmp/span-workbench-artifacts/*.png
             /tmp/span-workbench-artifacts/*.json
             /tmp/span-workbench-artifacts/glibc-service.txt
+            /tmp/span-workbench-artifacts/pty-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -90,6 +102,7 @@ jobs:
           npm run build
       - name: Verify Electron and native ConPTY
         run: |
+          node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
           bash prototype/test/package.sh win32 prototype/core/target/release/span-workbench-core.exe preview
           node prototype/test/smoke.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench.png"
           powershell.exe -NoProfile -Command 'Compress-Archive -Path preview -DestinationPath span-web-windows-x86_64.zip'

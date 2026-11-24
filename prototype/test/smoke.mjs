@@ -165,6 +165,17 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
     .some(line => line.textContent.trim() === 'span_local_pty'), null, { timeout: 10_000 });
 
+  if (!verifySandbox && !exerciseWebgl) {
+    const line = 'span-pressure '.repeat(6).trimEnd();
+    await page.keyboard.type(linux
+      ? `yes '${line}' | head -c 655360; printf '\\n%s_%s\\n' span_terminal burst`
+      : `(for /l %i in (1,1,8500) do @echo ${line}) & echo span_terminal_burst`);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
+      .some(line => line.textContent.trim() === 'span_terminal_burst'), null, { timeout: 20_000 });
+    console.log('Verified terminal output larger than the acknowledgment window reached the screen.');
+  }
+
   if (process.env.SPAN_TEST_SSH_ALIAS) {
     await page.getByRole('button', { name: '主机', exact: true }).click();
     await page.getByLabel('SSH 目标').fill(process.env.SPAN_TEST_SSH_ALIAS);
