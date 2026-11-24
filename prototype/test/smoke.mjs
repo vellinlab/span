@@ -554,9 +554,14 @@ try {
     const removed = join(profile, removedName);
     await Promise.all([writeFile(reference, '附件验收'), writeFile(removed, '这份文件应从草稿移除')]);
     const pick = async paths => {
-      const pending = page.waitForEvent('filechooser');
+      await app.evaluate(({ dialog }, filePaths) => {
+        dialog.showOpenDialog = async (_window, options) => ({
+          canceled: false, filePaths: options.properties.includes('openFile') &&
+            options.properties.includes('multiSelections') ? filePaths : [],
+        });
+      }, paths);
       await attach.click();
-      await (await pending).setFiles(paths);
+      await page.waitForFunction(() => document.activeElement === document.querySelector('.composer textarea'));
     };
     await pick([reference, removed]);
     await draftFiles.getByTitle(removed, { exact: true }).waitFor();

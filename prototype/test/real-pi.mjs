@@ -153,9 +153,10 @@ export default function (pi) {
   const attach = page.getByRole('button', { name: '添加本机文件', exact: true });
   if (ssh) assert.equal(await attach.count(), 0);
   else {
-    const picked = page.waitForEvent('filechooser');
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, localReference);
     await attach.click();
-    await (await picked).setFiles(localReference);
     await page.getByRole('list', { name: '待发送的附件' }).getByText(referenceName, { exact: true }).waitFor();
   }
   await send(initialPrompt);

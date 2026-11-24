@@ -122,6 +122,12 @@ ipcMain.handle('span:workspace', (event, choose) => {
     .then(result => result.filePaths[0] ?? null);
 });
 
+ipcMain.handle('span:choose-files', async event => {
+  if (!trusted(event)) throw new Error('无效的工作台请求。');
+  const result = await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] });
+  return result.canceled ? [] : result.filePaths.map(file => ({ path: file, name: path.basename(file) }));
+});
+
 ipcMain.handle('span:link', (event, url) => {
   if (!trusted(event) || typeof url !== 'string' || url.length > 8192) return;
   const link = new URL(url);

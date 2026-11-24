@@ -59,8 +59,7 @@ function App() {
   const previewOverlay = useSyncExternalStore(subscribePreviewOverlay, isPreviewOverlay);
   const jumpToLatest = useRef(true);
   const input = useRef(null);
-  const filePicker = useRef(null);
-  const pickerScope = useRef(null);
+  const choosingFiles = useRef(false);
   const search = useRef(null);
   const searchTrigger = useRef(null);
   const archiveTrigger = useRef(null);
@@ -116,7 +115,7 @@ function App() {
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
-  const localFiles = Boolean(api?.localFileReferences && window.span.filePath);
+  const localFiles = Boolean(api?.localFileReferences && window.span.chooseFiles);
   const canAttach = localFiles && connection === 'ready' && !loading && !interaction && (!running || canSteer || canQueue);
   const canSendDraft = Boolean(draft.trim() || files.length);
   const commands = agentCommands(api, work.models, work.options);
@@ -283,7 +282,8 @@ function App() {
   }
 
   const latestWork = useRef();
-  latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch };
+  latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch,
+    composerKey, draft, files, localFiles };
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
   const loadCatalogPage = useCallback(() => {
@@ -516,23 +516,25 @@ function App() {
     }
   }
 
-  function addFiles(event) {
-    const picker = event.currentTarget;
+  async function addFiles() {
+    if (!canAttach || choosingFiles.current) return;
+    const scope = work.timelineScope();
+    choosingFiles.current = true;
     try {
-      if (!canAttach || pickerScope.current !== work.timelineScope() || !picker.files.length) return;
-      const selected = new Map(files.map(file => [file.path, file]));
-      for (const file of picker.files) {
-        const path = window.span.filePath(file);
-        if (!path) throw new Error('无法取得所选文件的本机路径。');
-        selected.set(path, { path, name: file.name });
+      const picked = await window.span.chooseFiles();
+      const current = latestWork.current;
+      if (!picked.length || !current.localFiles || current.composerKey !== composerKey || scope !== work.timelineScope()) return;
+      const selected = new Map(current.files.map(file => [file.path, file]));
+      for (const file of picked) {
+        selected.set(file.path, file);
         if (selected.size > maxFileReferences) throw new Error(`最多附加 ${maxFileReferences} 个文件。`);
       }
-      edit(composerKey, draft, [...selected.values()]);
+      edit(composerKey, current.draft, [...selected.values()]);
       input.current?.focus();
     } catch (error) {
-      report(error);
+      if (scope === work.timelineScope()) report(error);
     } finally {
-      picker.value = '';
+      choosingFiles.current = false;
     }
   }
 
@@ -738,14 +740,8 @@ function App() {
                     setCommandIndex(0);
                   }} onKeyDown={textareaKey} />
                 <div className="composer-bar">
-                  {localFiles && <>
-                    <input type="file" multiple hidden ref={filePicker} onChange={addFiles} />
-                    <button type="button" className="icon-button composer-attach" aria-label="添加本机文件" title="添加本机文件"
-                      disabled={!canAttach} onClick={() => {
-                        pickerScope.current = work.timelineScope();
-                        filePicker.current.click();
-                      }}><Paperclip size={16} /></button>
-                  </>}
+                  {localFiles && <button type="button" className="icon-button composer-attach" aria-label="添加本机文件"
+                    title="添加本机文件" disabled={!canAttach} onClick={addFiles}><Paperclip size={16} /></button>}
                   <button type="button" className="composer-control connection" aria-label="主机" data-route={route || undefined}
                     title={[backendName, host, connectionLabel, routeLabels[route]].filter(Boolean).join(' · ')}
                     onClick={showConnection}>

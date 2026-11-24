@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, webUtils } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 let windowHidden = false;
 const visibilityListeners = new Set();
@@ -16,7 +16,7 @@ ipcRenderer.on('span:event', (_event, packet) => {
 contextBridge.exposeInMainWorld('span', {
   request: (method, params = {}) => ipcRenderer.invoke('span:request', method, params),
   workspace: (choose = false) => ipcRenderer.invoke('span:workspace', choose),
-  filePath: file => webUtils.getPathForFile(file),
+  chooseFiles: () => ipcRenderer.invoke('span:choose-files'),
   openLink: url => ipcRenderer.invoke('span:link', url),
   copyText: text => ipcRenderer.invoke('span:copy-text', text),
   onWindowHidden: listener => {
