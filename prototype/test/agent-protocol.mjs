@@ -281,6 +281,17 @@ test('timeline preserves interleaved tools, reconciles message chunks, and keeps
   assert.equal(turnReasoning(reopened, 't'), reopened[4]);
 });
 
+test('reasoning received during an open Markdown reply does not break its formatting', () => {
+  const delta = (kind, id, text) => ({ kind: 'delta', delta: { kind, id, text, turnId: 'turn' } });
+  const rows = applyTimeline([], [
+    delta('message', 'reply', '**First'),
+    delta('reasoning', 'summary', 'Check the wording'),
+    delta('message', 'reply', ' and last**'),
+  ]);
+  assert.deepEqual(rows.map(row => row.kind), ['message', 'reasoning']);
+  assert.equal(rows[0].text, '**First and last**');
+});
+
 test('the server user echo merges into the optimistic row without moving it', () => {
   const optimistic = { kind: 'user', text: 'Run', key: 'client', clientId: 'client', optimistic: true };
   const event = { kind: 'item', final: true, item: {

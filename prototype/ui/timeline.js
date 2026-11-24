@@ -203,6 +203,15 @@ function addItem(state, item, final) {
   write(first, updated);
 }
 
+function hasInterveningContent(rows, index) {
+  for (let position = rows.length - 1; position > index; position--) {
+    const row = rows[position];
+    // A reasoning update can arrive during an open Markdown paragraph.
+    if (row.kind !== 'reasoning' && visibleRow(row)) return true;
+  }
+  return false;
+}
+
 function addDelta(state, delta) {
   if (!delta.id || typeof delta.text !== 'string' || !delta.text) return;
   if (delta.kind === 'reasoning') return addReasoning(state, delta, false, true);
@@ -213,8 +222,7 @@ function addDelta(state, delta) {
   const index = indexes.at(-1);
   const previous = rows[index];
   if (previous?.final) return;
-  const split = kind === 'message' && previous?.text && index < rows.length - 1
-    && rows.slice(index + 1).some(visibleRow);
+  const split = kind === 'message' && previous?.text && hasInterveningContent(rows, index);
   const row = split || !previous ? {
     id, turnId, kind, key: split ? JSON.stringify([key, indexes.length]) : key,
     ...(split ? { itemKey: key, phase: previous.phase } : {}), status: 'running',
