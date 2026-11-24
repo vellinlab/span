@@ -289,10 +289,84 @@ def benchmark(name, binary):
                     app.kill()
 
 
+def catalog_benchmark(name, binary):
+    with tempfile.TemporaryDirectory(prefix="span-catalog-") as tmp:
+        profile = Path(tmp) / "profile"
+        env = dict(os.environ, HOME=tmp, SPAN_PREVIEW_PROFILE=str(profile),
+                   SPAN_PREVIEW_CATALOG_FIXTURE="benchmark")
+        args = ["--demo", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0",
+                f"--user-data-dir={profile}"]
+        with subprocess.Popen(["taskset", "-c", CPU, binary, *args], env=env, stdout=sys.stderr) as app:
+            try:
+                wid = int(subprocess.check_output(
+                    ["timeout", "20", "xdotool", "search", "--sync", "--onlyvisible",
+                     "--pid", str(app.pid), "--name", "^Span"], text=True).splitlines()[0])
+                xdo("windowactivate", "--sync", wid, "windowmove", wid, 60, 50,
+                    "windowsize", wid, 1180, 800)
+                port_file = profile / "DevToolsActivePort"
+                if not try_until(port_file.is_file, 12):
+                    raise RuntimeError("Could not open the catalog benchmark automation port")
+                port = port_file.read_text().splitlines()[0]
+                browser = ["/artifacts/node", "prototype/test/prepare-benchmark.mjs", port]
+                top = json.loads(subprocess.check_output([*browser, "--catalog-top"], text=True, timeout=32))
+                roles = {process["id"]: process["type"] for process in top["processes"]}
+                win = screen.create_resource_object("window", wid)
+                origin = root.translate_coords(win, 0, 0)
+                pointer(origin.x + 105, origin.y + 380)
+                time.sleep(.35)
+
+                def pixels():
+                    return root.get_image(origin.x + 68, origin.y + 255, 115, 360, X.ZPixmap, 0xffffffff).data
+
+                start_stats = stats(app.pid, roles)
+                latencies = []
+                for index in range(24):
+                    before = pixels()
+                    start = time.monotonic()
+                    button = 5 if index % 12 < 6 else 4
+                    mouse(button, True)
+                    mouse(button, False)
+                    screen.flush()
+                    if try_until(lambda: pixels() != before, .45):
+                        latencies.append((time.monotonic() - start) * 1000)
+                    time.sleep(.13)
+                end_stats = stats(app.pid, roles)
+                bottom = json.loads(subprocess.check_output([*browser, "--catalog-bottom"], text=True, timeout=32))
+                record = {"app": name, "mounted_top": top["mounted"], "mounted_bottom": bottom["mounted"],
+                          "dom_nodes_top": top["dom"]["nodes"], "wheel_to_pixel_change": sample(latencies),
+                          "wheel_no_pixel_change": 24 - len(latencies),
+                          "cpu_tree_ms": end_stats["tree_cpu_ms"] - start_stats["tree_cpu_ms"],
+                          "cpu_main_ms": end_stats["main_cpu_ms"] - start_stats["main_cpu_ms"],
+                          "memory_kib": {key: start_stats[key] for key in ("Pss", "Rss", "Private_Dirty")},
+                          "renderer_kib": start_stats["by_role"]["renderer"]}
+                print(json.dumps(record), flush=True)
+                return record
+            finally:
+                app.terminate()
+                try:
+                    app.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    app.kill()
+
+
 report = {"runner": "AlmaLinux 8 / Xvfb 1440×960 / Openbox / one constrained CPU / software rendering",
-          "baseline": "Span 0.1.0 EL8 x86_64", "runs": []}
-for target in (BASE, NEXT, NEXT, BASE):
-    report["runs"].append(benchmark(*target))
-    Path(OUTPUT).write_text(json.dumps(report, indent=2) + "\n")
-if any(run["resize_error"] or not run["resize_visible"] or not run["scroll"] for run in report["runs"]):
-    raise SystemExit("One or more interactive runs did not reach their expected resize or paint.")
+          "runs": []}
+if WIDGET_SOCKET == "--catalog":
+    base = ("baseline", "/artifacts/catalog-baseline/span-preview")
+    report["baseline_renderer"] = Path("/artifacts/catalog-baseline-commit.txt").read_text().strip()
+    report["sessions"] = 1201
+    for target in (base, NEXT, NEXT, base):
+        report["runs"].append(catalog_benchmark(*target))
+        Path(OUTPUT).write_text(json.dumps(report, indent=2) + "\n")
+    for run in report["runs"]:
+        counts = (run["mounted_top"], run["mounted_bottom"])
+        expected = counts == (1201, 1201) if run["app"] == "baseline" else all(0 < n < 40 for n in counts)
+        if not expected or not run["wheel_to_pixel_change"]:
+            raise SystemExit("Catalog comparison did not reach the expected endpoints or paint.")
+else:
+    report["baseline"] = "Span 0.1.0 EL8 x86_64"
+    for target in (BASE, NEXT, NEXT, BASE):
+        report["runs"].append(benchmark(*target))
+        Path(OUTPUT).write_text(json.dumps(report, indent=2) + "\n")
+    if any(run["resize_error"] or not run["resize_visible"] or not run["scroll"] for run in report["runs"]):
+        raise SystemExit("One or more interactive runs did not reach their expected resize or paint.")

@@ -2,6 +2,23 @@ export const itemKey = ({ turnId, id }) => JSON.stringify([turnId, id]);
 
 const reasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
 const positionsByRows = new WeakMap();
+const layoutByRows = new WeakMap();
+
+function estimateRow(row) {
+  if (!visibleRow(row)) return 0;
+  return row.kind === 'message' || row.kind === 'user' ? 92 : 34;
+}
+
+export function timelineLayout(rows) {
+  let layout = layoutByRows.get(rows);
+  if (!layout) {
+    const keys = rows.map(row => row.key);
+    const sizes = rows.map(estimateRow);
+    layout = { getItemKey: index => keys[index], estimateSize: index => sizes[index] };
+    layoutByRows.set(rows, layout);
+  }
+  return layout;
+}
 
 export const historyRows = turns => applyTimeline([], turns.flatMap(turn => turn.rows.map(item => ({
   kind: 'item', item, final: turn.run.status !== 'running',
@@ -40,7 +57,7 @@ function lastSummaryLine(text) {
   return text.trimEnd().slice(-240).split(/\r?\n/).at(-1).trim().replace(/^\s*(?:[-*+] |#{1,6} )/, '');
 }
 
-function addReasoning(rows, positions, data, final, delta) {
+function addReasoning({ rows, positions, write }, data, final, delta) {
   const { turnId, id } = data;
   const section = data.section ?? 0;
   if (delta && (typeof data.text !== 'string' || !data.text || !Number.isInteger(section) || section < 0 || section >= 24)) return;
@@ -59,11 +76,12 @@ function addReasoning(rows, positions, data, final, delta) {
   const text = delta ? sections[section] : sections.findLast(part => part?.trim());
   const preview = (delta || !previous || row.previewSource === id) && text && lastSummaryLine(text);
   if (existing === undefined) positions.set(key, [index]);
-  rows[index] = { ...row, sources, ...(preview && { preview, previewSource: id }) };
+  write(index, { ...row, sources, ...(preview && { preview, previewSource: id }) });
 }
 
-function addItem(rows, item, final, positions) {
-  if (item.kind === 'reasoning') return addReasoning(rows, positions, item, final, false);
+function addItem(state, item, final) {
+  if (item.kind === 'reasoning') return addReasoning(state, item, final, false);
+  const { rows, positions, write } = state;
   const key = itemKey(item);
   const indexes = positions.get(key) ?? [];
   const first = indexes[0];
@@ -72,7 +90,7 @@ function addItem(rows, item, final, positions) {
       ? row.clientId === item.clientId
       : row.text === item.text && (!row.turnId || row.turnId === item.turnId)));
     if (index !== -1) {
-      rows[index] = { ...item, key: rows[index].key, itemKey: key, final };
+      write(index, { ...item, key: rows[index].key, itemKey: key, final });
       positions.set(key, [index]);
       return;
     }
@@ -81,7 +99,7 @@ function addItem(rows, item, final, positions) {
   if (first === undefined) {
     // Empty placeholders reserve their position but mount no content.
     positions.set(key, [rows.length]);
-    rows.push({ ...item, key, final });
+    write(rows.length, { ...item, key, final });
     return;
   }
 
@@ -90,7 +108,7 @@ function addItem(rows, item, final, positions) {
     for (const [ordinal, index] of indexes.entries()) {
       const row = rows[index];
       const end = ordinal === indexes.length - 1 ? undefined : offset + row.text.length;
-      rows[index] = { ...row, ...item, text: item.text.slice(offset, end), final };
+      write(index, { ...row, ...item, text: item.text.slice(offset, end), final });
       offset = end;
     }
     return;
@@ -102,12 +120,13 @@ function addItem(rows, item, final, positions) {
   if ((item.kind === 'command' || item.kind === 'tool') && !item.text && row.text) {
     updated.text = row.text;
   }
-  rows[first] = updated;
+  write(first, updated);
 }
 
-function addDelta(rows, delta, positions) {
+function addDelta(state, delta) {
   if (!delta.id || typeof delta.text !== 'string' || !delta.text) return;
-  if (delta.kind === 'reasoning') return addReasoning(rows, positions, delta, false, true);
+  if (delta.kind === 'reasoning') return addReasoning(state, delta, false, true);
+  const { rows, positions, write } = state;
   const { id, turnId, kind, text } = delta;
   const key = itemKey(delta);
   const indexes = positions.get(key) ?? [];
@@ -126,9 +145,9 @@ function addDelta(rows, delta, positions) {
 
   if (split || !previous) {
     positions.set(key, [...indexes, rows.length]);
-    rows.push(row);
+    write(rows.length, row);
   } else {
-    rows[index] = row;
+    write(index, row);
   }
 }
 
@@ -158,11 +177,24 @@ export function applyTimeline(previous, events) {
       index.set(key, indexes);
     },
   };
+  let layout = layoutByRows.get(previous);
+  const state = {
+    rows,
+    positions,
+    write(position, row) {
+      if (layout && (layout.getItemKey(position) !== row.key || layout.estimateSize(position) !== estimateRow(row))) {
+        layout = undefined;
+      }
+      rows[position] = row;
+    },
+  };
   for (const event of events) {
-    if (event.kind === 'item') addItem(rows, event.item, event.final, positions);
-    else if (event.kind === 'delta') addDelta(rows, event.delta, positions);
+    if (event.kind === 'item') addItem(state, event.item, event.final);
+    else if (event.kind === 'delta') addDelta(state, event.delta);
   }
   positionsByRows.set(rows, index);
+  // Stable callbacks let the virtualizer retain measured offsets during text-only updates.
+  if (layout) layoutByRows.set(rows, layout);
   return rows;
 }
 

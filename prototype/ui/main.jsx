@@ -1,12 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, FileText, Folder, FolderOpen,
+  ArrowDown, ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
   GitBranch, PanelLeftClose, PanelLeftOpen, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, AgentMenu, AgentPanel, GoalStrip, Interactions } from './agent-controls.jsx';
 import { Markdown } from './markdown.jsx';
+import { directoryName, SessionCatalog } from './session-catalog.jsx';
 import { Sidebar } from './sidebar.jsx';
 import { Transcript } from './transcript.jsx';
 import { useAgent } from './use-agent.js';
@@ -17,10 +18,6 @@ const connectionLabels = { ready: '已连接', connecting: '正在连接', offli
 const routeLabels = { shared: '共享后台', stdio: '独立进程', fixture: '演示数据', remote: '远程服务' };
 const extensionCommands = { '/mcp': 'mcp', '/skills': 'skill', '/plugins': 'plugin', '/apps': 'connector', '/tools': 'tool' };
 const extensionTitles = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
-
-function directoryName(path) {
-  return path?.split(/[\\/]/).filter(Boolean).at(-1) || path;
-}
 
 function App() {
   const [config, setConfig] = useState(null);
@@ -44,6 +41,7 @@ function App() {
   const input = useRef(null);
   const search = useRef(null);
   const scroll = useRef(null);
+  const catalogScroll = useRef({ scope: '', top: 0 });
   const previewScope = useRef(0);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
@@ -161,8 +159,13 @@ function App() {
   }
 
   const latestWork = useRef();
-  latestWork.current = { newSession, openSearch, openSession };
+  latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived };
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
+  const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
+  const loadCatalogPage = useCallback(() => {
+    const { list, archived } = latestWork.current;
+    list(archived, true).catch(report);
+  }, [report]);
 
   useEffect(() => {
     function onShortcut(event) {
@@ -400,15 +403,6 @@ function App() {
   const branch = session?.branch;
   const connectionLabel = connectionLabels[connection];
   const connectionError = connection === 'offline' && error;
-  const groups = new Map();
-  const filter = query.trim().toLocaleLowerCase();
-  if (!filter && config && !work.archived) groups.set(config.ssh || cwd || '工作区', []);
-  for (const entry of sessions) {
-    if (filter && ![sessionTitle(entry), entry.ref.id, entry.cwd].some(value => value?.toLocaleLowerCase().includes(filter))) continue;
-    const project = entry.cwd || (config?.ssh ? host : cwd) || '工作区';
-    if (!groups.has(project)) groups.set(project, []);
-    groups.get(project).push(entry);
-  }
 
   return <div className={`workbench${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
     <header className="topbar">
@@ -445,19 +439,10 @@ function App() {
           <button className="icon-button" aria-label="选择本地工作区" title="选择本地工作区"
             disabled={running || !config} onClick={chooseWorkspace}><FolderOpen size={16} /></button>
         </div>}
-        {tab === 'sessions' && <div className="side-list workspaces">{Array.from(groups, ([project, entries]) =>
-          <details key={project} className="workspace-group" open>
-            <summary title={project}><ChevronRight size={12} className="group-chevron" /><Folder size={15} />
-              <span>{directoryName(project)}</span></summary>
-            {entries.length > 0 && <div className="session-list">{entries.map(entry =>
-              <button key={sessionKey(entry.ref)} aria-current={refKey === sessionKey(entry.ref) ? 'true' : undefined}
-                disabled={running || loading || connection !== 'ready'} title={sessionTitle(entry)}
-                onClick={() => openSession(entry)}><span>{sessionTitle(entry)}</span></button>
-            )}</div>}
-          </details>
-        )}{!groups.size && (filter || work.archived) && <p className="search-empty">{filter ? '没有匹配的会话' : '没有归档会话'}</p>}
-          {work.sessionCursor && <button className="load-more" type="button" onClick={() => work.list(work.archived, true).catch(report)}>加载更多会话</button>}
-        </div>}
+        {tab === 'sessions' && <SessionCatalog sessions={sessions} project={config && (config.ssh || cwd || '工作区')}
+          scope={JSON.stringify([config?.backend, config?.ssh || cwd])} archived={work.archived} query={query} selected={refKey}
+          disabled={running || loading || connection !== 'ready'} more={Boolean(work.sessionCursor)}
+          open={openCatalogSession} loadMore={loadCatalogPage} scrollPosition={catalogScroll} />}
         {tab === 'hosts' && <form className="host-form" onSubmit={event => {
           event.preventDefault();
           if (config) applyConfig({ ...config, backend, ssh: target.trim() });

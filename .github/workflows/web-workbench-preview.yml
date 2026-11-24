@@ -50,6 +50,19 @@ jobs:
             test "$(tail -1 /artifacts/glibc-service.txt | cat - <(echo GLIBC_2.28) | sort -V | tail -1)" = GLIBC_2.28
           '
           bash prototype/test/package.sh linux prototype/core/target/release/span-workbench-core /tmp/span-workbench-artifacts/linux
+      - name: Prepare the pre-virtualization renderer for the same-run comparison
+        run: |
+          baseline=6832bd32033f165eaeeff83cd42af1a670527227
+          artifacts=/tmp/span-workbench-artifacts
+          source_dir=$(mktemp -d)
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git archive "$baseline" prototype | tar -x -C "$source_dir"
+          npm --prefix "$source_dir/prototype" ci --no-audit --no-fund
+          npm --prefix "$source_dir/prototype" run build
+          cp -al "$artifacts/linux" "$artifacts/catalog-baseline"
+          rm -r "$artifacts/catalog-baseline/resources/app/dist"
+          cp -a "$source_dir/prototype/dist" "$artifacts/catalog-baseline/resources/app/"
+          printf '%s\n' "$baseline" > "$artifacts/catalog-baseline-commit.txt"
       - name: Verify on AlmaLinux 8 and compare with Span 0.1.0
         run: |
           baseline=span-0.1.0-1.el8.x86_64.rpm
@@ -102,6 +115,7 @@ jobs:
           node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
           bash prototype/test/package.sh win32 prototype/core/target/release/span-workbench-core.exe preview
           node prototype/test/smoke.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench.png"
+          node prototype/test/catalog.mjs "$PWD/preview/span-preview.exe" "$PWD/windows-workbench-catalog.png"
           powershell.exe -NoProfile -Command 'Compress-Archive -Path preview -DestinationPath span-web-windows-x86_64.zip'
       - name: Publish Windows preview and screenshot
         if: always()

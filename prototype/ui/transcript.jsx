@@ -5,7 +5,7 @@ import {
   Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { Markdown } from './markdown.jsx';
-import { visibleRow } from './timeline.js';
+import { timelineLayout, visibleRow } from './timeline.js';
 
 const truncate = text => text.length > 256 * 1024 ? text.slice(0, 256 * 1024) + '\n…' : text;
 const statusLabels = {
@@ -155,15 +155,9 @@ export const Transcript = memo(function Transcript({
     expanded.current.set(key, open);
     updateExpansion();
   }, []);
-  const getItemKey = useCallback(index => rows[index].key, [rows]);
   const virtual = useVirtualizer({
     count: rows.length, getScrollElement: () => scroll.current,
-    estimateSize: index => {
-      const row = rows[index];
-      if (!visibleRow(row)) return 0;
-      return row.kind === 'message' || row.kind === 'user' ? 92 : 34;
-    },
-    getItemKey, overscan: 6, paddingStart: 20, paddingEnd: 14,
+    ...timelineLayout(rows), overscan: 6, paddingStart: 20, paddingEnd: 14,
     anchorTo: 'end', followOnAppend: true, scrollEndThreshold: 40,
   });
   const virtualRows = virtual.getVirtualItems();

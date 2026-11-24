@@ -12,6 +12,21 @@ try {
     await page.getByRole('region', { name: '终端' }).waitFor({ state: 'detached' });
   } else if (command === '--wait-for-history') {
     await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 12000 });
+  } else if (command === '--catalog-top' || command === '--catalog-bottom') {
+    const catalog = page.locator('.workspaces');
+    const name = command === '--catalog-top' ? '工作台架构评审' : '目录会话 1199';
+    await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 12000 });
+    await catalog.evaluate((node, bottom) => { node.scrollTop = bottom ? node.scrollHeight : 0; }, command === '--catalog-bottom');
+    const endpoint = catalog.getByText(name, { exact: true });
+    await page.waitForFunction(name => {
+      const list = document.querySelector('.workspaces');
+      const bounds = list.getBoundingClientRect();
+      return [...list.querySelectorAll('span')].some(node => {
+        const row = node.getBoundingClientRect();
+        return node.textContent === name && row.top >= bounds.top && row.bottom <= bounds.bottom;
+      });
+    }, name);
+    if (await endpoint.count() !== 1) throw new Error(`Expected one visible catalog endpoint: ${name}`);
   } else if (command === '--open-terminal') {
     await page.getByRole('button', { name: '切换终端' }).click();
     await page.locator('.xterm-helper-textarea').waitFor();
@@ -30,7 +45,9 @@ try {
       renderer.send('Runtime.getHeapUsage'),
       renderer.send('Memory.getDOMCounters'),
     ]);
-    console.log(JSON.stringify({ processes: processes.processInfo.map(({ id, type }) => ({ id, type })), heap, dom }));
+    const mounted = command.startsWith('--catalog-') ?
+      await page.locator('.workspaces .session-list button, .workspaces [role="treeitem"][aria-level="2"]').count() : undefined;
+    console.log(JSON.stringify({ processes: processes.processInfo.map(({ id, type }) => ({ id, type })), heap, dom, mounted }));
   }
 } finally {
   await browser.close();

@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::{
     env,
     io::{self, BufRead, BufWriter},
+    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -13,6 +14,35 @@ use std::{
 
 const THREAD: &str = "workspace-review";
 const TITLE: &str = "工作台架构评审";
+
+fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str) -> Value {
+    let mut entries = vec![json!({"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
+        "gitInfo":{"branch":"prototype/web-workbench"}})];
+    if mode.is_empty() {
+        return json!({"data":entries,"nextCursor":null});
+    }
+    if params["archived"] == true {
+        return json!({"data":[{"id":"catalog-archive","name":"归档会话示例","cwd":cwd}],"nextCursor":null});
+    }
+    let last = if mode == "benchmark" { 1200 } else { 119 };
+    let other = cwd.join("second-workspace");
+    entries.extend((1..=last).map(|number| {
+        json!({"id":format!("catalog-{number:04}"),
+        "name":format!("目录会话 {number:04}"),"cwd":if number % 2 == 0 { cwd } else { &other }})
+    }));
+    let limit = if mode == "benchmark" {
+        entries.len()
+    } else {
+        40
+    };
+    let start = params["cursor"]
+        .as_str()
+        .and_then(|cursor| cursor.parse::<usize>().ok())
+        .unwrap_or(0)
+        .min(entries.len());
+    let end = (start + limit).min(entries.len());
+    json!({"data":entries[start..end],"nextCursor":(end < entries.len()).then(|| end.to_string())})
+}
 
 fn history() -> Vec<Value> {
     (1..=160)
@@ -55,6 +85,7 @@ fn notice(output: &Output, method: &str, params: Value) -> io::Result<()> {
 pub fn run() -> Result<()> {
     let output = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
     let cwd = env::current_dir()?;
+    let catalog_mode = env::var("SPAN_PREVIEW_CATALOG_FIXTURE").unwrap_or_default();
     let history = history();
     let background = Arc::new(AtomicBool::new(false));
     let mut turn_count = 0;
@@ -69,10 +100,7 @@ pub fn run() -> Result<()> {
         let params = &packet["params"];
         let result = match packet["method"].as_str().unwrap_or_default() {
             "initialize" => json!({"userAgent":"Span preview fixture"}),
-            "thread/list" => {
-                json!({"data":[{"id":THREAD,"name":title,"cwd":cwd,"preview":TITLE,
-                    "gitInfo":{"branch":"prototype/web-workbench"}}],"nextCursor":null})
-            }
+            "thread/list" => catalog(&cwd, &title, params, &catalog_mode),
             "thread/start" | "thread/resume" => {
                 let turns = if params["excludeTurns"] == true {
                     &[][..]
@@ -80,9 +108,26 @@ pub fn run() -> Result<()> {
                     &history
                 };
                 let page = history.iter().rev().take(20).collect::<Vec<_>>();
-                json!({"thread":{"id":THREAD,"name":title,"cwd":cwd,"turns":turns},
+                let thread = params["threadId"].as_str().unwrap_or(THREAD);
+                let name = thread
+                    .strip_prefix("catalog-")
+                    .map(|suffix| {
+                        if suffix == "archive" {
+                            "归档会话示例".to_owned()
+                        } else {
+                            format!("目录会话 {suffix}")
+                        }
+                    })
+                    .unwrap_or_else(|| title.clone());
+                let directory = thread
+                    .strip_prefix("catalog-")
+                    .and_then(|suffix| suffix.parse::<usize>().ok())
+                    .filter(|number| number % 2 == 1)
+                    .map(|_| cwd.join("second-workspace"));
+                let directory = directory.as_deref().unwrap_or(&cwd);
+                json!({"thread":{"id":thread,"name":name,"cwd":directory,"turns":turns},
                     "initialTurnsPage":{"data":page,"nextCursor":(history.len()-20).to_string()},
-                    "cwd":cwd,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
+                    "cwd":directory,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
             }
             "thread/turns/list" => {
                 let end = params["cursor"]

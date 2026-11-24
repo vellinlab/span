@@ -81,6 +81,7 @@ pressure_cpu="$(python3.9 -c 'import os; print(min(os.sched_getaffinity(0)))')"
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/terminal-pressure.mjs /artifacts/linux/resources/app/bin/span-workbench-core \
     /artifacts/span-workbench-pty-baseline | tee /artifacts/terminal-pressure.json
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
+/artifacts/node prototype/test/catalog.mjs /artifacts/linux/span-preview /artifacts/el8-catalog.png
 SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview "" webgl
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 
@@ -89,5 +90,6 @@ widget_socket="$fixture/widgets.sock"
 for _ in {1..50}; do [[ -S "$widget_socket" ]] && break; sleep 0.1; done
 result=0
 python3.9 prototype/test/benchmark.py "$widget_socket" /artifacts/benchmark.json || result=$?
+python3.9 prototype/test/benchmark.py --catalog /artifacts/catalog-benchmark.json || result=$?
 bash prototype/test/backend.sh "$fixture" || result=$?
 exit "$result"

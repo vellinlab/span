@@ -1,11 +1,32 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
-import { applyTimeline, historyRows, mergeHistory, visibleRow } from '../ui/timeline.js';
+import { applyTimeline, historyRows, mergeHistory, timelineLayout, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
 const session = (backend, location) => ({ backend, location, id: 'thread' });
+
+test('timeline layout survives streaming text and changes when rows become visible', () => {
+  const item = { kind: 'message', turnId: 'turn', id: 'reply', text: '' };
+  const initial = applyTimeline([], [{ kind: 'item', item, final: false }]);
+  const delta = text => ({ kind: 'delta', delta: { ...item, text } });
+  const empty = timelineLayout(initial);
+  assert.equal(empty.estimateSize(0), 0);
+
+  const visible = applyTimeline(initial, [delta('First')]);
+  const layout = timelineLayout(visible);
+  assert.equal(layout.getItemKey(0), empty.getItemKey(0));
+  assert.equal(layout.estimateSize(0), 92);
+  assert.notEqual(layout, empty);
+  const continued = applyTimeline(visible, [delta(' and second')]);
+  assert.equal(timelineLayout(continued), layout);
+  const command = { kind: 'item', final: true, item: { kind: 'command', turnId: 'turn', id: 'tool' } };
+  const mixed = applyTimeline(continued, [command, delta(' after tool')]);
+  assert.notEqual(timelineLayout(mixed), layout);
+  assert.equal(timelineLayout(mixed).getItemKey(2), mixed[2].key);
+  assert.equal(timelineLayout(mixed).estimateSize(1), 34);
+});
 
 test('session identities are scoped by backend and host, and the factory rejects unknown backends', () => {
   const refs = [session('codex', local), session('codex', remote), session('clue', remote)];
