@@ -16,15 +16,74 @@ function estimateRow(row) {
   return row.kind === 'message' || row.kind === 'user' ? 92 : 34;
 }
 
+function routineActivity(row) {
+  if (!row?.final || row.status !== 'completed') return;
+  if (row.kind === 'tool' || (row.kind === 'command' && row.exitCode === 0)) return row.kind;
+}
+
+function sameActivityScope(a, b) {
+  return a.turnId === b.turnId && a.depth === b.depth && a.actor?.id === b.actor?.id;
+}
+
+function activityGroups(rows) {
+  const groups = [];
+  for (let start = 0; start < rows.length;) {
+    const first = rows[start];
+    const kind = routineActivity(first);
+    let end = start + 1;
+    if (kind) {
+      let commands = Number(kind === 'command');
+      for (; end < rows.length && sameActivityScope(first, rows[end]); end++) {
+        const next = routineActivity(rows[end]);
+        if (!next) break;
+        if (next === 'command') commands++;
+      }
+      if (end - start >= 4) {
+        groups.push({ kind: 'activity-group', key: JSON.stringify(['activities', first.key]),
+          turnId: first.turnId, depth: first.depth, start, end, commands });
+      }
+    }
+    start = end;
+  }
+  return groups;
+}
+
 export function timelineLayout(rows) {
   let layout = layoutByRows.get(rows);
   if (!layout) {
     const keys = rows.map(row => row.key);
     const sizes = rows.map(estimateRow);
-    layout = { getItemKey: index => keys[index], estimateSize: index => sizes[index] };
+    layout = { count: rows.length, groups: activityGroups(rows), getItemKey: index => keys[index],
+      estimateSize: index => sizes[index], rowAt: (items, index) => items[index] };
     layoutByRows.set(rows, layout);
   }
   return layout;
+}
+
+export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
+  const groups = layout.groups.filter(group => group.turnId !== liveTurnId && !ungroupedTurns.has(group.turnId));
+  if (!groups.length) return layout;
+  const entries = [];
+  const nested = new Set();
+  let nextRow = 0;
+  for (const group of groups) {
+    for (; nextRow < group.start; nextRow++) entries.push(nextRow);
+    entries.push(group);
+    if (openGroups.has(group.key)) {
+      for (; nextRow < group.end; nextRow++) {
+        nested.add(entries.length);
+        entries.push(nextRow);
+      }
+    }
+    nextRow = group.end;
+  }
+  for (; nextRow < layout.count; nextRow++) entries.push(nextRow);
+  return {
+    count: entries.length, nested,
+    getItemKey: index => typeof entries[index] === 'number' ? layout.getItemKey(entries[index]) : entries[index]?.key,
+    estimateSize: index => typeof entries[index] === 'number' ? layout.estimateSize(entries[index]) : 34,
+    rowAt: (rows, index) => typeof entries[index] === 'number' ? rows[entries[index]] : entries[index],
+  };
 }
 
 export const historyRows = turns => applyTimeline([], turns.flatMap(turn => turn.rows.map(item => ({
@@ -189,8 +248,13 @@ export function applyTimeline(previous, events) {
     rows,
     positions,
     write(position, row) {
-      if (layout && (layout.getItemKey(position) !== row.key || layout.estimateSize(position) !== estimateRow(row))) {
-        layout = undefined;
+      if (layout) {
+        const previous = rows[position];
+        const activity = routineActivity(row);
+        if (layout.getItemKey(position) !== row.key || layout.estimateSize(position) !== estimateRow(row) ||
+          activity !== routineActivity(previous) || (activity && !sameActivityScope(row, previous))) {
+          layout = undefined;
+        }
       }
       rows[position] = row;
     },

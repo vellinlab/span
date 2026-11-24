@@ -376,6 +376,44 @@ pub fn run() -> Result<()> {
                     active_plan = Some(turn);
                     continue;
                 }
+                if params["input"][0]["text"] == "验证连续工具活动。" {
+                    for index in 1..=6 {
+                        notice(
+                            &output,
+                            "item/completed",
+                            json!({"threadId":thread_id,"turnId":turn,"item":{"type":"commandExecution","id":format!("{turn}-activity-{index}"),
+                                "command":format!("git status --short -- review-{index}"),"status":"completed","exitCode":0,
+                                "aggregatedOutput":format!("第 {index} 条命令的输出。")}}),
+                        )?;
+                    }
+                    for index in 1..=2 {
+                        notice(
+                            &output,
+                            "item/completed",
+                            json!({"threadId":thread_id,"turnId":turn,"item":{"type":"dynamicToolCall","id":format!("{turn}-tool-{index}"),
+                                "tool":format!("复核记录 {index}"),"status":"completed","output":"记录可读。"}}),
+                        )?;
+                    }
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"commandExecution","id":format!("{turn}-failed"),
+                            "command":"git diff --check -- review-missing","status":"failed","exitCode":1,"aggregatedOutput":"缺少待复核的记录。"}}),
+                    )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-activity-result"),
+                            "phase":"final_answer","text":"连续工具活动验收完成。"}}),
+                    )?;
+                    background.store(false, Ordering::Release);
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+                    )?;
+                    continue;
+                }
                 if params["input"][0]["text"] == "验证长差异与文件切换。" {
                     notice(
                         &output,

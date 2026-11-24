@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
-import { applyTimeline, historyRows, mergeHistory, timelineLayout, visibleRow } from '../ui/timeline.js';
+import { applyTimeline, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
@@ -26,6 +26,37 @@ test('timeline layout survives streaming text and changes when rows become visib
   assert.notEqual(timelineLayout(mixed), layout);
   assert.equal(timelineLayout(mixed).getItemKey(2), mixed[2].key);
   assert.equal(timelineLayout(mixed).estimateSize(1), 34);
+});
+
+test('completed activity groups preserve chronology and exclude failure, prose and other scopes', () => {
+  const command = (id, fields = {}) => ({ kind: 'command', id, turnId: 'turn', status: 'completed', exitCode: 0, ...fields });
+  const prose = { kind: 'message', id: 'prose', turnId: 'turn', text: 'Between activities' };
+  const rows = applyTimeline([], [
+    command('a'), command('b'), command('c', {kind: 'tool'}), command('d'),
+    command('failure', { exitCode: 1 }), prose,
+    command('e'), command('f'), command('g'), command('h', { depth: 1 }),
+    command('i', { actor: { id: 'agent' } }), command('j', { turnId: 'next' }),
+  ].map(item => ({ kind: 'item', final: true, item })));
+  const layout = timelineLayout(rows);
+  const empty = new Set();
+  const collapsed = groupedTimelineLayout(layout, undefined, empty, empty);
+  const group = collapsed.rowAt(rows, 0);
+  assert.equal(group.kind, 'activity-group');
+  assert.equal(group.commands, 3);
+  assert.equal(collapsed.count, rows.length - 3);
+  assert.equal(collapsed.rowAt(rows, 1).id, 'failure');
+  assert.equal(collapsed.rowAt(rows, 2), rows[5]);
+  assert.equal(groupedTimelineLayout(layout, 'turn', empty, empty), layout);
+  assert.equal(groupedTimelineLayout(layout, undefined, new Set(['turn']), empty), layout);
+
+  const expanded = groupedTimelineLayout(layout, undefined, empty, new Set([group.key]));
+  assert.equal(expanded.count, rows.length + 1);
+  assert.deepEqual(Array.from({ length: rows.length }, (_, index) => expanded.rowAt(rows, index + 1)), rows);
+  assert.deepEqual([...expanded.nested], [1, 2, 3, 4]);
+
+  const update = item => applyTimeline(rows, [{ kind: 'item', item, final: true }]);
+  assert.equal(timelineLayout(update({ ...prose, text: 'Changed prose' })), layout);
+  assert.notEqual(timelineLayout(update(command('d', { exitCode: 1 }))), layout);
 });
 
 test('session identities are scoped by backend and host, and the factory rejects unknown backends', () => {

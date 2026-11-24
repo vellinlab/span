@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useLayoutEffect, useReducer, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
@@ -8,7 +8,7 @@ import { Markdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, TextReader } from './text-reader.jsx';
-import { timelineLayout, visibleRow } from './timeline.js';
+import { groupedTimelineLayout, timelineLayout, visibleRow } from './timeline.js';
 
 const statusLabels = {
   pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
@@ -199,21 +199,36 @@ const TranscriptRow = memo(function TranscriptRow({ row, activePlan, expanded, t
     title={title} hint={hint} expanded={expanded} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
-function readAnchor(element, rows) {
+const ActivityGroup = memo(function ActivityGroup({ group, open, toggle }) {
+  const count = group.end - group.start;
+  const tools = count - group.commands;
+  const Icon = tools ? Wrench : Terminal;
+  const label = tools ? `${group.commands ? `${group.commands} 条命令 · ` : ''}${tools} 次工具调用`
+    : `${count} 条命令`;
+  return <div className="activity" data-card="activity-group">
+    <button type="button" className="card-heading" aria-expanded={open} onClick={() => toggle(group.key)}>
+      <ChevronRight size={13} className="card-chevron" /><Icon size={15} className="card-icon" />
+      <span className="card-title">{label}</span>
+    </button>
+  </div>;
+});
+
+function readAnchor(element, rows, layout) {
   if (element.scrollHeight - element.clientHeight - element.scrollTop < 40) return;
   const viewport = element.getBoundingClientRect();
   for (const item of element.querySelectorAll('.message[data-empty="false"]')) {
     const content = item.firstElementChild?.getBoundingClientRect();
     if (content && content.bottom > viewport.top && content.top < viewport.bottom) {
-      const { key, itemKey, turnId } = rows[Number(item.dataset.index)];
+      const { key, itemKey, turnId } = layout.rowAt(rows, Number(item.dataset.index));
       return { key, itemKey, turnId, top: item.getBoundingClientRect().top - viewport.top };
     }
   }
 }
 
-function anchorIndex(rows, anchor, hiddenKey) {
+function anchorIndex(rows, layout, anchor, hiddenKey) {
   let fallback = -1;
-  for (const [index, row] of rows.entries()) {
+  for (let index = 0; index < layout.count; index++) {
+    const row = layout.rowAt(rows, index);
     if (row.turnId !== anchor.turnId || row.key === hiddenKey || !visibleRow(row)) continue;
     if (row.key === anchor.key || row.key === anchor.itemKey) return index;
     if (fallback === -1) fallback = index;
@@ -227,11 +242,14 @@ export const Transcript = memo(function Transcript({
 }) {
   const expanded = useRef(null);
   if (!expanded.current) expanded.current = new Map(remembered?.expansion);
+  const ungroupedTurns = useRef(null);
+  if (!ungroupedTurns.current) ungroupedTurns.current = new Set(remembered?.ungroupedTurns);
+  const [openGroups, setOpenGroups] = useState(() => new Set(remembered?.openGroups));
   const [restore, setRestore] = useState(remembered?.anchor);
-  const [planTurnId, setPlanTurnId] = useState(activeTurnId);
+  const [liveTurnId, setLiveTurnId] = useState(activeTurnId);
   const latest = useRef(null);
   const following = useRef(true);
-  const followPlanCollapse = useRef(false);
+  const followAfterFold = useRef(false);
   const viewportHeight = useRef(0);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const toggle = useCallback((key, open) => {
@@ -239,8 +257,15 @@ export const Transcript = memo(function Transcript({
     expanded.current.set(key, open);
     updateExpansion();
   }, []);
-  const target = restore && !loading ? anchorIndex(rows, restore, liveReasoningKey) : -1;
-  const layout = timelineLayout(rows);
+  const toggleGroup = useCallback(key => setOpenGroups(previous => {
+    const next = new Set(previous);
+    if (!next.delete(key)) next.add(key);
+    return next;
+  }), []);
+  const rawLayout = timelineLayout(rows);
+  const layout = useMemo(() => groupedTimelineLayout(rawLayout, liveTurnId, ungroupedTurns.current, openGroups),
+    [rawLayout, liveTurnId, openGroups]);
+  const target = restore && !loading ? anchorIndex(rows, layout, restore, liveReasoningKey) : -1;
   const estimate = useCallback(index => layout.getItemKey(index) === liveReasoningKey ? 0 : layout.estimateSize(index), [layout, liveReasoningKey]);
   const rangeExtractor = useCallback(range => {
     const indexes = defaultRangeExtractor(range);
@@ -249,7 +274,7 @@ export const Transcript = memo(function Transcript({
     return indexes;
   }, [target]);
   const virtual = useVirtualizer({
-    count: rows.length, getScrollElement: () => scroll.current,
+    count: layout.count, getScrollElement: () => scroll.current,
     getItemKey: layout.getItemKey, estimateSize: liveReasoningKey ? estimate : layout.estimateSize,
     rangeExtractor: target >= 0 ? rangeExtractor : defaultRangeExtractor,
     overscan: 6, paddingStart: 20, paddingEnd: 14,
@@ -259,44 +284,60 @@ export const Transcript = memo(function Transcript({
   const height = virtual.getTotalSize();
 
   useLayoutEffect(() => {
-    latest.current = { rows, historyPages, restore };
-  }, [rows, historyPages, restore]);
+    latest.current = { rows, layout, historyPages, restore, openGroups };
+  }, [rows, layout, historyPages, restore, openGroups]);
 
   useLayoutEffect(() => {
-    if (planTurnId === activeTurnId) {
-      if (followPlanCollapse.current) {
-        followPlanCollapse.current = false;
+    if (liveTurnId === activeTurnId) {
+      if (followAfterFold.current) {
+        followAfterFold.current = false;
         virtual.scrollToEnd();
       }
       return;
     }
-    if (planTurnId) {
-      // Inspect the existing body before applying the collapsed default for an inactive turn.
+    if (liveTurnId) {
+      const { layout, rows } = latest.current;
       const element = scroll.current;
       const viewport = following.current ? null : element.getBoundingClientRect();
       const focus = element.ownerDocument.activeElement;
       const selection = element.ownerDocument.getSelection();
+      const selecting = selection?.type === 'Range';
+      const groups = rawLayout.groups.filter(group => group.turnId === liveTurnId);
+      // Leave an inspected turn intact. Reflowing cards can move the point the user is reading.
+      const focusedActivity = focus?.closest('.message:is([data-kind="command"], [data-kind="tool"])');
+      const openActivity = expanded.current.size && rows.some(row => row.turnId === liveTurnId &&
+        (row.kind === 'command' || row.kind === 'tool') && expanded.current.get(row.key));
+      if (viewport || element.contains(focusedActivity) || (selecting && selection.containsNode(element, true)) || openActivity) {
+        ungroupedTurns.current.add(liveTurnId);
+      } else if (groups.length) {
+        followAfterFold.current = true;
+      }
+
+      // Inspect the existing body before applying the collapsed default for an inactive turn.
       for (const body of element.querySelectorAll('.message[data-kind="plan"] .card-body')) {
-        const row = latest.current.rows[Number(body.closest('.message').dataset.index)];
-        if (row?.turnId !== planTurnId || expanded.current.has(row.key)) continue;
+        const row = layout.rowAt(rows, Number(body.closest('.message').dataset.index));
+        if (row?.turnId !== liveTurnId || expanded.current.has(row.key)) continue;
         const rect = viewport && body.getBoundingClientRect();
         if ((rect && rect.bottom > viewport.top && rect.top < viewport.bottom) || body.contains(focus) ||
-          (selection?.type === 'Range' && selection.containsNode(body, true))) {
+          (selecting && selection.containsNode(body, true))) {
           expanded.current.set(row.key, true);
         } else if (following.current && row.steps?.length) {
-          followPlanCollapse.current = true;
+          followAfterFold.current = true;
         }
       }
     }
-    setPlanTurnId(activeTurnId);
-  }, [activeTurnId, planTurnId, scroll, virtual]);
+    setLiveTurnId(activeTurnId);
+  }, [activeTurnId, liveTurnId, rawLayout, scroll, virtual]);
 
   useLayoutEffect(() => {
     const element = scroll.current;
     return () => {
-      if (!viewKey || latest.current?.restore || !latest.current?.rows.length) return;
-      remember(viewKey, { anchor: readAnchor(element, latest.current.rows), pages: latest.current.historyPages,
-        expansion: Array.from(expanded.current).slice(-64) });
+      const current = latest.current;
+      if (!viewKey || current?.restore || !current?.rows.length) return;
+      const anchor = readAnchor(element, current.rows, current.layout);
+      remember(viewKey, { anchor, pages: current.historyPages, expansion: Array.from(expanded.current).slice(-64),
+        openGroups: Array.from(current.openGroups).slice(-64),
+        ungroupedTurns: anchor && ungroupedTurns.current.has(anchor.turnId) ? [anchor.turnId] : [] });
     };
   }, [viewKey, remember, scroll]);
 
@@ -326,7 +367,7 @@ export const Transcript = memo(function Transcript({
     }
     align(2);
     return () => cancelAnimationFrame(frame);
-  }, [rows.length, virtual, jumpToLatest, scroll, onScrollPosition, restore, loading, target]);
+  }, [layout.count, virtual, jumpToLatest, scroll, onScrollPosition, restore, loading, target]);
 
   useLayoutEffect(() => {
     if (restore || !jumpToLatest.current || !rows.length) return;
@@ -369,15 +410,16 @@ export const Transcript = memo(function Transcript({
     }}>
     {rows.length ? <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
       {virtualRows.map(item => {
-        const row = rows[item.index];
-        const depth = Math.max(0, Math.min(3, row.depth ?? 0));
+        const row = layout.rowAt(rows, item.index);
+        const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + Number(Boolean(layout.nested?.has(item.index)));
         const show = row.key !== liveReasoningKey && Boolean(visibleRow(row));
-        const activePlan = row.kind === 'plan' && Boolean(planTurnId && row.turnId === planTurnId);
+        const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
         return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
-          {show && <TranscriptRow row={row} activePlan={activePlan}
-            expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
-            toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />}
+          {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)} toggle={toggleGroup} />
+            : <TranscriptRow row={row} activePlan={activePlan}
+              expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
+              toggle={toggle} openSession={openSession} openArtifact={openArtifact} canOpenSession={canOpenSession} />)}
         </div>;
       })}
     </div> : null}

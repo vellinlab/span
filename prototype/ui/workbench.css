@@ -195,7 +195,7 @@ p { margin-block: 0 12px; }
 }
 .catalog-workspace:not([aria-expanded]) .group-chevron { visibility: hidden; }
 .activity summary::-webkit-details-marker { display: none; }
-.catalog-workspace[aria-expanded="true"] .group-chevron, .activity details[open] .card-chevron { transform: rotate(90deg); }
+.catalog-workspace[aria-expanded="true"] .group-chevron, .activity :is(details[open], button[aria-expanded="true"]) .card-chevron { transform: rotate(90deg); }
 .catalog-tree .catalog-session {
   position: absolute;
   inset: 0 0 auto;
@@ -339,7 +339,15 @@ p { margin-block: 0 12px; }
   border-radius: 0 6px 6px 0;
 }
 .activity summary { cursor: pointer; list-style: none; }
-.activity summary:hover { background: var(--hover); color: #ededed; }
+.activity :is(summary, button.card-heading):hover { background: var(--hover); color: #ededed; }
+.activity button.card-heading {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
 .card-chevron, .card-icon { color: #a8b6b1; }
 .card-placeholder { width: 13px; flex: none; }
 .card-title, .card-hint, .member-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

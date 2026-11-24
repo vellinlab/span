@@ -447,6 +447,34 @@ try {
   assert.equal(await steps.getByRole('img', { name: '已完成', exact: true }).count(), 3);
   console.log('Verified live and archived plan details, progress updates, and manual disclosure.');
 
+  await composer.fill('验证连续工具活动。');
+  await composer.press('Enter');
+  const group = transcript.getByRole('button', { name: '6 条命令 · 2 次工具调用', exact: true });
+  const groupAnswer = transcript.getByText('连续工具活动验收完成。', { exact: true });
+  const firstCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git status --short -- review-1' });
+  const failedCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git diff --check -- review-missing' });
+  await group.waitFor();
+  await groupAnswer.waitFor();
+  await failedCommand.getByText('退出码 1', { exact: true }).waitFor();
+  await waitForTranscriptEnd();
+  assert.ok(await groupAnswer.evaluate(element => {
+    const answer = element.getBoundingClientRect();
+    const viewport = element.closest('[data-testid="transcript"]').getBoundingClientRect();
+    return answer.top >= viewport.top && answer.bottom <= viewport.bottom;
+  }));
+  assert.equal(await group.getAttribute('aria-expanded'), 'false');
+  assert.equal(await firstCommand.count(), 0);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-activity-group.png') });
+  await group.press('Enter');
+  await firstCommand.locator('summary').press('Enter');
+  await firstCommand.getByText('第 1 条命令的输出。', { exact: true }).waitFor();
+  assert.equal(await group.getAttribute('aria-expanded'), 'true');
+  await group.press('Enter');
+  await firstCommand.waitFor({ state: 'detached' });
+  assert.ok(await group.evaluate(element => element === document.activeElement));
+  await failedCommand.getByText('退出码 1', { exact: true }).waitFor();
+  console.log('Verified completed tool groups preserve the failure card and unmount folded commands and output.');
+
   await composer.fill('这段草稿留在原会话。');
   await page.getByRole('button', { name: /新会话/ }).click();
   await page.getByRole('heading', { name: '开始新会话' }).waitFor();
