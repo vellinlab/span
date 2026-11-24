@@ -236,6 +236,7 @@ try {
   await goalText.waitFor();
   assert.equal(await goalText.textContent(), longGoal);
   assert.ok(await editGoal.evaluate(button => button === document.activeElement));
+  await goal.getByText('已暂停', { exact: true }).waitFor();
   const compactGoal = await goalPanel.evaluate(panel => {
     const bounds = panel.getBoundingClientRect();
     const timeline = document.querySelector('.timeline').getBoundingClientRect();
@@ -251,7 +252,11 @@ try {
   });
   assert.deepEqual(compactGoal, { fits: true, scrolls: true, closeVisible: true, actionsVisible: true });
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact.png') });
-  await editGoal.press('Enter');
+  await goalPanel.getByRole('button', { name: '继续', exact: true }).click();
+  await goal.getByText('进行中', { exact: true }).waitFor();
+  await goalPanel.getByRole('button', { name: '暂停', exact: true }).click();
+  await goal.getByText('已暂停', { exact: true }).waitFor();
+  await editGoal.click();
   assert.ok(await saveGoal.evaluate(button => {
     const bounds = button.getBoundingClientRect();
     return button.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
@@ -276,6 +281,13 @@ try {
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-edit.png') });
     await saveGoal.press('Enter');
     await goalPanel.getByText(newer, { exact: true }).waitFor();
+    await goalPanel.getByText('320 / 64,000 tokens', { exact: true }).waitFor();
+    await editGoal.press('Enter');
+    await goalBudget.fill('');
+    await saveGoal.press('Enter');
+    await goalText.waitFor();
+    await goal.getByText('已暂停', { exact: true }).waitFor();
+    await goalPanel.getByText('320 tokens', { exact: true }).waitFor();
   }
   await dismissGoal.press('Escape');
   await goalPanel.waitFor({ state: 'detached' });

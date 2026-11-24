@@ -32,6 +32,7 @@ export type Goal = {
 };
 export type GoalAction =
   | { kind: 'set'; objective: string; budget?: number }
+  | { kind: 'edit'; objective: string; budget: number | null }
   | { kind: 'pause' | 'resume' | 'clear' };
 export type Usage = {
   tokens?: { total?: number; input?: number; output?: number; cached?: number; reasoning?: number;

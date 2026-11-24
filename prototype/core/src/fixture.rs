@@ -1019,10 +1019,18 @@ pub fn run() -> Result<()> {
                             continue;
                         }
                     }
-                    goal = json!({"objective":objective,"tokenBudget":params["tokenBudget"],"tokensUsed":0});
+                    if goal.is_null() {
+                        goal = json!({"status":"active","tokensUsed":0,"tokenBudget":null});
+                    }
+                    goal["objective"] = json!(objective);
                 }
                 if !goal.is_null() {
-                    goal["status"] = params["status"].clone();
+                    if let Some(status) = params["status"].as_str() {
+                        goal["status"] = json!(status);
+                    }
+                    if let Some(budget) = params.get("tokenBudget") {
+                        goal["tokenBudget"] = budget.clone();
+                    }
                 }
                 notice(
                     &output,

@@ -318,7 +318,20 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.deepEqual(await agent.goal.update(ref, { kind: 'set', objective: 'Ship', budget: 100 }), {
       objective: 'Ship', status: 'active', budget: 100, seconds: undefined, tokens: undefined,
     });
-    assert.equal(requests.at(-1)[1].packet.params.origin, 'user');
+    assert.deepEqual(requests.at(-1)[1].packet.params, {
+      threadId: ref.id, origin: 'user', status: 'active', objective: 'Ship', tokenBudget: 100,
+    });
+    responses['thread/goal/set'] = {
+      goal: { objective: 'Ship the fix', status: 'paused', tokenBudget: null, tokensUsed: 40 },
+    };
+    assert.deepEqual(await agent.goal.update(ref, { kind: 'edit', objective: 'Ship the fix', budget: null }), {
+      objective: 'Ship the fix', status: 'paused', budget: undefined, seconds: undefined, tokens: 40,
+    });
+    assert.deepEqual(requests.at(-1)[1].packet.params, {
+      threadId: ref.id, origin: 'user', objective: 'Ship the fix', tokenBudget: null,
+    });
+    await agent.goal.update(ref, { kind: 'resume' });
+    assert.deepEqual(requests.at(-1)[1].packet.params, { threadId: ref.id, origin: 'user', status: 'active' });
     assert.equal((await agent.usage()).limits[0].used, 22);
     const scope = { threadId: 'thread', turnId: 't' };
     publish('agent', { method: 'item/reasoning/textDelta', params: { ...scope, itemId: 'r', delta: 'raw' } });

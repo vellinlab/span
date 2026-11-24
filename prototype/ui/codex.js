@@ -15,7 +15,7 @@ const normalizeGoal = goal => goal ? {
     active: 'active', paused: 'paused', complete: 'complete', blocked: 'blocked',
     budgetLimited: 'limited', usageLimited: 'limited',
   }[goal.status] ?? 'unknown',
-  budget: goal.tokenBudget, tokens: goal.tokensUsed, seconds: goal.timeUsedSeconds,
+  budget: goal.tokenBudget ?? undefined, tokens: goal.tokensUsed, seconds: goal.timeUsedSeconds,
 } : null;
 
 /** @type {Record<string, import('./agent-protocol').ItemDelta['kind']>} */
@@ -391,10 +391,13 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
             await request('thread/goal/clear', { threadId });
             return null;
           }
-          return normalizeGoal((await request('thread/goal/set', {
-            threadId, origin: 'user', status: action.kind === 'pause' ? 'paused' : 'active',
-            ...(action.kind === 'set' ? { objective: action.objective, tokenBudget: action.budget } : {}),
-          })).goal);
+          const params = { threadId, origin: 'user' };
+          if (action.kind !== 'edit') params.status = action.kind === 'pause' ? 'paused' : 'active';
+          if (action.kind === 'set' || action.kind === 'edit') {
+            params.objective = action.objective;
+            if (action.budget !== undefined) params.tokenBudget = action.budget;
+          }
+          return normalizeGoal((await request('thread/goal/set', params)).goal);
         },
       },
       async usage() {

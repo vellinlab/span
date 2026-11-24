@@ -124,7 +124,7 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
     setBusy(true);
     try {
       const updated = await action(value);
-      const saved = value.kind === 'set' && updated;
+      const saved = (value.kind === 'set' || value.kind === 'edit') && updated;
       const cleared = value.kind === 'clear' && updated === null;
       if (submitted === version.current && (saved || cleared)) {
         setDraft(null);
@@ -142,7 +142,11 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
   }
   return <form ref={form} className="goal-panel-main" onSubmit={event => {
     event.preventDefault();
-    if (trimmed) update({ kind: 'set', objective: trimmed, budget: budget === '' ? undefined : Number(budget) });
+    if (!trimmed) return;
+    const tokenBudget = budget === '' ? null : Number(budget);
+    update(goal
+      ? { kind: 'edit', objective: trimmed, budget: tokenBudget }
+      : { kind: 'set', objective: trimmed, budget: tokenBudget ?? undefined });
   }}>
     <div className="agent-panel-content" ref={content}>
       {showEditor ? <div className="goal-form">
@@ -161,7 +165,8 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
         }}>取消</button>}
         <button type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>保存目标</button>
       </> : <>
-        <button type="button" aria-disabled={busy} onClick={() => update({ kind: 'clear' })}>清除</button>
+        <button type="button" className="goal-clear" aria-disabled={busy}
+          onClick={() => update({ kind: 'clear' })}>清除</button>
         {toggleStatus && <button type="button" aria-disabled={busy}
           onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : '继续'}</button>}
         <button type="button" ref={editButton} aria-disabled={busy} onClick={() => { if (!busy) changeEditor(true); }}>编辑</button>

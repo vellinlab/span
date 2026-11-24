@@ -921,6 +921,7 @@ p { margin-block: 0 12px; }
 .goal-actions { flex: none; padding: 4px 8px; border-top: 1px solid var(--line); justify-content: flex-end; }
 .goal-actions button { min-height: 28px; padding-block: 3px; }
 .goal-actions button[aria-disabled="true"] { cursor: default; opacity: .5; }
+.goal-clear { margin-inline-end: auto; color: var(--muted); }
 .settings-grid, .goal-form, .usage-panel, .agent-groups, .delegation-form { display: grid; gap: 10px; }
 .agent-setting { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 8px; }
 .agent-setting span, .goal-form label, .panel-output, .panel-link { color: var(--muted); }
