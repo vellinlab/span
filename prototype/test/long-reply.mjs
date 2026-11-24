@@ -192,10 +192,12 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label)
     const start = await metrics();
     await writeFile(join(profile, 'append'), '');
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
+    await delay(160);
     await settleFrame(page);
     const end = await metrics();
     const endPssKiB = await pss();
     assert.deepEqual(await offsets(), position);
+    if (label === 'candidate') await command.getByText('16385–20073 行', { exact: true }).waitFor();
     await output.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await output.getByText('workspace/source/stream_072.rs', { exact: false }).waitFor();
     assert.equal(await output.evaluate(element => element.tabIndex), 0);

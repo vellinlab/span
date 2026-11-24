@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
@@ -36,10 +36,30 @@ function ArtifactList({ artifacts, openArtifact, openImage, label }) {
   </li>)}</ul>;
 }
 
-function ToolOutput({ text, cwd }) {
+const largeOutputSize = 16 * 1024;
+const largeOutputRefreshMs = 125;
+
+function ToolOutput({ text, cwd, streaming }) {
   const scroll = useRef(null);
-  const visible = useDeferredValue(text);
-  const long = visible && (visible.length > 16 * 1024 || visible.split('\n', 32).length === 32);
+  const deferred = useDeferredValue(text);
+  const output = streaming ? deferred : text;
+  const committed = useRef({ text: output, time: -Infinity });
+  const [released, setReleased] = useState(-Infinity);
+  const previous = committed.current;
+  const pending = streaming && previous.text?.length > largeOutputSize &&
+    output?.length >= previous.text.length && output !== previous.text &&
+    released !== previous.time && performance.now() - previous.time < largeOutputRefreshMs;
+  const visible = pending ? previous.text : output;
+  useLayoutEffect(() => {
+    if (committed.current.text !== visible) committed.current = { text: visible, time: performance.now() };
+  }, [visible]);
+  useEffect(() => {
+    if (!pending) return;
+    const { time } = previous;
+    const timer = setTimeout(() => setReleased(time), Math.max(0, time + largeOutputRefreshMs - performance.now()));
+    return () => clearTimeout(timer);
+  }, [pending, previous]);
+  const long = visible && (visible.length > largeOutputSize || visible.split('\n', 32).length === 32);
   return <>
     {cwd && <code className="card-path">{cwd}</code>}
     {visible && <div className="tool-output">
@@ -176,7 +196,7 @@ const TranscriptRow = memo(function TranscriptRow({
       }
       if (command || hasContext) detail = titleRef => <>
         {command && <CommandText command={command} titleRef={titleRef} force={!hasContext} />}
-        {hasContext && <ToolOutput text={row.text} cwd={row.cwd} />}
+        {hasContext && <ToolOutput text={row.text} cwd={row.cwd} streaming={status === 'running'} />}
       </>;
       break;
     }
@@ -195,7 +215,7 @@ const TranscriptRow = memo(function TranscriptRow({
           <dt>路径</dt><dd><code>{path}</code></dd>
           {row.source && <><dt>来源</dt><dd>{row.source}</dd></>}
         </dl>}
-        {row.text && <ToolOutput text={row.text} />}
+        {row.text && <ToolOutput text={row.text} streaming={status === 'running'} />}
       </>;
       break;
     case 'search':
