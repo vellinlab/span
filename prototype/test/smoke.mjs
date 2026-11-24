@@ -47,7 +47,9 @@ try {
     if (message.type() === 'error') console.error(message.text());
   });
   await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 20_000 });
-  await page.locator('.branch').getByText('prototype/web-workbench', { exact: true }).waitFor();
+  const branch = page.locator('.topbar .branch');
+  await branch.getByText('prototype/web-workbench', { exact: true }).waitFor();
+  assert.equal(await branch.getAttribute('title'), 'prototype/web-workbench');
   await page.waitForFunction(() => {
     const overlay = navigator.windowControlsOverlay;
     if (!overlay?.visible) return false;
@@ -330,11 +332,17 @@ try {
   }
   await composer.fill(Array(20).fill('处理审批后请继续，保留本次检查的结果。').join('\n'));
   assert.ok(await composer.evaluate(element => element.scrollHeight > element.clientHeight));
+  assert.ok(await branch.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.left >= element.previousElementSibling.getBoundingClientRect().right &&
+      bounds.right <= element.nextElementSibling.getBoundingClientRect().left &&
+      bounds.bottom <= element.closest('.topbar').getBoundingClientRect().bottom;
+  }), 'The branch sits between the session title and window actions');
   assert.ok(await page.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
     const refuse = rect('.approval-actions button');
     const hit = document.elementFromPoint(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2);
-    return rect('.timeline').height > 0 && rect('.approval-context').bottom <= rect('.approval-body').bottom &&
+    return rect('.timeline').height >= 44 && rect('.approval-context').bottom <= rect('.approval-body').bottom &&
       rect('.approval-actions').bottom <= rect('.composer').top && rect('.terminal-canvas').height >= 70 &&
       rect('.composer').bottom <= rect('.terminal-panel').top && Boolean(hit?.closest('.approval-actions button'));
   }), 'History, approval scope and actions, the long draft and terminal fit at the minimum window size');
@@ -379,6 +387,7 @@ try {
   await composer.fill('这段草稿留在原会话。');
   await page.getByRole('button', { name: /新会话/ }).click();
   await page.getByRole('heading', { name: '开始新会话' }).waitFor();
+  assert.equal(await branch.count(), 0);
   assert.ok(await composer.evaluate(element => document.activeElement === element));
   assert.equal(await composer.inputValue(), '');
   const retryDraft = '验证新会话草稿重试。';

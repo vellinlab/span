@@ -533,6 +533,7 @@ function App() {
       <div className="titlebar-content">
         <div className="breadcrumb"><Folder size={15} /><span title={session?.cwd || cwd}>{workspace}</span>
           <span aria-hidden="true" className="breadcrumb-separator">/</span><strong title={name}>{name}</strong></div>
+        {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
         {preview?.parked && <button className="icon-button" aria-label="恢复文件预览" aria-controls="file-preview"
           title={previewBlocked ? '处理请求后可恢复文件预览' : `恢复文件预览 · ${preview.path}`}
           disabled={previewBlocked} onClick={restorePreview}><FileText size={16} /></button>}
@@ -658,7 +659,6 @@ function App() {
                     disabled={!draft.trim() || connection !== 'ready' || loading}><ArrowUp size={16} /></button>}
                 </div>
               </form>
-              {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
             </div>
           </div>
           {terminal && config && <Suspense fallback={<div className="terminal-panel">正在打开终端…</div>}>

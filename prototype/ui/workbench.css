@@ -84,6 +84,18 @@ p { margin-block: 0 12px; }
 .breadcrumb strong { color: #ededed; font-size: 14px; font-weight: 600; }
 .breadcrumb span:first-of-type { max-width: 42%; }
 .breadcrumb-separator { color: #808080; }
+.branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(36%, 192px);
+  padding: 2px 4px;
+  color: var(--muted);
+  font: 12px/16px var(--mono);
+  app-region: no-drag;
+  user-select: text;
+}
 .breadcrumb :is(strong, span), .side-list span, .path, .preview header strong,
 .branch span, .connection span, .composer-control span {
   min-width: 0;
@@ -477,14 +489,6 @@ p { margin-block: 0 12px; }
 }
 .send:hover:not(:disabled) { background: #d1e7d8; }
 .send.stop, .send:disabled { background: #525655; color: #e7eae8; opacity: 1; }
-.branch {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 8px 0 0 3px;
-  color: var(--muted);
-  font: 12px/16px var(--mono);
-}
 .live { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-height: 26px; padding-left: 4px; }
 .approval, .error { margin-bottom: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .approval {
