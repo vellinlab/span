@@ -411,10 +411,20 @@ export default function (pi) {
     await members.getByText('空闲', { exact: true }).waitFor();
     const task = roster.getByRole('listitem').filter({ hasText: '整理交接说明' });
     await task.getByText('受阻', { exact: true }).waitFor();
-    await task.getByText('负责人 reviewer · 依赖 核对原始清单', { exact: true }).waitFor();
+    const metadata = task.getByText('负责人 reviewer · 依赖 核对原始清单', { exact: true });
+    await metadata.waitFor();
+    assert.ok(await metadata.evaluate(element => {
+      const row = element.getBoundingClientRect();
+      const view = element.closest('.agent-panel-content').getBoundingClientRect();
+      return row.top >= view.top && row.bottom <= view.bottom;
+    }), 'The task owner and prerequisite must fit in the narrow roster');
     const readers = ssh ? await remoteTeamReaders() : [];
     if (ssh) assert.equal(readers.length, 1);
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-teams.png') });
+    const details = task.getByRole('button', { name: '整理交接说明', exact: true });
+    await details.press('Enter');
+    await task.getByText('将结论写成可交付的说明。', { exact: true }).waitFor();
+    await details.press('Enter');
     await writeFile(teamSignal, 'done');
     await task.getByText('等待中', { exact: true }).waitFor({ timeout: 15_000 });
     await roster.getByText('已完成', { exact: true }).waitFor();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, ChevronRight, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
 import { mergeAgentMember } from './delegation.js';
@@ -326,17 +326,23 @@ function DelegationControls({ work, members, report }) {
 }
 
 function AgentTaskList({ tasks, members }) {
+  const [expandedTask, setExpandedTask] = useState(null);
   const titles = new Map(tasks.map(task => [task.id, task.title]));
   return <ul className="agent-member-list" aria-label="团队任务">{tasks.map(task => {
+    const expanded = expandedTask === task.id;
     const assignee = task.assigneeId && members.get(task.assigneeId);
     const dependencies = (task.dependsOn ?? task.blockedBy)?.map(id => titles.get(id) || id).join('、');
     const metadata = [task.assigneeId && `负责人 ${assignee ? memberName(assignee) : task.assigneeId}`,
       dependencies && `依赖 ${dependencies}`].filter(Boolean).join(' · ');
+    const title = <span className="agent-member-label">{task.title}</span>;
     return <li key={task.id} className="agent-member-row">
-      <span className="agent-member-label">{task.title}</span>
+      {task.detail ? <button type="button" className="agent-member-name agent-task-title" aria-expanded={expanded}
+        onClick={() => setExpandedTask(expanded ? null : task.id)}>
+        <ChevronRight size={13} aria-hidden="true" />{title}
+      </button> : title}
       <AgentStatus status={task.status} />
       {metadata && <small className="agent-member-meta">{metadata}</small>}
-      {task.detail && <p className="agent-member-detail">{task.detail}</p>}
+      {expanded && task.detail && <p className="agent-member-detail">{task.detail}</p>}
     </li>;
   })}</ul>;
 }

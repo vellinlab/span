@@ -1159,6 +1159,11 @@ p { margin-block: 0 12px; }
 .agent-group-description { overflow-wrap: anywhere; }
 .agent-group-description + :is(.agent-member-list, .agent-task-group) { margin-top: 7px; }
 .agent-task-group h4 { color: var(--muted); }
+.agent-task-title svg { color: var(--muted); }
+.agent-task-title[aria-expanded="true"] svg { transform: rotate(90deg); }
+.agent-task-group .agent-member-row:has(.agent-task-title) > :is(.agent-member-meta, .agent-member-detail) {
+  padding-inline-start: 18px;
+}
 .agent-group + .agent-group, .agent-member-list + .agent-task-group {
   border-top: 1px solid var(--line);
   padding-top: 7px;
