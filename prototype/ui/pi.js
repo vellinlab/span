@@ -1,6 +1,8 @@
 import { connectRpc } from './agent-rpc.js';
+import { sessionKey } from './agent.js';
 import { fileReferencePreview, fileReferenceText, parseFileReferences } from './file-references.js';
 import { piDelta, piMessage, piRunStatus, piText, piTool, piTurnId, piTurns } from './pi-items.js';
+import { isPiTeamsCommand, piTeamSnapshot } from './pi-teams.js';
 
 const wire = {
   request: (id, type, params) => ({ ...params, id: String(id), type }),
@@ -34,6 +36,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
   let state;
   let reserved = false;
   let replacingSession = false;
+  let teamCapability;
 
   const notify = event => { if (current) onEvent({ ...event, session: current.ref }); };
   const item = (value, final) => notify({ kind: 'item', item: value, final });
@@ -184,7 +187,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
   }
 
   function requireSession(session) {
-    if (session.id !== current?.ref.id || session.backend !== 'pi') throw new Error('Pi 会话已切换。');
+    if (!current || sessionKey(session) !== sessionKey(current.ref)) throw new Error('Pi 会话已切换。');
   }
 
   async function list({ cursor, archived } = {}) {
@@ -302,6 +305,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
 
   return {
     commands,
+    get delegation() { return teamCapability; },
     extensions: {
       kinds: ['skill'],
       async list(kind, session) {
@@ -326,6 +330,14 @@ export function createPi({ generation, cwd, location, onEvent }) {
       await rpc.ready();
       state = await request('get_state');
       const result = await request('get_commands');
+      if (result.commands.some(isPiTeamsCommand)) teamCapability = {
+        observe: true,
+        teamRefreshMs: location.kind === 'ssh' ? 5000 : 2200,
+        async teams(session) {
+          requireSession(session);
+          return piTeamSnapshot(await request('span_pi_teams', { sessionId: session.id }));
+        },
+      };
       commands.push(...result.commands.filter(command => command.name)
         .map(command => ({ id: command.name, label: command.name, description: command.description })));
     },

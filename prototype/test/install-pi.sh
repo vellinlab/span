@@ -14,3 +14,9 @@ curl -fsSL --retry 3 "$release/pi-coding-agent-install-package-lock.json" -o "$p
         | sha256sum --check -
 )
 npm ci --prefix "$prefix" --no-audit --no-fund
+
+teams_archive="$prefix/pi-teams-1.0.7.tgz"
+curl -fsSL --retry 3 https://registry.npmjs.org/@vadimcomanescu/pi-teams/-/pi-teams-1.0.7.tgz -o "$teams_archive"
+printf '%s  %s\n' 4546aa9e1ba36062ff1f0ea8f7f66295c081f5467bbcaee05fb7972d1d2bdc2e "$teams_archive" | sha256sum --check -
+mkdir -p "$prefix/team-state-fixture"
+tar -xf "$teams_archive" -C "$prefix/team-state-fixture" --strip-components=1

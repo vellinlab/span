@@ -6,7 +6,7 @@ use async_tungstenite::{
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::{
-    cell::OnceCell,
+    cell::{OnceCell, RefCell},
     env, io,
     path::{Path, PathBuf},
     process::Stdio,
@@ -715,6 +715,23 @@ async fn stdio_process(
 ) -> io::Result<()> {
     event(output, "agent-route", generation, json!(route))?;
     let pi_session_file = OnceCell::new();
+    let pi_session = RefCell::new(None::<String>);
+    let (team_requests, mut team_queue) = mpsc::channel::<(Value, String)>(1);
+    let teams = async {
+        let Some(catalog) = &pi_catalog else {
+            return std::future::pending().await;
+        };
+        while let Some((id, session)) = team_queue.recv().await {
+            let result = pi::team_snapshot(catalog, session.clone()).await;
+            let result = if pi_session.borrow().as_deref() == Some(session.as_str()) {
+                result
+            } else {
+                Err("Pi 会话已切换。".into())
+            };
+            event(output, "agent", generation, pi_response(&id, result))?;
+        }
+        Ok(())
+    };
     let read = async {
         let mut line = Vec::new();
         loop {
@@ -723,10 +740,23 @@ async fn stdio_process(
                 if pi_catalog.is_some()
                     && value["type"] == "response"
                     && value["command"] == "get_state"
-                    && let Some(file) = value["data"]["sessionFile"].as_str()
-                    && !file.is_empty()
                 {
-                    let _ = pi_session_file.set(file.to_owned());
+                    if let Some(file) = value["data"]["sessionFile"].as_str()
+                        && !file.is_empty()
+                    {
+                        let _ = pi_session_file.set(file.to_owned());
+                    }
+                    pi_session.replace(value["data"]["sessionId"].as_str().map(str::to_owned));
+                } else if pi_catalog.is_some()
+                    && value["type"] == "response"
+                    && matches!(
+                        value["command"].as_str(),
+                        Some("switch_session" | "new_session")
+                    )
+                    && value["success"] == true
+                    && value["data"]["cancelled"] != true
+                {
+                    pi_session.replace(None);
                 }
                 event(output, "agent", generation, value)?;
             }
@@ -738,15 +768,36 @@ async fn stdio_process(
                 && packet["type"] == "span_list_sessions"
             {
                 let result = pi::catalog(catalog, pi_session_file.get(), &packet).await;
-                let response = match result {
-                    Ok(data) => {
-                        json!({"id":packet["id"],"type":"response","success":true,"data":data})
+                event(
+                    output,
+                    "agent",
+                    generation,
+                    pi_response(&packet["id"], result),
+                )?;
+                continue;
+            }
+            if pi_catalog.is_some() && packet["type"] == "span_pi_teams" {
+                let id = &packet["id"];
+                let result = match packet["sessionId"].as_str() {
+                    Some(session)
+                        if !session.is_empty()
+                            && session.len() <= 128
+                            && session
+                                .bytes()
+                                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                            && pi_session.borrow().as_deref() == Some(session) =>
+                    {
+                        if team_requests
+                            .try_send((id.clone(), session.to_owned()))
+                            .is_ok()
+                        {
+                            continue;
+                        }
+                        Err("正在读取 Pi 团队。".into())
                     }
-                    Err(error) => {
-                        json!({"id":packet["id"],"type":"response","success":false,"error":error.to_string()})
-                    }
+                    _ => Err("Pi 会话已切换。".into()),
                 };
-                event(output, "agent", generation, response)?;
+                event(output, "agent", generation, pi_response(id, result))?;
                 continue;
             }
             let mut data = serde_json::to_vec(&packet)?;
@@ -756,7 +807,14 @@ async fn stdio_process(
         }
         Ok(())
     };
-    tokio::select! { result = read => result, result = write => result }
+    tokio::select! { result = read => result, result = write => result, result = teams => result }
+}
+
+fn pi_response(id: &Value, result: Result<Value>) -> Value {
+    match result {
+        Ok(data) => json!({"id":id,"type":"response","success":true,"data":data}),
+        Err(error) => json!({"id":id,"type":"response","success":false,"error":error.to_string()}),
+    }
 }
 
 type ProxyStream = tokio_util::compat::Compat<tokio::io::Join<BufReader<ChildStdout>, ChildStdin>>;

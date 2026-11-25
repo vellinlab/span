@@ -426,7 +426,6 @@ function App() {
     setPanel({ kind, id, focus: Boolean(trigger), ...options });
     setSuggesting(false);
     if (kind === 'usage') work.refreshUsage().catch(report);
-    if (kind === 'agents') work.refreshDelegation().catch(report);
   }
 
   function showExtensions(kind, trigger, options = {}) {

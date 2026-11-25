@@ -4,9 +4,10 @@ import { sessionKey } from './agent.js';
 import { transientAgentStatus } from './delegation.js';
 
 export const agentStatusLabels = {
-  pending: '等待中', running: '进行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
+  pending: '等待中', running: '进行中', idle: '空闲', blocked: '受阻',
+  completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态未知',
 };
-const statusIcons = { pending: Circle, running: CircleDot, completed: Check, failed: CircleAlert, cancelled: CircleSlash };
+const statusIcons = { running: CircleDot, blocked: CircleSlash, completed: Check, failed: CircleAlert, cancelled: CircleSlash };
 
 export const memberName = member => member.name || member.role || member.id;
 

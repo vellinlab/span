@@ -48,7 +48,7 @@ export type Usage = {
   cost?: { amount: number; currency: string };
 };
 export type Checkpoint = { id: string; label: string; turnId?: string; createdAt?: number };
-export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+export type AgentStatus = 'pending' | 'running' | 'idle' | 'blocked' | 'completed' | 'failed' | 'cancelled' | 'unknown';
 export type AgentMember = {
   id: string; name?: string; role?: string; status?: AgentStatus; detail?: string;
   session?: SessionRef; parent?: SessionRef; teamId?: string; model?: string;
@@ -56,9 +56,13 @@ export type AgentMember = {
   attachedTranscript?: boolean;
 };
 export type TeamTask = {
-  id: string; title: string; detail?: string; status: AgentStatus; assigneeId?: string; blockedBy?: string[];
+  id: string; title: string; detail?: string; status: AgentStatus; assigneeId?: string;
+  dependsOn?: string[]; blockedBy?: string[];
 };
-export type Team = { id: string; name: string; members: AgentMember[]; tasks?: TeamTask[] };
+export type Team = {
+  id: string; name: string; description?: string; status?: 'active' | 'closed' | 'orphaned';
+  members: AgentMember[]; tasks?: TeamTask[];
+};
 export type TeamAction =
   | { kind: 'create'; name: string }
   | { kind: 'assign'; teamId: string; taskId: string; memberId: string }
@@ -197,6 +201,8 @@ export interface AgentAdapter {
     members?(ref: SessionRef): Promise<AgentMember[]>;
     watchTranscript?(ref: SessionRef, memberId: string, listener: (view: AgentTranscript) => void): () => void;
     teams?(ref: SessionRef): Promise<Team[]>;
+    /** Optional refresh cadence while a visible roster is observing an active team or turn. */
+    teamRefreshMs?: number;
     act?(ref: SessionRef, action: DelegationAction): Promise<AgentMember | void>;
     manageTeam?(ref: SessionRef, action: TeamAction): Promise<Team | void>;
   };

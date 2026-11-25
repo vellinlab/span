@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -10,6 +10,9 @@ import { _electron as electron } from 'playwright';
 const [binary, piPath, screenshot, ssh] = process.argv.slice(2);
 const profile = await mkdtemp(join(tmpdir(), 'span-pi-preview-'));
 const state = process.env.SPAN_TEST_PI_STATE ?? join(profile, "Pi's state");
+const nativeTeams = process.env.SPAN_TEST_PI_TEAMS;
+const teamHome = ssh ? '/home/span-preview-ci' : join(profile, 'Team state home');
+const teamSignal = join(state, 'complete-team-prerequisite');
 const localWorkspace = join(profile, 'Pi 工作区');
 const referenceName = '工作区检查.txt';
 const localReference = join(localWorkspace, referenceName);
@@ -128,6 +131,47 @@ export default function (pi) {
   });
 }
 `);
+  if (nativeTeams) {
+    if (!ssh) await mkdir(teamHome);
+    await cp(nativeTeams, join(state, 'pi-teams-native'), { recursive: true });
+    await writeFile(join(state, 'extensions', 'span-team-fixture.ts'), `
+import { existsSync } from 'node:fs';
+import { TeamManager } from '../pi-teams-native/team-manager.ts';
+import { TaskStore } from '../pi-teams-native/task-store.ts';
+
+export default function (pi) {
+  pi.registerCommand('team', {
+    description: 'Show team roster or teammate detail: /team [team-name] [--detail <teammate>] [--full-prompt]',
+    handler() {},
+  });
+  pi.registerCommand('span-team-fixture', {
+    description: '为桌面验收创建原生 Pi Teams 共享任务。',
+    handler(_args, ctx) {
+      const registry = { resolve() {} };
+      const manager = new TeamManager({ registry, getCurrentSessionId: () => ctx.sessionManager.getSessionId() });
+      const board = manager.createTeam({ team_name: 'span-release-review', description: '复核发布前的交接。' });
+      manager.registerTeammate(board.name, {
+        name: 'reviewer', agentId: 'span-reviewer', agentType: 'worker', model: 'span-preview/span-pi',
+        status: 'running', isActive: false, cwd: ctx.cwd,
+      });
+      const store = new TaskStore(board.name, manager.getTasksPath(board.name));
+      const checklist = store.createTask('核对原始清单', '复核已收集的结果。');
+      const report = store.createTask('整理交接说明', '将结论写成可交付的说明。');
+      store.updateTask(report.id, { owner: 'reviewer', dependsOn: [checklist.id] }, report.version);
+      const other = new TeamManager({ registry, getCurrentSessionId: () => 'span-unrelated-session' });
+      other.createTeam({ team_name: 'span-unrelated-team', description: '其他会话的团队' });
+      const timer = setInterval(() => {
+        if (!existsSync(${JSON.stringify(teamSignal)})) return;
+        clearInterval(timer);
+        store.updateTask(checklist.id, { status: 'completed' }, checklist.version);
+      }, 100);
+      timer.unref();
+      ctx.ui.notify('原生任务板已就绪。', 'info');
+    },
+  });
+}
+`);
+  }
   if (ssh) execFileSync('chown', ['-R', 'span-preview-ci:span-preview-ci', state]);
   else {
     await mkdir(localWorkspace);
@@ -138,7 +182,8 @@ export default function (pi) {
     app = await electron.launch({
       executablePath: binary,
       args: ['--no-sandbox', '--disable-gpu'],
-      env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PI_PATH: resolve(piPath), PI_CODING_AGENT_DIR: state },
+      env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PI_PATH: resolve(piPath), PI_CODING_AGENT_DIR: state,
+        ...(nativeTeams && !ssh && (process.platform === 'win32' ? { USERPROFILE: teamHome } : { HOME: teamHome })) },
     });
     const page = await app.firstWindow();
     const errors = [];
@@ -311,6 +356,32 @@ export default function (pi) {
   await name.fill('Pi 原生会话验收');
   await name.press('Enter');
   await page.locator('.breadcrumb strong').getByText('Pi 原生会话验收', { exact: true }).waitFor();
+  async function openTeam(view) {
+    const input = view.getByRole('textbox', { name: '消息' });
+    await input.fill('/agents');
+    await input.press('Enter');
+    const roster = view.getByRole('region', { name: '代理与团队', exact: true });
+    await roster.getByText('复核发布前的交接。', { exact: true }).waitFor();
+    assert.equal(await roster.getByText('其他会话的团队').count(), 0);
+    return roster;
+  }
+  if (nativeTeams) {
+    await send('/span-team-fixture');
+    await transcript.getByText('原生任务板已就绪。', { exact: true }).waitFor();
+    const roster = await openTeam(page);
+    const members = roster.getByRole('list', { name: '代理成员' });
+    await members.getByText('reviewer', { exact: true }).waitFor();
+    await members.getByText('空闲', { exact: true }).waitFor();
+    const task = roster.getByRole('listitem').filter({ hasText: '整理交接说明' });
+    await task.getByText('受阻', { exact: true }).waitFor();
+    await task.getByText('负责人 reviewer · 依赖 核对原始清单', { exact: true }).waitFor();
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-teams.png') });
+    await writeFile(teamSignal, 'done');
+    await task.getByText('等待中', { exact: true }).waitFor({ timeout: 15_000 });
+    await roster.getByText('已完成', { exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    await roster.waitFor({ state: 'detached' });
+  }
   if (screenshot) await page.screenshot({ path: screenshot });
   assert.deepEqual(first.errors, []);
   await app.close();
@@ -325,6 +396,14 @@ export default function (pi) {
   else assert.equal(await resumed.page.getByTestId('session-catalog').getByRole('treeitem', { name: ssh, exact: true }).count(), 0);
   await verifyArchive(resumed.page.getByTestId('transcript'));
   await narrow(resumed.page);
+  if (nativeTeams) {
+    const roster = await openTeam(resumed.page);
+    await roster.getByText('已完成', { exact: true }).waitFor();
+    await resumed.page.keyboard.press('Escape');
+    await roster.waitFor({ state: 'detached' });
+    console.log('Verified Pi Teams native task-store snapshots, a live dependency transition, and session isolation on ' +
+      (ssh ?? process.platform));
+  }
   const editorAfterRestart = resumed.page.getByRole('textbox', { name: '消息' });
   await editorAfterRestart.fill(resumePrompt);
   await editorAfterRestart.press('Enter');

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
@@ -329,19 +329,57 @@ function AgentTaskList({ tasks, members }) {
   const titles = new Map(tasks.map(task => [task.id, task.title]));
   return <ul className="agent-member-list" aria-label="团队任务">{tasks.map(task => {
     const assignee = task.assigneeId && members.get(task.assigneeId);
-    const dependencies = task.blockedBy?.map(id => titles.get(id) || id).join('、');
+    const dependencies = (task.dependsOn ?? task.blockedBy)?.map(id => titles.get(id) || id).join('、');
     const metadata = [task.assigneeId && `负责人 ${assignee ? memberName(assignee) : task.assigneeId}`,
       dependencies && `依赖 ${dependencies}`].filter(Boolean).join(' · ');
     return <li key={task.id} className="agent-member-row">
       <span className="agent-member-label">{task.title}</span>
       <AgentStatus status={task.status} />
       {metadata && <small className="agent-member-meta">{metadata}</small>}
+      {task.detail && <p className="agent-member-detail">{task.detail}</p>}
     </li>;
   })}</ul>;
 }
 
+const teamStatuses = { active: '运行中', closed: '已关闭', orphaned: '主会话已断开' };
+
 function AgentsPanel({ work, openSession, openTrace, report }) {
   const { teams, members: liveMembers } = work;
+  const activeKey = sessionKey(work.session?.ref);
+  const cadence = work.api?.delegation?.teamRefreshMs;
+  const ready = Boolean(activeKey && work.connection === 'ready' && !work.loading);
+  const running = Boolean(cadence && work.run);
+  const observing = running || teams.some(team => team.status === 'active');
+  const refresh = useEffectEvent(async reportError => {
+    try { await work.refreshDelegation(); }
+    catch (error) { if (reportError) report(error); }
+  });
+  useEffect(() => {
+    if (ready) refresh(true);
+  }, [activeKey, ready, running]);
+  useEffect(() => {
+    if (!ready || !cadence || !observing) return;
+    let disposed = false;
+    let inFlight = false;
+    let timer;
+    function schedule() {
+      clearTimeout(timer);
+      if (disposed || document.hidden || inFlight) return;
+      timer = setTimeout(async () => {
+        inFlight = true;
+        await refresh(false);
+        inFlight = false;
+        schedule();
+      }, cadence);
+    }
+    schedule();
+    document.addEventListener('visibilitychange', schedule);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', schedule);
+    };
+  }, [activeKey, ready, cadence, observing]);
   const recordedMembers = delegatedMembers(work.rows);
   const { members, entries, groups, parents } = useMemo(() => {
     const members = new Map(recordedMembers);
@@ -360,7 +398,6 @@ function AgentsPanel({ work, openSession, openTrace, report }) {
     groups.set(null, subagents);
     return { members, entries, groups, parents };
   }, [recordedMembers, liveMembers, teams]);
-  const activeKey = sessionKey(work.session?.ref);
   const parentName = useCallback(ref => {
     if (!ref) return;
     const key = sessionKey(ref);
@@ -370,8 +407,12 @@ function AgentsPanel({ work, openSession, openTrace, report }) {
   const sections = groups.get(null).length ? [...teams, { id: null, name: '子代理' }] : teams;
   return <div className="agent-groups">
     {!members.size && !teams.length && <p>当前会话还没有代理活动。</p>}
-    {sections.map(({ id, name, tasks }) => <section key={id ?? 'subagents'} className="agent-group">
-      <h3>{name}</h3>
+    {sections.map(({ id, name, description, status, tasks }) => <section key={id ?? 'subagents'} className="agent-group">
+      <div className="agent-group-heading">
+        <h3>{name}</h3>
+        {teamStatuses[status] && <small>{teamStatuses[status]}</small>}
+      </div>
+      {description && <p className="agent-group-description">{description}</p>}
       {groups.get(id).length > 0 && <AgentMemberList members={groups.get(id)} parentName={parentName}
         currentKey={activeKey} openSession={openSession} canOpenSession={canOpenSession} openTrace={openTrace} />}
       {tasks?.length > 0 && <div className="agent-task-group">

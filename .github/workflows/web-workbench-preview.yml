@@ -247,7 +247,8 @@ jobs:
             "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
             "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE"
           bash prototype/test/install-pi.sh "$PWD/pi-test"
-          node prototype/test/real-pi.mjs "$binary" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
+          SPAN_TEST_PI_TEAMS="$PWD/pi-test/team-state-fixture" node prototype/test/real-pi.mjs \
+            "$binary" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Publish Windows preview and screenshot
         if: always()

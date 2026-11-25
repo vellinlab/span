@@ -27,6 +27,8 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 
 Pi 可以使用 PATH 中的 CLI。本机也可用 `SPAN_PI_PATH` 指定可执行文件。工作台读取 Pi 为当前工作区返回的会话目录，通过 Pi RPC 恢复会话，并显示当前历史分支。扩展注册的命令可从斜杠菜单发送给 Pi。 [Pi RPC 协议](https://github.com/earendil-works/pi/blob/v1.6.0/packages/coding-agent/docs/rpc.md)
 
+安装 Pi Teams 扩展后，可以在本机或 SSH 会话用 `/agents` 查看当前主会话的团队、成员、负责人和任务依赖。面板打开时刷新活动团队，从 Pi Teams 保存的状态确认任务是否受阻。团队的创建、分配和停用通过 Pi Teams 原生命令和工具执行。重开面板时会读取仍存在的任务板，团队数据保留周期由扩展管理。 [Pi Teams 工作流](https://github.com/vadimcomanescu/pi-teams#team-first-workflow)
+
 Codex 和 Pi 在 Agent 菜单中提供「技能」。在输入框用 `/skills` 也可以打开面板，并可在命令后附上搜索词。面板显示后端为当前工作区报告的技能，在第一条消息发出前也可以打开。
 
 OpenCode 使用 PATH 中的 CLI。本机也可用 `SPAN_OPENCODE_PATH` 指定可执行文件。SSH 会按顺序查找远端的 PATH、`~/.opencode/bin` 和 `~/.local/bin`。新会话默认使用远端登录目录，已保存的会话从其原工作目录恢复。OpenCode 回放的历史由 Span 按需向上分页。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/)

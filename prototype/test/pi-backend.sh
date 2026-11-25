@@ -9,6 +9,7 @@ cat > "$fixture/pi" <<SCRIPT
 exec /artifacts/node "$pi_cli" "\$@"
 SCRIPT
 chmod 0755 "$fixture/pi"
+export SPAN_TEST_PI_TEAMS=/artifacts/pi-test/team-state-fixture
 
 /artifacts/node prototype/test/real-pi.mjs "$binary" "$fixture/pi" /artifacts/el8-pi.png
 

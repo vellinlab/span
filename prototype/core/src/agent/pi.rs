@@ -11,6 +11,9 @@ use tokio::{io::AsyncReadExt, process::Command, time::timeout};
 
 const CATALOG_PAGE: usize = 40;
 const CATALOG_PREFIX: u64 = 64 * 1024;
+const TEAM_CONFIG_LIMIT: u64 = 128 * 1024;
+const TEAM_TASKS_LIMIT: u64 = 512 * 1024;
+const TEAM_SNAPSHOT_LIMIT: u64 = 8 * 1024 * 1024;
 
 pub(super) enum Catalog {
     Local,
@@ -212,6 +215,132 @@ pub(super) async fn catalog(
     Ok(
         json!({"items":records.into_iter().filter_map(session_record).collect::<Vec<_>>(),"cursor":next}),
     )
+}
+
+fn team_file(path: &Path, limit: u64) -> Option<(Value, u64)> {
+    let metadata = path.symlink_metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > limit {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .ok()?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let length = bytes.len() as u64;
+    if length > limit {
+        return None;
+    }
+    Some((serde_json::from_slice(&bytes).ok()?, length))
+}
+
+fn session_team(config: &Value, session: &str) -> bool {
+    config["leadSessionId"] == session && config["name"].as_str().is_some()
+}
+
+fn local_teams(root: &Path, session: &str) -> io::Result<Vec<Value>> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut teams = Vec::new();
+    let mut size = 0;
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if let Some((config, config_bytes)) =
+            team_file(&path.join("config.json"), TEAM_CONFIG_LIMIT)
+            && session_team(&config, session)
+        {
+            let (tasks, task_bytes) =
+                team_file(&path.join("tasks.json"), TEAM_TASKS_LIMIT).unwrap_or_default();
+            size += config_bytes + task_bytes + 32;
+            if size > TEAM_SNAPSHOT_LIMIT {
+                return Err(io::Error::other("Pi 团队记录超过响应大小限制。"));
+            }
+            teams.push(json!({ "config": config, "board": tasks }));
+        }
+    }
+    Ok(teams)
+}
+
+async fn remote_teams(host: &str, session: &str) -> Result<Vec<Value>> {
+    // Prefilter on the remote host, then parse and verify ownership again locally.
+    const SCRIPT: &str = r#"
+shopt -s nullglob dotglob
+export LC_ALL=C
+owner='"leadSessionId"[[:space:]]*:[[:space:]]*"'"$1"'"'
+config_limit=$(($2 + 1))
+tasks_limit=$(($3 + 1))
+for directory in "$HOME/.pi/teams/"*; do
+  config="$directory/config.json"
+  tasks="$directory/tasks.json"
+  [[ -d "$directory" && ! -L "$directory" && -f "$config" && ! -L "$config" ]] || continue
+  IFS= read -r -d '' -n "$config_limit" config_json < "$config"
+  [[ ${#config_json} -lt $config_limit && $config_json =~ $owner ]] || continue
+  task_json=''
+  if [[ -f "$tasks" && ! -L "$tasks" ]]; then
+    IFS= read -r -d '' -n "$tasks_limit" task_json < "$tasks"
+    if [[ ${#task_json} -ge $tasks_limit ]]; then task_json=''; fi
+  fi
+  printf '%s\0%s\0' "$config_json" "$task_json"
+done
+"#;
+    let command = format!(
+        "bash -c {} span-pi-teams {} {} {}",
+        shell_arg(SCRIPT),
+        shell_arg(session),
+        TEAM_CONFIG_LIMIT,
+        TEAM_TASKS_LIMIT,
+    );
+    let mut process = spawn(ssh(host).arg(command))?;
+    let mut bytes = Vec::new();
+    let status = timeout(Duration::from_secs(10), async {
+        (&mut process.output)
+            .take(TEAM_SNAPSHOT_LIMIT + 1)
+            .read_to_end(&mut bytes)
+            .await?;
+        if bytes.len() as u64 > TEAM_SNAPSHOT_LIMIT {
+            return Err(io::Error::other("Pi 团队记录超过响应大小限制。"));
+        }
+        process.child.wait().await
+    })
+    .await
+    .map_err(|_| "读取远端 Pi 团队超时。")??;
+    if !status.success() {
+        return Err("无法读取远端 Pi 团队。".into());
+    }
+    let mut teams = Vec::new();
+    let mut fields = bytes.split(|byte| *byte == 0);
+    while let (Some(config), Some(tasks)) = (fields.next(), fields.next()) {
+        if let Ok(config) = serde_json::from_slice::<Value>(config)
+            && session_team(&config, session)
+        {
+            let tasks = serde_json::from_slice::<Value>(tasks).ok();
+            teams.push(json!({ "config": config, "board": tasks }));
+        }
+    }
+    Ok(teams)
+}
+
+pub(super) async fn team_snapshot(source: &Catalog, session: String) -> Result<Value> {
+    let teams = match source {
+        Catalog::Local => {
+            let home = env::home_dir().ok_or("无法定位 Pi 团队目录。")?;
+            tokio::task::spawn_blocking(move || {
+                local_teams(&home.join(".pi").join("teams"), &session)
+            })
+            .await??
+        }
+        Catalog::Ssh(host) => remote_teams(host, &session).await?,
+        Catalog::Fixture => Vec::new(),
+    };
+    Ok(json!(teams))
 }
 
 pub(crate) fn fixture() -> Result<()> {

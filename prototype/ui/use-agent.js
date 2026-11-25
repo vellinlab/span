@@ -649,7 +649,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
         if (rosterRefresh.current !== refresh) return;
         // Replay only changes that arrived after this request began.
         if (newMembers) setMembers(previous => reconcileRoster(previous, newMembers, refresh.members));
-        if (newTeams) setTeams(previous => reconcileRoster(previous, newTeams, refresh.teams));
+        if (newTeams) setTeams(previous => {
+          const next = reconcileRoster(previous, newTeams, refresh.teams);
+          return client.delegation.teamRefreshMs && JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+        });
       } catch (error) {
         if (rosterRefresh.current === refresh) throw error;
       } finally {

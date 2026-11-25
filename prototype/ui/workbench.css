@@ -1153,6 +1153,11 @@ p { margin-block: 0 12px; }
 .usage-refresh { margin-inline-start: auto; min-inline-size: 68px; padding-block: 2px; text-align: center; }
 .usage-refresh[aria-disabled="true"] { cursor: default; }
 .agent-group :is(h3, h4) { margin: 0 0 4px; font-size: 12px; font-weight: 600; }
+.agent-group-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; }
+.agent-group-heading h3 { overflow-wrap: anywhere; }
+.agent-group-heading small, .agent-group-description { color: var(--muted); font-size: 11px; }
+.agent-group-description { overflow-wrap: anywhere; }
+.agent-group-description + :is(.agent-member-list, .agent-task-group) { margin-top: 7px; }
 .agent-task-group h4 { color: var(--muted); }
 .agent-group + .agent-group, .agent-member-list + .agent-task-group {
   border-top: 1px solid var(--line);
