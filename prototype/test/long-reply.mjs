@@ -20,6 +20,7 @@ const reasoningDetails = reasoningIndex || reasoningFollowing || process.argv.in
 const streamedReasoning = reasoningDetails || process.argv.includes('--reasoning');
 const [candidate, baseline, screenshot] = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const linux = process.platform === 'linux';
+const deviceScaleFactor = Number(process.env.SPAN_TEST_DEVICE_SCALE ?? 1);
 const lastFragment = `追加记录 ${following ? '160' : '040'}。继续核对正在生成的结果。`;
 
 const settleFrame = page => page.evaluate(async () => {
@@ -681,7 +682,7 @@ async function check(binary, label, trial) {
     if (reasoningDetails) await writeFile(join(profile, reasoningFollowing ? 'reasoning-following' : 'reasoning-details'), '');
     app = await electron.launch({
       executablePath: binary,
-      args: ['--demo', '--force-device-scale-factor=1',
+      args: ['--demo', `--force-device-scale-factor=${deviceScaleFactor}`,
         ...(linux ? ['--no-sandbox', '--disable-gpu', '--disable-webgl'] : [])],
       env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_STREAM_GATE: profile },
     });
@@ -693,6 +694,7 @@ async function check(binary, label, trial) {
       return window.webContents.getOSProcessId();
     }, size);
     await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, size);
+    assert.equal(await page.evaluate(() => devicePixelRatio), deviceScaleFactor);
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
@@ -890,4 +892,4 @@ for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
 }
 const scenario = toolOutput ? 'tool-output' : reasoningFollowing ? 'reasoning-following' :
   reasoningIndex ? 'reasoning-index' : reasoningDetails ? 'reasoning-details' : streamedReasoning ? 'reasoning' : undefined;
-console.log(JSON.stringify({ platform: process.platform, scenario, trials }, null, 2));
+console.log(JSON.stringify({ platform: process.platform, scenario, deviceScaleFactor, trials }, null, 2));

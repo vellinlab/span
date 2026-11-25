@@ -249,7 +249,8 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "$PWD/following-reply-baseline/span-preview.exe" --following | tee windows-workbench-following-reply.json
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-grouped-history" --grouped-history
           node prototype/test/long-reply.mjs "$binary" --tool-output
-          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-stream" --reasoning
+          SPAN_TEST_DEVICE_SCALE=1.25 node prototype/test/long-reply.mjs \
+            "$binary" "" "$PWD/windows-workbench-reasoning-stream-125" --reasoning
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-details" --reasoning-details
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-index" --reasoning-index
