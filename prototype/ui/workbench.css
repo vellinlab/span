@@ -1025,7 +1025,11 @@ p { margin-block: 0 12px; }
 }
 .agent-panel:is([data-kind="agents"], [data-kind="subagent"]) { width: min(100%, 560px); }
 .agent-panel[data-kind="reasoning"] { --panel-height: 320px; }
-.agent-panel[data-kind="subagent"] { --panel-height: 310px; }
+.composer-overlay:has(> .agent-panel[data-kind="subagent"]) { container-type: size; }
+.agent-panel[data-kind="subagent"] {
+  --subagent-panel-height: min(calc(100cqh - 10px), 55vh, 310px);
+  max-height: var(--subagent-panel-height);
+}
 .agent-panel[data-kind="subagent"] > header strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-panel-back {
   display: inline-flex;
@@ -1045,6 +1049,17 @@ p { margin-block: 0 12px; }
   overflow: hidden;
 }
 .agent-panel[data-kind="subagent"] .timeline { flex: 0 1 auto; container-type: inline-size; overscroll-behavior: contain; }
+/* Short child logs size to their content. Bound inner scrollers to the overlay's available height. */
+.agent-panel[data-kind="subagent"] .command-text {
+  max-height: clamp(44px, calc(var(--subagent-panel-height) - 178px), 88px);
+}
+.agent-panel[data-kind="subagent"] .card-body :is(.text-scroll, .output-scroll) {
+  max-height: clamp(72px, calc(var(--subagent-panel-height) - 126px), 160px);
+  overscroll-behavior: contain;
+}
+.agent-panel[data-kind="subagent"] .plan-list {
+  max-height: clamp(72px, calc(var(--subagent-panel-height) - 106px), 178px);
+}
 .subagent-latest {
   position: absolute;
   inset-inline-end: 17px;

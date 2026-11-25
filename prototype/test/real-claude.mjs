@@ -25,7 +25,7 @@ const delegate = '委派子代理检查临时工作区。';
 const childPrompt = '执行给定的验收命令并报告结果。';
 const childAnswer = '子代理已核对验收标记。';
 const delegateAnswer = '父会话收到子代理结果。';
-const childCommand = 'echo span-claude-child';
+const childCommand = "printf 'span-claude-child-%s\\n' {01..48}";
 const toolId = 'toolu_span_claude_command';
 const delegateId = 'toolu_span_claude_delegate';
 const childToolId = 'toolu_span_claude_child_cmd';
@@ -277,7 +277,7 @@ try {
   assert.ok(promptOffset >= 0 && promptOffset <= 36, `Short child transcripts should start under the header (${promptOffset}px)`);
   await approvalCard.getByRole('button', { name: '仅允许这次', exact: true }).press('Enter');
   await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
-  assert.match(childToolResult ?? '', /span-claude-child/);
+  assert.match(childToolResult ?? '', /span-claude-child-01.*span-claude-child-48/);
   await transcript().getByText(delegateAnswer, { exact: true }).waitFor();
   assert.equal(await transcript().getByText(childAnswer, { exact: true }).count(), 0);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent.png') });
@@ -297,9 +297,43 @@ try {
   const restoredCommand = childTranscript().locator('[data-card="command"]').filter({ hasText: childCommand });
   await restoredCommand.locator('summary').press('Enter');
   const restoredOutput = restoredCommand.getByLabel('工具输出', { exact: true });
-  await restoredOutput.waitFor();
-  assert.equal((await restoredOutput.textContent()).trim(), 'span-claude-child');
+  const firstOutputLine = restoredOutput.getByText('span-claude-child-01', { exact: true });
+  await firstOutputLine.waitFor();
+  await restoredOutput.scrollIntoViewIfNeeded();
+  await restoredOutput.focus();
+  const outputSize = await restoredOutput.evaluate(element => ({
+    height: element.clientHeight,
+    contentHeight: element.scrollHeight,
+    transcriptHeight: element.closest('.timeline').clientHeight,
+  }));
+  assert.ok(outputSize.contentHeight > outputSize.height && outputSize.height <= outputSize.transcriptHeight - 60,
+    `Long output should leave room for the card heading and controls (${JSON.stringify(outputSize)})`);
+  assert.ok(await restoredOutput.locator('.output-line').count() < 40, 'Only nearby output lines should be mounted');
+  const childScroll = await childTranscript().evaluate(element => element.scrollTop);
+  const parentScroll = await transcript().evaluate(element => element.scrollTop);
   if (screenshot) await page.screenshot({ path: screenshot });
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => {
+    const output = document.querySelector('[data-testid="subagent-transcript"] [aria-label="工具输出"]');
+    return output && output.scrollHeight - output.clientHeight - output.scrollTop <= 2;
+  });
+  const lastOutputLine = restoredOutput.getByText('span-claude-child-48', { exact: true });
+  await lastOutputLine.waitFor();
+  assert.ok(await lastOutputLine.evaluate(element => {
+    const line = element.getBoundingClientRect();
+    const output = element.closest('.output-scroll').getBoundingClientRect();
+    const child = element.closest('.timeline').getBoundingClientRect();
+    return line.top >= Math.max(output.top, child.top) - 1 && line.bottom <= Math.min(output.bottom, child.bottom) + 1;
+  }), 'The final line should be visible inside the child transcript');
+  assert.ok(await restoredOutput.evaluate(element => element === document.activeElement));
+  assert.equal(await childTranscript().evaluate(element => element.scrollTop), childScroll);
+  assert.equal(await transcript().evaluate(element => element.scrollTop), parentScroll);
+  const copyOutput = restoredCommand.getByRole('button', { name: '复制输出', exact: true });
+  await copyOutput.click();
+  await restoredCommand.locator('[title="已复制输出"]').waitFor();
+  const copiedOutput = (await app.evaluate(({ clipboard }) => clipboard.readText())).trim().split(/\r?\n/);
+  assert.deepEqual(copiedOutput, Array.from({ length: 48 }, (_, index) =>
+    `span-claude-child-${String(index + 1).padStart(2, '0')}`));
   await childPanel().getByRole('button', { name: '关闭面板' }).press('Escape');
   await send('/agents');
   const roster = page.getByRole('region', { name: '代理与团队', exact: true });
