@@ -815,6 +815,8 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
     update(sessionId, { sessionUpdate, messageId, content: { type: 'text', text } });
   let ongoing;
   let sessionConfig = configOptions;
+  let kiloGoal;
+  let finishSavedGoalRead;
   globalThis.window = { span: {
     onEvent(listener) {
       listeners.add(listener);
@@ -827,6 +829,25 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
         emit('agent', { method: 'span/backendWorkspace', params: { cwd: '/remote home' } });
         emit('agent-route', 'stdio');
         return;
+      }
+      if (method === 'agent.kiloGoal') {
+        assert.equal(backend, 'kilo');
+        assert.equal(args.generation, source);
+        if (args.probe) {
+          assert.equal(args.cwd, '/remote home');
+          return true;
+        }
+        if (args.sessionId === 'saved') return new Promise(resolve => { finishSavedGoalRead = resolve; });
+        assert.equal(args.sessionId, 'new');
+        assert.equal(args.cwd, '/remote home');
+        if (args.action === 'set') {
+          assert.equal(args.options.mode, 'plan');
+          kiloGoal = { text: args.objective, status: 'active' };
+          chunk('new', 'agent_thought_chunk', 'goal-thought', 'Verify the objective.');
+        } else if (args.action === 'pause') {
+          kiloGoal = { ...kiloGoal, status: 'paused' };
+        }
+        return kiloGoal;
       }
       if (method !== 'agent.send') return;
       const sent = args.packet;
@@ -889,9 +910,15 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   const older = await agent.sessions.history(saved.session.ref, { cursor: saved.history.cursor, limit: 1 });
   assert.deepEqual(historyRows(older.items).map(row => row.text ?? row.command),
     ['First question', 'Before the tool.', 'echo test', 'After the tool.']);
+  const savedGoalRead = agent.goal?.read(saved.session.ref);
   await agent.sessions.release(saved.session.ref);
   const fresh = await agent.sessions.start({});
   const session = fresh.session.ref;
+  if (savedGoalRead) {
+    finishSavedGoalRead({ text: 'Previous goal', status: 'active' });
+    assert.equal(await savedGoalRead, undefined);
+    assert.ok(!events.some(event => event.kind === 'goal'));
+  }
   const otherBackend = backend === 'opencode' ? 'kilo' : 'opencode';
   await assert.rejects(agent.usage({ ...session, backend: otherBackend }), /切换/);
   assert.deepEqual(agent.commands.map(command => command.id), ['compact']);
@@ -926,4 +953,16 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.deepEqual(usage.tokens, { contextUsed: 900, contextLimit: 32768 });
   assert.equal(usage.recentTokens.total, 40);
   assert.equal(usage.cost.amount, 0.001);
+  if (backend === 'kilo') {
+    const goal = await agent.goal.update(session, { kind: 'set', objective: 'Review the state' }, { mode: 'plan' });
+    assert.equal(goal.status, 'active');
+    assert.equal(events.findLast(event => event.kind === 'delta').delta.text, 'Verify the objective.');
+    const activeGoalRun = events.findLast(event => event.kind === 'run').run;
+    assert.equal(activeGoalRun.status, 'running');
+    await agent.turns.stop(session, activeGoalRun.id);
+    assert.equal(events.findLast(event => event.kind === 'goal').goal.status, 'paused');
+    assert.equal(events.findLast(event => event.kind === 'run').run.status, 'cancelled');
+  } else {
+    assert.equal(agent.goal, undefined);
+  }
 }));

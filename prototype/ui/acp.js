@@ -1,6 +1,7 @@
 import { connectRpc, jsonRpc } from './agent-rpc.js';
 import { acpOperation, acpReplay, acpTurn, acpTurnId } from './acp-items.js';
 import { attachmentArtifacts, attachmentName, fileReferenceText } from './file-references.js';
+import { createKiloGoals } from './kilo-goals.js';
 
 const wire = { ...jsonRpc, request: (id, method, params) => ({ jsonrpc: '2.0', id, method, params }) };
 const approvalOptions = new Map([
@@ -25,11 +26,13 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   let capabilities;
   let active;
   let loading;
+  let goals;
 
   const ref = id => ({ backend, location, id });
   const childSession = tool => childSessionKey ? tool._meta?.[childSessionKey] : undefined;
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }), error => {
+    goals?.close();
     active = loading = undefined;
     dialogs.clear();
     onEvent({ kind: 'disconnected', error });
@@ -104,6 +107,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     active = state;
     state.id = entry.sessionId;
     state.entry = entry;
+    goals?.attach(state);
     sessions.set(state.id, entry);
     commands.splice(0, commands.length, ...(state.commands ?? []));
     useConfig(state, config ?? state.config ?? []);
@@ -173,7 +177,10 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
         return;
     }
     if (state.replay) state.replay.update(update);
-    else state.turn?.projection.update(update);
+    else {
+      if (state === active && ['agent_message_chunk', 'agent_thought_chunk', 'tool_call'].includes(update.sessionUpdate)) goals?.activity(state);
+      state.turn?.projection.update(update);
+    }
   }
 
   function result(id, value) {
@@ -188,6 +195,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       const normalized = approvalOptions.get(option.kind);
       return normalized && typeof option.optionId === 'string' ? [{ id: option.optionId, ...normalized }] : [];
     });
+    if (params.sessionId === state?.id) goals?.activity(state);
     if (!state?.turn || (params.sessionId !== state.id && parent !== state.id) || !choices.length) {
       result(id, { outcome: { outcome: 'cancelled' } }).catch(() => {});
       return;
@@ -226,6 +234,24 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     }
     state.turn = undefined;
     notify(state.id, { kind: 'run', run: { id: turn.run.id, status, error } });
+    if (!turn.goal) goals?.watch(state, 0);
+  }
+
+  function startTurn(state, goal = false) {
+    const run = { id: acpTurnId(state.nextTurn++), status: 'running' };
+    const turn = { run, goal, projection: acpTurn(run.id, event => notify(state.id, event), childSession) };
+    state.turn = turn;
+    if (goal) notify(state.id, { kind: 'run', run });
+    return turn;
+  }
+
+  function synchronizeGoal(state, goal) {
+    if (goal?.status === 'active') {
+      if (!state.turn) startTurn(state, true);
+    } else if (state.turn?.goal) {
+      const status = goal?.status === 'blocked' ? 'failed' : ['complete', 'waiting'].includes(goal?.status) ? 'completed' : 'cancelled';
+      finish(state, state.turn, status);
+    }
   }
 
   async function configure(state, options) {
@@ -290,6 +316,11 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       if (initialized.protocolVersion !== 1) throw new Error(`当前 ${label} 使用了不兼容的 ACP 版本。`);
       if (!workspace) throw new Error(`无法确认 ${label} 的工作目录。`);
       capabilities = initialized.agentCapabilities;
+      if (backend === 'kilo' && await window.span.request('agent.kiloGoal', { generation, probe: true, cwd: workspace }).catch(() => false)) {
+        goals = createKiloGoals({ generation, requireActive, synchronize: synchronizeGoal,
+          begin: state => startTurn(state, true), end: finish, notify });
+        adapter.goal = goals.capability;
+      }
       if (capabilities?.sessionCapabilities?.fork && capabilities.loadSession) {
         adapter.sessions.fork = async session => {
           const { entry, id } = requireActive(session);
@@ -301,6 +332,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       }
     },
     close() {
+      goals?.close();
       active = loading = undefined;
       dialogs.clear();
       sessions.clear();
@@ -330,6 +362,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       },
       async release(session) {
         if (session.id !== active?.id) return;
+        goals?.close();
         active = undefined;
         commands.length = 0;
         modes.length = 0;
@@ -342,9 +375,9 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
         if (state.turn) throw new Error(`请等当前 ${label} 回合结束。`);
         const prompt = await promptInput(input);
         await configure(state, options);
-        const run = { id: acpTurnId(state.nextTurn++), status: 'running' };
-        const turn = { run, projection: acpTurn(run.id, event => notify(state.id, event), childSession) };
-        state.turn = turn;
+        const turn = startTurn(state);
+        const { run } = turn;
+        goals?.watch(state);
         const { sent, response } = rpc.beginRequest('session/prompt', { sessionId: state.id, prompt }, null);
         const dispatched = sent.then(() => {
           const text = input.filter(part => part.kind === 'text').map(part => part.text).join('\n');
@@ -377,6 +410,10 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       async stop(session, id) {
         const state = requireActive(session);
         if (state.turn?.run.id !== id) return;
+        if (state.turn.goal && goals) {
+          await goals.capability.update(session, { kind: 'pause' });
+          return;
+        }
         await rpc.send({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: state.id } });
       },
     },

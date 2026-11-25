@@ -101,7 +101,8 @@ export function acpTurn(id, notify, childSession) {
       item({ kind: 'message', id: messageId, text: chunks.join(''), phase: messageId === final ? 'final' : 'commentary' }, true);
     }
     for (const current of tools.values()) {
-      tool({ ...current, status: cancelled ? 'failed' : current.status });
+      const interrupted = cancelled && (current.status === 'pending' || current.status === 'in_progress');
+      tool({ ...current, status: interrupted ? 'failed' : current.status });
     }
   }
 

@@ -27,8 +27,8 @@ export type RunOptions = { model?: string; effort?: string; tier?: string; mode?
 export type Turn = { id: string; run: Run; rows: TimelineItem[] };
 export type OpenSession = { session: Session; options?: RunOptions; models?: Model[]; history?: Page<Turn> };
 export type Goal = {
-  objective: string; status: 'active' | 'paused' | 'complete' | 'blocked' | 'limited' | 'unknown';
-  budget?: number; tokens?: number; seconds?: number;
+  objective: string; status: 'active' | 'paused' | 'complete' | 'blocked' | 'waiting' | 'limited' | 'unknown';
+  budget?: number; tokens?: number; seconds?: number; reason?: string;
 };
 export type GoalAction =
   | { kind: 'set'; objective: string; budget?: number }
@@ -172,8 +172,12 @@ export interface AgentAdapter {
   modes?: Choice[];
   permissions?: Choice[];
   goal?: {
+    budget?: boolean;
+    startsOnSave?: boolean;
+    canRestart?: boolean;
+    objectiveLimit?: number;
     read(ref: SessionRef): Promise<Goal | null>;
-    update(ref: SessionRef, action: GoalAction): Promise<Goal | null>;
+    update(ref: SessionRef, action: GoalAction, options?: RunOptions): Promise<Goal | null>;
   };
   usage?(ref?: SessionRef): Promise<Usage>;
   interactions?: { respond(id: string, reply: InteractionReply): Promise<void> };

@@ -21,6 +21,11 @@ const next = `继续已经保存的 ${label} 会话。`;
 const answer = `${label} 已交付结果。`;
 const continued = `${label} 已继续原会话。`;
 const firstReasoning = `先核对 ${label}。`;
+const goalObjective = '核对目标卡片和实际任务状态。';
+const goalReasoning = '检查原生目标的暂停与恢复。';
+const goalReport = '已核对目标卡片和会话状态。';
+const goalAnswer = '原生目标已完成。';
+let goalRequests = 0;
 let toolResult;
 let gatewayError;
 let releaseReasoning;
@@ -41,7 +46,21 @@ const gateway = createServer(async (request, response) => {
         choices: [{ index: 0, delta, finish_reason }], usage }) + '\n\n');
     };
     emit({ role: 'assistant' });
-    if (text.includes(initial) && !tool) {
+    if (text.includes(goalObjective)) {
+      if (tool) {
+        assert.match(JSON.stringify(tool.content), /Report recorded/);
+        emit({ content: goalAnswer });
+        emit({}, 'stop', { prompt_tokens: 28, completion_tokens: 10, total_tokens: 38 });
+      } else if (++goalRequests === 1) {
+        emit({ reasoning_content: goalReasoning });
+        await once(response, 'close');
+        return;
+      } else {
+        emit({ tool_calls: [{ index: 0, id: 'span-goal-report', type: 'function',
+          function: { name: 'goal_report', arguments: JSON.stringify({ status: 'complete', reason: goalReport }) } }] });
+        emit({}, 'tool_calls', { prompt_tokens: 26, completion_tokens: 9, total_tokens: 35 });
+      }
+    } else if (text.includes(initial) && !tool) {
       emit({ reasoning_content: firstReasoning });
       await new Promise(done => { releaseReasoning = done; });
       emit({ reasoning_content: '\n再检查工具与审批。' });
@@ -212,6 +231,41 @@ try {
   await send('/new');
   await page.getByPlaceholder('描述要完成的任务…').waitFor();
   assert.equal(await model.count(), 0);
+  if (backend === 'kilo') {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+    await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+    const goalPanel = () => page.getByRole('region', { name: '会话目标', exact: true });
+    const goalStrip = () => page.locator('.goal-strip').filter({ hasText: goalObjective });
+    const closeGoal = () => goalPanel().getByRole('button', { name: '关闭面板' }).press('Escape');
+    await send('/goal');
+    await goalPanel().getByRole('textbox', { name: '目标', exact: true }).fill(goalObjective);
+    assert.equal(await goalPanel().getByText('Token 预算').count(), 0);
+    await goalPanel().getByRole('button', { name: '启动目标', exact: true }).press('Enter');
+    await goalStrip().getByText('进行中', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '实时推理摘要' }).getByText(goalReasoning, { exact: true }).waitFor();
+    await closeGoal();
+    await goalPanel().waitFor({ state: 'detached' });
+    assert.ok(await goalStrip().evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      const composer = document.querySelector('.composer').getBoundingClientRect();
+      return bounds.bottom < composer.top && Math.abs(bounds.left - composer.left) <= 1;
+    }));
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal.png') });
+    await goalStrip().press('Enter');
+    await goalPanel().getByRole('button', { name: '暂停', exact: true }).press('Enter');
+    await goalStrip().getByText('已暂停', { exact: true }).waitFor();
+    await app.close();
+    await open(false);
+    await goalStrip().getByText('已暂停', { exact: true }).waitFor();
+    await goalStrip().press('Enter');
+    await goalPanel().getByRole('button', { name: '继续', exact: true }).press('Enter');
+    await goalStrip().getByText('已完成', { exact: true }).waitFor();
+    await page.getByTestId('transcript').getByText(goalAnswer, { exact: true }).waitFor();
+    await goalPanel().getByText(goalReport, { exact: true }).waitFor();
+    await goalPanel().getByRole('button', { name: '清除', exact: true }).press('Enter');
+    await goalStrip().waitFor({ state: 'detached' });
+    console.log(`Verified Kilo's native goal start, pause, persisted state, resume, completion and clear on ${ssh ?? process.platform}`);
+  }
   assert.equal(gatewayError, undefined);
   console.log(`Verified ${label} ACP reasoning, permission, usage, persisted history and continuation on ${ssh ?? process.platform}`);
 } catch (error) {

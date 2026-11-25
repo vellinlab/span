@@ -597,7 +597,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   async function goalAction(action) {
     const version = ++callbacks.current.goal;
-    const value = await withSession((client, ref) => action ? client.goal.update(ref, action) : client.goal.read(ref),
+    const value = await withSession((client, ref) => action ? client.goal.update(ref, action, options) : client.goal.read(ref),
       { create: action?.kind === 'set', title: action?.objective?.slice(0, 48) });
     if (version === callbacks.current.goal && value !== undefined) setGoal(value);
     return value;

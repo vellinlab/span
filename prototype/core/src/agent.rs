@@ -46,8 +46,39 @@ else
     exit 127
 fi
 printf "span-acp-cwd %s\n" "$PWD"
+if [ -n "$2" ]; then
+    IFS= read -r KILO_SERVER_PASSWORD || exit 1
+    export KILO_SERVER_PASSWORD KILO_SERVER_USERNAME=span
+    exec "$cli" acp --hostname 127.0.0.1 --port "$2"
+fi
 exec "$cli" acp
 "#;
+
+struct KiloConnection {
+    local_port: u16,
+    remote_port: u16,
+    password: String,
+}
+
+impl KiloConnection {
+    fn from_request(params: &Value) -> Option<Self> {
+        let local_port = u16::try_from(params["localPort"].as_u64()?).ok()?;
+        let remote_port = u16::try_from(params["remotePort"].as_u64()?).ok()?;
+        let password = params["password"].as_str()?;
+        if local_port == 0
+            || remote_port == 0
+            || password.len() != 64
+            || !password.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        Some(Self {
+            local_port,
+            remote_port,
+            password: password.to_owned(),
+        })
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 struct AcpBackend {
@@ -123,6 +154,9 @@ impl Agent {
         } else {
             Location::Local(process_directory(params)?)
         };
+        let kilo = (backend == Backend::Acp(KILO))
+            .then(|| KiloConnection::from_request(&params["kilo"]))
+            .flatten();
         let (outgoing, requests) = mpsc::channel(32);
         let (stop, stopped) = oneshot::channel();
         let output = output.clone();
@@ -135,7 +169,7 @@ impl Agent {
                 runtime.block_on(async {
                     tokio::select! {
                         _ = stopped => {}
-                        result = serve(backend, location, requests, &output, generation) => {
+                        result = serve(backend, location, kilo, requests, &output, generation) => {
                             let reason = result.err().map(|error| error.to_string());
                             let _ = event(&output, "agent-closed", generation, json!(reason));
                         }
@@ -199,17 +233,21 @@ fn spawn(command: &mut Command) -> io::Result<Process> {
 }
 
 fn ssh(target: &str) -> Command {
+    ssh_with_forward(target, None)
+}
+
+fn ssh_with_forward(target: &str, kilo: Option<&KiloConnection>) -> Command {
     let mut command = Command::new("ssh");
-    command.args([
-        "-T",
-        "-x",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=8",
-        "--",
-        target,
-    ]);
+    command.args(["-T", "-x", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]);
+    if let Some(kilo) = kilo {
+        command
+            .args(["-o", "ExitOnForwardFailure=yes", "-L"])
+            .arg(format!(
+                "127.0.0.1:{}:127.0.0.1:{}",
+                kilo.local_port, kilo.remote_port
+            ));
+    }
+    command.args(["--", target]);
     command
 }
 
@@ -432,6 +470,7 @@ async fn remote_route(process: &mut Process) -> Result<bool> {
 async fn serve(
     backend: Backend,
     location: Location,
+    kilo: Option<KiloConnection>,
     requests: mpsc::Receiver<Value>,
     output: &Output,
     generation: u64,
@@ -459,8 +498,22 @@ async fn serve(
             stdio_process(process, requests, output, generation, route, Some(catalog)).await?;
         }
         (Backend::Acp(acp), Location::Ssh(target)) => {
-            let mut process =
-                spawn(ssh(&target).arg(format!("sh -c '{REMOTE_ACP}' span-acp {}", acp.name)))?;
+            let port = kilo
+                .as_ref()
+                .map(|connection| connection.remote_port.to_string())
+                .unwrap_or_default();
+            let mut process = spawn(ssh_with_forward(&target, kilo.as_ref()).arg(format!(
+                "sh -c '{REMOTE_ACP}' span-acp {} '{port}'",
+                acp.name
+            )))?;
+            if let Some(connection) = &kilo {
+                process
+                    .input
+                    .write_all(connection.password.as_bytes())
+                    .await?;
+                process.input.write_all(b"\n").await?;
+                process.input.flush().await?;
+            }
             let directory = timeout(Duration::from_secs(12), async {
                 let mut line = Vec::new();
                 loop {
@@ -498,13 +551,21 @@ async fn serve(
             let program = env::var_os(acp.path_override)
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| backend.binary().into());
-            let process =
-                spawn(Command::new(program).arg("acp").current_dir(cwd)).map_err(|error| {
-                    format!(
-                        "无法启动 {}。请检查 CLI 安装，或将 {} 指向可执行文件。\n{error}",
-                        acp.label, acp.path_override
-                    )
-                })?;
+            let mut command = Command::new(program);
+            command.arg("acp").current_dir(cwd);
+            if let Some(connection) = &kilo {
+                command
+                    .args(["--hostname", "127.0.0.1", "--port"])
+                    .arg(connection.local_port.to_string())
+                    .env("KILO_SERVER_USERNAME", "span")
+                    .env("KILO_SERVER_PASSWORD", &connection.password);
+            }
+            let process = spawn(&mut command).map_err(|error| {
+                format!(
+                    "无法启动 {}。请检查 CLI 安装，或将 {} 指向可执行文件。\n{error}",
+                    acp.label, acp.path_override
+                )
+            })?;
             stdio(process, requests, output, generation, "stdio").await?;
         }
         (_, Location::Fixture) => {

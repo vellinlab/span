@@ -10,7 +10,7 @@ import { TextReader } from './text-reader.jsx';
 import { delegatedMembers } from './timeline.js';
 
 const statuses = {
-  active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', limited: '达到用量上限', unknown: '状态未知',
+  active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', waiting: '等待中', limited: '达到用量上限', unknown: '状态未知',
 };
 const number = new Intl.NumberFormat('zh-CN');
 const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息', diff: '工作区 Git 改动' };
@@ -87,7 +87,7 @@ function RuntimeSettings({ api, models, options, setOptions }) {
   </div>;
 }
 
-function GoalPanel({ goal, action, report, editOnOpen }) {
+function GoalPanel({ goal, capability, action, report, editOnOpen }) {
   const [editing, setEditing] = useState(() => editOnOpen || !goal);
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -99,7 +99,9 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
   const editButton = useRef(null);
   const moveFocus = useRef(editOnOpen);
   const showEditor = editing || !goal;
-  const toggleStatus = goal?.status === 'active' ? 'pause' : goal?.status === 'paused' ? 'resume' : null;
+  const toggleStatus = ['active', 'waiting'].includes(goal?.status) ? 'pause'
+    : goal?.status === 'paused' || (capability?.canRestart && ['complete', 'blocked'].includes(goal?.status)) ? 'resume' : null;
+  const saveLabel = capability?.startsOnSave ? goal ? '替换并启动' : '启动目标' : '保存目标';
   const objective = draft?.objective ?? goal?.objective ?? '';
   const budget = draft?.budget ?? goal?.budget ?? '';
   const trimmed = useMemo(() => showEditor ? objective.trim() : '', [showEditor, objective]);
@@ -157,28 +159,30 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
   }}>
     {showEditor ? <div className="goal-editor">
       <textarea ref={objectiveInput} aria-label="目标" rows={6} value={objective} required
+        maxLength={capability?.objectiveLimit}
         onChange={event => edit('objective', event.target.value)} />
     </div> : <div className="agent-panel-content" ref={content}>
       <p className="goal-objective" tabIndex={0}>{goal.objective}</p>
+      {goal.reason && <p className="goal-reason">{goal.reason}</p>}
     </div>}
     <div className="panel-actions goal-actions">
       {showEditor ? <>
-        <label className="goal-budget"><span>Token 预算</span>
+        {capability?.budget !== false && <label className="goal-budget"><span>Token 预算</span>
           <input type="number" min={1} step={1} value={budget} placeholder="可选"
             onChange={event => edit('budget', event.target.value)} />
-        </label>
+        </label>}
         {goal && <button type="button" aria-disabled={busy} onClick={() => {
           if (busy) return;
           setDraft(null);
           changeEditor(false);
         }}>取消</button>}
         {/* The edit button must keep its original type when its click opens the editor. */}
-        <button key="save-goal" type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>保存目标</button>
+        <button key="save-goal" type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>{saveLabel}</button>
       </> : <>
         <button type="button" className="goal-clear" aria-disabled={busy}
           onClick={() => update({ kind: 'clear' })}>清除</button>
         {toggleStatus && <button type="button" aria-disabled={busy}
-          onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : '继续'}</button>}
+          onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : goal.status === 'complete' ? '重新开始' : '继续'}</button>}
         <button type="button" ref={editButton} aria-disabled={busy} onClick={() => { if (!busy) changeEditor(true); }}>编辑</button>
       </>}
     </div>
@@ -429,7 +433,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       </button>}
       <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => onClose()}><X size={15} /></button>
     </header>
-    {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal}
+    {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal} capability={work.api?.goal}
       action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}
       tabIndex={detailsLabel ? 0 : undefined} role={detailsLabel ? 'group' : undefined} aria-label={detailsLabel}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}

@@ -3,12 +3,13 @@ const { spawn } = require('node:child_process');
 const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises');
 const { createInterface } = require('node:readline');
 const path = require('node:path');
+const { prepareKilo, kiloGoal } = require('./kilo-goals.cjs');
 
 const root = path.resolve(__dirname, '..');
 const binary = process.platform === 'win32' ? 'span-workbench-core.exe' : 'span-workbench-core';
 const demo = process.argv.includes('--demo');
 const allowed = new Set([
-  'agent.start', 'agent.send', 'agent.close',
+  'agent.start', 'agent.send', 'agent.close', 'agent.kiloGoal',
   'terminal.start', 'terminal.write', 'terminal.resize', 'terminal.ack', 'terminal.close',
   'files.list', 'files.preview',
 ]);
@@ -21,6 +22,15 @@ const selectedImages = new Set();
 const stagedScreenshots = new Set();
 const screenshotSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 let screenshotNumber = 0;
+let kiloConnection;
+let agentStart;
+
+function closeKilo(generation) {
+  if (kiloConnection && (generation === undefined || kiloConnection.generation === generation)) {
+    kiloConnection.controller.abort();
+    kiloConnection = undefined;
+  }
+}
 
 const screenshotRoot = () => path.join(app.getPath('userData'), 'screenshots');
 
@@ -86,6 +96,7 @@ function finish(id, error, payload) {
 }
 
 function publish(packet) {
+  if (packet.event === 'agent-closed') closeKilo(packet.generation);
   if (terminalEvents.has(packet.event) && packet.generation !== terminalGeneration) return;
   if (window && !window.isDestroyed()) window.webContents.send('span:event', packet);
 }
@@ -109,6 +120,8 @@ function spawnCore() {
   core.stdin.on('error', () => {});
   core.on('error', error => publish({ event: 'core-error', data: error.message }));
   core.on('close', () => {
+    agentStart = undefined;
+    closeKilo();
     for (const id of pending.keys()) finish(id, 'Rust 服务已退出。');
     if (!closing) publish({ event: 'core-error', data: 'Rust 服务已退出。' });
     if (closing) app.quit();
@@ -127,9 +140,32 @@ function closeTerminal() {
   request('terminal.close', { generation }).catch(() => {});
 }
 
-ipcMain.handle('span:request', (event, method, params) => {
+ipcMain.handle('span:request', async (event, method, params) => {
   if (!trusted(event) || !allowed.has(method)) throw new Error('无效的工作台请求。');
-  if (method === 'agent.start') params = { ...params, demo };
+  if (method === 'agent.start') {
+    const start = { generation: params?.generation };
+    agentStart = start;
+    closeKilo();
+    const kilo = !demo && params?.backend === 'kilo' ? await prepareKilo(params.ssh) : undefined;
+    if (start !== agentStart) throw new Error('Agent 连接已切换。');
+    if (kilo) {
+      const controller = new AbortController();
+      kiloConnection = { ...kilo, generation: params.generation, controller, signal: controller.signal };
+    }
+    try { return await request(method, { ...params, demo, kilo }); }
+    catch (error) {
+      closeKilo(params?.generation);
+      throw error;
+    }
+  }
+  if (method === 'agent.close' && Number.isSafeInteger(params?.generation)) {
+    if (agentStart?.generation === params.generation) agentStart = undefined;
+    closeKilo(params.generation);
+  }
+  if (method === 'agent.kiloGoal') {
+    if (!kiloConnection || kiloConnection.generation !== params?.generation) throw new Error('Kilo 连接已切换。');
+    return kiloGoal(kiloConnection, params);
+  }
   if (method === 'terminal.start') {
     const generation = params?.generation;
     if (!Number.isSafeInteger(generation) || generation <= 0) throw new Error('无效的终端标识。');
