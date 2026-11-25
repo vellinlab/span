@@ -54,7 +54,7 @@ function App() {
   const [connectionCwd, setConnectionCwd] = useState('');
   const [tab, setTab] = useState('sessions');
   const [error, setError] = useState('');
-  const [copyFeedback, setCopyFeedback] = useState(null);
+  const [composerFeedback, setComposerFeedback] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -141,10 +141,10 @@ function App() {
     ? commands.filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
 
   useEffect(() => {
-    if (!copyFeedback) return;
-    const timer = setTimeout(() => setCopyFeedback(null), 3000);
+    if (!composerFeedback) return;
+    const timer = setTimeout(() => setComposerFeedback(null), 3000);
     return () => clearTimeout(timer);
-  }, [copyFeedback]);
+  }, [composerFeedback]);
 
   useEffect(() => {
     window.span.workspace(false).then(settings => {
@@ -461,7 +461,7 @@ function App() {
         const rich = args === 'rich';
         const copied = rich ? await window.span.copyRich(text) : await window.span.copyText(text);
         if (copied !== false && scope === work.timelineScope()) {
-          setCopyFeedback({ scope, text: rich ? '已复制富文本' : '已复制 Markdown' });
+          setComposerFeedback({ scope, text: rich ? '已复制富文本' : '已复制 Markdown' });
         }
         return true;
       }
@@ -593,9 +593,15 @@ function App() {
           const screenshots = files.filter(file => file.screenshot).map(file => file.path);
           if (screenshots.length) window.span.retainScreenshots(screenshots);
           dispatched = true;
+          setComposerFeedback(null);
           setDispatchedDraft(submitted);
         }, files);
-      if (sent) clearSent(submitted);
+      if (sent) {
+        clearSent(submitted);
+        if (dispatched && running && showLatest && work.timelineScope() === scope) {
+          setComposerFeedback({ scope, text: delivery === 'followUp' ? '已排队' : '已追加' });
+        }
+      }
     } catch (error) {
       if (work.timelineScope() === scope) report(error);
     } finally {
@@ -905,11 +911,14 @@ function App() {
                   </button>
                   <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel :
                     interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' :
-                      pastingScreenshot ? '正在添加截图' : running && !showReasoning ? '正在处理' :
-                        copyFeedback?.scope === work.timelineScope() ? copyFeedback.text : ''}</span>
-                  {showLatest && rows.length > 0 && <button type="button" className="icon-button jump-latest" title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
-                    scroll.current.scrollTop = scroll.current.scrollHeight;
-                  }}><ArrowDown size={16} /></button>}
+                      pastingScreenshot ? '正在添加截图' : composerFeedback?.scope === work.timelineScope() ? composerFeedback.text :
+                        running && !showReasoning ? '正在处理' : ''}</span>
+                  {showLatest && rows.length > 0 && <button type="button" className="composer-control jump-latest"
+                    title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
+                      const timeline = scroll.current;
+                      timeline.scrollTop = timeline.scrollHeight;
+                      timeline.focus({ preventScroll: true });
+                    }}><ArrowDown size={15} aria-hidden="true" /><span>最新消息</span></button>}
                   {connection === 'ready' && <AgentMenu work={work} onSelect={showPanel} />}
                   {running && api?.turns.stop && <button type="button" className="send stop" aria-label="停止" disabled={!run.id}
                     onClick={() => work.stop().catch(report)}><Square size={13} fill="currentColor" /></button>}

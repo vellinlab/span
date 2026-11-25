@@ -18,15 +18,18 @@ const missingPath = '.span-ci/工作区检查/记录/' + missingFile;
 const prompts = [];
 const initialPrompt = '核对 Pi 的推理、工具与用量。';
 const resumePrompt = '继续刚才保存的 Pi 会话。';
+const followUpPrompt = '保留阅读位置并排队跟进。';
 const firstAnswer = 'Pi 已完成工作台验收。';
 const beforeTool = '再核对工具和用量。';
 const afterTool = '工具已返回，整理核对结果。';
 const resumedAnswer = 'Pi 已恢复原会话。';
 const longAnswerEnd = '已读到这次长答复的末尾。';
+const followUpAnswer = 'Pi 已处理排队跟进。';
 let releaseReasoning;
 let releaseTool;
 let releaseAnswer;
 let releaseLongReply;
+let releaseLongCompletion;
 const gateway = createServer(async (request, response) => {
   try {
     assert.equal(request.url, '/v1/chat/completions');
@@ -40,7 +43,8 @@ const gateway = createServer(async (request, response) => {
       : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
     const tools = messages.filter(message => message.role === 'tool');
     const initial = prompt.includes(initialPrompt);
-    assert.ok(initial || prompt.includes(resumePrompt));
+    const followUp = prompt.includes(followUpPrompt);
+    assert.ok(initial || followUp || prompt.includes(resumePrompt));
     if (initial && !ssh) assert.ok(prompt.includes('- ' + JSON.stringify(localReference)));
     if (!initial) assert.ok(messages.some(message => message.role === 'assistant' &&
       JSON.stringify(message.content).includes(firstAnswer)));
@@ -74,11 +78,12 @@ const gateway = createServer(async (request, response) => {
         send({ reasoning_content: afterTool });
         await new Promise(done => { releaseAnswer = done; });
       }
-      send({ content: initial ? firstAnswer : resumedAnswer });
-      if (!initial) {
+      send({ content: initial ? firstAnswer : followUp ? followUpAnswer : resumedAnswer });
+      if (!initial && !followUp) {
         await new Promise(done => { releaseLongReply = done; });
         const paragraphs = Array.from({ length: 32 }, (_, index) => `第 ${index + 1} 项 · 复查工作台中的会话与工具记录。`);
         send({ content: '\n\n' + [...paragraphs, longAnswerEnd].join('\n\n') });
+        await new Promise(done => { releaseLongCompletion = done; });
       }
       send({}, 'stop', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
     }
@@ -306,9 +311,25 @@ export default function (pi) {
     return bounds.top >= view.top && bounds.bottom <= view.bottom;
   }, longAnswerEnd);
   await resumedLog.evaluate(log => { log.scrollTop = 0; });
-  await resumed.page.getByRole('button', { name: '滚到最新消息' }).waitFor();
+  const latest = resumed.page.getByRole('button', { name: '滚到最新消息' });
+  await latest.getByText('最新消息', { exact: true }).waitFor();
   await resumedLog.getByText(initialPrompt, { exact: true }).waitFor();
-  assert.deepEqual(prompts.map(entry => entry.initial), [true, true, false]);
+  await editorAfterRestart.fill(followUpPrompt);
+  await editorAfterRestart.press('Alt+Enter');
+  await resumed.page.getByRole('status').filter({ hasText: '已排队' }).waitFor();
+  assert.equal(await editorAfterRestart.inputValue(), '');
+  assert.equal(await resumedLog.evaluate(log => log.scrollTop), 0);
+  if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-queue-while-reading.png') });
+  releaseLongCompletion();
+  await resumed.page.waitForFunction(() => !document.querySelector('.send.stop'));
+  assert.ok(await latest.isVisible());
+  assert.equal(await resumedLog.evaluate(log => log.scrollTop), 0);
+  await latest.press('Enter');
+  await resumedLog.getByText(followUpAnswer, { exact: true }).waitFor();
+  await latest.waitFor({ state: 'detached' });
+  assert.ok(await resumedLog.evaluate(log => log === document.activeElement));
+  assert.equal(await resumedLog.getByText(followUpPrompt, { exact: false }).count(), 1);
+  assert.deepEqual(prompts.map(entry => entry.initial), [true, true, false, false]);
   assert.deepEqual(resumed.errors, []);
   console.log('Verified real Pi streaming, tools, extension dialogs, usage, and automatic workspace and session restore on ' +
     (ssh ?? process.platform));
@@ -317,6 +338,7 @@ export default function (pi) {
   releaseTool?.();
   releaseAnswer?.();
   releaseLongReply?.();
+  releaseLongCompletion?.();
   gateway.closeAllConnections();
   gateway.close();
   await app?.close();

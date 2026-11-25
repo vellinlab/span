@@ -497,7 +497,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     const clientId = crypto.randomUUID();
     pendingSend.current = clientId;
     setRun(steering ?? { status: 'running' });
-    jumpToLatest.current = true;
+    if (!steering) jumpToLatest.current = true;
     let added = false;
     try {
       const ref = await ensureSession(client, (text || files[0]?.name || '').slice(0, 48), scope);

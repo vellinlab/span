@@ -457,6 +457,14 @@ try {
     await checkTranscriptEdge(app, page, transcript, screenshot);
     await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
   }
+  const steerWhileReading = '保持历史阅读位置，继续核对。';
+  await composer.fill(steerWhileReading);
+  await composer.press('Enter');
+  await page.getByRole('status').filter({ hasText: '已追加' }).waitFor();
+  await reasoningJump.getByText('最新消息', { exact: true }).waitFor();
+  assert.equal(await composer.inputValue(), '');
+  assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - reasoningAnchor) <= 2);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-steer-while-reading.png') });
   await liveReasoning.press('Enter');
   const reasoningPanel = page.getByRole('region', { name: '推理摘要' });
   await reasoningPanel.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
@@ -520,8 +528,11 @@ try {
   await reasoningPanel.waitFor({ state: 'detached' });
   assert.ok(await composer.evaluate(element => element === document.activeElement));
   assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - restoredReasoningAnchor) <= 2);
-  await reasoningJump.click();
+  await reasoningJump.press('Enter');
+  await reasoningJump.waitFor({ state: 'detached' });
+  assert.ok(await transcript.evaluate(element => element === document.activeElement));
   await transcript.getByText('流式输出已接通。', { exact: true }).waitFor();
+  await transcript.getByText(steerWhileReading, { exact: true }).waitFor();
   const earlyReasoning = archivedReasoning.filter({ hasText: '再确认工具结果和最终回复的前后顺序。' });
   const lateReasoning = archivedReasoning.filter({ hasText: '确认目标卡片和输入区之间的间距。' });
   await earlyReasoning.locator('summary').click();
@@ -532,6 +543,7 @@ try {
   await earlyReasoning.locator('summary').click();
   assert.equal(await page.getByRole('alert').count(), 0);
   console.log('Verified the fixed reasoning strip, history scroll position, nested details, and archived summary.');
+  console.log('Verified steering while reading, acknowledgement, and keyboard return to the latest conversation.');
 
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);

@@ -571,7 +571,7 @@ export const Transcript = memo(function Transcript({
     if (!atBottom && element.scrollTop < 160 && cursor && !loading) loadOlder();
   }
 
-  return <div className="timeline" ref={scroll} role="log" aria-live="off" data-testid="transcript"
+  return <div className="timeline" ref={scroll} role="log" aria-label="会话记录" aria-live="off" tabIndex={-1} data-testid="transcript"
     data-items={rows.length} data-reading-history={showLatest && !restore ? 'true' : undefined} onScroll={onScroll}
     onPointerDownCapture={releaseGroupAnchor} onKeyDownCapture={releaseGroupAnchor}
     onWheel={event => {
