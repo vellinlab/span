@@ -263,10 +263,12 @@ try {
   }
   await page.getByRole('button', { name: '会话', exact: true }).click();
   const composer = page.getByRole('textbox', { name: '消息' });
-  const goal = page.locator('.goal-strip');
+  const goal = page.getByRole('button', { name: '会话目标', exact: true });
   await composer.fill('/goal 验证会话目标');
   await composer.press('Enter');
   await goal.getByText('验证会话目标').waitFor();
+  assert.deepEqual(await goal.evaluate(button => button.getAttribute('aria-describedby').split(' ')
+    .map(id => button.ownerDocument.getElementById(id)?.textContent)), ['进行中', '验证会话目标']);
   assert.ok(await goal.evaluate(card => {
     const form = card.nextElementSibling;
     if (!form?.matches('form.composer')) return false;

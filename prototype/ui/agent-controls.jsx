@@ -723,9 +723,11 @@ export function AgentMenu({ work, onSelect }) {
 
 export const GoalStrip = memo(function GoalStrip({ objective, status, activeWithoutTurn, expanded, toggle }) {
   const label = status === 'active' && activeWithoutTurn ? '已启用' : statuses[status];
-  return <button type="button" className="goal-strip" title={objective} aria-expanded={expanded}
+  return <button type="button" className="goal-strip" title={objective} aria-label="会话目标"
+    aria-describedby="goal-strip-status goal-strip-objective" aria-expanded={expanded}
     aria-controls={expanded ? 'goal-panel' : undefined} data-status={status} onClick={toggle}>
-    <Goal size={16} className="goal-icon" /><span>{objective}</span><small>{label}</small>
-    <ChevronDown size={13} className="goal-chevron" />
+    <Goal size={16} className="goal-icon" aria-hidden="true" />
+    <span id="goal-strip-objective">{objective}</span><small id="goal-strip-status">{label}</small>
+    <ChevronDown size={13} className="goal-chevron" aria-hidden="true" />
   </button>;
 });
