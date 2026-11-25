@@ -824,8 +824,10 @@ p { margin-block: 0 12px; }
   color: #1b2b21;
 }
 .send:hover:not(:disabled) { background: #d1e7d8; }
-.send.stop:not(:disabled) { background: #414845; color: #f0f3f1; }
-.send.stop:hover:not(:disabled, [aria-disabled="true"]) { background: #515c56; }
+.send.stop:not(:disabled),
+.composer-wrap:has(> .approval) .send:not(.stop, :disabled) { background: #414845; color: #f0f3f1; }
+.send.stop:hover:not(:disabled, [aria-disabled="true"]),
+.composer-wrap:has(> .approval) .send:not(.stop, :disabled):hover { background: #515c56; }
 .send:disabled, .send.stop[aria-disabled="true"] { background: #ffffff0b; color: #929a96; opacity: 1; cursor: default; }
 .live { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-height: 26px; padding-left: 4px; }
 .approval, .error { margin-bottom: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }

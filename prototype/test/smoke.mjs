@@ -925,6 +925,12 @@ try {
   }
   await composer.fill(Array(20).fill('处理审批后请继续，保留本次检查的结果。').join('\n'));
   assert.ok(await composer.evaluate(element => element.scrollHeight > element.clientHeight));
+  const draftAction = page.getByRole('button', { name: '追加', exact: true });
+  assert.ok(await draftAction.isEnabled());
+  assert.ok(await draftAction.evaluate(button => {
+    const [red, green, blue] = getComputedStyle(button).backgroundColor.match(/\d+/g).map(Number);
+    return Math.max(red, green, blue) < 120;
+  }), 'Pending approval should take visual priority over the enabled draft action.');
   assert.ok(await branch.evaluate(element => {
     const bounds = element.getBoundingClientRect();
     const breadcrumb = element.previousElementSibling;
