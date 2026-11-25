@@ -3,6 +3,7 @@ import json
 import math
 import os
 from pathlib import Path
+from select import select
 import statistics
 import subprocess
 import sys
@@ -10,7 +11,7 @@ import tempfile
 import time
 
 from Xlib import X, display, protocol
-from Xlib.ext import xtest
+from Xlib.ext import damage, xtest
 
 screen = display.Display()
 root = screen.screen().root
@@ -76,8 +77,9 @@ def stats(pid, chromium_roles=None):
             lines = Path(f"/proc/{process}/smaps_rollup").read_text().splitlines()
         except OSError:
             continue
-        group = roles.setdefault(process_role(process, pid, chromium_roles), dict.fromkeys((*memory, "processes"), 0))
+        group = roles.setdefault(process_role(process, pid, chromium_roles), dict.fromkeys((*memory, "processes", "cpu_ms"), 0))
         group["processes"] += 1
+        group["cpu_ms"] += 1000 * ticks.get(process, 0) / CLOCK_TICKS
         for line in lines:
             key, _, value = line.partition(":")
             if key in memory:
@@ -131,8 +133,123 @@ def mouse(button, pressed):
     xtest.fake_input(screen, X.ButtonPress if pressed else X.ButtonRelease, button)
 
 
-def benchmark(name, binary):
-    candidate = name == "prototype"
+def process_cpu_ms(pid):
+    fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    return 1000 * (int(fields[11]) + int(fields[12])) / CLOCK_TICKS
+
+
+def trace_scroll(app, browser, chromium_roles, area):
+    x, y, width, height = area
+    display_pid = int(os.environ["SPAN_TEST_DISPLAY_PID"])
+
+    def clock():
+        return time.time_ns() / 1_000_000
+
+    def browser_trace(phase):
+        output = subprocess.check_output([*browser, f"--trace-scroll-{phase}"], text=True, timeout=15)
+        return json.loads(output)
+
+    def pixels():
+        return root.get_image(x, y, width, height, X.ZPixmap, 0xffffffff).data
+
+    def roll(direction):
+        button = 4 if direction < 0 else 5
+        mouse(button, True)
+        mouse(button, False)
+        screen.flush()
+
+    directions = [-1] * 6 + [1] * 6
+    directions *= 3
+    # Replay the same real wheel path after the virtualized rows have been measured.
+    browser_trace("start")
+    for direction in directions:
+        roll(direction)
+        time.sleep(.09)
+    browser_trace("start")
+    time.sleep(.18)
+    initial = pixels()
+    reference = []
+    for direction in directions:
+        roll(direction)
+        time.sleep(.18)
+        reference.append(pixels())
+    calibration = browser_trace("finish")["events"]
+    assert [entry["direction"] for entry in calibration] == directions
+    assert all(left != right for left, right in zip([initial, *reference], reference)), "Scroll calibration must move visible text"
+
+    initial_state = browser_trace("start")
+    time.sleep(.18)
+    assert pixels() == initial, "The scroll replay starts on different desktop pixels"
+    screen.damage_query_version()
+    watched = root.damage_create(damage.DamageReportRawRectangles)
+    screen.sync()
+    start = stats(app.pid, chromium_roles)
+    start_display = process_cpu_ms(display_pid)
+    samples = []
+    intervals = (31, 45, 76)
+    try:
+        for index, (direction, target) in enumerate(zip(directions, reference)):
+            before = pixels()
+            while screen.pending_events():
+                screen.next_event()
+            sent = clock()
+            roll(direction)
+            end = time.monotonic() + .35
+            first_pixel = exact_pixel = None
+            captures = 0
+            while exact_pixel is None and time.monotonic() < end:
+                if not screen.pending_events():
+                    select([screen], [], [], max(0, end - time.monotonic()))
+                    continue
+                event = screen.next_event()
+                if event.type != screen.extension_event.DamageNotify:
+                    continue
+                rect = event.area
+                if rect.x >= x + width or rect.x + rect.width <= x or rect.y >= y + height or rect.y + rect.height <= y:
+                    continue
+                rendered = pixels()
+                captured = clock()
+                captures += 1
+                if first_pixel is None and rendered != before:
+                    first_pixel = captured - sent
+                if rendered == target and rendered != before:
+                    exact_pixel = captured - sent
+            gap = intervals[(index + index // 3) % len(intervals)]
+            samples.append({"sent_at": sent, "direction": direction, "pause_after_ms": gap,
+                            "first_pixel_ms": first_pixel, "expected_pixel_ms": exact_pixel, "captures": captures})
+            time.sleep(gap / 1000)
+    finally:
+        screen.damage_destroy(watched)
+    end_display = process_cpu_ms(display_pid)
+    end = stats(app.pid, chromium_roles)
+    final_state = browser_trace("finish")
+    terminal_lines = final_state["terminalLine"] - initial_state["terminalLine"]
+    assert terminal_lines > 0, "The terminal must continue writing during the scroll benchmark"
+    recorded = final_state["events"]
+    assert [entry["direction"] for entry in recorded] == directions, "Every X11 wheel must reach the transcript"
+    previous = initial_state["top"]
+    for result, event, calibrated in zip(samples, recorded, calibration):
+        offset = event.get("top")
+        assert offset is not None and (offset - previous) * event["direction"] > 0, "A wheel did not move the transcript"
+        result["scroll_top"] = offset
+        result["expected_scroll_top"] = calibrated.get("top")
+        result["correct_offset"] = abs(offset - calibrated["top"]) <= 1
+        previous = offset
+        for name, field in (("dispatch_ms", "dispatchedAt"), ("receive_ms", "receivedAt"),
+                            ("scroll_ms", "scrolledAt"), ("frame_ms", "frameAt")):
+            if field in event:
+                result[name] = event[field] - result["sent_at"]
+    verified = [entry for entry in samples if entry["correct_offset"] and entry["expected_pixel_ms"] is not None]
+    return {"scroll_first_pixel": sample([entry["first_pixel_ms"] for entry in verified]),
+            "scroll_expected_pixel": sample([entry["expected_pixel_ms"] for entry in verified]),
+            "renderer_cpu_ms": end["by_role"]["renderer"]["cpu_ms"] - start["by_role"]["renderer"]["cpu_ms"],
+            "app_cpu_ms": end["tree_cpu_ms"] - start["tree_cpu_ms"], "xvfb_cpu_ms": end_display - start_display,
+            "renderer_pss_kib": end["by_role"]["renderer"]["Pss"], "matched": len(verified),
+            "terminal_lines": terminal_lines, "samples": samples}
+
+
+def benchmark(name, binary, scroll_trace=False):
+    electron = scroll_trace or name == "prototype"
     with tempfile.TemporaryDirectory(prefix="span-desktop-") as tmp:
         workspace = Path(tmp)
         wrapper = workspace / "codex"
@@ -143,7 +260,7 @@ def benchmark(name, binary):
                    SPAN_PREVIEW_PROFILE=str(workspace / "profile"),
                    PATH=f"{tmp}:{os.environ['PATH']}")
         args = ["--demo", "--no-sandbox", "--disable-gpu", "--terminal-renderer=dom", "--remote-debugging-port=0",
-                f"--user-data-dir={workspace / 'profile'}"] if candidate else []
+                f"--user-data-dir={workspace / 'profile'}"] if electron else []
         command = ('touch "$HOME/span-terminal-ready"; n=0; while :; do '
                    'printf \'span-bench-%04d\\n\' "$n"; n=$((n+1)); sleep .055; done')
         with open(workspace / "app.log", "w+") as log, subprocess.Popen(
@@ -151,7 +268,7 @@ def benchmark(name, binary):
         ) as app:
             try:
                 chromium_roles = None
-                title = "^Span" if candidate else "^Span$"
+                title = "^Span" if electron else "^Span$"
                 wid = int(subprocess.check_output(
                     ["timeout", "20", "xdotool", "search", "--sync", "--onlyvisible",
                      "--pid", str(app.pid), "--name", title], text=True).splitlines()[0])
@@ -159,7 +276,7 @@ def benchmark(name, binary):
                 xdo("windowactivate", "--sync", wid, "windowmove", wid, 60, 50,
                     "windowsize", wid, 1180, 800)
                 time.sleep(.6)
-                if candidate:
+                if electron:
                     port_file = workspace / "profile" / "DevToolsActivePort"
                     if not try_until(port_file.is_file, 12):
                         raise RuntimeError("Could not open the benchmark automation port")
@@ -194,12 +311,16 @@ def benchmark(name, binary):
                     return root.get_image(pos.x + 365, pos.y + 105, 450, 220,
                                           X.ZPixmap, 0xffffffff).data
 
-                if not candidate:
+                if not electron:
                     xdo("mousemove", "--window", wid, 650, 740, "click", 1, "type", command)
                     xdo("key", "Return")
                 if not try_until((workspace / "span-terminal-ready").is_file, 5):
                     raise RuntimeError(f"{name}: the terminal stream did not start")
                 time.sleep(.35)
+                if scroll_trace:
+                    pos = origin()
+                    pointer(pos.x + 650, pos.y + 240)
+                    return {"app": name, **trace_scroll(app, browser, chromium_roles, (pos.x + 365, pos.y + 105, 450, 220))}
                 start_stats = stats(app.pid, chromium_roles)
                 xdo("mousemove", "--window", wid, 650, 240)
                 scroll = []
@@ -269,7 +390,7 @@ def benchmark(name, binary):
                           "scroll": sample(scroll), "scroll_no_pixel_change": timeouts,
                           "resize_geometry": sample(geometry), "resize_visible": sample(drag),
                           "resize_error": resize_error}
-                if candidate:
+                if electron:
                     _, active_terminal = terminal_memory(app.pid, browser, "--snapshot")
                     _, after_close = terminal_memory(app.pid, browser, "--close-terminal")
                     time.sleep(2)
@@ -359,7 +480,18 @@ def catalog_benchmark(name, binary):
 
 report = {"runner": "AlmaLinux 8 / Xvfb 1440×960 / Openbox / one constrained CPU / software rendering",
           "runs": []}
-if WIDGET_SOCKET == "--catalog":
+if WIDGET_SOCKET == "--scroll-trace":
+    base = ("baseline", "/artifacts/terminal-window-baseline/span-preview")
+    report["baseline_renderer"] = Path("/artifacts/terminal-window-baseline-commit.txt").read_text().strip()
+    os.sched_setaffinity(0, {max(os.sched_getaffinity(0))})
+    for target in (base, NEXT, NEXT, base):
+        run = benchmark(*target, scroll_trace=True)
+        report["runs"].append(run)
+        Path(OUTPUT).write_text(json.dumps(report, indent=2) + "\n")
+        print(json.dumps({key: value for key, value in run.items() if key != "samples"}), flush=True)
+    if any(run["matched"] < 30 for run in report["runs"]):
+        raise SystemExit("Too few scrolls reached the calibrated offset and pixels.")
+elif WIDGET_SOCKET == "--catalog":
     base = ("baseline", "/artifacts/catalog-baseline/span-preview")
     report["baseline_renderer"] = Path("/artifacts/catalog-baseline-commit.txt").read_text().strip()
     report["sessions"] = 1201

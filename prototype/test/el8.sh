@@ -20,6 +20,7 @@ fi
 fixture="$(mktemp -d)"
 trap 'jobs -p | xargs -r kill; rm -rf -- "$fixture"' EXIT
 Xvfb -displayfd 3 -screen 0 1440x960x24 -nolisten tcp 3>"$fixture/display" &
+display_pid=$!
 for _ in {1..50}; do [[ -s "$fixture/display" ]] && break; sleep 0.1; done
 export DISPLAY=":$(cat "$fixture/display")"
 openbox --sm-disable >"$fixture/wm.log" 2>&1 &
@@ -149,6 +150,7 @@ widget_socket="$fixture/widgets.sock"
 for _ in {1..50}; do [[ -S "$widget_socket" ]] && break; sleep 0.1; done
 result=0
 python3.9 prototype/test/benchmark.py "$widget_socket" /artifacts/benchmark.json || result=$?
+SPAN_TEST_DISPLAY_PID="$display_pid" python3.9 prototype/test/benchmark.py --scroll-trace /artifacts/scroll-trace.json || result=$?
 python3.9 prototype/test/benchmark.py --catalog /artifacts/catalog-benchmark.json || result=$?
 bash prototype/test/backend.sh "$fixture" || result=$?
 bash prototype/test/pi-backend.sh "$fixture" || result=$?

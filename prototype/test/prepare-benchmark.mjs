@@ -7,7 +7,36 @@ const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {
 });
 try {
   const page = browser.contexts()[0].pages()[0];
-  if (command === '--close-terminal') {
+  const terminalLine = () => page.locator('.xterm-rows').evaluate(element =>
+    Number([...element.textContent.matchAll(/span-bench-(\d+)/g)].at(-1)?.[1]));
+  if (command === '--trace-scroll-start') {
+    const top = await page.getByTestId('transcript').evaluate(async timeline => {
+      timeline.scrollTop = timeline.scrollHeight;
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const now = () => performance.timeOrigin + performance.now();
+      if (!timeline.spanScrollTrace) {
+        timeline.addEventListener('wheel', event => {
+          const entry = { direction: Math.sign(event.deltaY), dispatchedAt: performance.timeOrigin + event.timeStamp,
+            receivedAt: now() };
+          timeline.spanScrollTrace.push(entry);
+          requestAnimationFrame(() => { entry.frameAt = now(); });
+        }, { passive: true, capture: true });
+        timeline.addEventListener('scroll', () => {
+          const entry = timeline.spanScrollTrace.at(-1);
+          if (!entry) return;
+          entry.scrolledAt ??= now();
+          entry.top = timeline.scrollTop;
+        }, { passive: true });
+      }
+      timeline.spanScrollTrace = [];
+      return timeline.scrollTop;
+    });
+    console.log(JSON.stringify({ top, terminalLine: await terminalLine() }));
+  } else if (command === '--trace-scroll-finish') {
+    const events = await page.getByTestId('transcript').evaluate(timeline => timeline.spanScrollTrace);
+    console.log(JSON.stringify({ events, terminalLine: await terminalLine() }));
+  } else if (command === '--close-terminal') {
     await page.getByRole('button', { name: '关闭终端' }).click();
     await page.getByRole('region', { name: '终端' }).waitFor({ state: 'detached' });
   } else if (command === '--wait-for-history') {
@@ -36,7 +65,7 @@ try {
     await page.keyboard.type(command);
     await page.keyboard.press('Enter');
   }
-  if (command.startsWith('--')) {
+  if (command.startsWith('--') && !command.startsWith('--trace-scroll-')) {
     const system = await browser.newBrowserCDPSession();
     const renderer = await page.context().newCDPSession(page);
     if (command === '--collect-heap') await renderer.send('HeapProfiler.collectGarbage');
