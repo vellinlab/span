@@ -2,12 +2,17 @@ use serde_json::Value;
 use std::io;
 
 const PAGE_TURNS: usize = 20;
-const PAGE_BYTES: usize = 16 * 1024 * 1024;
+pub(super) const PAGE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 pub(super) struct Cursor {
     pub(super) end: u64,
     pub(super) parent: String,
+}
+
+pub(super) struct Leaf {
+    pub(super) id: String,
+    pub(super) end: u64,
 }
 
 pub(super) struct BranchPage {
@@ -21,6 +26,8 @@ pub(super) struct BranchPage {
     turns: usize,
     done: bool,
     next: Option<Cursor>,
+    leaf: Option<Leaf>,
+    through: Option<String>,
 }
 
 impl BranchPage {
@@ -36,7 +43,20 @@ impl BranchPage {
             turns: 0,
             done: false,
             next: None,
+            leaf: None,
+            through: None,
         }
+    }
+
+    pub(super) fn append_to(leaf: &Leaf) -> Self {
+        Self {
+            through: Some(leaf.id.clone()),
+            ..Self::new(None)
+        }
+    }
+
+    pub(super) fn reached_previous_leaf(&self) -> bool {
+        self.through.is_some() && self.parent == self.through
     }
 
     fn accept(&mut self, start: u64, line: &[u8]) -> io::Result<()> {
@@ -65,6 +85,12 @@ impl BranchPage {
         if entry["type"] == "session" || self.found_leaf && self.parent.as_deref() != Some(id) {
             return Ok(());
         }
+        if !self.found_leaf {
+            self.leaf = Some(Leaf {
+                id: id.to_owned(),
+                end: start + length as u64 + 1,
+            });
+        }
         self.found_leaf = true;
         self.parent = entry["parentId"].as_str().map(str::to_owned);
         if entry["type"] == "message" && entry["message"]["role"].is_string() {
@@ -75,18 +101,18 @@ impl BranchPage {
             }
             self.entries.push(entry);
         }
-        if self.turns == PAGE_TURNS {
+        if self.through.is_none() && self.turns == PAGE_TURNS {
             self.next = self
                 .parent
                 .take()
                 .map(|parent| Cursor { end: start, parent });
         }
-        self.done = self.parent.is_none();
+        self.done = self.parent.is_none() || self.reached_previous_leaf();
         Ok(())
     }
 
     // Chunks arrive newest first. A complete record starts just after the preceding newline.
-    pub(super) fn read(&mut self, start: u64, bytes: &[u8]) -> io::Result<bool> {
+    pub(super) fn read(&mut self, start: u64, floor: u64, bytes: &[u8]) -> io::Result<bool> {
         let mut end = bytes.len();
         for index in (0..end).rev().filter(|index| bytes[*index] == b'\n') {
             if self.past_tail {
@@ -98,9 +124,9 @@ impl BranchPage {
             self.past_tail = true;
             end = index;
         }
-        if start == 0 {
+        if start == floor {
             if self.past_tail {
-                self.accept(0, &bytes[..end])?;
+                self.accept(start, &bytes[..end])?;
             }
             return Ok(true);
         }
@@ -114,9 +140,9 @@ impl BranchPage {
         Ok(false)
     }
 
-    pub(super) fn finish(mut self) -> (Vec<Value>, Option<Cursor>) {
+    pub(super) fn finish(mut self) -> (Vec<Value>, Option<Cursor>, Option<Leaf>) {
         self.entries.reverse();
-        (self.entries, self.next)
+        (self.entries, self.next, self.leaf)
     }
 }
 
@@ -133,12 +159,16 @@ mod tests {
         let mut remaining = end;
         while remaining > 0 {
             let start = remaining.saturating_sub(11);
-            if page.read(start as u64, &bytes[start..remaining]).unwrap() {
+            if page
+                .read(start as u64, 0, &bytes[start..remaining])
+                .unwrap()
+            {
                 break;
             }
             remaining = start;
         }
-        page.finish()
+        let (entries, cursor, _) = page.finish();
+        (entries, cursor)
     }
 
     #[test]
@@ -182,5 +212,55 @@ mod tests {
         assert_eq!(older.first().unwrap()["message"]["content"], "请核对记录");
         assert_eq!(older.last().unwrap()["id"], "reply-3");
         assert!(cursor.is_none());
+    }
+
+    #[test]
+    fn limits_an_append_to_the_previous_leaf_and_waits_for_complete_lines() {
+        let leaf = Leaf {
+            id: "previous".to_owned(),
+            end: 4096,
+        };
+        let entry = |id, parent| {
+            json!({"type":"message","id":id,"parentId":parent,
+            "message":{"role":"assistant","content":"追加回复"}})
+            .to_string()
+        };
+        let contents = entry("ignored-fork", "different") + "\n" + &entry("new", "previous") + "\n";
+        let mut page = BranchPage::append_to(&leaf);
+        let length = contents.len();
+        let bytes = contents.as_bytes();
+        let split = length - 21;
+        assert!(
+            !page
+                .read(leaf.end + split as u64, leaf.end, &bytes[split..])
+                .unwrap()
+        );
+        assert!(page.read(leaf.end, leaf.end, &bytes[..split]).unwrap());
+        assert!(page.reached_previous_leaf());
+        let (entries, cursor, head) = page.finish();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"], "new");
+        assert_eq!(head.unwrap().end, leaf.end + length as u64);
+        assert!(cursor.is_none());
+
+        let mut incomplete = BranchPage::append_to(&leaf);
+        incomplete
+            .read(
+                leaf.end,
+                leaf.end,
+                entry("unfinished", "previous").as_bytes(),
+            )
+            .unwrap();
+        assert!(incomplete.finish().2.is_none());
+
+        let mut fork = BranchPage::append_to(&leaf);
+        fork.read(
+            leaf.end,
+            leaf.end,
+            (entry("fork", "different") + "\n").as_bytes(),
+        )
+        .unwrap();
+        assert!(!fork.reached_previous_leaf());
+        assert!(fork.finish().2.is_some());
     }
 }

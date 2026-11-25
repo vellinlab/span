@@ -182,9 +182,13 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
   };
 }
 
-export const historyRows = turns => applyTimeline([], turns.flatMap(turn => turn.rows.map(item => ({
-  kind: 'item', item, final: turn.run.status !== 'running',
-})))).filter(row => row.kind !== 'reasoning' || visibleRow(row));
+export function historyRows(turns, previous = []) {
+  const rows = applyTimeline(previous, turns.flatMap(turn => turn.rows.map(item => ({
+    kind: 'item', item, final: turn.run.status !== 'running',
+  }))));
+  const emptyReasoning = row => row.kind === 'reasoning' && !visibleRow(row);
+  return rows.some(emptyReasoning) ? rows.filter(row => !emptyReasoning(row)) : rows;
+}
 
 export function mergeHistory(previous, history) {
   const liveKeys = new Set(previous.map(row => row.itemKey ?? row.key));

@@ -38,12 +38,14 @@ export function createPi({ generation, cwd, location, onEvent }) {
   let replacingSession = false;
   let teamCapability;
   let teamMembers = new Set();
+  let closeTeamTrace;
 
   const notify = event => { if (current) onEvent({ ...event, session: current.ref }); };
   const item = (value, final) => notify({ kind: 'item', item: value, final });
   const ref = id => ({ backend: 'pi', location, id });
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }),
     error => {
+      closeTeamTrace?.();
       closeDialogs();
       onEvent({ kind: 'disconnected', error });
     }, wire);
@@ -219,6 +221,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
     try {
       const result = await request(type, params);
       if (result.cancelled) throw new Error('Pi 扩展取消了会话切换。');
+      closeTeamTrace?.();
     } finally {
       replacingSession = false;
       closeDialogs();
@@ -350,17 +353,25 @@ export function createPi({ generation, cwd, location, onEvent }) {
         watchTranscript(session, memberId, listener) {
           requireSession(session);
           if (!teamMembers.has(memberId)) throw new Error('当前会话没有这个 Pi 子代理。');
-          const stop = watchPiTeamTranscript(cursor => request('span_pi_team_transcript', { sessionId: session.id, memberId, cursor }), listener);
-          return () => {
+          closeTeamTrace?.();
+          const stop = watchPiTeamTranscript(({ cursor, refresh }) => request('span_pi_team_transcript', {
+            sessionId: session.id, memberId, cursor, refresh,
+          }), listener, teamCapability.teamRefreshMs);
+          const close = () => {
+            if (closeTeamTrace !== close) return;
+            closeTeamTrace = undefined;
             stop();
             teamCapability.releaseTeamView?.(session);
           };
+          closeTeamTrace = close;
+          return close;
         },
       };
       commands.push(...result.commands.filter(command => command.name)
         .map(command => ({ id: command.name, label: command.name, description: command.description })));
     },
     close() {
+      closeTeamTrace?.();
       closeDialogs();
       rpc.close();
       window.span.request('agent.close', { generation }).catch(() => {});

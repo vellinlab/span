@@ -731,7 +731,7 @@ struct PiTeamRequest {
 
 struct PiTranscriptRequest {
     member: String,
-    offset: Option<u64>,
+    read: pi::TeamTranscriptRead,
 }
 
 async fn stdio_process(
@@ -785,14 +785,14 @@ async fn stdio_process(
                 Some(identity) => {
                     let read_view = view_changes.clone();
                     let read = async {
-                        if let Some(PiTranscriptRequest { member, offset }) = transcript {
+                        if let Some(PiTranscriptRequest { member, read }) = transcript {
                             pi::team_transcript(
                                 catalog,
                                 &mut remote,
                                 &mut stored,
                                 &identity,
                                 &member,
-                                offset,
+                                read,
                             )
                             .await
                         } else {
@@ -918,7 +918,11 @@ async fn stdio_process(
                     }
                     Some(PiTranscriptRequest {
                         member: member.to_owned(),
-                        offset,
+                        read: match offset {
+                            Some(offset) => pi::TeamTranscriptRead::Older(offset),
+                            None if packet["refresh"] == true => pi::TeamTranscriptRead::Refresh,
+                            None => pi::TeamTranscriptRead::Latest,
+                        },
                     })
                 } else {
                     None

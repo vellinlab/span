@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::{
     env, fs,
     io::{self, BufRead as _, BufWriter, Read as _, Seek as _, SeekFrom},
+    ops::Range,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -14,7 +15,7 @@ use tokio::{
     process::Command,
     time::timeout,
 };
-use transcript::{BranchPage, Cursor};
+use transcript::{BranchPage, Cursor, Leaf, PAGE_BYTES};
 
 const CATALOG_PAGE: usize = 40;
 const CATALOG_PREFIX: u64 = 64 * 1024;
@@ -298,9 +299,11 @@ pub(super) fn valid_team_member(id: &str) -> bool {
     id.len() == 8 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-struct TranscriptChunk {
+#[derive(PartialEq)]
+struct TranscriptStamp {
     file: String,
-    block: TranscriptBlock,
+    length: u64,
+    modified: String,
 }
 
 #[derive(Clone)]
@@ -312,22 +315,32 @@ struct TranscriptBlock {
 pub(super) struct TeamTranscript {
     owner: SessionIdentity,
     member: String,
-    file: String,
-    cursor: Cursor,
+    stamp: TranscriptStamp,
+    leaf: Option<Leaf>,
+    cursor: Option<Cursor>,
     buffered: Option<TranscriptBlock>,
 }
 
-fn local_team_chunk(
-    parent: &Path,
-    member: &str,
-    file: Option<&str>,
-    end: Option<u64>,
-) -> io::Result<Option<TranscriptChunk>> {
+pub(super) enum TeamTranscriptRead {
+    Latest,
+    Older(u64),
+    Refresh,
+}
+
+#[derive(Clone, Copy)]
+struct TranscriptFile<'a> {
+    parent: &'a str,
+    member: &'a str,
+    name: &'a str,
+}
+
+fn local_team_file(file: TranscriptFile<'_>) -> io::Result<Option<PathBuf>> {
+    let parent = Path::new(file.parent);
     if !parent.is_absolute() {
         return Ok(None);
     }
     let mut directory = parent.with_extension("");
-    for component in [None, Some(member), Some("run-0")] {
+    for component in [None, Some(file.member), Some("run-0")] {
         if let Some(component) = component {
             directory.push(component);
         }
@@ -338,9 +351,8 @@ fn local_team_chunk(
             Err(error) => return Err(error),
         }
     }
-    let name = match file {
-        Some(file) => file.to_owned(),
-        None => {
+    let name = match file.name {
+        "" => {
             let latest = fs::read_dir(&directory)?
                 .filter_map(|entry| {
                     let entry = entry.ok()?;
@@ -356,25 +368,47 @@ fn local_team_chunk(
             };
             name
         }
+        name => name.to_owned(),
     };
     let path = directory.join(&name);
-    if !path.symlink_metadata()?.is_file() {
-        return Ok(None);
+    match path.symlink_metadata() {
+        Ok(metadata) => Ok(metadata.is_file().then_some(path)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
+}
+
+fn local_team_stamp(file: TranscriptFile<'_>) -> io::Result<Option<TranscriptStamp>> {
+    let Some(path) = local_team_file(file)? else {
+        return Ok(None);
+    };
+    let metadata = path.metadata()?;
+    Ok(Some(TranscriptStamp {
+        file: path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned(),
+        length: metadata.len(),
+        modified: format!("{:?}", metadata.modified()?),
+    }))
+}
+
+fn local_team_chunk(file: TranscriptFile<'_>, range: Range<u64>) -> io::Result<TranscriptBlock> {
+    let Some(path) = local_team_file(file)? else {
+        return Err(io::Error::other("Pi 子代理的记录已变更，请重新打开。"));
+    };
     let mut file = fs::File::open(path)?;
-    let length = file.metadata()?.len();
-    let end = end.unwrap_or(length);
-    if end > length {
+    if range.end > file.metadata()?.len() {
         return Err(io::Error::other("Pi 子代理的记录已变更，请重新打开。"));
     }
-    let start = end.saturating_sub(TEAM_TRANSCRIPT_CHUNK);
-    let mut bytes = vec![0; (end - start) as usize];
-    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = vec![0; (range.end - range.start) as usize];
+    file.seek(SeekFrom::Start(range.start))?;
     file.read_exact(&mut bytes)?;
-    Ok(Some(TranscriptChunk {
-        file: name,
-        block: TranscriptBlock { start, bytes },
-    }))
+    Ok(TranscriptBlock {
+        start: range.start,
+        bytes,
+    })
 }
 
 fn start_remote_team_reader(host: &str) -> Result<Process> {
@@ -387,14 +421,17 @@ config_limit=$(($1 + 1))
 tasks_limit=$(($2 + 1))
 owner_field='"leadSessionId"[[:space:]]*:[[:space:]]*'
 while IFS= read -r -d '' operation; do
-  if [[ $operation == transcript ]]; then
+  if [[ $operation == transcript || $operation == transcript-stamp ]]; then
     IFS= read -r -d '' parent || exit 2
     IFS= read -r -d '' member || exit 2
     IFS= read -r -d '' name || exit 2
-    IFS= read -r -d '' end || exit 2
     [[ $parent == /*.jsonl && $member =~ ^[[:xdigit:]]{8}$ ]] || exit 2
     [[ -z $name || ( $name == *.jsonl && $name != */* ) ]] || exit 2
-    [[ -z $end || $end =~ ^[0-9]{1,18}$ ]] || exit 2
+    if [[ $operation == transcript ]]; then
+      IFS= read -r -d '' start && IFS= read -r -d '' end || exit 2
+      [[ -n $name && $start =~ ^[0-9]{1,18}$ && $end =~ ^[0-9]{1,18}$ ]] || exit 2
+      (( start <= end && end - start <= $3 )) || exit 2
+    fi
     base=${parent%.jsonl}
     directory="$base/$member/run-0"
     if [[ -d "$directory" && ! -L "$directory" && ! -L "$base/$member" && ! -L "$base" ]]; then
@@ -408,10 +445,14 @@ while IFS= read -r -d '' operation; do
       fi
       file="$directory/$name"
       if [[ -n $name && -f "$file" && ! -L "$file" ]]; then
-        if [[ -z $end ]]; then end=$(stat -c %s -- "$file") || exit 2; fi
-        start=$((end > $3 ? end - $3 : 0))
-        printf '%s\0%s\0' "$name" "$end"
-        dd if="$file" iflag=skip_bytes,count_bytes skip="$start" count="$((end - start))" status=none || exit 2
+        if [[ $operation == transcript-stamp ]]; then
+          stamp=$(stat -c '%s %y' -- "$file") || exit 2
+          printf '%s\0%s\0' "$name" "$stamp"
+          continue
+        else
+          printf '%s\0' "$name"
+          dd if="$file" iflag=skip_bytes,count_bytes skip="$start" count="$((end - start))" status=none || exit 2
+        fi
       fi
     fi
     printf '\0'
@@ -535,19 +576,27 @@ pub(super) async fn team_transcript(
     stored: &mut Option<TeamTranscript>,
     session: &SessionIdentity,
     member: &str,
-    offset: Option<u64>,
+    read: TeamTranscriptRead,
 ) -> Result<Value> {
-    let previous = match offset {
-        None => None,
-        Some(offset) => Some(
-            stored
-                .as_ref()
-                .filter(|view| {
-                    &view.owner == session && view.member == member && view.cursor.end == offset
-                })
-                .ok_or("Pi 子代理的历史页已失效，请重新打开。")?,
-        ),
-    };
+    let result = timeout(
+        Duration::from_secs(22),
+        read_team_transcript(source, remote, stored, session, member, read),
+    )
+    .await;
+    if !matches!(&result, Ok(Ok(_))) {
+        *remote = None;
+    }
+    result.map_err(|_| "读取 Pi 子代理记录超时。")?
+}
+
+async fn read_team_transcript(
+    source: &Catalog,
+    remote: &mut Option<Process>,
+    stored: &mut Option<TeamTranscript>,
+    session: &SessionIdentity,
+    member: &str,
+    read: TeamTranscriptRead,
+) -> Result<Value> {
     let Some(parent) = session
         .file
         .as_ref()
@@ -555,123 +604,257 @@ pub(super) async fn team_transcript(
     else {
         return Ok(json!({"entries":[],"cursor":null}));
     };
-    let mut file = previous.map(|view| view.file.clone());
-    let mut end = offset;
-    let mut page = BranchPage::new(previous.map(|view| view.cursor.parent.clone()));
-    let result = timeout(Duration::from_secs(22), async {
-        if let Some(block) = previous.and_then(|view| view.buffered.as_ref()) {
-            if page.read(block.start, &block.bytes)? {
-                return Ok::<_, Box<dyn std::error::Error>>(Some(block.clone()));
-            }
-            end = Some(block.start);
-        }
-        while let Some(chunk) =
-            team_transcript_chunk(source, remote, parent, member, file.as_deref(), end).await?
-        {
-            file = Some(chunk.file);
-            if page.read(chunk.block.start, &chunk.block.bytes)? {
-                return Ok(Some(chunk.block));
-            }
-            end = Some(chunk.block.start);
-        }
-        if file.is_some() {
-            return Err("Pi 子代理的记录已变更，请重新打开。".into());
-        }
-        Ok(None)
-    })
-    .await;
-    if result.is_err() {
-        *remote = None;
+    let mut file = TranscriptFile {
+        parent,
+        member,
+        name: "",
+    };
+    let previous = stored
+        .as_mut()
+        .filter(|view| &view.owner == session && view.member == member);
+    if let TeamTranscriptRead::Older(offset) = read {
+        let view = previous.ok_or("Pi 子代理的历史页已失效，请重新打开。")?;
+        let cursor = view
+            .cursor
+            .as_ref()
+            .filter(|cursor| cursor.end == offset)
+            .ok_or("Pi 子代理的历史页已失效，请重新打开。")?;
+        file.name = &view.stamp.file;
+        let mut page = BranchPage::new(Some(cursor.parent.clone()));
+        let block = scan_team_branch(
+            source,
+            remote,
+            file,
+            0..offset,
+            view.buffered.as_ref(),
+            &mut page,
+        )
+        .await?;
+        let (entries, cursor, _) = page.finish();
+        view.set_cursor(cursor, block);
+        return Ok(json!({"entries":entries,"cursor":view.cursor_token()}));
     }
-    let block = result.map_err(|_| "读取 Pi 子代理这一页的记录超时。")??;
-    let (entries, next) = page.finish();
-    *stored = next.and_then(|cursor| {
-        // Keep the already-read prefix below the cursor for the next page.
-        let buffered = block.and_then(|mut block| {
+
+    let refresh = matches!(read, TeamTranscriptRead::Refresh);
+    let Some(stamp) = team_transcript_stamp(source, remote, file).await? else {
+        if refresh && previous.is_none() {
+            return Ok(Value::Null);
+        }
+        *stored = None;
+        return Ok(json!({"entries":[],"cursor":null}));
+    };
+    file.name = &stamp.file;
+    if refresh && let Some(view) = previous {
+        if view.stamp == stamp {
+            return Ok(Value::Null);
+        }
+        if let Some(leaf) = view.leaf.as_ref().filter(|leaf| {
+            stamp.file == view.stamp.file
+                && stamp.length > view.stamp.length
+                && stamp.length - leaf.end <= PAGE_BYTES as u64
+        }) {
+            // The saved leaf ends on a complete line. Preserve the history cursor only
+            // when the appended branch links back to that leaf.
+            let mut page = BranchPage::append_to(leaf);
+            scan_team_branch(
+                source,
+                remote,
+                file,
+                leaf.end..stamp.length,
+                None,
+                &mut page,
+            )
+            .await?;
+            let connected = page.reached_previous_leaf();
+            let (entries, _, next) = page.finish();
+            if next.is_none() || connected {
+                view.stamp = stamp;
+                if next.is_some() {
+                    view.leaf = next;
+                }
+                return Ok(if entries.is_empty() {
+                    Value::Null
+                } else {
+                    json!({"entries":entries,"append":true})
+                });
+            }
+        }
+    }
+
+    let mut page = BranchPage::new(None);
+    let block = scan_team_branch(source, remote, file, 0..stamp.length, None, &mut page).await?;
+    let (entries, cursor, leaf) = page.finish();
+    let mut view = TeamTranscript {
+        owner: session.clone(),
+        member: member.to_owned(),
+        stamp,
+        leaf,
+        cursor: None,
+        buffered: None,
+    };
+    view.set_cursor(cursor, block);
+    let response = json!({"entries":entries,"cursor":view.cursor_token()});
+    *stored = Some(view);
+    Ok(response)
+}
+
+impl TeamTranscript {
+    fn cursor_token(&self) -> Option<String> {
+        self.cursor.as_ref().map(|cursor| cursor.end.to_string())
+    }
+
+    fn set_cursor(&mut self, cursor: Option<Cursor>, block: Option<TranscriptBlock>) {
+        self.buffered = cursor.as_ref().and_then(|cursor| {
+            // Keep the already-read prefix below the cursor for the next page.
+            let mut block = block?;
             block
                 .bytes
                 .truncate(cursor.end.saturating_sub(block.start) as usize);
             (!block.bytes.is_empty()).then_some(block)
         });
-        file.map(|file| TeamTranscript {
-            owner: session.clone(),
-            member: member.to_owned(),
-            file,
-            cursor,
-            buffered,
-        })
-    });
-    let cursor = stored.as_ref().map(|view| view.cursor.end.to_string());
-    Ok(json!({"entries":entries,"cursor":cursor}))
+        self.cursor = cursor;
+    }
 }
 
-async fn team_transcript_chunk(
+async fn scan_team_branch(
     source: &Catalog,
     remote: &mut Option<Process>,
-    parent: &str,
-    member: &str,
-    file: Option<&str>,
-    end: Option<u64>,
-) -> Result<Option<TranscriptChunk>> {
-    let chunk = match source {
+    file: TranscriptFile<'_>,
+    range: Range<u64>,
+    buffered: Option<&TranscriptBlock>,
+    page: &mut BranchPage,
+) -> Result<Option<TranscriptBlock>> {
+    let mut end = range.end;
+    if let Some(block) = buffered {
+        if page.read(block.start, range.start, &block.bytes)? {
+            return Ok(Some(block.clone()));
+        }
+        end = block.start;
+    }
+    while end > range.start {
+        let start = end.saturating_sub(TEAM_TRANSCRIPT_CHUNK).max(range.start);
+        let block = team_transcript_chunk(source, remote, file, start..end).await?;
+        if page.read(start, range.start, &block.bytes)? {
+            return Ok(Some(block));
+        }
+        end = start;
+    }
+    Ok(None)
+}
+
+async fn team_transcript_stamp(
+    source: &Catalog,
+    remote: &mut Option<Process>,
+    file: TranscriptFile<'_>,
+) -> Result<Option<TranscriptStamp>> {
+    match source {
         Catalog::Local => {
-            let parent = PathBuf::from(parent);
-            let member = member.to_owned();
-            let file = file.map(str::to_owned);
-            tokio::task::spawn_blocking(move || {
-                local_team_chunk(&parent, &member, file.as_deref(), end)
+            let parent = file.parent.to_owned();
+            let member = file.member.to_owned();
+            Ok(tokio::task::spawn_blocking(move || {
+                local_team_stamp(TranscriptFile {
+                    parent: &parent,
+                    member: &member,
+                    name: "",
+                })
             })
-            .await??
+            .await??)
         }
         Catalog::Ssh(host) => {
             if remote.is_none() {
                 *remote = Some(start_remote_team_reader(host)?);
             }
             let process = remote.as_mut().expect("opened remote team reader");
-            let result = timeout(Duration::from_secs(10), async {
-                let name = file.unwrap_or_default();
-                let offset = end.map(|end| end.to_string()).unwrap_or_default();
-                let request = format!("transcript\0{parent}\0{member}\0{name}\0{offset}\0");
+            let stamp = timeout(Duration::from_secs(10), async {
+                let request = format!("transcript-stamp\0{}\0{}\0\0", file.parent, file.member);
                 process.input.write_all(request.as_bytes()).await?;
                 process.input.flush().await?;
-                let mut remaining = TEAM_TRANSCRIPT_CHUNK + 4096;
+                let mut remaining = 4096;
                 let mut field = Vec::new();
                 read_team_field(&mut process.output, &mut remaining, &mut field).await?;
                 if field.is_empty() {
                     return Ok::<_, io::Error>(None);
                 }
                 let file = String::from_utf8(field.clone()).map_err(io::Error::other)?;
-                if !name.is_empty() && file != name {
+                if !file.ends_with(".jsonl") || file.contains('/') {
                     return Err(io::Error::other("远端 Pi 子代理的记录已变更，请重新打开。"));
                 }
                 read_team_field(&mut process.output, &mut remaining, &mut field).await?;
-                let received_end = std::str::from_utf8(&field)
+                let parts = std::str::from_utf8(&field)
                     .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .filter(|received| end.is_none_or(|end| *received == end))
+                    .and_then(|value| value.split_once(' '))
+                    .and_then(|(length, modified)| Some((length.parse::<u64>().ok()?, modified)))
                     .ok_or_else(|| io::Error::other("远端 Pi 子代理记录的位置无效。"))?;
-                let start = received_end.saturating_sub(TEAM_TRANSCRIPT_CHUNK);
-                read_team_field(&mut process.output, &mut remaining, &mut field).await?;
-                if field.len() as u64 != received_end - start {
-                    return Err(io::Error::other("远端 Pi 子代理的记录已变更，请重新打开。"));
-                }
-                Ok(Some(TranscriptChunk {
+                Ok(Some(TranscriptStamp {
                     file,
-                    block: TranscriptBlock {
-                        start,
-                        bytes: field,
-                    },
+                    length: parts.0,
+                    modified: parts.1.to_owned(),
                 }))
             })
             .await;
-            if !matches!(&result, Ok(Ok(_))) {
-                *remote = None;
-            }
-            result.map_err(|_| "读取远端 Pi 子代理记录超时。")??
+            Ok(stamp.map_err(|_| "读取远端 Pi 子代理记录超时。")??)
         }
-        Catalog::Fixture => None,
-    };
-    Ok(chunk)
+        Catalog::Fixture => Ok(None),
+    }
+}
+
+async fn team_transcript_chunk(
+    source: &Catalog,
+    remote: &mut Option<Process>,
+    file: TranscriptFile<'_>,
+    range: Range<u64>,
+) -> Result<TranscriptBlock> {
+    match source {
+        Catalog::Local => {
+            let (parent, member, name) = (
+                file.parent.to_owned(),
+                file.member.to_owned(),
+                file.name.to_owned(),
+            );
+            Ok(tokio::task::spawn_blocking(move || {
+                local_team_chunk(
+                    TranscriptFile {
+                        parent: &parent,
+                        member: &member,
+                        name: &name,
+                    },
+                    range,
+                )
+            })
+            .await??)
+        }
+        Catalog::Ssh(host) => {
+            if remote.is_none() {
+                *remote = Some(start_remote_team_reader(host)?);
+            }
+            let process = remote.as_mut().expect("opened remote team reader");
+            let block = timeout(Duration::from_secs(10), async {
+                let request = format!(
+                    "transcript\0{}\0{}\0{}\0{}\0{}\0",
+                    file.parent, file.member, file.name, range.start, range.end
+                );
+                process.input.write_all(request.as_bytes()).await?;
+                process.input.flush().await?;
+                let mut remaining = TEAM_TRANSCRIPT_CHUNK + 4096;
+                let mut field = Vec::new();
+                read_team_field(&mut process.output, &mut remaining, &mut field).await?;
+                if field.as_slice() != file.name.as_bytes() {
+                    return Err(io::Error::other("远端 Pi 子代理的记录已变更，请重新打开。"));
+                }
+                read_team_field(&mut process.output, &mut remaining, &mut field).await?;
+                if field.len() as u64 != range.end - range.start {
+                    return Err(io::Error::other("远端 Pi 子代理的记录已变更，请重新打开。"));
+                }
+                Ok(TranscriptBlock {
+                    start: range.start,
+                    bytes: field,
+                })
+            })
+            .await;
+            Ok(block.map_err(|_| "读取远端 Pi 子代理记录超时。")??)
+        }
+        Catalog::Fixture => Err("Pi 子代理的记录不存在。".into()),
+    }
 }
 
 pub(crate) fn fixture() -> Result<()> {

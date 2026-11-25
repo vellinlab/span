@@ -41,32 +41,60 @@ export function piTeamSnapshot(records, hasSessionFile) {
   }).sort((first, second) => first.name.localeCompare(second.name));
 }
 
-export function watchPiTeamTranscript(read, listener) {
+export function watchPiTeamTranscript(read, listener, refreshMs) {
   let subscribed = true;
-  let view = { rows: [], cursor: null, loading: false, loadOlder: () => { if (view.cursor) void load(view.cursor); } };
+  let timer;
+  let nextRefresh = refreshMs;
+  let reading = false;
+  let olderRequested = false;
+  let continuation = {};
+  let view = { rows: [], cursor: null, loading: false, loadOlder };
+
   function publish(changes) {
     view = { ...view, ...changes };
     listener(view);
   }
-  async function load(cursor) {
-    if (!subscribed || view.loading) return;
-    publish({ loading: true, error: undefined });
+
+  function loadOlder() {
+    if (!subscribed || !view.cursor || view.loading) return;
+    if (reading) olderRequested = true;
+    else void load({ cursor: view.cursor });
+  }
+
+  async function load({ cursor, refresh = false } = {}) {
+    clearTimeout(timer);
+    reading = true;
+    if (!refresh) publish({ loading: true, error: undefined });
     try {
-      const page = await read(cursor);
+      const page = await read({ cursor, refresh });
       if (!subscribed) return;
+      nextRefresh = refreshMs;
       if (page === null) {
-        publish({ loading: false });
+        if (view.loading || view.error) publish({ loading: false, error: undefined });
         return;
       }
-      const turns = piBranchTurns(page.entries, entry => entry.id);
-      publish({ cursor: page.cursor, rows: mergeHistory(view.rows, historyRows(turns)), loading: false });
+      if (!cursor && !page.append) continuation = {};
+      const turns = piBranchTurns(page.entries, entry => entry.id, cursor ? undefined : continuation);
+      const rows = cursor ? mergeHistory(view.rows, historyRows(turns)) : historyRows(turns, page.append ? view.rows : undefined);
+      publish({ cursor: page.append ? view.cursor : page.cursor, rows, loading: false, error: undefined });
     } catch (error) {
-      if (subscribed) publish({ error: error.message, loading: false });
+      if (refresh) nextRefresh = Math.min(nextRefresh * 2, 30_000);
+      if (subscribed && (view.loading || view.error !== error.message)) publish({ error: error.message, loading: false });
+    } finally {
+      reading = false;
+      if (subscribed) {
+        const loadQueuedPage = olderRequested && view.cursor;
+        olderRequested = false;
+        if (loadQueuedPage) loadOlder();
+        else timer = setTimeout(() => void load({ refresh: true }), nextRefresh);
+      }
     }
   }
   void load();
   return () => {
     subscribed = false;
+    clearTimeout(timer);
+    continuation = {};
     view = { rows: [], cursor: null, loading: false };
   };
 }

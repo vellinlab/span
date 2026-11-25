@@ -69,12 +69,15 @@ export function piTurns(entries, leafId) {
   return piBranchTurns(branch.reverse());
 }
 
-export function piBranchTurns(branch, identifyTurn = (_, index) => piTurnId(index)) {
+export function piBranchTurns(branch, identifyTurn = (_, index) => piTurnId(index), continuation) {
   const turns = [];
-  let turn;
-  let index = 0;
-  let tools;
-  let positions;
+  let turn = continuation?.turnId && {
+    id: continuation.turnId, run: { id: continuation.turnId, status: 'completed' }, rows: [],
+  };
+  let index = continuation?.index ?? 0;
+  let tools = continuation?.tools;
+  let positions = new Map();
+  if (turn) turns.push(turn);
   for (const entry of branch) {
     if (entry.type !== 'message') continue;
     const message = entry.message;
@@ -87,6 +90,7 @@ export function piBranchTurns(branch, identifyTurn = (_, index) => piTurnId(inde
       positions = new Map();
     }
     const items = piMessage(turn.id, index++, message, tools);
+    if (continuation && message.role === 'toolResult') tools.delete(message.toolCallId);
     for (const item of items) {
       const previous = positions.get(item.id);
       if (previous === undefined) {
@@ -97,5 +101,6 @@ export function piBranchTurns(branch, identifyTurn = (_, index) => piTurnId(inde
     }
     if (message.role === 'assistant') turn.run = { id: turn.id, ...piRunStatus(message) };
   }
+  if (continuation && turn) Object.assign(continuation, { turnId: turn.id, index, tools });
   return turns;
 }

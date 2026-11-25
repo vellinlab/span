@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -15,6 +15,7 @@ const nativeTeams = process.env.SPAN_TEST_PI_TEAMS;
 const teamReadGate = process.env.SPAN_TEST_PI_READ_GATE;
 const teamHome = ssh ? '/home/span-preview-ci' : join(profile, 'Team state home');
 const teamSignal = join(state, 'complete-team-prerequisite');
+const teamWorkerPath = join(state, 'worker-transcript-path');
 const teamExtension = join(state, 'extensions', 'span-team-fixture.ts');
 const localWorkspace = join(profile, 'Pi 工作区');
 const referenceName = '工作区检查.txt';
@@ -225,7 +226,9 @@ export default function (pi) {
         records.push({ type: 'message', id: 'result-' + index, parentId: 'request-' + index,
           message: { role: 'assistant', content: [{ type: 'text', text: index === 23 ? '发布交接已核对。' : '已完成历史任务 ' + index }], stopReason: 'stop' } });
       }
-      writeFileSync(join(directory, 'worker.jsonl'), records.map(record => JSON.stringify(record)).join('\\n') + '\\n{"id":"unfinished');
+      const workerLog = join(directory, 'worker.jsonl');
+      writeFileSync(workerLog, records.map(record => JSON.stringify(record)).join('\\n') + '\\n{"id":"unfinished');
+      writeFileSync(${JSON.stringify(teamWorkerPath)}, workerLog);
       const store = new TaskStore(board.name, manager.getTasksPath(board.name));
       const checklist = store.createTask('核对原始清单', '复核已收集的结果。');
       const report = store.createTask('整理交接说明', '将结论写成可交付的说明。');
@@ -538,6 +541,25 @@ export default function (pi) {
     await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
     assert.equal(await trace.getAttribute('data-items'), '40');
     if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-trace-compact.png') });
+    const workerLog = await readFile(teamWorkerPath, 'utf8');
+    const appendWorker = (...records) => appendFile(workerLog, '\n' + records.map(record => JSON.stringify({ type: 'message', ...record })).join('\n') + '\n');
+    const waitForItems = count => resumed.page.waitForFunction(expected =>
+      document.querySelector('[data-testid="subagent-transcript"]')?.dataset.items === String(expected), count);
+    const workerCommand = 'printf span-pi-worker';
+    await appendWorker(
+      { id: 'live-request', parentId: 'result-23', message: { role: 'user', content: '补充核对发布说明。' } },
+      { id: 'live-tool', parentId: 'live-request', message: { role: 'assistant', stopReason: 'toolUse', content: [
+        { type: 'thinking', thinking: '正在核对补充说明。' },
+        { type: 'toolCall', id: 'worker-command', name: 'bash', arguments: { command: workerCommand } },
+      ] } },
+    );
+    await waitForItems(43);
+    const liveCommand = trace.locator('[data-card="command"]').filter({ hasText: workerCommand });
+    await liveCommand.waitFor();
+    await resumed.page.waitForFunction(() => {
+      const timeline = document.querySelector('[data-testid="subagent-transcript"]');
+      return timeline && timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
+    });
     const scrollToStart = () => trace.evaluate(element => { element.scrollTop = 0; });
     const topOffset = locator => locator.evaluate(async element => {
       await new Promise(requestAnimationFrame);
@@ -545,14 +567,23 @@ export default function (pi) {
       return element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top;
     });
     await scrollToStart();
-    await resumed.page.waitForFunction(() => document.querySelector('[data-testid="subagent-transcript"]')?.dataset.items === '48');
+    await waitForItems(51);
     const anchored = await topOffset(trace.getByText('核对历史任务 4', { exact: true }));
     await scrollToStart();
-    const atStart = await topOffset(trace.getByText('核对历史任务 0', { exact: true }));
+    const oldestTask = trace.getByText('核对历史任务 0', { exact: true });
+    const atStart = await topOffset(oldestTask);
     // Both first rows have the same layout. Compare their rendered insets
     // without assuming the virtualizer had mounted the old first row in advance.
     assert.ok(atStart >= 0 && Math.abs(anchored - atStart) <= 2,
       `Prepending moved the first previously loaded task from ${atStart}px to ${anchored}px.`);
+    await appendWorker(
+      { id: 'live-tool-result', parentId: 'live-tool', message: { role: 'toolResult', toolCallId: 'worker-command', toolName: 'bash',
+        isError: false, content: [{ type: 'text', text: 'span-pi-worker' }], details: { exitCode: 0 } } },
+      { id: 'live-answer', parentId: 'live-tool-result', message: { role: 'assistant', stopReason: 'stop',
+        content: [{ type: 'text', text: '发布说明已补充核对。' }] } },
+    );
+    await waitForItems(52);
+    assert.ok(Math.abs((await topOffset(oldestTask)) - atStart) <= 2, 'A live append should keep the old reading position');
     const memberLatest = resumed.page.getByRole('button', { name: '滚到子代理最新消息', exact: true });
     await memberLatest.waitFor();
     assert.ok(await memberLatest.evaluate(button => {
@@ -563,13 +594,16 @@ export default function (pi) {
     if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-history-compact.png') });
     await memberLatest.press('Enter');
     await memberLatest.waitFor({ state: 'detached' });
-    await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
+    await trace.getByText('发布说明已补充核对。', { exact: true }).waitFor();
     await resumed.page.waitForFunction(() => {
       const timeline = document.querySelector('[data-testid="subagent-transcript"]');
       return timeline === document.activeElement && timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
     });
     assert.equal(await parentLog.evaluate(element => element.scrollTop), parentOffset);
-    console.log('Verified a Pi member transcript larger than 16 MiB preserves the reading anchor while loading older turns and jumps back to the latest reply.');
+    await liveCommand.locator('summary').press('Enter');
+    assert.equal((await liveCommand.getByLabel('工具输出', { exact: true }).textContent()).trim(), 'span-pi-worker');
+    assert.equal(await liveCommand.count(), 1);
+    console.log('Verified a Pi member transcript larger than 16 MiB appends new activity, keeps older pages and their reading anchor, and returns to the latest reply.');
     await resumed.page.keyboard.press('Escape');
     await member.waitFor();
     assert.ok(await member.evaluate(element => element === document.activeElement));
