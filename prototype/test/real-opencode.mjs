@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -63,6 +63,7 @@ await once(gateway, 'listening');
 
 const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 const remoteWrapper = '/home/span-preview-ci/.local/bin/opencode';
+const remoteLog = join(state, 'opencode-stderr.log');
 let app;
 let page;
 try {
@@ -86,11 +87,15 @@ try {
   };
   if (ssh) {
     await mkdir('/home/span-preview-ci/.local/bin', { recursive: true });
-    const exports = Object.entries(env).map(([key, value]) => key + '=' + shellQuote(value));
-    await writeFile(remoteWrapper, '#!/bin/sh\nexec env ' + exports.join(' ') + ' ' + shellQuote(resolve(executable)) + ' "$@"\n',
+    const exports = Object.entries(env).map(([key, value]) => key + '=' + shellQuote(value)).join(' ');
+    await writeFile(remoteWrapper,
+      `#!/bin/sh\nexec env ${exports} ${shellQuote(resolve(executable))} "$@" 2>>${shellQuote(remoteLog)}\n`,
       { mode: 0o755 });
     execFileSync('chmod', ['0711', profile]);
     execFileSync('chown', ['-R', 'span-preview-ci:span-preview-ci', state]);
+    const installed = execFileSync('ssh', ['-T', '-o', 'BatchMode=yes', '--', ssh,
+      'command -v opencode && opencode --version'], { encoding: 'utf8', timeout: 10_000 });
+    console.log('OpenCode on ' + ssh + ': ' + installed.trim().replace(/\n/g, ' '));
   }
   async function open(selectConnection) {
     app = await electron.launch({
@@ -118,6 +123,8 @@ try {
   }
 
   await open(true);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
   const send = async text => {
     const composer = page.getByRole('textbox', { name: '消息' });
     await composer.fill(text);
@@ -133,10 +140,22 @@ try {
   assert.deepEqual(await reasoning.boundingBox(), position);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
   releaseTool();
-  const approval = page.locator('.approval').filter({ hasText: command });
-  await approval.getByRole('button', { name: '仅允许这次', exact: true }).waitFor();
+  const approval = page.getByRole('region', { name: '执行命令', exact: true });
+  const allow = approval.getByRole('button', { name: '仅允许这次', exact: true });
+  await allow.waitFor();
+  const commandText = approval.getByLabel('待执行命令');
+  assert.equal(await commandText.textContent(), command);
+  assert.ok(await commandText.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const visible = element.closest('.approval-body').getBoundingClientRect();
+    return bounds.top >= Math.max(0, visible.top) && bounds.bottom <= Math.min(innerHeight, visible.bottom);
+  }), 'The complete short command is visible before approval');
+  assert.ok(await allow.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+  }));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
-  await approval.getByRole('button', { name: '仅允许这次', exact: true }).press('Enter');
+  await allow.press('Enter');
   await approval.waitFor({ state: 'detached' });
   const activity = transcript.locator('[data-card="command"]').filter({ hasText: command });
   await activity.waitFor();
@@ -145,7 +164,11 @@ try {
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await send('/usage');
   const usage = page.getByRole('region', { name: '用量', exact: true });
-  await usage.getByRole('region', { name: '会话用量' }).getByText('总计', { exact: true }).waitFor();
+  const currentUsage = usage.getByRole('region', { name: '会话用量', exact: true });
+  await currentUsage.getByText('上下文', { exact: true }).waitFor();
+  assert.equal(await currentUsage.getByText('总计', { exact: true }).count(), 0);
+  await usage.getByRole('region', { name: '最近一次用量' }).getByText('总计', { exact: true }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-usage.png') });
   await usage.getByRole('button', { name: '关闭面板' }).press('Escape');
   await usage.waitFor({ state: 'detached' });
   if (screenshot) await page.screenshot({ path: screenshot });
@@ -159,6 +182,12 @@ try {
   await send(next);
   await reopened.getByText(continued, { exact: true }).waitFor();
   assert.equal(await reopened.getByText(initial, { exact: true }).count(), 1);
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  const model = page.getByRole('button', { name: 'Agent 控件', exact: true }).getByText('Span ACP', { exact: false });
+  await model.waitFor();
+  await send('/new');
+  await page.getByPlaceholder('描述要完成的任务…').waitFor();
+  assert.equal(await model.count(), 0);
   assert.equal(gatewayError, undefined);
   console.log('Verified OpenCode ACP reasoning, permission, usage, persisted history and continuation on ' + (ssh ?? process.platform));
 } catch (error) {
@@ -167,6 +196,10 @@ try {
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-failure.png') }).catch(() => {});
   }
   if (gatewayError) console.error(gatewayError);
+  if (ssh) {
+    const stderr = await readFile(remoteLog, 'utf8').catch(() => '');
+    if (stderr) console.error(stderr.slice(-8000));
+  }
   throw error;
 } finally {
   releaseReasoning?.();

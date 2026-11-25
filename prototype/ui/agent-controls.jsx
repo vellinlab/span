@@ -201,17 +201,26 @@ function quotaWindow(minutes) {
   return ` · ${minutes} 分钟`;
 }
 
+function tokenStats(tokens) {
+  return [
+    ['总计', tokens?.total], ['输入', tokens?.input], ['输出', tokens?.output],
+    ['缓存输入', tokens?.cached], ['推理输出', tokens?.reasoning],
+  ].filter(([, value]) => Number.isFinite(value)).map(([label, value]) => [label, number.format(value)]);
+}
+
+function UsageStats({ stats }) {
+  return stats.length > 0 && <dl>{stats.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+}
+
 function UsagePanel({ usage, refreshing }) {
-  const { tokens, limits, cost } = usage;
+  const { tokens, recentTokens, limits, cost } = usage;
   const contextUsed = Number.isFinite(tokens?.contextUsed) && tokens.contextUsed >= 0 ? tokens.contextUsed : undefined;
   const contextLimit = Number.isFinite(tokens?.contextLimit) && tokens.contextLimit > 0 ? tokens.contextLimit : undefined;
   const hasContext = contextUsed !== undefined || contextLimit !== undefined;
   const contextAmount = !hasContext ? '' : contextUsed === undefined ? `上限 ${number.format(contextLimit)}`
     : contextLimit === undefined ? `已用 ${number.format(contextUsed)}` : `${number.format(contextUsed)} / ${number.format(contextLimit)}`;
-  const stats = [
-    ['总计', tokens?.total], ['输入', tokens?.input], ['输出', tokens?.output],
-    ['缓存输入', tokens?.cached], ['推理输出', tokens?.reasoning],
-  ].filter(([, value]) => Number.isFinite(value)).map(([label, value]) => [label, number.format(value)]);
+  const stats = tokenStats(tokens);
+  const recent = tokenStats(recentTokens);
   if (Number.isFinite(cost?.amount) && cost.currency) {
     const amount = cost.amount > 0 && cost.amount < 0.000001 ? '<0.000001'
       : cost.amount.toLocaleString('zh-CN', { maximumFractionDigits: 6 });
@@ -221,7 +230,11 @@ function UsagePanel({ usage, refreshing }) {
     {(hasContext || stats.length > 0) && <section className="usage-group" aria-label="会话用量">
       <h3>会话用量</h3>
       {hasContext && <UsageMeter label="上下文" amount={contextAmount} value={contextUsed} max={contextLimit} />}
-      {stats.length > 0 && <dl>{stats.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+      <UsageStats stats={stats} />
+    </section>}
+    {recent.length > 0 && <section className="usage-group" aria-label="最近一次用量">
+      <h3>最近一次用量</h3>
+      <UsageStats stats={recent} />
     </section>}
     {limits?.length > 0 && <section className="usage-group" aria-label="账号额度">
       <h3>账号额度</h3>
@@ -235,7 +248,7 @@ function UsagePanel({ usage, refreshing }) {
         </UsageMeter>;
       })}
     </section>}
-    {!hasContext && !stats.length && !limits?.length && <p role="status">
+    {!hasContext && !stats.length && !recent.length && !limits?.length && <p role="status">
       {refreshing ? '正在读取用量…' : '当前没有可显示的用量。'}
     </p>}
   </div>;

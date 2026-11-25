@@ -96,7 +96,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     state.entry = entry;
     sessions.set(state.id, entry);
     commands.splice(0, commands.length, ...(state.commands ?? []));
-    useConfig(state, config ?? []);
+    useConfig(state, config ?? state.config ?? []);
     return { session: sessionInfo(entry), options: state.options, models: state.models };
   }
 
@@ -124,8 +124,25 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     notify(state.id, { kind: 'usage', usage: state.usage });
   }
 
+  function promptUsage(state, report) {
+    const { totalTokens, inputTokens, outputTokens, cachedReadTokens, thoughtTokens } = report;
+    state.usage = { ...state.usage, recentTokens: {
+      total: totalTokens, input: inputTokens, output: outputTokens, cached: cachedReadTokens, reasoning: thoughtTokens,
+    } };
+    notify(state.id, { kind: 'usage', usage: state.usage });
+  }
+
   function updateSession(id, update) {
-    const state = id === active?.id ? active : loading && (!loading.id || id === loading.id) ? loading : undefined;
+    const state = id === active?.id ? active : id === loading?.id ? loading : undefined;
+    if (!state && id && loading?.unconfirmed) {
+      if (update.sessionUpdate === 'available_commands_update' || update.sessionUpdate === 'config_option_update') {
+        const staged = loading.unconfirmed.get(id) ?? {};
+        if (update.sessionUpdate === 'available_commands_update') useCommands(staged, update.availableCommands);
+        else useConfig(staged, update.configOptions);
+        loading.unconfirmed.set(id, staged);
+      }
+      return;
+    }
     if (!state) return;
     switch (update.sessionUpdate) {
       case 'available_commands_update':
@@ -168,8 +185,10 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     const key = JSON.stringify(id);
     dialogs.set(key, { id, state, choices });
     const operation = acpOperation(tool, state.entry.cwd);
+    const title = operation.command && tool.title?.trim() === operation.command.trim()
+      ? '执行命令' : tool.title || 'OpenCode 请求权限';
     notify(state.id, { kind: 'interaction', request: {
-      kind: 'approval', id: key, title: tool.title || 'OpenCode 请求权限',
+      kind: 'approval', id: key, title,
       choices, operation, cancel: true, turnId: state.turn.run.id,
       itemId: tool.toolCallId ? 'tool:' + tool.toolCallId : undefined,
     } });
@@ -251,7 +270,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
   }
 
   const adapter = {
-    commands, modes, localFileReferences: local,
+    commands, modes, localFileReferences: local, sessionModels: true,
     get localImageInputs() { return Boolean(local && capabilities?.promptCapabilities?.image); },
     async open() {
       await window.span.request('agent.start', { generation, cwd, backend: 'opencode', ssh: location.host });
@@ -281,14 +300,15 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     sessions: {
       list,
       async start({ cwd: directory } = {}) {
-        const state = { usage: {}, nextTurn: 0 };
+        const pending = { unconfirmed: new Map() };
         const workingDirectory = local && directory ? directory : workspace;
-        loading = state;
+        loading = pending;
         try {
           const response = await request('session/new', { cwd: workingDirectory, mcpServers: [] });
+          const state = { ...pending.unconfirmed.get(response.sessionId), usage: {}, nextTurn: 0 };
           return activate(state, { sessionId: response.sessionId, cwd: workingDirectory }, response.configOptions);
         } finally {
-          if (loading === state) loading = undefined;
+          if (loading === pending) loading = undefined;
         }
       },
       async resume(session, limit) {
@@ -325,12 +345,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
         });
         dispatched.then(() => response.then(reply => {
           if (state !== active || state.turn !== turn) return;
-          const totals = reply.usage;
-          if (totals) {
-            const { totalTokens, inputTokens, outputTokens } = totals;
-            state.usage.tokens = { ...state.usage.tokens, total: totalTokens, input: inputTokens, output: outputTokens };
-            updateUsage(state, {});
-          }
+          if (reply.usage) promptUsage(state, reply.usage);
           if (reply.stopReason === 'cancelled') finish(state, turn, 'cancelled');
           else if (reply.stopReason === 'max_tokens') finish(state, turn, 'failed', 'OpenCode 达到本轮输出上限。');
           else if (reply.stopReason === 'refusal') finish(state, turn, 'failed', 'OpenCode 拒绝了本轮请求。');

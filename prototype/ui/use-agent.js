@@ -110,6 +110,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     setTeams([]);
     setMembers([]);
     setRun(null);
+    if (agent.current?.sessionModels) setModels([]);
     setOptions({});
     setLoading(false);
     return layer.current;

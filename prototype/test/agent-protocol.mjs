@@ -848,6 +848,8 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
           break;
         case 'session/new':
           assert.equal(sent.params.cwd, '/remote home');
+          update('new', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact' }] });
+          update('saved', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'other-project' }] });
           answer({ sessionId: 'new', configOptions });
           break;
         case 'session/prompt':
@@ -883,11 +885,12 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   await agent.sessions.release(saved.session.ref);
   const fresh = await agent.sessions.start({});
   const session = fresh.session.ref;
+  assert.deepEqual(agent.commands.map(command => command.id), ['compact']);
   const run = await agent.turns.start(session, [{ kind: 'text', text: 'New request' }], { effort: 'high' }, 'draft');
   assert.equal(run.status, 'running');
   assert.equal(events.findLast(event => event.kind === 'item').item.clientId, 'draft');
   const permission = (id, sessionId) => packet({ id, method: 'session/request_permission', params: {
-    sessionId, toolCall: { toolCallId: 'active-tool', kind: 'execute', rawInput: { command: 'echo open' } },
+    sessionId, toolCall: { toolCallId: 'active-tool', kind: 'execute', title: 'echo open', rawInput: { command: 'echo open' } },
     options: [{ optionId: 'once', kind: 'allow_once' }, { optionId: 'deny', kind: 'reject_once' }],
   } });
   permission('stale', 'saved');
@@ -895,6 +898,7 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   chunk('new', 'agent_thought_chunk', 'thought', 'Check result.');
   permission('approval', 'new');
   const approval = events.findLast(event => event.kind === 'interaction').request;
+  assert.equal(approval.title, '执行命令');
   assert.equal(approval.operation.cwd, '/remote home');
   assert.equal(approval.operation.command, 'echo open');
   await agent.interactions.respond(approval.id, { choice: 'deny' });
@@ -902,4 +906,12 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   await agent.turns.stop(session, run.id);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(events.findLast(event => event.kind === 'run').run.status, 'cancelled');
+  await agent.turns.start(session, [{ kind: 'text', text: 'Second request' }], {}, 'second');
+  update('new', { sessionUpdate: 'usage_update', used: 900, size: 32768, cost: { amount: 0.001, currency: 'USD' } });
+  packet({ id: ongoing.id, result: { stopReason: 'end_turn', usage: { totalTokens: 40, inputTokens: 35, outputTokens: 5 } } });
+  await new Promise(resolve => setImmediate(resolve));
+  const usage = await agent.usage(session);
+  assert.deepEqual(usage.tokens, { contextUsed: 900, contextLimit: 32768 });
+  assert.equal(usage.recentTokens.total, 40);
+  assert.equal(usage.cost.amount, 0.001);
 });

@@ -34,10 +34,12 @@ export type GoalAction =
   | { kind: 'set'; objective: string; budget?: number }
   | { kind: 'edit'; objective: string; budget: number | null }
   | { kind: 'pause' | 'resume' | 'clear' };
+type TokenCounts = { total?: number; input?: number; output?: number; cached?: number; reasoning?: number };
 /** Each provided field replaces its group. Omitted fields leave their groups unchanged. */
 export type Usage = {
-  tokens?: { total?: number; input?: number; output?: number; cached?: number; reasoning?: number;
-    contextUsed?: number; contextLimit?: number };
+  tokens?: TokenCounts & { contextUsed?: number; contextLimit?: number };
+  /** Latest backend-reported counts when the adapter has no session token totals. */
+  recentTokens?: TokenCounts;
   /** Account-wide limits for the active Agent connection. */
   limits?: { id: string; label: string; used: number; windowMinutes?: number; resetsAt?: number }[];
   cost?: { amount: number; currency: string };
@@ -143,6 +145,8 @@ export interface AgentAdapter {
   close(): void;
   localFileReferences?: boolean;
   localImageInputs?: boolean;
+  /** Models come from the active session and are cleared when leaving it. */
+  sessionModels?: boolean;
   sessions: {
     list(options: { cursor?: string; archived?: boolean }): Promise<Page<Session>>;
     search?(options: { query: string; cursor?: string; archived?: boolean }): Promise<Page<Session>>;
