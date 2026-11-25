@@ -63,7 +63,8 @@ try {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(archive)) hash.update(chunk);
   assert.equal(hash.digest('hex'), '4cfd8acd6dd74ccba36393c33b460907e907a8c19051e16a0d0a9783ae0246c5');
-  await run('tar.exe', ['-xzf', archive, '-C', fixture]);
+  const nativeTar = join(process.env.SystemRoot, 'System32', 'tar.exe');
+  await run(nativeTar, ['-xzf', archive, '-C', fixture]);
   const executable = (await readdir(fixture)).find(name => name.endsWith('.exe'));
   assert.ok(executable, 'The pinned Codex archive must contain a Windows executable.');
   await rename(join(fixture, executable), codex);
