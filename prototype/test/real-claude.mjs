@@ -281,9 +281,9 @@ try {
   await transcript().getByText(delegateAnswer, { exact: true }).waitFor();
   assert.equal(await transcript().getByText(childAnswer, { exact: true }).count(), 0);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent.png') });
-  const childPanel = page.locator('.agent-panel[data-kind="subagent"]');
-  await childPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
-  await childPanel.waitFor({ state: 'hidden' });
+  const childPanel = () => page.locator('.agent-panel[data-kind="subagent"]');
+  await childPanel().getByRole('button', { name: '关闭面板' }).press('Escape');
+  await childPanel().waitFor({ state: 'hidden' });
   assert.ok(await openChild().evaluate(button => button === button.ownerDocument.activeElement));
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await app.close();
@@ -300,13 +300,13 @@ try {
   await restoredOutput.waitFor();
   assert.match(await restoredOutput.textContent(), /span-claude-child/);
   if (screenshot) await page.screenshot({ path: screenshot });
-  await childPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
+  await childPanel().getByRole('button', { name: '关闭面板' }).press('Escape');
   await send('/agents');
   const roster = page.getByRole('region', { name: '代理与团队', exact: true });
   const rosterChild = roster.getByRole('button', { name: /^查看 .+ 的会话记录$/ });
   await rosterChild.press('Enter');
   await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
-  const backToRoster = childPanel.getByRole('button', { name: '返回代理与团队' });
+  const backToRoster = childPanel().getByRole('button', { name: '返回代理与团队' });
   assert.ok(await backToRoster.evaluate(button => button === button.ownerDocument.activeElement));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent-roster.png') });
   await backToRoster.press('Escape');
