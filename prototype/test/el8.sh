@@ -118,6 +118,10 @@ SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffini
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/reasoning-following-baseline/span-preview /artifacts/el8-reasoning-following \
     --reasoning-following | tee /artifacts/reasoning-following.json
+SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
+taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
+    /artifacts/linux/span-preview /artifacts/reasoning-index-baseline/span-preview /artifacts/el8-reasoning-index \
+    --reasoning-index | tee /artifacts/reasoning-index.json
 tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs \
     /artifacts/linux/span-preview /artifacts/resource-isolation.json \

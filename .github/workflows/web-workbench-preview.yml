@@ -106,6 +106,7 @@ jobs:
             reasoning:2b2da807b5ec4496e20eece8df6d54763e2379e3 \
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
             reasoning-following:fec399648c3366d3b5d0c54ff8bb988b94edab96 \
+            reasoning-index:d33986d300a411e407892e61a1646265baa5853a \
             grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51 \
             terminal:"$TERMINAL_RENDERER_BASELINE" \
             terminal-cover:"$TERMINAL_COVER_BASELINE"
@@ -162,6 +163,7 @@ jobs:
             /tmp/span-workbench-artifacts/reasoning-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-details-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-following-baseline-commit.txt
+            /tmp/span-workbench-artifacts/reasoning-index-baseline-commit.txt
           if-no-files-found: warn
 
   windows:
@@ -221,6 +223,7 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-stream" --reasoning
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-details" --reasoning-details
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following
+          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-index" --reasoning-index
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \

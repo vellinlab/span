@@ -3,8 +3,9 @@ import { appendOutput } from './text-pages.js';
 
 export const itemKey = ({ turnId, id }) => JSON.stringify([turnId, id]);
 
-const latestReasoningKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
+const reasoningPositionsKey = turnId => JSON.stringify([turnId, 'reasoning', null]);
 const positionsByRows = new WeakMap();
+const reasoningViewByRows = new WeakMap();
 const layoutByRows = new WeakMap();
 const membersByRows = new WeakMap();
 const groupsByRows = new WeakMap();
@@ -28,8 +29,19 @@ export function delegatedMembers(rows) {
 export function turnReasoning(rows, turnId) {
   if (!turnId) return;
   const positions = positionsByRows.get(rows);
-  return positions ? rows[positions.get(latestReasoningKey(turnId))?.[0]]
+  return positions ? rows[positions.get(reasoningPositionsKey(turnId))?.at(-1)]
     : rows.findLast(row => row.turnId === turnId && row.kind === 'reasoning' && row.preview);
+}
+
+export function turnReasoningRows(rows, turnId) {
+  const cached = reasoningViewByRows.get(rows);
+  if (cached && cached.turnId === turnId) return cached.details;
+  const positions = positionsByRows.get(rows);
+  const details = positions
+    ? (positions.get(reasoningPositionsKey(turnId)) ?? []).map(index => rows[index])
+    : rows.filter(row => row.turnId === turnId && row.kind === 'reasoning' && row.preview);
+  reasoningViewByRows.set(rows, { turnId, details });
+  return details;
 }
 
 export function hasReasoningSection(row, index) {
@@ -247,8 +259,12 @@ function addReasoning({ rows, positions, write }, data, final, delta) {
   }
   const preview = summary?.preview || previous?.preview;
   if (existing === undefined) positions.set(key, [index]);
-  const latest = latestReasoningKey(turnId);
-  if (preview && (positions.get(latest)?.[0] ?? -1) < index) positions.set(latest, [index]);
+  if (preview && !previous?.preview) {
+    const reasoning = reasoningPositionsKey(turnId);
+    const indexes = [...(positions.get(reasoning) ?? []), index];
+    if (index < indexes.at(-2)) indexes.sort((a, b) => a - b);
+    positions.set(reasoning, indexes);
+  }
   const row = { ...previous, ...(delta ? {} : data), key, id, turnId, kind: 'reasoning', sections, final, preview };
   if (!final && tails) summaryTailsByRow.set(row, tails);
   write(index, row);
@@ -360,7 +376,12 @@ export function applyTimeline(previous, events) {
       const indexes = index.get(key);
       if (indexes) indexes.push(position);
       else index.set(key, [position]);
-      if (row.kind === 'reasoning' && row.preview) index.set(latestReasoningKey(row.turnId), [position]);
+      if (row.kind === 'reasoning' && row.preview) {
+        const reasoning = reasoningPositionsKey(row.turnId);
+        const indexes = index.get(reasoning);
+        if (indexes) indexes.push(position);
+        else index.set(reasoning, [position]);
+      }
     });
   }
   // Existing rows retain their positions during streaming. Copy the index only
@@ -377,6 +398,7 @@ export function applyTimeline(previous, events) {
   };
   let layout = layoutByRows.get(previous);
   let members = membersByRows.get(previous);
+  let reasoningView = reasoningViewByRows.get(previous);
   const groups = groupsByRows.get(previous);
   let groupingChangedAt = Infinity;
   const state = {
@@ -385,6 +407,9 @@ export function applyTimeline(previous, events) {
     write(position, row) {
       const earlier = rows[position];
       if (row.kind === 'delegation' || earlier?.kind === 'delegation') members = undefined;
+      if (row.kind === 'reasoning' && row.turnId === reasoningView?.turnId && (row.preview || earlier?.preview)) {
+        reasoningView = undefined;
+      }
       const activity = routineActivity(row);
       const groupingChanged = activity !== routineActivity(earlier) ||
         (activity && (row.key !== earlier.key || !sameActivityScope(row, earlier)));
@@ -403,6 +428,7 @@ export function applyTimeline(previous, events) {
     else if (event.kind === 'delta') addDelta(state, event.delta);
   }
   positionsByRows.set(rows, index);
+  if (reasoningView) reasoningViewByRows.set(rows, reasoningView);
   // Stable callbacks let the virtualizer retain measured offsets during text-only updates.
   if (layout) layoutByRows.set(rows, layout);
   if (groups) groupsByRows.set(rows, groupingChangedAt === Infinity ? groups : refreshActivityGroups(groups, rows, groupingChangedAt));

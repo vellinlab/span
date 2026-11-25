@@ -5,7 +5,7 @@ import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegat
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
-import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
+import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
@@ -559,6 +559,35 @@ test('reasoning received during an open Markdown reply does not break its format
   ]);
   assert.deepEqual(rows.map(row => row.kind), ['message', 'reasoning']);
   assert.equal(rows[0].text, '**First and last**');
+});
+
+test('reasoning detail reads only its turn and retains the same view for unrelated output', () => {
+  const delta = (kind, id, text, turnId = 'live') => ({ kind: 'delta', delta: { kind, id, text, turnId, section: 0 } });
+  const earlier = applyTimeline([], [delta('reasoning', 'old', 'History', 'older')]);
+  const initial = applyTimeline([], [
+    delta('reasoning', 'first', '\n\n'),
+    delta('message', 'message', 'First part. '),
+    delta('reasoning', 'last', 'Last reason.'),
+  ]);
+  const detail = turnReasoningRows(initial, 'live');
+  assert.deepEqual(detail.map(row => row.id), ['last']);
+  const unrelated = applyTimeline(initial, [delta('message', 'message', 'Next part.')]);
+  assert.equal(turnReasoningRows(unrelated, 'live'), detail);
+  const otherTurn = applyTimeline(unrelated, [delta('reasoning', 'older', 'Other reason.', 'older')]);
+  assert.equal(turnReasoningRows(otherTurn, 'live'), detail);
+
+  const completed = applyTimeline(initial, [delta('reasoning', 'first', 'Earlier reason.')]);
+  assert.deepEqual(turnReasoningRows(completed, 'live').map(row => row.id), ['first', 'last']);
+  assert.equal(turnReasoning(completed, 'live').id, 'last');
+  assert.equal(turnReasoningRows(initial, 'live'), detail);
+  const updated = applyTimeline(completed, [delta('reasoning', 'first', ' Updated.')]);
+  assert.equal(turnReasoningRows(updated, 'live')[0].preview, 'Earlier reason. Updated.');
+  assert.equal(turnReasoningRows(updated, 'live')[1], turnReasoningRows(completed, 'live')[1]);
+  const reloaded = mergeHistory(updated, earlier);
+  assert.deepEqual(turnReasoningRows(reloaded, 'older'), [earlier[0]]);
+  const fromHistory = turnReasoningRows(reloaded, 'live');
+  assert.deepEqual(fromHistory, turnReasoningRows(updated, 'live'));
+  assert.equal(turnReasoningRows(applyTimeline(reloaded, [delta('message', 'message', 'Last part.')]), 'live'), fromHistory);
 });
 
 test('streamed reasoning keeps a bounded preview and preserves the full summary', () => {

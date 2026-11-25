@@ -15,7 +15,8 @@ const following = process.argv.includes('--following');
 const grouped = process.argv.includes('--grouped-history');
 const toolOutput = process.argv.includes('--tool-output');
 const reasoningFollowing = process.argv.includes('--reasoning-following');
-const reasoningDetails = reasoningFollowing || process.argv.includes('--reasoning-details');
+const reasoningIndex = process.argv.includes('--reasoning-index');
+const reasoningDetails = reasoningIndex || reasoningFollowing || process.argv.includes('--reasoning-details');
 const streamedReasoning = reasoningDetails || process.argv.includes('--reasoning');
 const [candidate, baseline, screenshot] = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const linux = process.platform === 'linux';
@@ -364,6 +365,7 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
 }
 
 async function checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial) {
+  const deferredDetails = label === 'candidate' || reasoningIndex;
   const goalText = '核对 Windows 与 EL8 的会话状态和历史阅读位置';
   await composer.fill('/goal ' + goalText);
   await composer.press('Enter');
@@ -388,7 +390,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     await heading.waitFor();
     await panel.locator('ul ul').getByText('保留两级缩进', { exact: true }).waitFor();
     detailPosition = await heading.boundingBox();
-    if (label === 'candidate') {
+    if (deferredDetails) {
       const bounds = await detail.boundingBox();
       assert.ok(detailPosition.y - bounds.y >= 8 && detailPosition.y - bounds.y <= 14,
         'The first heading should start just inside the summary viewport.');
@@ -482,15 +484,15 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       } else {
         assert.deepEqual(await heading.boundingBox(), detailPosition);
         assert.equal(await detail.evaluate(element => element.scrollTop), 0);
-        if (label === 'candidate') assert.equal(bodyUpdates, 0);
+        if (deferredDetails) assert.equal(bodyUpdates, 0);
         else assert.ok(bodyUpdates > 0, 'The baseline must render updates below the viewport.');
         await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
         await panel.getByText(lastBatch, { exact: false }).waitFor();
       }
-      if (label === 'candidate') await revealBottom();
+      if (deferredDetails) await revealBottom();
       await writeFile(join(profile, 'follow-detail'), '');
       await panel.getByText('步骤 073', { exact: false }).waitFor();
-      if (label === 'candidate') await revealBottom();
+      if (deferredDetails) await revealBottom();
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-tail.png` });
     }
     let archived = detail ? '步骤 073' : lastBatch;
@@ -590,7 +592,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     return { label, updates, bodyUpdates, startPssKiB, endPssKiB, typing,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
-      scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000 };
+      scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000, layouts: end.LayoutCount - start.LayoutCount };
   } finally {
     desktop?.close();
   }
@@ -602,7 +604,7 @@ async function check(binary, label, trial) {
   let desktop;
   try {
     if (following) await writeFile(join(profile, 'fast'), '');
-    if (grouped) await writeFile(join(profile, 'grouped-history'), '');
+    if (grouped || reasoningIndex) await writeFile(join(profile, 'grouped-history'), '');
     if (reasoningDetails) await writeFile(join(profile, reasoningFollowing ? 'reasoning-following' : 'reasoning-details'), '');
     app = await electron.launch({
       executablePath: binary,
@@ -621,10 +623,10 @@ async function check(binary, label, trial) {
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
+    if (grouped || reasoningIndex) assert.equal(await transcript.getAttribute('data-items'), '2901');
     if (toolOutput) return await checkToolOutput(app, page, composer, profile, rendererPid, label, trial);
     if (streamedReasoning) return await checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial);
     if (grouped) {
-      assert.equal(await transcript.getAttribute('data-items'), '2901');
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
       const titleOffset = () => group.evaluate(button =>
         button.getBoundingClientRect().top - button.closest('.timeline').getBoundingClientRect().top);
@@ -810,5 +812,5 @@ for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
   if (baseline && alternate && trial === 1) trials.push(await check(baseline, 'baseline', trial));
 }
 const scenario = toolOutput ? 'tool-output' : reasoningFollowing ? 'reasoning-following' :
-  reasoningDetails ? 'reasoning-details' : streamedReasoning ? 'reasoning' : undefined;
+  reasoningIndex ? 'reasoning-index' : reasoningDetails ? 'reasoning-details' : streamedReasoning ? 'reasoning' : undefined;
 console.log(JSON.stringify({ platform: process.platform, scenario, trials }, null, 2));

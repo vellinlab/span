@@ -17,7 +17,7 @@ import { directoryName, SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
 import { Transcript } from './transcript.jsx';
-import { turnReasoning } from './timeline.js';
+import { turnReasoning, turnReasoningRows } from './timeline.js';
 import { useAgent } from './use-agent.js';
 import { draftKey, useDrafts } from './use-drafts.js';
 import './workbench.css';
@@ -125,7 +125,7 @@ function App() {
   const showReasoning = Boolean(liveReasoning?.preview && !interaction);
   const reasoningOpen = panel?.kind === 'reasoning';
   const reasoningDetails = reasoningOpen && liveReasoning
-    ? rows.filter(row => row.kind === 'reasoning' && row.turnId === liveReasoning.turnId && row.preview) : undefined;
+    ? turnReasoningRows(rows, liveReasoning.turnId) : undefined;
   const previewBlocked = previewOverlay && Boolean(interaction);
   const readingOverlay = previewCoversConversation && !interaction;
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
