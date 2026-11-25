@@ -7,10 +7,20 @@ import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFile
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
 import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
+import { workspacePathKey } from '../ui/workspace-path.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
 const session = (backend, location) => ({ backend, location, id: 'thread' });
+
+test('workspace grouping recognizes Windows path spelling while retaining case-sensitive directory names', () => {
+  assert.equal(workspacePathKey('D:\\Span\\Case\\'), workspacePathKey('d:/Span/Case'));
+  assert.equal(workspacePathKey('D:\\'), workspacePathKey('d:/'));
+  assert.equal(workspacePathKey('\\\\host\\share\\Case'), workspacePathKey('//host/share/Case'));
+  assert.notEqual(workspacePathKey('d:/Span/Case'), workspacePathKey('d:/Span/case'));
+  assert.notEqual(workspacePathKey('d:/Span/Case'), workspacePathKey('e:/Span/Case'));
+  assert.notEqual(workspacePathKey('/mnt/work\\tree'), workspacePathKey('/mnt/work/tree'));
+});
 
 test('append-only readers reuse completed log lines and rebuild when the backend replaces output', () => {
   const original = '\t检查\r\n'.repeat(LINES_PER_PAGE);

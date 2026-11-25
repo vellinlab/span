@@ -2,29 +2,28 @@ import { memo, useId, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Folder } from 'lucide-react';
 import { mergeSessions, sessionKey, sessionTitle } from './agent.js';
 import { catalogRowHeight, useCatalogViewport } from './catalog-viewport.js';
-
-export function directoryName(path) {
-  return path?.split(/[\\/]/).filter(Boolean).at(-1) || path;
-}
+import { directoryName, workspacePathKey } from './workspace-path.js';
 
 function catalogRows(sessions, project, remote, archived, filter, collapsed, matches) {
   const groups = new Map();
-  if (project && !archived && !filter && (!remote || !sessions.length)) groups.set(project, []);
+  function groupFor(workspace) {
+    const key = workspacePathKey(workspace);
+    if (!groups.has(key)) groups.set(key, { workspace, entries: [] });
+    return groups.get(key);
+  }
+  if (project && !archived && !filter && (!remote || !sessions.length)) groupFor(project);
   const local = filter ? sessions.filter(entry => [sessionTitle(entry), entry.ref.id, entry.cwd]
     .some(value => value?.toLocaleLowerCase().includes(filter))) : sessions;
   const entries = matches?.length ? mergeSessions(local, matches) : local;
-  for (const entry of entries) {
-    const title = sessionTitle(entry);
-    const workspace = entry.cwd || project || '工作区';
-    if (!groups.has(workspace)) groups.set(workspace, []);
-    groups.get(workspace).push({ key: sessionKey(entry.ref), title, entry });
-  }
+  for (const entry of entries) groupFor(entry.cwd || project || '工作区').entries.push({
+    key: sessionKey(entry.ref), title: sessionTitle(entry), entry,
+  });
 
   const rows = [];
   let position = 0;
-  for (const [workspace, entries] of groups) {
+  for (const [identity, { workspace, entries }] of groups) {
     const parent = rows.length;
-    const key = JSON.stringify(['workspace', workspace]);
+    const key = JSON.stringify(['workspace', identity]);
     const expanded = entries.length ? !collapsed?.has(key) : undefined;
     rows.push({ key, title: directoryName(workspace), workspace, expanded, position: ++position, siblings: groups.size,
       end: parent + 1 + (expanded ? entries.length : 0) });

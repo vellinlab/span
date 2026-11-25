@@ -13,13 +13,14 @@ import { Markdown, prepareMarkdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
 import { startupWorkspace } from './recent-workspaces.js';
 import { SessionActions } from './session-actions.jsx';
-import { directoryName, SessionCatalog } from './session-catalog.jsx';
+import { SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
 import { Transcript, transcriptIsAtEnd } from './transcript.jsx';
 import { turnReasoning, turnReasoningRows } from './timeline.js';
 import { useAgent } from './use-agent.js';
 import { draftKey, useDrafts } from './use-drafts.js';
+import { directoryName, windowsPath } from './workspace-path.js';
 import './workbench.css';
 
 const TerminalPanel = lazy(() => import('./terminal.jsx').then(module => ({ default: module.TerminalPanel })));
@@ -28,7 +29,6 @@ const routeLabels = { shared: '共享后台', stdio: '独立进程', fixture: '�
 const extensionCommands = { '/mcp': 'mcp', '/skills': 'skill', '/plugins': 'plugin', '/apps': 'connector', '/tools': 'tool' };
 const extensionTitles = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
 const previewOverlayQuery = window.matchMedia('(max-width: 1020px)');
-const windowsPath = /^[a-z]:[\\/]|^\\\\/i;
 
 function subscribePreviewOverlay(onChange) {
   previewOverlayQuery.addEventListener('change', onChange);

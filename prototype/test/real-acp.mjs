@@ -155,6 +155,16 @@ try {
     await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
   }
 
+  async function verifyWorkspaceGroup() {
+    const folders = page.getByRole('treeitem', { name: workspaceName, exact: true }).and(page.locator('.catalog-workspace'));
+    const rendered = await folders.evaluateAll(nodes => nodes.map(folder => ({
+      path: folder.title,
+      sessions: document.getElementById(folder.getAttribute('aria-owns'))?.querySelectorAll('.catalog-session').length,
+    })));
+    assert.equal(rendered.length, 1, JSON.stringify(rendered));
+    assert.equal(rendered[0].sessions, 2, JSON.stringify(rendered));
+  }
+
   await open(true);
   await narrow();
   const send = async text => {
@@ -256,6 +266,7 @@ try {
       const composer = document.querySelector('.composer').getBoundingClientRect();
       return bounds.bottom < composer.top && Math.abs(bounds.left - composer.left) <= 1;
     }));
+    if (!ssh) await verifyWorkspaceGroup();
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal.png') });
     await goalStrip().press('Enter');
     await goalPanel().getByRole('button', { name: '暂停', exact: true }).press('Enter');
@@ -265,6 +276,7 @@ try {
     await narrow();
     await goalStrip().getByText('已暂停', { exact: true }).waitFor();
     assert.equal(await page.getByTestId('transcript').getByText('Continue working toward this session goal:').count(), 0);
+    if (!ssh) await verifyWorkspaceGroup();
     await goalStrip().press('Enter');
     await goalPanel().getByRole('button', { name: '继续', exact: true }).press('Enter');
     await goalStrip().getByText('已完成', { exact: true }).waitFor();
