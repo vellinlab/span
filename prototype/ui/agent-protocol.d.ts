@@ -172,6 +172,7 @@ export interface AgentAdapter {
   modes?: Choice[];
   permissions?: Choice[];
   goal?: {
+    actions?: GoalAction['kind'][];
     budget?: boolean;
     startsOnSave?: boolean;
     canRestart?: boolean;

@@ -16,7 +16,7 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 | --- | --- |
 | Codex | 已注册。本机或 SSH 接入 App Server。使用原生目标、用量、规划、审批、模型和速度档位。时间线显示子代理活动，成员可打开对应会话。 |
 | Clue | 已注册。本机或 SSH 使用现有的 `clue app-server` 兼容路径。使用基础会话和回合操作。 |
-| Claude Code | 本机和 SSH 通过 Claude Agent SDK 的 ACP 适配器。使用 Claude 原生会话，接收流式推理、回复、工具活动、审批和用量。 |
+| Claude Code | 本机和 SSH 通过 Claude Agent SDK 的 ACP 适配器。使用 Claude 原生会话，接收流式推理、回复、工具活动、审批和用量。适配器公开 Goal 时，可以设置、替换和清除目标。 |
 | Pi Agent | 已注册。本机和 SSH 启动 `pi --mode rpc`，使用 Pi 自己保存的会话。支持模型和思考级别、`steer`、`follow_up`、会话统计、扩展命令及交互。 |
 | OpenCode | 本机和 SSH 通过 ACP 连接 `opencode acp`。使用 OpenCode 保存的会话，支持流式回复和推理、工具活动、审批、停止、用量，以及当前会话公开的模型和模式。 |
 | Kilo | 本机和 SSH 通过 ACP 连接 `kilo acp`。与 OpenCode 共用协议和界面，模型、模式与会话从 Kilo 原生进程读取。支持原生 Goal 的版本在输入框上方显示目标，可启动、暂停、继续并查看结果。 |

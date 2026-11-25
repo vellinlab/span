@@ -15,6 +15,9 @@ const configChoices = item => (item?.options ?? []).flatMap(option => option.opt
   .filter(option => typeof option.value === 'string').map(choice);
 const configCategories = { model: 'model', effort: 'thought_level', mode: 'mode' };
 const pageSize = 40;
+const goalStatuses = new Set(['active', 'paused', 'blocked', 'limited', 'complete']);
+const asyncStopStatuses = new Map([['completed', 'completed'], ['failed', 'failed'], ['stopped', 'cancelled']]);
+const air = value => value?._meta?.jetbrains?.air;
 
 export function createAcp({ id: backend, label, childSessionKey }, { generation, cwd, location, onEvent }) {
   const sessions = new Map();
@@ -22,6 +25,8 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   const commands = [];
   const modes = [];
   const local = location.kind === 'local';
+  const claude = backend === 'claude';
+  const sessionSettings = claude ? { _meta: { claudeCode: { options: { promptSuggestions: false } } } } : {};
   let workspace = local ? cwd : undefined;
   let capabilities;
   let active;
@@ -146,13 +151,24 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     notify(state.id, { kind: 'usage', usage: state.usage });
   }
 
+  function updateGoalSnapshot(state, snapshot) {
+    if (snapshot === undefined || !adapter.goal || !claude) return;
+    const goal = typeof snapshot?.objective === 'string' && snapshot.objective.trim() ? {
+      objective: snapshot.objective, status: goalStatuses.has(snapshot.status) ? snapshot.status : 'unknown',
+      reason: typeof snapshot.lastReason === 'string' ? snapshot.lastReason : undefined,
+    } : null;
+    state.goal = goal;
+    if (state === active) notify(state.id, { kind: 'goal', goal });
+  }
+
   function updateSession(id, update) {
     const state = id === active?.id ? active : id === loading?.id ? loading : undefined;
     if (!state && id && loading?.unconfirmed) {
-      if (update.sessionUpdate === 'available_commands_update' || update.sessionUpdate === 'config_option_update') {
+      if (['available_commands_update', 'config_option_update', 'session_info_update'].includes(update.sessionUpdate)) {
         const staged = loading.unconfirmed.get(id) ?? {};
         if (update.sessionUpdate === 'available_commands_update') useCommands(staged, update.availableCommands);
-        else useConfig(staged, update.configOptions);
+        if (update.sessionUpdate === 'config_option_update') useConfig(staged, update.configOptions);
+        if (update.sessionUpdate === 'session_info_update') updateGoalSnapshot(staged, air(update)?.goal);
         loading.unconfirmed.set(id, staged);
       }
       return;
@@ -166,6 +182,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
         useConfig(state, update.configOptions);
         return;
       case 'session_info_update': {
+        updateGoalSnapshot(state, air(update)?.goal);
         if (state !== active || typeof update.title !== 'string') return;
         state.entry = { ...state.entry, title: update.title };
         sessions.set(id, state.entry);
@@ -175,6 +192,17 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       case 'usage_update':
         if (state === active) updateUsage(state, update);
         return;
+      case 'async_task_spawned':
+        if (claude && state === active && !state.turn && update.taskType === 'turn' && typeof update.asyncTaskId === 'string') {
+          startTurn(state, false, true).asyncTask = update.asyncTaskId;
+        }
+        return;
+      case 'async_task_state_update': {
+        const turn = state.turn;
+        const status = asyncStopStatuses.get(update.state);
+        if (turn?.asyncTask && turn.asyncTask === update.asyncTaskId && status) finish(state, turn, status);
+        return;
+      }
     }
     if (state.replay) state.replay.update(update);
     else {
@@ -237,11 +265,11 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     if (!turn.goal) goals?.watch(state, 0);
   }
 
-  function startTurn(state, goal = false) {
+  function startTurn(state, goal = false, announce = goal) {
     const run = { id: acpTurnId(state.nextTurn++), status: 'running' };
     const turn = { run, goal, projection: acpTurn(run.id, event => notify(state.id, event), childSession) };
     state.turn = turn;
-    if (goal) notify(state.id, { kind: 'run', run });
+    if (announce) notify(state.id, { kind: 'run', run });
     return turn;
   }
 
@@ -252,6 +280,37 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       const status = goal?.status === 'blocked' ? 'failed' : ['complete', 'waiting'].includes(goal?.status) ? 'completed' : 'cancelled';
       finish(state, state.turn, status);
     }
+  }
+
+  function createClaudeGoal(support) {
+    if (support?.version !== 1 || support.controlMethod !== '_session/goal'
+      || !Array.isArray(support.actions) || !support.actions.includes('set')) return;
+    const actions = ['set', 'edit', ...(support.actions.includes('clear') ? ['clear'] : [])];
+    return {
+      actions, budget: false, startsOnSave: true,
+      async read(session) { return requireActive(session).goal ?? null; },
+      async update(session, { kind, objective }, options = {}) {
+        const state = requireActive(session);
+        if (!actions.includes(kind)) throw new Error('Claude Code 不支持这个目标操作。');
+        if (state.goalChanging) throw new Error('正在更新当前目标。');
+        state.goalChanging = true;
+        let turn;
+        try {
+          if (!state.turn && kind !== 'clear') await configure(state, options);
+          if (state !== active) return;
+          if (!state.turn) turn = startTurn(state, false, true);
+          const params = kind === 'clear' ? { action: 'clear' } : { action: 'set', objective };
+          await rpc.beginRequest(support.controlMethod, { sessionId: state.id, ...params }, null).response;
+          if (turn) finish(state, turn, 'completed');
+          if (state === active) return state.goal ?? null;
+        } catch (error) {
+          if (turn) finish(state, turn, 'cancelled');
+          throw error;
+        } finally {
+          state.goalChanging = false;
+        }
+      },
+    };
   }
 
   async function configure(state, options) {
@@ -316,7 +375,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   }
 
   function sessionParams(entry) {
-    return { sessionId: entry.sessionId, cwd: entry.cwd, mcpServers: [],
+    return { sessionId: entry.sessionId, cwd: entry.cwd, mcpServers: [], ...sessionSettings,
       ...(Array.isArray(entry.additionalDirectories) && { additionalDirectories: entry.additionalDirectories }) };
   }
 
@@ -346,11 +405,13 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     async open() {
       await window.span.request('agent.start', { generation, cwd, backend, ssh: location.host });
       await rpc.ready();
-      const initialized = await request('initialize', { protocolVersion: 1, clientCapabilities: {},
+      const clientCapabilities = claude ? { _meta: { jetbrains: { air: { version: 1, capabilities: ['asyncTasks'] } } } } : {};
+      const initialized = await request('initialize', { protocolVersion: 1, clientCapabilities,
         clientInfo: { name: 'span', version: '0.1.0' } });
       if (initialized.protocolVersion !== 1) throw new Error(`当前 ${label} 使用了不兼容的 ACP 版本。`);
       if (!workspace) throw new Error(`无法确认 ${label} 的工作目录。`);
       capabilities = initialized.agentCapabilities;
+      if (claude) adapter.goal = createClaudeGoal(air(initialized)?.goal);
       if (backend === 'kilo' && await window.span.request('agent.kiloGoal', { generation, probe: true, cwd: workspace }).catch(() => false)) {
         goals = createKiloGoals({ generation, requireActive, synchronize: synchronizeGoal,
           begin: state => startTurn(state, true), end: finish, notify });
@@ -381,7 +442,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
         const workingDirectory = local && directory ? directory : workspace;
         loading = pending;
         try {
-          const response = await request('session/new', { cwd: workingDirectory, mcpServers: [] });
+          const response = await request('session/new', { cwd: workingDirectory, mcpServers: [], ...sessionSettings });
           const state = { ...pending.unconfirmed.get(response.sessionId), usage: {}, nextTurn: 0 };
           return activate(state, { sessionId: response.sessionId, cwd: workingDirectory }, response.configOptions);
         } finally {
@@ -439,6 +500,11 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
         if (state.turn?.run.id !== id) return;
         if (state.turn.goal && !state.turn.foreground && goals) {
           await goals.capability.update(session, { kind: 'pause' });
+          return;
+        }
+        if (state.turn.asyncTask) {
+          const { stopped } = await request('_session/async_task/stop', { sessionId: state.id, asyncTaskId: state.turn.asyncTask });
+          if (!stopped && state.turn?.run.id === id) throw new Error('Claude Code 无法停止当前任务。');
           return;
         }
         await rpc.send({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: state.id } });

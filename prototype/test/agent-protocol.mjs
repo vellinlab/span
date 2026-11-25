@@ -695,6 +695,67 @@ test('timeline updates can branch from the same rows without sharing new positio
   assert.deepEqual(continued.map(row => row.text), ['Start', 'B', 'C', '?']);
 });
 
+test('Claude ACP separates the native Goal snapshot from the lifetime of its turns', async t => {
+  const generation = 47;
+  const events = [];
+  const packets = [];
+  let receive;
+  const emit = data => receive({ event: 'agent', generation, data });
+  const update = (update, sessionId = 'claude-session') => emit({ method: 'session/update', params: { sessionId, update } });
+  const snapshot = (goal, id) => update({ sessionUpdate: 'session_info_update', _meta: { jetbrains: { air: { goal } } } }, id);
+  const reply = (packet, result) => emit({ id: packet.id, result });
+  globalThis.window = { span: {
+    onEvent(callback) { receive = callback; return () => {}; },
+    async request(method, { packet } = {}) {
+      if (method === 'agent.start') receive({ event: 'agent-route', generation, data: 'stdio' });
+      if (method !== 'agent.send') return;
+      packets.push(packet);
+      if (packet.method === 'initialize') {
+        assert.deepEqual(packet.params.clientCapabilities._meta.jetbrains.air.capabilities, ['asyncTasks']);
+        reply(packet, { protocolVersion: 1, agentCapabilities: {}, _meta: { jetbrains: { air: {
+          goal: { version: 1, actions: ['set', 'clear'], controlMethod: '_session/goal' },
+        } } } });
+      } else if (packet.method === 'session/new') {
+        assert.equal(packet.params._meta.claudeCode.options.promptSuggestions, false);
+        reply(packet, { sessionId: 'claude-session' });
+      } else if (packet.method === '_session/goal') {
+        snapshot(packet.params.action === 'clear' ? null : { objective: packet.params.objective, status: 'active' });
+        reply(packet, {});
+      } else if (packet.method === '_session/async_task/stop') {
+        update({ sessionUpdate: 'async_task_state_update', asyncTaskId: packet.params.asyncTaskId, state: 'stopped' });
+        reply(packet, { stopped: true });
+      }
+    },
+  } };
+  const agent = await createAgent('claude', { generation, location: { kind: 'local' }, cwd: '/work',
+    onEvent: event => events.push(event) });
+  t.after(() => { agent.close(); delete globalThis.window; });
+  await agent.open();
+  const { session: { ref } } = await agent.sessions.start();
+  assert.deepEqual(agent.goal.actions, ['set', 'edit', 'clear']);
+  assert.equal(await agent.goal.read(ref), null);
+  await assert.rejects(agent.goal.update(ref, { kind: 'pause' }), /不支持/);
+  const goal = await agent.goal.update(ref, { kind: 'set', objective: 'Check the worktree' });
+  assert.equal(goal.status, 'active');
+  assert.deepEqual(events.filter(event => event.kind === 'run').map(event => event.run.status), ['running', 'completed']);
+  snapshot({ objective: 'Unrelated session', status: 'complete' }, 'another-session');
+  assert.deepEqual(await agent.goal.read(ref), goal);
+
+  const task = 'autonomous-turn-test';
+  update({ sessionUpdate: 'async_task_spawned', asyncTaskId: task, taskType: 'turn' });
+  const run = events.at(-1).run;
+  update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Checking again.' } });
+  assert.equal(events.at(-1).delta.turnId, run.id);
+  await agent.turns.stop(ref, run.id);
+  assert.equal(packets.at(-1).params.asyncTaskId, task);
+  assert.equal(events.at(-1).run.status, 'cancelled');
+  assert.equal((await agent.goal.read(ref)).status, 'active');
+  await agent.goal.update(ref, { kind: 'edit', objective: 'Check a second time' });
+  assert.deepEqual(packets.at(-1).params, { sessionId: ref.id, action: 'set', objective: 'Check a second time' });
+  assert.equal(await agent.goal.update(ref, { kind: 'clear' }), null);
+  assert.equal(events.filter(event => event.kind === 'goal').at(-1).goal, null);
+});
+
 test('Pi reconnects to its stored branch and keeps queue, tool and dialog events on the active host', async t => {
   const events = [];
   const sent = [];

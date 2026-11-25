@@ -15,6 +15,7 @@ const statuses = {
 const number = new Intl.NumberFormat('zh-CN');
 const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息', diff: '工作区 Git 改动' };
 const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
+const supportsGoalAction = (capability, action) => !capability?.actions || capability.actions.includes(action);
 
 export function commonAgentCommands(api, models, options) {
   if (!api) return [];
@@ -25,8 +26,9 @@ export function commonAgentCommands(api, models, options) {
     ['/new', '新建会话'], ['/resume', '打开会话或恢复指定 ID'], ['/status', '查看会话状态'],
     ['/pwd', '查看工作目录'], ['/copy', '复制 Markdown'], ['/copy rich', '复制富文本'],
     ...(api.goal ? [
-      ['/goal', '查看或设置会话目标'], ['/goal status', '查看当前目标'], ['/goal edit', '编辑当前目标'],
-      ['/goal pause', '暂停目标'], ['/goal resume', '继续目标'], ['/goal clear', '清除目标'],
+      ['/goal', '查看或设置会话目标'], ['/goal status', '查看当前目标'],
+      ...[['edit', '编辑当前目标'], ['pause', '暂停目标'], ['resume', '继续目标'], ['clear', '清除目标']]
+        .filter(([action]) => supportsGoalAction(api.goal, action)).map(([action, text]) => ['/goal ' + action, text]),
     ] : []),
     ...(api.usage ? [['/usage', '查看 Agent 用量']] : []),
     ...(api.delegation ? [['/agents', '查看子代理与团队']] : []),
@@ -101,6 +103,7 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
   const showEditor = editing || !goal;
   const toggleStatus = ['active', 'waiting'].includes(goal?.status) ? 'pause'
     : goal?.status === 'paused' || (capability?.canRestart && ['complete', 'blocked'].includes(goal?.status)) ? 'resume' : null;
+  const supports = kind => supportsGoalAction(capability, kind);
   const saveLabel = capability?.startsOnSave ? goal ? '替换并启动' : '启动目标' : '保存目标';
   const objective = draft?.objective ?? goal?.objective ?? '';
   const budget = draft?.budget ?? goal?.budget ?? '';
@@ -179,11 +182,12 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
         {/* The edit button must keep its original type when its click opens the editor. */}
         <button key="save-goal" type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>{saveLabel}</button>
       </> : <>
-        <button type="button" className="goal-clear" aria-disabled={busy}
-          onClick={() => update({ kind: 'clear' })}>清除</button>
-        {toggleStatus && <button type="button" aria-disabled={busy}
+        {supports('clear') && <button type="button" className="goal-clear" aria-disabled={busy}
+          onClick={() => update({ kind: 'clear' })}>清除</button>}
+        {toggleStatus && supports(toggleStatus) && <button type="button" aria-disabled={busy}
           onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : goal.status === 'complete' ? '重新开始' : '继续'}</button>}
-        <button type="button" ref={editButton} aria-disabled={busy} onClick={() => { if (!busy) changeEditor(true); }}>编辑</button>
+        {supports('edit') && <button type="button" ref={editButton} aria-disabled={busy}
+          onClick={() => { if (!busy) changeEditor(true); }}>编辑</button>}
       </>}
     </div>
   </form>;

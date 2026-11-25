@@ -20,10 +20,12 @@ const reasoningUpdate = '随后核对命令与权限。';
 const command = 'echo span-claude-tool';
 const answer = '已完成 Claude 的首次检查。';
 const continued = 'Claude 已继续原会话。';
+const objective = '验收结束时保持工作目录不变。';
 const toolId = 'toolu_span_claude_command';
 let releaseReasoning;
 let releaseTool;
 let toolResult;
+let resumedWithHistory = false;
 let failure;
 let messages = 0;
 
@@ -74,8 +76,8 @@ const gateway = createServer(async (request, response) => {
     if (result) {
       toolResult = JSON.stringify(result.content);
       reply(answer);
-    } else if (lastText.includes(next)) {
-      assert.ok(JSON.stringify(users).includes(initial), 'Claude should receive the original request on resume');
+    } else if (lastText.includes(next) && JSON.stringify(users).includes(initial)) {
+      resumedWithHistory = true;
       reply(continued);
     } else if (lastText.includes(initial) && body.tools?.length) {
       start(0, { type: 'thinking', thinking: '' });
@@ -158,9 +160,13 @@ try {
     await composer.press('Enter');
   }
 
+  async function narrow() {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+    await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  }
+
   await open(true);
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
-  await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  await narrow();
   await send(initial);
   const reasoning = page.getByRole('button', { name: '实时推理摘要' });
   await reasoning.getByText(reasoningStart, { exact: true }).waitFor();
@@ -191,9 +197,29 @@ try {
   assert.equal(await transcript().getByText(initial, { exact: true }).count(), 1);
   await send(next);
   await transcript().getByText(continued, { exact: true }).waitFor();
+  assert.ok(resumedWithHistory, 'Claude should receive the original request on resume');
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  await narrow();
+  await send('/goal ' + objective);
+  const goal = page.locator('.goal-strip').filter({ hasText: objective });
+  await goal.waitFor();
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  assert.ok(await goal.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const composer = document.querySelector('.composer').getBoundingClientRect();
+    return bounds.bottom < composer.top && Math.abs(bounds.left - composer.left) <= 1;
+  }), 'The Goal card belongs above the composer and aligns with it');
+  await goal.click();
+  const goalPanel = page.getByRole('region', { name: '会话目标', exact: true });
+  await goalPanel.getByRole('button', { name: '编辑', exact: true }).waitFor();
+  assert.equal(await goalPanel.getByRole('button', { name: '暂停', exact: true }).count(), 0);
+  assert.equal(await goalPanel.getByRole('button', { name: '继续', exact: true }).count(), 0);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal.png') });
+  await goalPanel.getByRole('button', { name: '清除', exact: true }).click();
+  await goal.waitFor({ state: 'hidden' });
   if (screenshot) await page.screenshot({ path: screenshot });
   assert.equal(failure, undefined);
-  console.log(`Verified Claude Code ACP reasoning, tool permission, usage, history and continuation on ${ssh ?? process.platform}`);
+  console.log(`Verified Claude Code ACP reasoning, tool permission, usage, history, continuation and goal controls on ${ssh ?? process.platform}`);
 } catch (error) {
   if (page) {
     console.error(await page.getByRole('alert').allTextContents().catch(() => []));

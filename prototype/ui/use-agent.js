@@ -566,7 +566,8 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     const scope = layer.current;
     if (!active.current && !create && !allowEmpty) throw new Error('请先打开一个会话。');
     if (!active.current && busy.current) throw new Error('请等当前会话启动完成。');
-    if (!active.current && create) busy.current = true;
+    const starting = !active.current && create;
+    if (starting) busy.current = true;
     try {
       const ref = create ? await ensureSession(client, title, scope) : active.current?.ref ?? null;
       if ((!ref && !allowEmpty) || scope !== layer.current) return;
@@ -576,7 +577,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
         return result;
       }
     } finally {
-      if (create && scope === layer.current) busy.current = false;
+      if (starting && scope === layer.current) busy.current = false;
     }
   }
 
@@ -598,6 +599,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   async function goalAction(action) {
     const version = ++callbacks.current.goal;
+    const capability = agent.current?.goal;
+    if (!capability || (action && capability.actions && !capability.actions.includes(action.kind))) {
+      throw new Error('当前 Agent 不支持这个目标操作。');
+    }
     const value = await withSession((client, ref) => action ? client.goal.update(ref, action, options) : client.goal.read(ref),
       { create: action?.kind === 'set', title: action?.objective?.slice(0, 48) });
     if (version === callbacks.current.goal && value !== undefined) setGoal(value);
