@@ -366,13 +366,24 @@ fn stream_reasoning(
         "核对历史记录和工具结果。".repeat(38_000) + "\r\n"
     };
     initial.push_str("开始复核长会话。");
-    let delta = |fragment: &str| {
+    let section_delta = |section: usize, fragment: &str| {
         notice(
             output,
             "item/reasoning/summaryTextDelta",
-            json!({"threadId":thread_id,"turnId":turn,"itemId":id,"summaryIndex":0,"delta":fragment}),
+            json!({"threadId":thread_id,"turnId":turn,"itemId":id,"summaryIndex":section,"delta":fragment}),
         )
     };
+    if gate.join("reasoning-observers").is_file() {
+        let paragraph = "对照工作区的修改、工具输出和复核记录。";
+        for section in 1..=2 {
+            let text = format!(
+                "### 复核补充 {section}\n\n{}",
+                (paragraph.repeat(12) + "\n\n").repeat(24)
+            );
+            section_delta(section, &text)?;
+        }
+    }
+    let delta = |fragment: &str| section_delta(0, fragment);
     delta(&initial)?;
     if !wait_for_stream_gate(&gate.join("append"), running) {
         return Ok(());

@@ -141,12 +141,47 @@ async function checkPreviewSwitch(binary) {
   let filename;
   try {
     await writeFile(join(profile, 'reasoning-details'), '');
+    await writeFile(join(profile, 'reasoning-observers'), '');
     app = await electron.launch({
       executablePath: binary,
       args: ['--demo', '--disable-webgl', ...(linux ? ['--no-sandbox'] : [])],
       env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_STREAM_GATE: profile },
     });
     const page = await app.firstWindow();
+    await page.evaluate(() => {
+      const observers = new Map();
+      window.IntersectionObserver = class extends IntersectionObserver {
+        constructor(callback, options) {
+          super(callback, options);
+          if (options?.root?.matches('#reasoning-panel .agent-panel-content')) observers.set(this, new Set());
+        }
+
+        observe(target) {
+          super.observe(target);
+          observers.get(this)?.add(target);
+        }
+
+        unobserve(target) {
+          super.unobserve(target);
+          observers.get(this)?.delete(target);
+        }
+
+        disconnect() {
+          super.disconnect();
+          observers.delete(this);
+        }
+      };
+      window.readReasoningObservers = () => ({
+        active: observers.size,
+        targets: [...observers.values()].reduce((count, targets) => count + targets.size, 0),
+      });
+    });
+    const readObservers = async (active, targets) => {
+      await page.waitForFunction(targets => window.readReasoningObservers().targets === targets, targets);
+      const observed = await page.evaluate(() => window.readReasoningObservers());
+      assert.deepEqual(observed, { active, targets });
+      return observed;
+    };
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(800, 640));
     await page.waitForFunction(() => innerWidth <= 820 && innerHeight <= 660);
     const { cwd } = await page.evaluate(() => window.span.workspace(false));
@@ -170,6 +205,7 @@ async function checkPreviewSwitch(binary) {
     await composer.evaluate(element => element.setSelectionRange(2, 8));
     await strip.press('Enter');
     await detail.getByText('保留两级缩进', { exact: true }).waitFor();
+    const openedObservers = await readObservers(1, 3);
     await detail.focus();
     const detailTop = await detail.evaluate(element => { element.scrollTop = 180; return element.scrollTop; });
     await transcript.evaluate(element => { element.scrollTop = 300; });
@@ -237,6 +273,12 @@ async function checkPreviewSwitch(binary) {
     assert.ok(await file.evaluate(element => element === document.activeElement));
     await writeFile(join(profile, 'follow-detail'), '');
     await strip.getByText('步骤 073', { exact: false }).waitFor();
+    await detail.press('Escape');
+    await detail.waitFor({ state: 'detached' });
+    const closedObservers = await readObservers(0, 0);
+    await strip.press('Enter');
+    await detail.getByText('步骤 073', { exact: false }).waitFor();
+    const reopenedObservers = await readObservers(1, 3);
     await detail.evaluate(element => {
       element.focus({ preventScroll: true });
       element.scrollTop = 180;
@@ -258,6 +300,7 @@ async function checkPreviewSwitch(binary) {
     await strip.waitFor({ state: 'detached' });
     const panel = page.getByRole('region', { name: '推理摘要' });
     await panel.getByText('已归档', { exact: true }).waitFor();
+    const archivedObservers = await readObservers(0, 0);
     assert.deepEqual(await readSelection(), selection);
     assert.ok(await detail.evaluate(element => element === document.activeElement));
     await assertReadingPosition(transcript, reading);
@@ -265,7 +308,8 @@ async function checkPreviewSwitch(binary) {
     await detail.press('Escape');
     await panel.waitFor({ state: 'detached' });
     assert.ok(await composer.evaluate(element => element === document.activeElement));
-    return { fileTop, transcriptTop, detailTop };
+    return { fileTop, transcriptTop, detailTop,
+      reasoningObservers: { opened: openedObservers, closed: closedObservers, reopened: reopenedObservers, archived: archivedObservers } };
   } finally {
     await app?.close();
     if (filename) await rm(filename, { force: true });

@@ -14,6 +14,31 @@ export const Markdown = memo(function Markdown({ text, reusePrefix = false }) {
 });
 
 const longReplyRefreshMs = 80;
+const tailObservers = new WeakMap();
+
+function observeTailInViewport(root, tail, setNear) {
+  let observation = tailObservers.get(root);
+  if (!observation) {
+    const listeners = new Map();
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) listeners.get(entry.target)?.(entry.isIntersecting);
+    }, { root, rootMargin: '0px 0px 192px 0px' });
+    observation = { observer, listeners };
+    tailObservers.set(root, observation);
+  }
+
+  const { observer, listeners } = observation;
+  listeners.set(tail, setNear);
+  observer.observe(tail);
+  return () => {
+    observer.unobserve(tail);
+    listeners.delete(tail);
+    if (!listeners.size) {
+      observer.disconnect();
+      tailObservers.delete(root);
+    }
+  };
+}
 
 export function StreamingMarkdown({ text, streaming, following, scroll, reusePrefix }) {
   const tail = useRef(null);
@@ -43,11 +68,9 @@ export function StreamingMarkdown({ text, streaming, following, scroll, reusePre
     return () => clearTimeout(timer);
   }, [delayAppend, previous]);
   useEffect(() => {
-    if (!observeTail || !scroll.current) return;
-    const observer = new IntersectionObserver(([entry]) => setTailNear(entry.isIntersecting),
-      { root: scroll.current, rootMargin: '0px 0px 192px 0px' });
-    observer.observe(tail.current);
-    return () => observer.disconnect();
+    if (observeTail && scroll.current && tail.current) {
+      return observeTailInViewport(scroll.current, tail.current, setTailNear);
+    }
   }, [observeTail, scroll]);
 
   return <>
