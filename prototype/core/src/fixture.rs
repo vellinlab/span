@@ -871,6 +871,12 @@ pub fn run() -> Result<()> {
                     continue;
                 }
                 if params["input"][0]["text"] == "验证连续工具活动。" {
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-activity-progress"),
+                            "phase":"commentary","text":"# 正在核对工作区\n\n- 检查复核记录\n  - 逐项核对文件状态"}}),
+                    )?;
                     for index in 1..=6 {
                         notice(
                             &output,
@@ -907,7 +913,7 @@ pub fn run() -> Result<()> {
                         &output,
                         "item/completed",
                         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-activity-result"),
-                            "phase":"final_answer","text":"连续工具活动验收完成。"}}),
+                            "phase":"final_answer","text":"## 连续工具活动验收完成。\n\n已记录缺少的复核文件。"}}),
                     )?;
                     background.store(false, Ordering::Release);
                     notice(

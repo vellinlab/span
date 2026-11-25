@@ -1036,8 +1036,9 @@ try {
 
   await composer.fill('验证连续工具活动。');
   await composer.press('Enter');
+  const progressHeading = transcript.getByRole('heading', { name: '正在核对工作区', level: 1 });
   const group = transcript.getByRole('button', { name: '6 条命令 · 2 次工具调用', exact: true });
-  const groupAnswer = transcript.getByText('连续工具活动验收完成。', { exact: true });
+  const groupAnswer = transcript.getByRole('heading', { name: '连续工具活动验收完成。', level: 2 });
   const firstCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git status --short -- review-1' });
   const failedCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git diff --check -- review-missing' });
   const change = transcript.locator('[data-card="patch"]').filter({ hasText: 'review-notes.md' });
@@ -1066,6 +1067,47 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
   await waitForTranscriptEnd();
+  const messageType = heading => {
+    const prose = heading.closest('.prose');
+    const viewport = heading.closest('.timeline').getBoundingClientRect();
+    const block = prose.getBoundingClientRect();
+    return {
+      headingSize: parseFloat(getComputedStyle(heading).fontSize),
+      lineHeight: parseFloat(getComputedStyle(prose).lineHeight),
+      inView: block.top >= viewport.top && block.bottom <= viewport.bottom,
+    };
+  };
+  const progressType = await progressHeading.evaluate(messageType);
+  const answerType = await groupAnswer.evaluate(messageType);
+  assert.ok(progressType.inView && answerType.inView && progressType.headingSize < answerType.headingSize &&
+    progressType.lineHeight < answerType.lineHeight, 'The progress and answer should fit together with a clear reading hierarchy.');
+  assert.ok(await progressHeading.evaluate(heading => {
+    const prose = heading.closest('.prose');
+    const outer = prose.querySelector(':scope > ul');
+    const inner = outer.querySelector('li > ul');
+    return inner.querySelector('li').getBoundingClientRect().left > outer.querySelector('li').getBoundingClientRect().left;
+  }), 'Nested steps in the progress message should remain indented.');
+  const progressBox = await progressHeading.boundingBox();
+  const groupBox = await group.boundingBox();
+  const failureBox = await failedCommand.boundingBox();
+  const answerBox = await groupAnswer.boundingBox();
+  assert.ok(progressBox.y < groupBox.y && groupBox.y < failureBox.y && failureBox.y < answerBox.y);
+  if (screenshot) {
+    const progressBlock = await progressHeading.evaluateHandle(heading => heading.closest('.agent-commentary'));
+    await progressBlock.evaluate(element => {
+      element.style.color = getComputedStyle(element).color;
+      element.classList.remove('agent-commentary');
+    });
+    await waitForTranscriptEnd();
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-commentary-before.png') });
+    await progressBlock.evaluate(element => {
+      element.classList.add('agent-commentary');
+      element.style.removeProperty('color');
+    });
+    await progressBlock.dispose();
+    await waitForTranscriptEnd();
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-commentary.png') });
+  }
   assert.ok(await failureSummary.evaluate(summary => {
     const title = summary.querySelector('.card-title').getBoundingClientRect();
     const preview = summary.querySelector('.card-failure-preview').getBoundingClientRect();
