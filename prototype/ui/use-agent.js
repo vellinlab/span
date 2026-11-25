@@ -23,6 +23,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const [historyPages, setHistoryPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [run, setRun] = useState(null);
+  const [stopping, setStopping] = useState(false);
   const [requests, setRequests] = useState([]);
   const [goal, setGoal] = useState(null);
   const [usage, setUsage] = useState({});
@@ -39,6 +40,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const agent = useRef(null);
   const busy = useRef(false);
   const currentRun = useRef(null);
+  const stopRequest = useRef(null);
   const callbacks = useRef({ goal: 0, run: 0, catalog: 0 });
   const requestedArchiveView = useRef(false);
   const pendingPage = useRef(null);
@@ -87,6 +89,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     layer.current++;
     active.current = null;
     currentRun.current = null;
+    clearStop();
     busy.current = false;
     pendingPage.current = null;
     pendingSend.current = null;
@@ -115,7 +118,14 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   function changeRun(next) {
     callbacks.current.run++;
     currentRun.current = next?.status === 'running' ? next : null;
+    if (stopRequest.current?.turnId !== currentRun.current?.id) clearStop();
     setRun(currentRun.current);
+  }
+
+  function clearStop() {
+    if (!stopRequest.current) return;
+    stopRequest.current = null;
+    setStopping(false);
   }
 
   function changeRoster(kind, id, entry) {
@@ -560,6 +570,22 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     }
   }
 
+  async function stop() {
+    const turnId = currentRun.current?.id;
+    if (!turnId || stopRequest.current?.turnId === turnId) return;
+    const request = { turnId };
+    stopRequest.current = request;
+    clearError();
+    setStopping(true);
+    try {
+      await withSession((client, ref) => client.turns.stop(ref, turnId));
+    } catch (error) {
+      if (stopRequest.current !== request) return;
+      clearStop();
+      throw error;
+    }
+  }
+
   async function goalAction(action) {
     const version = ++callbacks.current.goal;
     const value = await withSession((client, ref) => action ? client.goal.update(ref, action) : client.goal.read(ref),
@@ -650,14 +676,12 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   }
 
   return {
-    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyPages, loading, run, requests,
+    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyPages, loading, run, stopping, requests,
     goal, usage, usageRefreshing, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
     prepareConnection, timelineScope: () => layer.current,
     refreshDelegation, delegate, manageTeam,
     list: (showArchived = archived, more = false) => list(agent.current, showArchived, more ? sessionCursor : null),
-    stop: () => withSession((client, ref) => {
-      if (currentRun.current) return client.turns.stop(ref, currentRun.current.id);
-    }),
+    stop,
     respond: (id, reply) => {
       const request = requests.find(entry => entry.id === id);
       if (!api || api !== agent.current || !request ||

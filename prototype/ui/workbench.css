@@ -811,8 +811,8 @@ p { margin-block: 0 12px; }
 }
 .send:hover:not(:disabled) { background: #d1e7d8; }
 .send.stop:not(:disabled) { background: #414845; color: #f0f3f1; }
-.send.stop:hover:not(:disabled) { background: #515c56; }
-.send:disabled { background: #ffffff0b; color: #929a96; opacity: 1; }
+.send.stop:hover:not(:disabled, [aria-disabled="true"]) { background: #515c56; }
+.send:disabled, .send.stop[aria-disabled="true"] { background: #ffffff0b; color: #929a96; opacity: 1; cursor: default; }
 .live { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-height: 26px; padding-left: 4px; }
 .approval, .error { margin-bottom: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .approval {

@@ -96,6 +96,12 @@ function App() {
   const closeTerminal = useCallback(() => setTerminal(false), []);
   const report = useCallback(error => setError(error.message), []);
   const clearError = useCallback(() => setError(''), []);
+  const stopButton = useCallback(button => {
+    if (!button) return;
+    return () => {
+      if (button === document.activeElement) input.current?.focus({ preventScroll: true });
+    };
+  }, []);
   const rememberReadingView = useCallback((key, view) => {
     const recent = readingViews.current;
     recent.delete(key);
@@ -933,7 +939,8 @@ function App() {
                   </button>
                   <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel :
                     interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' :
-                      pastingScreenshot ? '正在添加截图' : composerFeedback?.scope === work.timelineScope() ? composerFeedback.text :
+                      work.stopping ? '正在停止…' : pastingScreenshot ? '正在添加截图' :
+                        composerFeedback?.scope === work.timelineScope() ? composerFeedback.text :
                         running && !showReasoning ? '正在处理' : ''}</span>
                   {showLatest && rows.length > 0 && <button type="button" className="composer-control jump-latest"
                     title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
@@ -943,7 +950,8 @@ function App() {
                       timeline.focus({ preventScroll: true });
                     }}><ArrowDown size={15} aria-hidden="true" /><span>最新消息</span></button>}
                   {connection === 'ready' && <AgentMenu work={work} onSelect={showPanel} />}
-                  {running && api?.turns.stop && <button type="button" className="send stop" aria-label="停止" disabled={!run.id}
+                  {running && api?.turns.stop && <button ref={stopButton} type="button" className="send stop" aria-label="停止"
+                    aria-disabled={work.stopping || undefined} disabled={!run.id} title={work.stopping ? '正在停止…' : undefined}
                     onClick={() => work.stop().catch(report)}><Square size={13} fill="currentColor" /></button>}
                   {(!running || ((canSteer || canQueue) && canSendDraft)) && <button className="send" type="submit" aria-label={running ? canSteer ? '追加' : '排队' : '发送'}
                     title={canSteer && canQueue ? 'Enter 追加，Alt+Enter 排队' : undefined}

@@ -1072,6 +1072,39 @@ pub fn run() -> Result<()> {
                 continue;
             }
             "turn/interrupt" => {
+                if let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                    && gate.join("hold-stop").is_file()
+                {
+                    fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(gate.join("stop-requests"))?
+                        .write_all(b"1")?;
+                    if fs::remove_file(gate.join("fail-stop")).is_ok() {
+                        send(
+                            &output,
+                            json!({"id":id,"error":{"code":-32603,"message":"模拟停止请求失败"}}),
+                        )?;
+                        continue;
+                    }
+                    if let Some(turn) = active_plan.take() {
+                        let output = output.clone();
+                        let background = background.clone();
+                        let thread_id = params["threadId"].clone();
+                        thread::spawn(move || {
+                            if wait_for_stream_gate(&gate.join("release-stop"), &background) {
+                                background.store(false, Ordering::Release);
+                                let _ = notice(
+                                    &output,
+                                    "turn/completed",
+                                    json!({"threadId":thread_id,"turn":{"id":turn,"status":"interrupted","items":[]}}),
+                                );
+                            }
+                        });
+                    }
+                    send(&output, json!({"id":id,"result":{}}))?;
+                    continue;
+                }
                 background.store(false, Ordering::Release);
                 if let Some(turn) = active_plan.take() {
                     notice(

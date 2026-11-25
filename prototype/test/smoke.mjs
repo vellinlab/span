@@ -522,10 +522,12 @@ try {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve(element.scrollTop)));
   }));
   await liveReasoning.press('Enter');
-  await page.getByRole('button', { name: '停止', exact: true }).evaluate(button => button.click());
+  const stop = page.getByRole('button', { name: '停止', exact: true });
+  await stop.press('Enter');
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await liveReasoning.waitFor({ state: 'detached' });
   await reasoningPanel.getByText('已归档', { exact: true }).waitFor();
+  assert.ok(await composer.evaluate(element => element === document.activeElement));
   assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - restoredReasoningAnchor) <= 2);
   await reasoningJump.press('Enter');
   await reasoningPanel.waitFor({ state: 'detached' });
@@ -953,6 +955,36 @@ try {
   assert.equal(await steps.getByRole('img', { name: '已完成', exact: true }).count(), 3);
   console.log('Verified live and archived plan details, progress updates, and manual disclosure.');
 
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
+  await sendPlanMessage('验证任务计划。');
+  await planSummary.getByText('已完成 1/3', { exact: true }).waitFor();
+  await composer.fill('保留准备好的草稿和选区。');
+  await composer.evaluate(element => element.setSelectionRange(2, 7));
+  await writeFile(join(profile, 'hold-stop'), '');
+  await writeFile(join(profile, 'fail-stop'), '');
+  await stop.press('Enter');
+  const stopError = page.getByRole('alert').filter({ hasText: '模拟停止请求失败' });
+  await stopError.waitFor();
+  assert.ok(await stop.isEnabled());
+  await stop.press('Enter');
+  const stopping = page.getByRole('status').filter({ hasText: '正在停止…' });
+  await stopping.waitFor();
+  await stopError.waitFor({ state: 'detached' });
+  assert.equal(await stop.getAttribute('aria-disabled'), 'true');
+  assert.ok(await stop.evaluate(element => element === document.activeElement));
+  assert.ok(await stopping.evaluate(element => element.clientWidth >= element.scrollWidth));
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-stop-pending.png') });
+  await writeFile(join(profile, 'release-stop'), '');
+  await stop.waitFor({ state: 'detached' });
+  await stopping.waitFor({ state: 'detached' });
+  assert.deepEqual(await composer.evaluate(element => [element === document.activeElement,
+    element.value, element.selectionStart, element.selectionEnd]), [true, '保留准备好的草稿和选区。', 2, 7]);
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), windowSize);
+  await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);
+
   await composer.fill('验证连续工具活动。');
   await composer.press('Enter');
   const group = transcript.getByRole('button', { name: '6 条命令 · 2 次工具调用', exact: true });
@@ -962,6 +994,8 @@ try {
   const change = transcript.locator('[data-card="patch"]').filter({ hasText: 'review-notes.md' });
   await group.waitFor();
   await groupAnswer.waitFor();
+  assert.equal(await readFile(join(profile, 'stop-requests'), 'utf8'), '11');
+  await rm(join(profile, 'hold-stop'));
   await change.waitFor();
   assert.equal(await change.locator('summary > .file-reference-name').getAttribute('title'), 'review/notes/review-notes.md');
   await failedCommand.getByText('失败', { exact: true }).waitFor();
