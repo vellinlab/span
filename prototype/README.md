@@ -31,7 +31,7 @@ Codex 和 Pi 在 Agent 菜单中提供「技能」。在输入框用 `/skills` �
 
 OpenCode 使用 PATH 中的 CLI。本机也可用 `SPAN_OPENCODE_PATH` 指定可执行文件。SSH 会按顺序查找远端的 PATH、`~/.opencode/bin` 和 `~/.local/bin`。新会话默认使用远端登录目录，已保存的会话从其原工作目录恢复。OpenCode 回放的历史由 Span 按需向上分页。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/)
 
-Claude Code 使用 PATH 中的 `claude-agent-acp`，本机可用 `SPAN_CLAUDE_ACP_PATH` 指定适配器。SSH 使用远端 PATH、`~/.claude-agent-acp/bin` 或 `~/.local/bin`。独立发行包内的适配器与 Claude CLI 放在同一目录。Claude 的认证和会话仍由该主机上的 Claude Code 管理。 [Claude Agent ACP](https://github.com/agentclientprotocol/claude-agent-acp)
+Claude Code 使用 PATH 中的 `claude-agent-acp`，本机可用 `SPAN_CLAUDE_ACP_PATH` 指定适配器。SSH 使用远端 PATH、`~/.claude-agent-acp/bin` 或 `~/.local/bin`。EL8 使用 glibc 的 Linux 发行包。独立发行包内的适配器与 Claude CLI 放在同一目录。Claude 的认证和会话仍由该主机上的 Claude Code 管理。 [Claude Agent ACP](https://github.com/agentclientprotocol/claude-agent-acp)
 
 Kilo 使用 PATH 中的 CLI，本机可用 `SPAN_KILO_PATH` 指定可执行文件。SSH 使用远端 PATH、`~/.kilo/bin` 或 `~/.local/bin`。两种 ACP 后端各自管理会话，以后端、主机和原始会话 ID 区分读取和恢复。 [Kilo CLI 参考](https://kilo.ai/docs/code-with-ai/platforms/cli-reference#kilo-acp)
 

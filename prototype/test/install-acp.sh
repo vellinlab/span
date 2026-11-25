@@ -20,17 +20,14 @@ case "$backend/$platform" in
     kilo/windows) digest=4f1f542baa28f21fbb4801dd01be661f4a164c27042c8156b3237ff15c7e4c59 ;;
     kilo/linux) digest=ab7a008a2c0ca6e035b96cd1dc5712a8466a14a45992291a8f0b4b549b94136e ;;
     claude-agent-acp/windows) digest=b064183742b062012aa9a07a181da0cee8e1da906716eeb7b1039c571332cc5b ;;
-    claude-agent-acp/linux) digest=1d81d66c04d752dedb55a484aa44b04d8737e34e6490e863f517b5120b3b3ea0 ;;
+    claude-agent-acp/linux) digest=f1e507f7bae512d3d7162e65f3c3e7a4a90b88fca17a81007ecac92d2028b9c7 ;;
     *) exit 2 ;;
 esac
 suffix=tar.gz
 if [[ "$platform" == windows ]]; then suffix=zip; fi
 archive="$backend-$platform-x64-baseline.$suffix"
 if [[ "$backend" == claude-agent-acp ]]; then
-    case "$platform" in
-        linux) archive="$backend-linux-x64-musl.$suffix" ;;
-        windows) archive="$backend-windows-x64.$suffix" ;;
-    esac
+    archive="$backend-$platform-x64.$suffix"
 fi
 
 mkdir -p "$destination"
@@ -42,5 +39,9 @@ if [[ "$platform" == windows ]]; then
 else
     tar -xzf "$destination/$archive" -C "$destination"
     test -x "$destination/$backend"
-    if [[ "$backend" != claude-agent-acp ]]; then "$destination/$backend" --version; fi
+    if [[ "$backend" == claude-agent-acp ]]; then
+        "$destination/claude" --version
+    else
+        "$destination/$backend" --version
+    fi
 fi
