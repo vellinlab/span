@@ -1160,8 +1160,9 @@ p { margin-block: 0 12px; }
 }
 .goal-editor textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @container (max-height: 400px) {
-  .composer-wrap:has(.agent-panel:is([data-kind="goal"], [data-kind="reasoning"])) .composer:not(:focus-within) textarea {
-    max-height: 46px;
+  .composer-wrap:has(.agent-panel:is([data-kind="goal"], [data-kind="reasoning"])) .composer:not(:focus-within) {
+    & textarea { max-height: 46px; }
+    & .composer-files { max-height: 28px; }
   }
   .goal-editor { padding-block: 6px; }
   .goal-editor textarea { padding-block: 4px; }

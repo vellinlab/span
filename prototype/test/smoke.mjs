@@ -349,6 +349,41 @@ try {
     await composer.evaluate(element => element.style.removeProperty('max-height'));
   }
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact.png') });
+  if (!process.env.SPAN_TEST_SSH_ALIAS) {
+    const names = Array.from({ length: 4 }, (_, index) => `验收 ${index + 1} · 工作区走查记录与附加参考清单.txt`);
+    const paths = names.map(name => join(profile, name));
+    await Promise.all(paths.map(path => writeFile(path, '工作区验收记录')));
+    await app.evaluate(({ dialog }, filePaths) => {
+      const original = dialog.showOpenDialog;
+      dialog.showOpenDialog = async () => {
+        dialog.showOpenDialog = original;
+        return { canceled: false, filePaths };
+      };
+    }, paths);
+    const tray = page.getByRole('list', { name: '待发送的附件' });
+    await page.getByRole('button', { name: '添加本机文件', exact: true }).click();
+    await tray.getByTitle(paths.at(-1), { exact: true }).waitFor();
+    await dismissGoal.focus();
+    const compact = await tray.evaluate(element => ({ height: element.clientHeight, scrollable: element.scrollHeight > element.clientHeight }));
+    assert.deepEqual(compact, { height: 28, scrollable: true });
+    const readingHeight = await goalViewport.evaluate(element => element.clientHeight);
+    await tray.evaluate(element => { element.style.maxHeight = '56px'; });
+    try {
+      const fullTrayReadingHeight = await goalViewport.evaluate(element => element.clientHeight);
+      assert.ok(readingHeight - fullTrayReadingHeight >= 22, 'The compact attachment tray must make room for another line.');
+      console.log(`Goal reading height with attachments: ${fullTrayReadingHeight} → ${readingHeight} CSS px.`);
+    } finally {
+      await tray.evaluate(element => { element.style.removeProperty('max-height'); });
+    }
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact-attachments.png') });
+    const last = tray.getByRole('button', { name: '移除附件 · ' + names.at(-1), exact: true });
+    await last.focus();
+    assert.ok(await tray.evaluate(element => element.clientHeight > 28 && element.contains(document.activeElement)));
+    for (const name of names) await tray.getByRole('button', { name: '移除附件 · ' + name, exact: true }).press('Enter');
+    await tray.waitFor({ state: 'detached' });
+    await dismissGoal.focus();
+    assert.equal(await composer.inputValue(), longDraft);
+  }
   await goalPanel.getByRole('button', { name: '继续', exact: true }).click();
   await goal.getByText('进行中', { exact: true }).waitFor();
   await goalPanel.getByRole('button', { name: '暂停', exact: true }).click();
