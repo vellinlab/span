@@ -587,6 +587,7 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
   const agentToggle = page.getByRole('button', { name: 'Agent 控件' });
+  const createGoal = page.locator('.agent-menu-entries').getByRole('button', { name: '会话目标', exact: true });
   const settingsEntry = page.getByRole('button', { name: '运行设置' });
   const settings = page.getByRole('region', { name: '运行设置' });
   const closeSettings = settings.getByRole('button', { name: '关闭面板' });
@@ -595,6 +596,7 @@ try {
   await composer.fill(settingsDraft);
   await composer.evaluate(element => element.setSelectionRange(2, 6));
   await agentToggle.press('Enter');
+  assert.equal(await createGoal.count(), 0, 'The Goal card is the sole entry point while an objective exists.');
   await page.keyboard.press('Tab');
   assert.ok(await settingsEntry.evaluate(element => document.activeElement === element));
   assert.ok(await settingsEntry.evaluate(element => {
@@ -1059,6 +1061,10 @@ try {
   await composer.fill('/goal clear');
   await composer.press('Enter');
   await goal.waitFor({ state: 'detached' });
+  await agentToggle.press('Enter');
+  await createGoal.waitFor();
+  await agentToggle.press('Escape');
+  await createGoal.waitFor({ state: 'detached' });
 
   const sendPlanMessage = async text => {
     await composer.fill(text);
