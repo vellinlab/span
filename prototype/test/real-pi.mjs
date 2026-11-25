@@ -14,6 +14,7 @@ const state = process.env.SPAN_TEST_PI_STATE ?? join(profile, "Pi's state");
 const nativeTeams = process.env.SPAN_TEST_PI_TEAMS;
 const teamHome = ssh ? '/home/span-preview-ci' : join(profile, 'Team state home');
 const teamSignal = join(state, 'complete-team-prerequisite');
+const teamExtension = join(state, 'extensions', 'span-team-fixture.ts');
 const localWorkspace = join(profile, 'Pi 工作区');
 const referenceName = '工作区检查.txt';
 const localReference = join(localWorkspace, referenceName);
@@ -29,6 +30,14 @@ const afterTool = '工具已返回，整理核对结果。';
 const resumedAnswer = 'Pi 已恢复原会话。';
 const longAnswerEnd = '已读到这次长答复的末尾。';
 const followUpAnswer = 'Pi 已处理排队跟进。';
+const teamPrompt = '用 Pi Teams 创建一个发布核对任务。';
+const teamDescription = '发布任务由 Pi Teams 原生扩展创建。';
+const teamTask = '核对最终发布说明';
+const teamAnswer = '已经通过 Pi Teams 建好任务。';
+const nativeCalls = [
+  { name: 'team_create', arguments: { team_name: 'span-native-release', description: teamDescription }, result: 'Created team' },
+  { name: 'task_create', arguments: { subject: teamTask, description: '确认改动明细和已知限制。' }, result: 'Created task' },
+];
 
 async function remoteTeamReaders() {
   const pids = (await readdir('/proc')).filter(name => /^\d+$/.test(name));
@@ -51,33 +60,48 @@ const gateway = createServer(async (request, response) => {
     assert.equal(request.url, '/v1/chat/completions');
     let body = '';
     for await (const chunk of request) body += chunk;
-    const { messages, model } = JSON.parse(body);
+    const { messages, model, tools: availableTools } = JSON.parse(body);
     assert.equal(model, 'span-pi');
     const userMessages = messages.filter(message => message.role === 'user');
     const content = userMessages.at(-1)?.content;
     const prompt = typeof content === 'string' ? content
       : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
     const tools = messages.filter(message => message.role === 'tool');
+    const nativeTeamRequest = prompt.includes(teamPrompt);
     const initial = prompt.includes(initialPrompt);
     const followUp = prompt.includes(followUpPrompt);
-    assert.ok(initial || followUp || prompt.includes(resumePrompt));
+    assert.ok(nativeTeamRequest || initial || followUp || prompt.includes(resumePrompt));
     if (initial && !ssh) assert.ok(prompt.includes('- ' + JSON.stringify(localReference)));
-    if (!initial) assert.ok(messages.some(message => message.role === 'assistant' &&
+    if (!initial && !nativeTeamRequest) assert.ok(messages.some(message => message.role === 'assistant' &&
       JSON.stringify(message.content).includes(firstAnswer)));
     if (initial && tools.length) {
       assert.ok(tools.some(tool => JSON.stringify(tool.content).includes('pi tool result')));
       assert.ok(tools.some(tool => JSON.stringify(tool.content).includes(missingFile)));
     }
-    prompts.push({ initial, tool: tools.length > 0 });
+    if (!nativeTeamRequest) prompts.push({ initial, tool: tools.length > 0 });
+    const requestId = nativeTeamRequest ? 'span-native-team-' + tools.length : 'span-fixture-' + prompts.length;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const send = (delta, finish_reason = null, usage = undefined) => {
       const choices = [{ index: 0, delta, finish_reason }];
       response.write('data: ' + JSON.stringify({
-        id: 'span-fixture-' + prompts.length, model, created: 1, object: 'chat.completion.chunk', choices, usage,
+        id: requestId, model, created: 1, object: 'chat.completion.chunk', choices, usage,
       }) + '\n\n');
     };
     send({ role: 'assistant' });
-    if (initial && !tools.length) {
+    if (nativeTeamRequest) {
+      assert.ok(tools.length <= nativeCalls.length);
+      const next = nativeCalls[tools.length];
+      if (tools.length) assert.ok(JSON.stringify(tools.at(-1).content).includes(nativeCalls[tools.length - 1].result));
+      if (next) {
+        assert.ok(availableTools.some(tool => tool.function?.name === next.name), `Missing Pi Teams tool ${next.name}`);
+        send({ tool_calls: [{ index: 0, id: 'span-native-' + next.name, type: 'function',
+          function: { name: next.name, arguments: JSON.stringify(next.arguments) } }] });
+        send({}, 'tool_calls');
+      } else {
+        send({ content: teamAnswer });
+        send({}, 'stop');
+      }
+    } else if (initial && !tools.length) {
       send({ reasoning_content: '先核对 Pi 会话。' });
       await new Promise(done => { releaseReasoning = done; });
       send({ reasoning_content: '\n' + beforeTool });
@@ -147,7 +171,7 @@ export default function (pi) {
   if (nativeTeams) {
     if (!ssh) await mkdir(teamHome);
     await cp(nativeTeams, join(state, 'pi-teams-native'), { recursive: true });
-    await writeFile(join(state, 'extensions', 'span-team-fixture.ts'), `
+    await writeFile(teamExtension, `
 import { existsSync } from 'node:fs';
 import { TeamManager } from '../pi-teams-native/team-manager.ts';
 import { TaskStore } from '../pi-teams-native/task-store.ts';
@@ -369,12 +393,12 @@ export default function (pi) {
   await name.fill('Pi 原生会话验收');
   await name.press('Enter');
   await page.locator('.breadcrumb strong').getByText('Pi 原生会话验收', { exact: true }).waitFor();
-  async function openTeam(view) {
+  async function openTeam(view, description = '复核发布前的交接。') {
     const input = view.getByRole('textbox', { name: '消息' });
     await input.fill('/agents');
     await input.press('Enter');
     const roster = view.getByRole('region', { name: '代理与团队', exact: true });
-    await roster.getByText('复核发布前的交接。', { exact: true }).waitFor();
+    await roster.getByText(description, { exact: true }).waitFor();
     assert.equal(await roster.getByText('其他会话的团队').count(), 0);
     return roster;
   }
@@ -469,6 +493,25 @@ export default function (pi) {
   assert.deepEqual(resumed.errors, []);
   console.log('Verified real Pi streaming, tools, extension dialogs, usage, and automatic workspace and session restore on ' +
     (ssh ?? process.platform));
+  if (nativeTeams) {
+    await app.close();
+    app = undefined;
+    await writeFile(teamExtension, `export { default } from '../pi-teams-native/index.ts';\n`);
+    const native = await open();
+    await native.page.getByTestId('transcript').getByText(firstAnswer, { exact: true }).waitFor();
+    await native.page.getByRole('button', { name: /^新会话/ }).click();
+    await native.page.getByRole('heading', { name: '开始新会话', exact: true }).waitFor();
+    const input = native.page.getByRole('textbox', { name: '消息' });
+    await input.fill(teamPrompt);
+    await input.press('Enter');
+    await native.page.getByTestId('transcript').getByText(teamAnswer, { exact: true }).waitFor();
+    await native.page.getByRole('button', { name: '发送', exact: true }).waitFor();
+    const roster = await openTeam(native.page, teamDescription);
+    await roster.getByRole('list', { name: '团队任务' }).getByText(teamTask, { exact: true }).waitFor();
+    assert.equal(await roster.getByText('复核发布前的交接。', { exact: true }).count(), 0);
+    assert.deepEqual(native.errors, []);
+    console.log('Verified the installed Pi Teams extension creates a team and task through its native tools on ' + (ssh ?? process.platform));
+  }
 } finally {
   releaseReasoning?.();
   releaseTool?.();
