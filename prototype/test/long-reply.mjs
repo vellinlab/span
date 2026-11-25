@@ -400,6 +400,7 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
 
 async function checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial) {
   const deferredDetails = label === 'candidate' || reasoningIndex;
+  const keepsArchive = label === 'candidate' || reasoningIndex;
   const goalText = '核对 Windows 与 EL8 的会话状态和历史阅读位置';
   await composer.fill('/goal ' + goalText);
   await composer.press('Enter');
@@ -615,10 +616,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       await strip.getByText(archived, { exact: true }).waitFor();
       assert.deepEqual(await strip.boundingBox(), geometry);
     }
-    if (detail && label === 'candidate') await strip.focus();
+    if (detail && keepsArchive) await strip.focus();
     await writeFile(join(profile, 'finish'), '');
     await strip.waitFor({ state: 'detached' });
-    if (detail && label === 'candidate') {
+    if (detail && keepsArchive) {
       await panel.getByText('已归档', { exact: true }).waitFor();
       assert.ok(await detail.evaluate(element => element === document.activeElement));
       await detail.press('Escape');
@@ -694,13 +695,30 @@ async function check(binary, label, trial) {
     });
     const page = await app.firstWindow();
     const size = streamedReasoning ? [740, 520] : [800, 640];
-    const rendererPid = await app.evaluate(({ BrowserWindow }, [width, height]) => {
-      const window = BrowserWindow.getAllWindows()[0];
-      window.setContentSize(width, height);
-      return window.webContents.getOSProcessId();
-    }, size);
-    await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, size);
+    await page.waitForLoadState('domcontentloaded');
+    const readViewport = () => page.evaluate(() => [innerWidth, innerHeight]);
     assert.equal(await page.evaluate(() => devicePixelRatio), deviceScaleFactor);
+    const initialViewport = deviceScaleFactor === 1 ? null : await readViewport();
+    const window = await app.evaluate(({ BrowserWindow }, { size, initialViewport }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      const initialContent = window.getContentSize();
+      // Windows content sizes use desktop units, while forced Chromium scaling changes CSS units.
+      const requested = initialViewport
+        ? size.map((target, axis) => Math.round(target * initialContent[axis] / initialViewport[axis])) : size;
+      window.setContentSize(...requested);
+      return { initialContent, requested, rendererPid: window.webContents.getOSProcessId() };
+    }, { size, initialViewport });
+    const tolerance = initialViewport ? 1 : 0;
+    try {
+      await page.waitForFunction(({ size: [width, height], tolerance }) =>
+        Math.abs(innerWidth - width) <= tolerance && Math.abs(innerHeight - height) <= tolerance, { size, tolerance });
+    } catch (error) {
+      const contentSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+      throw new Error(`Expected a ${size.join(' × ')} CSS viewport at ${deviceScaleFactor}×, observed ` +
+        `${(await readViewport()).join(' × ')}. Initial CSS: ${initialViewport}; initial native: ${window.initialContent}; ` +
+        `requested native: ${window.requested}; actual native: ${contentSize}.`, { cause: error });
+    }
+    const { rendererPid } = window;
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
