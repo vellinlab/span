@@ -757,6 +757,9 @@ try {
   assert.equal(await skills.getByText('workspace-checklist-32', { exact: true }).count(), 0);
   assert.ok(await skills.getByRole('group').evaluate(element => element.scrollWidth === element.clientWidth));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-skills-compact.png') });
+  await searchSkills.fill('workspace-review');
+  await skillRows.nth(1).waitFor({ state: 'detached' });
+  await skillRows.getByText('工作区复核', { exact: true }).waitFor();
   await searchSkills.fill('交接清单 32');
   await skills.getByText('workspace-checklist-32', { exact: true }).waitFor();
   assert.equal(await skillRows.count(), 1);

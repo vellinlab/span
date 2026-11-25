@@ -176,7 +176,14 @@ export default function (pi) {
   await skillPanel.getByText('读取工作台交接清单并核对项目。', { exact: true }).waitFor();
   assert.equal(await skillPanel.getByText('span-form', { exact: true }).count(), 0);
   assert.equal(prompts.length, 0);
-  await skillPanel.getByRole('searchbox', { name: '搜索技能' }).press('Escape');
+  const skillSearch = skillPanel.getByRole('searchbox', { name: '搜索技能' });
+  assert.ok(await skillSearch.evaluate(element => element === document.activeElement));
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-skills.png') });
+  await skillSearch.fill('');
+  assert.equal(await skillSearch.inputValue(), '');
+  assert.ok(await skillSearch.evaluate(element => element === document.activeElement));
+  await skillPanel.getByText('span-checklist', { exact: true }).waitFor();
+  await page.keyboard.press('Escape');
   await skillPanel.waitFor({ state: 'detached' });
   assert.ok(await composer.evaluate(element => element === document.activeElement));
   await composer.fill('保留技能目录旁的草稿。');

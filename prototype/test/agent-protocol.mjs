@@ -378,7 +378,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     };
     assert.deepEqual(await agent.extensions.list('skill', ref, { cwd: '/remote workspace' }), { items: [{
       kind: 'skill', id: '/remote workspace/skills/review/SKILL.md', path: '/remote workspace/skills/review/SKILL.md',
-      label: '复核', description: '界面说明', scope: 'workspace', enabled: false,
+      name: 'review', label: '复核', description: '界面说明', scope: 'workspace', enabled: false,
     }], cursor: null });
     const diffReplies = [
       { exitCode: 128, stdout: '', stderr: 'no commits yet' },
@@ -741,7 +741,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   await agent.open();
   assert.equal(events[0].route, 'stdio');
   assert.deepEqual(await agent.extensions.list('skill', null), { items: [{
-    kind: 'skill', id: 'skill:review', label: 'review', description: 'Project review',
+    kind: 'skill', id: 'skill:review', name: 'review', label: 'review', description: 'Project review',
     path: '/remote/work/.agents/skills/review/SKILL.md', scope: 'workspace',
   }], cursor: null });
   assert.deepEqual(agent.commands.map(command => command.id), ['skill:review', 'span-form']);

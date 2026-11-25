@@ -100,7 +100,7 @@ export type Extension = Choice & { status?: string; enabled?: boolean; source?: 
   | { kind: 'mcp'; tools?: string[]; toolError?: string;
       authentication?: 'unknown' | 'unsupported' | 'required' | 'token' | 'oauth';
       connection?: 'idle' | 'connecting' | 'ready' | 'auth-required' | 'failed' | 'cancelled' | 'disabled' }
-  | { kind: 'skill'; path?: string; scope?: 'workspace' | 'user' | 'system' | 'managed' | 'temporary' }
+  | { kind: 'skill'; name: string; path?: string; scope?: 'workspace' | 'user' | 'system' | 'managed' | 'temporary' }
   | { kind: Exclude<ExtensionKind, 'mcp' | 'skill'> }
 );
 export type ExtensionAction = 'enable' | 'disable' | 'install' | 'uninstall' | 'authorize' | 'refresh';

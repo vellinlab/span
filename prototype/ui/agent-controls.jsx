@@ -383,9 +383,10 @@ function DiffPanel({ panel }) {
 export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, report, openSession }) {
   const close = useRef(null);
   const content = useRef(null);
+  const extensionSearch = useRef(null);
   const { id: panelId, focus, editGoal } = panel ?? {};
   useLayoutEffect(() => {
-    if (focus && !editGoal) close.current?.focus({ preventScroll: true });
+    if (focus && !editGoal) (extensionSearch.current ?? close.current)?.focus({ preventScroll: true });
   }, [panelId, focus, editGoal]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
@@ -424,7 +425,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       {agentsPanel && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'diff' && <DiffPanel key={panel.id} panel={panel} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
-      {panel.kind === 'extensions' && <ExtensionList key={panel.id} panel={panel} />}
+      {panel.kind === 'extensions' && <ExtensionList key={panel.id} panel={panel} search={extensionSearch} />}
     </div>}
   </section>;
 }
@@ -471,7 +472,7 @@ function McpServerRow({ item, verbose }) {
   </li>;
 }
 
-function ExtensionList({ panel }) {
+function ExtensionList({ panel, search }) {
   const [listing, setListing] = useState({ items: [], cursor: null, loading: true, error: '' });
   const [query, setQuery] = useState(panel.query ?? '');
   const [skillLimit, setSkillLimit] = useState(skillPageSize);
@@ -506,12 +507,12 @@ function ExtensionList({ panel }) {
   }, []);
   const skills = panel.extension === 'skill';
   const term = query.trim().toLocaleLowerCase();
-  const matches = skills && term ? listing.items.filter(item =>
-    [item.label, item.description].some(text => text?.toLocaleLowerCase().includes(term))) : listing.items;
+  const matches = skills && term ? listing.items.filter(item => item.kind === 'skill' &&
+    [item.label, item.name, item.description].some(text => text?.toLocaleLowerCase().includes(term))) : listing.items;
   const visible = skills ? matches.slice(0, skillLimit) : matches;
   const moreSkills = skills && matches.length > skillLimit;
   return <>
-    {skills && (listing.items.length > 8 || query) && <input type="search" className="skill-search" aria-label="搜索技能"
+    {skills && (listing.items.length > 8 || panel.query) && <input ref={search} type="search" className="skill-search" aria-label="搜索技能"
       placeholder="搜索技能" value={query} onChange={event => { setQuery(event.target.value); setSkillLimit(skillPageSize); }} />}
     {visible.length > 0 && <ul className="extensions">{visible.map(item => item.kind === 'mcp'
       ? <McpServerRow key={item.id} item={item} verbose={panel.verbose} /> : item.kind === 'skill'

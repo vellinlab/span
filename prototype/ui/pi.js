@@ -309,11 +309,14 @@ export function createPi({ generation, cwd, location, onEvent }) {
         if (kind !== 'skill') return { items: [], cursor: null };
         const { commands } = await request('get_commands');
         const items = commands.filter(command => command.source === 'skill' && command.name?.startsWith('skill:'))
-          .map(command => ({
-            kind, id: command.name, label: command.name.slice('skill:'.length), description: command.description,
-            path: command.sourceInfo?.path,
-            scope: { project: 'workspace', user: 'user', temporary: 'temporary' }[command.sourceInfo?.scope],
-          }));
+          .map(command => {
+            const name = command.name.slice('skill:'.length);
+            return {
+              kind, id: command.name, name, label: name, description: command.description,
+              path: command.sourceInfo?.path,
+              scope: { project: 'workspace', user: 'user', temporary: 'temporary' }[command.sourceInfo?.scope],
+            };
+          });
         return { items, cursor: null };
       },
     },

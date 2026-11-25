@@ -319,7 +319,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
           for (const item of group.skills ?? []) {
             if (!item.path || !item.name) continue;
             items.set(item.path, {
-              kind, id: item.path, path: item.path, label: item.interface?.displayName || item.name,
+              kind, id: item.path, name: item.name, path: item.path, label: item.interface?.displayName || item.name,
               description: item.interface?.shortDescription || item.shortDescription || item.description,
               scope: { repo: 'workspace', user: 'user', system: 'system', admin: 'managed' }[item.scope],
               enabled: item.enabled,
