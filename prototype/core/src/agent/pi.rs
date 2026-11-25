@@ -287,11 +287,6 @@ fn local_teams(root: &Path, session: &SessionIdentity) -> io::Result<Vec<Value>>
     Ok(teams)
 }
 
-pub(super) struct RemoteTeamReader {
-    pub(super) session: String,
-    process: Process,
-}
-
 pub(super) fn valid_team_member(id: &str) -> bool {
     id.len() == 8 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -308,7 +303,7 @@ struct TranscriptBlock {
 }
 
 pub(super) struct TeamTranscript {
-    pub(super) owner: SessionIdentity,
+    owner: SessionIdentity,
     member: String,
     file: String,
     cursor: Cursor,
@@ -375,7 +370,7 @@ fn local_team_chunk(
     }))
 }
 
-fn start_remote_team_reader(host: &str, session: &str) -> Result<RemoteTeamReader> {
+fn start_remote_team_reader(host: &str) -> Result<Process> {
     // Requests and results use NUL-delimited fields. A roster ends with an empty config field.
     // The local reader checks ownership again after decoding the remote data.
     const SCRIPT: &str = r#"
@@ -441,10 +436,7 @@ done
         TEAM_TASKS_LIMIT,
         TEAM_TRANSCRIPT_CHUNK,
     );
-    Ok(RemoteTeamReader {
-        session: session.to_owned(),
-        process: spawn(ssh(host).arg(command))?,
-    })
+    Ok(spawn(ssh(host).arg(command))?)
 }
 
 async fn read_team_field(
@@ -465,11 +457,7 @@ async fn read_team_field(
     Ok(())
 }
 
-async fn remote_teams(
-    reader: &mut RemoteTeamReader,
-    session: &SessionIdentity,
-) -> Result<Vec<Value>> {
-    reader.session.clone_from(&session.id);
+async fn remote_teams(process: &mut Process, session: &SessionIdentity) -> Result<Vec<Value>> {
     let mut owners = b"roster\0".to_vec();
     serde_json::to_writer(&mut owners, &session.id)?;
     owners.push(0);
@@ -477,7 +465,6 @@ async fn remote_teams(
         serde_json::to_writer(&mut owners, file)?;
     }
     owners.push(0);
-    let process = &mut reader.process;
     let teams = timeout(Duration::from_secs(10), async {
         process.input.write_all(&owners).await?;
         process.input.flush().await?;
@@ -506,7 +493,7 @@ async fn remote_teams(
 
 pub(super) async fn team_snapshot(
     source: &Catalog,
-    remote: &mut Option<RemoteTeamReader>,
+    remote: &mut Option<Process>,
     session: &SessionIdentity,
 ) -> Result<Value> {
     let teams = match source {
@@ -520,7 +507,7 @@ pub(super) async fn team_snapshot(
         }
         Catalog::Ssh(host) => {
             if remote.is_none() {
-                *remote = Some(start_remote_team_reader(host, &session.id)?);
+                *remote = Some(start_remote_team_reader(host)?);
             }
             let result =
                 remote_teams(remote.as_mut().expect("opened remote team reader"), session).await;
@@ -536,7 +523,7 @@ pub(super) async fn team_snapshot(
 
 pub(super) async fn team_transcript(
     source: &Catalog,
-    remote: &mut Option<RemoteTeamReader>,
+    remote: &mut Option<Process>,
     stored: &mut Option<TeamTranscript>,
     session: &SessionIdentity,
     member: &str,
@@ -570,16 +557,8 @@ pub(super) async fn team_transcript(
             }
             end = Some(block.start);
         }
-        while let Some(chunk) = team_transcript_chunk(
-            source,
-            remote,
-            session,
-            parent,
-            member,
-            file.as_deref(),
-            end,
-        )
-        .await?
+        while let Some(chunk) =
+            team_transcript_chunk(source, remote, parent, member, file.as_deref(), end).await?
         {
             file = Some(chunk.file);
             if page.read(chunk.block.start, &chunk.block.bytes)? {
@@ -620,8 +599,7 @@ pub(super) async fn team_transcript(
 
 async fn team_transcript_chunk(
     source: &Catalog,
-    remote: &mut Option<RemoteTeamReader>,
-    session: &SessionIdentity,
+    remote: &mut Option<Process>,
     parent: &str,
     member: &str,
     file: Option<&str>,
@@ -639,19 +617,18 @@ async fn team_transcript_chunk(
         }
         Catalog::Ssh(host) => {
             if remote.is_none() {
-                *remote = Some(start_remote_team_reader(host, &session.id)?);
+                *remote = Some(start_remote_team_reader(host)?);
             }
-            let reader = remote.as_mut().expect("opened remote team reader");
-            reader.session.clone_from(&session.id);
+            let process = remote.as_mut().expect("opened remote team reader");
             let result = timeout(Duration::from_secs(10), async {
                 let name = file.unwrap_or_default();
                 let offset = end.map(|end| end.to_string()).unwrap_or_default();
                 let request = format!("transcript\0{parent}\0{member}\0{name}\0{offset}\0");
-                reader.process.input.write_all(request.as_bytes()).await?;
-                reader.process.input.flush().await?;
+                process.input.write_all(request.as_bytes()).await?;
+                process.input.flush().await?;
                 let mut remaining = TEAM_TRANSCRIPT_CHUNK + 4096;
                 let mut field = Vec::new();
-                read_team_field(&mut reader.process.output, &mut remaining, &mut field).await?;
+                read_team_field(&mut process.output, &mut remaining, &mut field).await?;
                 if field.is_empty() {
                     return Ok::<_, io::Error>(None);
                 }
@@ -659,14 +636,14 @@ async fn team_transcript_chunk(
                 if !name.is_empty() && file != name {
                     return Err(io::Error::other("远端 Pi 子代理的记录已变更，请重新打开。"));
                 }
-                read_team_field(&mut reader.process.output, &mut remaining, &mut field).await?;
+                read_team_field(&mut process.output, &mut remaining, &mut field).await?;
                 let received_end = std::str::from_utf8(&field)
                     .ok()
                     .and_then(|value| value.parse::<u64>().ok())
                     .filter(|received| end.is_none_or(|end| *received == end))
                     .ok_or_else(|| io::Error::other("远端 Pi 子代理记录的位置无效。"))?;
                 let start = received_end.saturating_sub(TEAM_TRANSCRIPT_CHUNK);
-                read_team_field(&mut reader.process.output, &mut remaining, &mut field).await?;
+                read_team_field(&mut process.output, &mut remaining, &mut field).await?;
                 if field.len() as u64 != received_end - start {
                     return Err(io::Error::other("远端 Pi 子代理的记录已变更，请重新打开。"));
                 }

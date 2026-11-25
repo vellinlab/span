@@ -6,7 +6,7 @@ use async_tungstenite::{
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::{
-    cell::{OnceCell, RefCell},
+    cell::OnceCell,
     env, io,
     path::{Path, PathBuf},
     process::Stdio,
@@ -18,8 +18,8 @@ pub(super) use pi::fixture as pi_fixture;
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
-    sync::{mpsc, oneshot},
-    time::timeout,
+    sync::{mpsc, oneshot, watch},
+    time::{sleep, timeout},
 };
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -705,13 +705,28 @@ async fn stdio(
     stdio_process(process, requests, output, generation, route, None).await
 }
 
-enum PiTeamRequest {
-    Read {
-        id: Value,
-        session: String,
-        transcript: Option<PiTranscriptRequest>,
-    },
-    Release(String),
+#[derive(Default)]
+struct PiTeamView {
+    session: Option<pi::SessionIdentity>,
+    revision: u64,
+}
+
+impl PiTeamView {
+    fn replace_session(&mut self, session: Option<pi::SessionIdentity>) -> bool {
+        if self.session == session {
+            return false;
+        }
+        self.session = session;
+        self.revision = self.revision.wrapping_add(1);
+        true
+    }
+}
+
+struct PiTeamRequest {
+    id: Value,
+    // Closing the view cancels the active read and invalidates queued reads.
+    revision: u64,
+    transcript: Option<PiTranscriptRequest>,
 }
 
 struct PiTranscriptRequest {
@@ -729,74 +744,71 @@ async fn stdio_process(
 ) -> io::Result<()> {
     event(output, "agent-route", generation, json!(route))?;
     let pi_session_file = OnceCell::new();
-    let pi_session = RefCell::new(None::<pi::SessionIdentity>);
+    let (pi_view, mut view_changes) = watch::channel(PiTeamView::default());
     let (team_requests, mut team_queue) = mpsc::channel::<PiTeamRequest>(2);
     let teams = async {
         let Some(catalog) = &pi_catalog else {
             return std::future::pending().await;
         };
-        let mut remote: Option<pi::RemoteTeamReader> = None;
-        let mut stored: Option<pi::TeamTranscript> = None;
+        let mut remote = None;
+        let mut stored = None;
         loop {
-            let request = if remote.is_some() {
-                match timeout(Duration::from_secs(12), team_queue.recv()).await {
-                    Ok(request) => request,
-                    Err(_) => {
-                        remote = None;
-                        continue;
-                    }
-                }
-            } else {
-                team_queue.recv().await
-            };
-            let (id, session, transcript) = match request {
-                Some(PiTeamRequest::Read {
-                    id,
-                    session,
-                    transcript,
-                }) => (id, session, transcript),
-                Some(PiTeamRequest::Release(session)) => {
-                    if remote
-                        .as_ref()
-                        .is_some_and(|reader| reader.session == session)
-                    {
-                        remote = None;
-                    }
-                    if stored.as_ref().is_some_and(|view| view.owner.id == session) {
-                        stored = None;
-                    }
+            let request = tokio::select! {
+                biased;
+                _ = view_changes.changed() => {
+                    remote = None;
+                    stored = None;
                     continue;
                 }
-                None => return Ok(()),
+                request = team_queue.recv() => request,
+                _ = sleep(Duration::from_secs(12)), if remote.is_some() => {
+                    remote = None;
+                    continue;
+                }
             };
-            let identity = pi_session
-                .borrow()
-                .as_ref()
-                .filter(|active| active.id == session)
-                .cloned();
+            let Some(PiTeamRequest {
+                id,
+                revision,
+                transcript,
+            }) = request
+            else {
+                return Ok(());
+            };
+            let identity = {
+                let view = view_changes.borrow();
+                view.session
+                    .as_ref()
+                    .filter(|_| view.revision == revision)
+                    .cloned()
+            };
             let result = match identity {
                 Some(identity) => {
-                    let result = if let Some(PiTranscriptRequest { member, offset }) = transcript {
-                        pi::team_transcript(
-                            catalog,
-                            &mut remote,
-                            &mut stored,
-                            &identity,
-                            &member,
-                            offset,
-                        )
-                        .await
-                    } else {
-                        pi::team_snapshot(catalog, &mut remote, &identity).await
+                    let read = async {
+                        if let Some(PiTranscriptRequest { member, offset }) = transcript {
+                            pi::team_transcript(
+                                catalog,
+                                &mut remote,
+                                &mut stored,
+                                &identity,
+                                &member,
+                                offset,
+                            )
+                            .await
+                        } else {
+                            pi::team_snapshot(catalog, &mut remote, &identity).await
+                        }
                     };
-                    if pi_session.borrow().as_ref() == Some(&identity) {
-                        result
-                    } else {
-                        stored = None;
-                        Err("Pi 会话已切换。".into())
+                    tokio::select! {
+                        biased;
+                        _ = view_changes.changed() => {
+                            remote = None;
+                            stored = None;
+                            Ok(Value::Null)
+                        }
+                        result = read => result,
                     }
                 }
-                None => Err("Pi 会话已切换。".into()),
+                None => Ok(Value::Null),
             };
             event(output, "agent", generation, pi_response(&id, result))?;
         }
@@ -816,12 +828,14 @@ async fn stdio_process(
                     if let Some(file) = file {
                         let _ = pi_session_file.set(file.to_owned());
                     }
-                    pi_session.replace(value["data"]["sessionId"].as_str().map(|id| {
-                        pi::SessionIdentity {
-                            id: id.to_owned(),
-                            file: file.map(str::to_owned),
-                        }
-                    }));
+                    pi_view.send_if_modified(|view| {
+                        view.replace_session(value["data"]["sessionId"].as_str().map(|id| {
+                            pi::SessionIdentity {
+                                id: id.to_owned(),
+                                file: file.map(str::to_owned),
+                            }
+                        }))
+                    });
                 } else if pi_catalog.is_some()
                     && value["type"] == "response"
                     && matches!(
@@ -831,7 +845,7 @@ async fn stdio_process(
                     && value["success"] == true
                     && value["data"]["cancelled"] != true
                 {
-                    pi_session.replace(None);
+                    pi_view.send_if_modified(|view| view.replace_session(None));
                 }
                 event(output, "agent", generation, value)?;
             }
@@ -857,7 +871,17 @@ async fn stdio_process(
                     .as_str()
                     .filter(|session| session.len() <= 128)
                 {
-                    let _ = team_requests.try_send(PiTeamRequest::Release(session.to_owned()));
+                    pi_view.send_if_modified(|view| {
+                        if view
+                            .session
+                            .as_ref()
+                            .is_some_and(|active| active.id == session)
+                        {
+                            view.revision = view.revision.wrapping_add(1);
+                            return true;
+                        }
+                        false
+                    });
                 }
                 continue;
             }
@@ -895,6 +919,7 @@ async fn stdio_process(
                 } else {
                     None
                 };
+                let view = pi_view.borrow();
                 let result = match packet["sessionId"].as_str() {
                     Some(session)
                         if !session.is_empty()
@@ -902,15 +927,15 @@ async fn stdio_process(
                             && session
                                 .bytes()
                                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                            && pi_session
-                                .borrow()
+                            && view
+                                .session
                                 .as_ref()
                                 .is_some_and(|active| active.id == session) =>
                     {
                         if team_requests
-                            .try_send(PiTeamRequest::Read {
+                            .try_send(PiTeamRequest {
                                 id: id.clone(),
-                                session: session.to_owned(),
+                                revision: view.revision,
                                 transcript,
                             })
                             .is_ok()

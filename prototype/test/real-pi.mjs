@@ -12,6 +12,7 @@ const [binary, piPath, screenshot, ssh] = process.argv.slice(2);
 const profile = await mkdtemp(join(tmpdir(), 'span-pi-preview-'));
 const state = process.env.SPAN_TEST_PI_STATE ?? join(profile, "Pi's state");
 const nativeTeams = process.env.SPAN_TEST_PI_TEAMS;
+const teamReadGate = process.env.SPAN_TEST_PI_READ_GATE;
 const teamHome = ssh ? '/home/span-preview-ci' : join(profile, 'Team state home');
 const teamSignal = join(state, 'complete-team-prerequisite');
 const teamExtension = join(state, 'extensions', 'span-team-fixture.ts');
@@ -45,13 +46,13 @@ const nativeCalls = [
   }, result: 'Spawned teammate' },
 ];
 
-async function remoteTeamReaders() {
+async function remoteTeamReaders(kind = 'bash') {
   const pids = (await readdir('/proc')).filter(name => /^\d+$/.test(name));
   const readers = await Promise.all(pids.map(async pid => {
     const comm = await readFile(`/proc/${pid}/comm`, 'utf8').catch(() => '');
-    if (comm.trim() !== 'bash') return;
+    if (comm.trim() !== kind) return;
     const command = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
-    if (command.split('\0')[3] === 'span-pi-teams') return pid;
+    if (kind === 'bash' ? command.split('\0')[3] === 'span-pi-teams' : command.includes(' span-pi-teams ')) return pid;
   }));
   return readers.filter(Boolean);
 }
@@ -500,8 +501,33 @@ export default function (pi) {
     const roster = await openTeam(resumed.page);
     await roster.getByText('已完成', { exact: true }).waitFor();
     const member = roster.getByRole('button', { name: '查看 reviewer 的会话记录', exact: true });
-    await member.press('Enter');
     const trace = resumed.page.getByTestId('subagent-transcript');
+    if (teamReadGate) {
+      const reading = teamReadGate + '.reading';
+      await writeFile(teamReadGate, '');
+      try {
+        await member.press('Enter');
+        const deadline = Date.now() + 5000;
+        while (!(await readFile(reading).catch(() => null)) && Date.now() < deadline) await delay(50);
+        await readFile(reading);
+        const blockedReaders = await remoteTeamReaders('ssh');
+        assert.ok(blockedReaders.length, 'The blocked read must have an active SSH client');
+        await resumed.page.getByText('正在读取子代理记录…', { exact: true }).waitFor();
+        await resumed.page.keyboard.press('Escape');
+        await member.waitFor();
+        await member.press('Enter');
+        await trace.getByText('发布交接已核对。', { exact: true }).waitFor({ timeout: 5000 });
+        await readFile(reading);
+        const currentReaders = await remoteTeamReaders('ssh');
+        assert.ok(blockedReaders.every(pid => !currentReaders.includes(pid)), 'Closing the trace must end its blocked SSH client');
+        console.log('Verified closing a Pi child transcript cancels a blocked SSH read and reopening loads a fresh page.');
+      } finally {
+        await rm(teamReadGate, { force: true });
+        await rm(reading, { force: true });
+      }
+    } else {
+      await member.press('Enter');
+    }
     await trace.getByText('请核对发布交接。', { exact: true }).waitFor();
     await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
     assert.equal(await trace.getAttribute('data-items'), '40');

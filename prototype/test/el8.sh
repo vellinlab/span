@@ -51,6 +51,9 @@ CONFIG
 cat > "$fixture/remote-shell" <<'SCRIPT'
 #!/bin/bash
 if [[ -n ${SSH_ORIGINAL_COMMAND:-} ]]; then
+    if [[ $SSH_ORIGINAL_COMMAND == *" span-pi-teams "* && -d "$HOME/.span-pi-test-tmp/bin" ]]; then
+        export PATH="$HOME/.span-pi-test-tmp/bin:$PATH"
+    fi
     exec /bin/bash -c "$SSH_ORIGINAL_COMMAND"
 fi
 printf 'span_ssh_connected\n'

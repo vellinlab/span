@@ -54,6 +54,10 @@ export function watchPiTeamTranscript(read, listener) {
     try {
       const page = await read(cursor);
       if (!subscribed) return;
+      if (page === null) {
+        publish({ loading: false });
+        return;
+      }
       const turns = piBranchTurns(page.entries, entry => entry.id);
       publish({ cursor: page.cursor, rows: mergeHistory(view.rows, historyRows(turns)), loading: false });
     } catch (error) {

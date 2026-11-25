@@ -340,7 +340,9 @@ export function createPi({ generation, cwd, location, onEvent }) {
         async teams(session) {
           requireSession(session);
           const scope = current;
-          const teams = piTeamSnapshot(await request('span_pi_teams', { sessionId: session.id }), Boolean(state?.sessionFile));
+          const records = await request('span_pi_teams', { sessionId: session.id });
+          if (records === null) return;
+          const teams = piTeamSnapshot(records, Boolean(state?.sessionFile));
           if (scope === current) teamMembers = new Set(teams.flatMap(team =>
             team.members.filter(member => member.attachedTranscript).map(member => member.id)));
           return teams;

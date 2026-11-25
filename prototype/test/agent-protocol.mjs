@@ -977,6 +977,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   const respond = (packet, data) => emit({ id: packet.id, type: 'response', success: true, data });
   let branch = false;
   let rejectPrompt = false;
+  let cancelTeamRead = false;
   let switching;
   globalThis.window = { span: {
     onEvent(callback) { receive = callback; return () => { receive = null; }; },
@@ -1025,6 +1026,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
           contextUsage: { tokens: 10, contextWindow: 100 } });
       } else if (packet.type === 'span_pi_teams') {
         assert.equal(packet.sessionId, 'saved');
+        if (cancelTeamRead) return respond(packet, null);
         respond(packet, [{ config: { name: 'shipping', state: 'active', members: [
           { agentId: '32a5c9ed', name: 'Reviewer', status: 'running', isActive: false },
         ] }, board: { schemaVersion: 1, tasks: [
@@ -1035,6 +1037,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
       } else if (packet.type === 'span_pi_team_transcript') {
         assert.equal(packet.sessionId, 'saved');
         assert.equal(packet.memberId, '32a5c9ed');
+        if (cancelTeamRead) return respond(packet, null);
         const older = packet.cursor === '12345';
         const records = [];
         for (let index = older ? 0 : 4; index < (older ? 4 : 24); index++) {
@@ -1102,6 +1105,14 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.equal(trace.at(-1).rows.at(-1).key, lastKey);
   assert.equal(trace.at(-1).cursor, null);
   closeTrace();
+  cancelTeamRead = true;
+  assert.equal(await agent.delegation.teams(ref), undefined);
+  const closeCancelledTrace = agent.delegation.watchTranscript(ref, '32a5c9ed', view => trace.push(view));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(trace.at(-1).error, undefined);
+  assert.equal(trace.at(-1).loading, false);
+  assert.deepEqual(trace.at(-1).rows, []);
+  closeCancelledTrace();
   await agent.delegation.releaseTeamView(ref);
   assert.deepEqual(sent.at(-1), { type: 'span_pi_release_team_view', sessionId: 'saved' });
   const older = await agent.sessions.history(ref, { cursor: opened.history.cursor, limit: 1 });

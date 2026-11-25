@@ -202,7 +202,8 @@ export interface AgentAdapter {
     watchTranscript?(ref: SessionRef, memberId: string, listener: (view: AgentTranscript) => void): () => void;
     /** The member's conversation can also be opened for direct interaction. */
     resumeMemberSession?: boolean;
-    teams?(ref: SessionRef): Promise<Team[]>;
+    /** A cancelled observation may return no snapshot. */
+    teams?(ref: SessionRef): Promise<Team[] | undefined>;
     /** Optional refresh cadence while a visible roster is observing an active team or turn. */
     teamRefreshMs?: number;
     /** End a roster observation when the view closes or is hidden. */
