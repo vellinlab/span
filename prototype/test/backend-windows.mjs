@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const binary = resolve(process.argv[2]);
@@ -34,16 +34,27 @@ async function run(executable, args, environment) {
   assert.equal(code, 0, `${executable} ${args.join(' ')} exited with ${signal || code}`);
 }
 
+async function directoryEntries(path) {
+  return readdir(path).catch(error => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+}
+
+async function hasEntry(path) {
+  return (await directoryEntries(dirname(path))).includes(basename(path));
+}
+
 async function ready(path, process) {
   for (let attempt = 0; attempt < 150; attempt++) {
     if (!process.child.pid || process.child.exitCode !== null || process.child.signalCode !== null) {
       const { error } = await process.finished;
       throw error ?? new Error(`Process exited before creating ${path}`);
     }
-    if (existsSync(path)) return;
+    if (await hasEntry(path)) return;
     await delay(100);
   }
-  throw new Error(`Timed out waiting for ${path}`);
+  throw new Error(`Timed out waiting for ${path}; directory entries: ${JSON.stringify(await directoryEntries(dirname(path)))}`);
 }
 
 async function stop(process) {
@@ -92,7 +103,7 @@ stream_max_retries = 0
   assert.equal(shared.child.exitCode, null, 'Closing Span must keep the shared backend alive.');
   await stop(shared);
   shared = undefined;
-  if (!existsSync(socket)) await writeFile(socket, '');
+  if (!await hasEntry(socket)) await writeFile(socket, '');
   await check('stdio');
   console.log('Verified Windows standalone discovery, shared Codex reuse, and fallback from an unavailable endpoint.');
 } finally {

@@ -184,17 +184,19 @@ fn codex_home() -> Option<PathBuf> {
 
 fn control_socket() -> Option<PathBuf> {
     let path = codex_home()?.join("app-server-control/app-server-control.sock");
-    let metadata = path.metadata().ok()?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::FileTypeExt;
-        if !metadata.file_type().is_socket() {
+        if !path.metadata().ok()?.file_type().is_socket() {
             return None;
         }
     }
-    // Windows AF_UNIX endpoints expose a filesystem entry through the Win32 APIs.
-    if metadata.is_dir() {
-        return None;
+    #[cfg(windows)]
+    {
+        // Inspect the AF_UNIX reparse entry without following it as a file.
+        if path.symlink_metadata().ok()?.is_dir() {
+            return None;
+        }
     }
     Some(path)
 }
