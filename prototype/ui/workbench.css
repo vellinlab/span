@@ -1132,7 +1132,7 @@ p { margin-block: 0 12px; }
   padding-top: 7px;
 }
 .extensions { margin: 0; padding: 0; list-style: none; }
-.extensions li {
+.extensions > li {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1143,6 +1143,23 @@ p { margin-block: 0 12px; }
 }
 .extensions small { color: var(--muted); }
 .extensions p { width: 100%; margin: 0; overflow-wrap: anywhere; }
+.extensions > li.extension-server { display: block; padding: 0; }
+.extension-heading { display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: baseline; padding: 6px 2px; }
+summary.extension-heading { cursor: pointer; }
+.extension-heading::-webkit-details-marker { display: none; }
+.extension-heading > svg { align-self: center; color: var(--muted); transform: rotate(-90deg); }
+.extension-server details[open] .extension-heading > svg { transform: none; }
+.extension-heading strong { flex: 1 0 100px; min-width: 0; overflow-wrap: anywhere; }
+.extension-heading small { margin-left: auto; }
+.extension-server > div { padding-left: 23px; }
+.extension-details { display: grid; gap: 5px; padding: 1px 2px 8px 23px; }
+.extension-tools { margin: 0; padding: 0; list-style: none; overflow-wrap: anywhere; }
+.extension-tools li + li { margin-top: 4px; }
+.extension-tools code { font-family: var(--mono); font-size: 11px; }
+.extension-details button { justify-self: start; }
+.extension-note { margin: 8px 0 2px; }
+.extension-error { color: var(--failure); overflow-wrap: anywhere; }
+.extension-more { margin-top: 5px; }
 .preview, .terminal-panel { display: flex; min-height: 0; flex-direction: column; background: #151617; }
 .preview header, .terminal-panel header {
   display: flex;

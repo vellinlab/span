@@ -9,6 +9,10 @@ const permissions = [
 ];
 const modes = [{ id: 'default', label: '执行' }, { id: 'plan', label: '规划' }];
 const pageRequest = limit => ({ limit, sortDirection: 'desc', itemsView: 'full' });
+const mcpAuthentication = new Map([['unknown', 'unknown'], ['unsupported', 'unsupported'],
+  ['notLoggedIn', 'required'], ['bearerToken', 'token'], ['oAuth', 'oauth']]);
+const mcpConnection = new Map([['notStarted', 'idle'], ['starting', 'connecting'], ['connected', 'ready'],
+  ['authenticationRequired', 'auth-required'], ['failed', 'failed'], ['cancelled', 'cancelled'], ['disabled', 'disabled']]);
 /** @returns {import('./agent-protocol').Goal | null} */
 const normalizeGoal = goal => goal ? {
   objective: goal.objective, status: {
@@ -306,29 +310,41 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   /** @type {NonNullable<import('./agent-protocol').AgentAdapter['extensions']>} */
   const extensions = {
     kinds: ['mcp', 'skill', 'plugin', 'connector'],
-    async list(kind, thread) {
+    async list(kind, thread, { cursor } = {}) {
       if (kind === 'mcp') {
-        const { data } = await request('mcpServerStatus/list', { threadId: thread.id, limit: 50, detail: 'toolsAndAuthOnly' });
-        return (data ?? []).map(item => ({ kind, id: item.name, label: item.name, status: item.authStatus }));
+        const { data, nextCursor } = await request('mcpServerStatus/list', {
+          threadId: thread.id, cursor, limit: 20, detail: 'toolsAndAuthOnly',
+        });
+        const items = (data ?? []).map(item => ({
+          kind, id: item.name, label: item.name,
+          authentication: mcpAuthentication.get(item.authStatus), connection: mcpConnection.get(item.runtimeStatus),
+          tools: !item.toolsError && item.tools && typeof item.tools === 'object' && !Array.isArray(item.tools)
+            ? Object.keys(item.tools).sort() : undefined,
+          toolError: item.toolsError || undefined,
+        }));
+        return { items, cursor: nextCursor ?? null };
       }
       if (kind === 'skill') {
         const { data } = await request('skills/list', {});
-        return (data ?? []).flatMap(group => (group.skills ?? []).map(item => ({
+        const items = (data ?? []).flatMap(group => (group.skills ?? []).map(item => ({
           kind, id: item.path, label: item.name, description: item.shortDescription ?? item.description,
           enabled: item.enabled, source: group.cwd,
         })));
+        return { items, cursor: null };
       }
       if (kind === 'plugin') {
         const { marketplaces } = await request('plugin/list', {});
-        return (marketplaces ?? []).flatMap(group => (group.plugins ?? []).map(item => ({
+        const items = (marketplaces ?? []).flatMap(group => (group.plugins ?? []).map(item => ({
           kind, id: item.id, label: item.name, enabled: item.enabled, source: group.name,
         })));
+        return { items, cursor: null };
       }
       if (kind === 'connector') {
-        const { data } = await request('app/list', { threadId: thread.id, limit: 50 });
-        return (data ?? []).map(item => ({ kind, id: item.id, label: item.name, description: item.description, enabled: item.isEnabled }));
+        const { data, nextCursor } = await request('app/list', { threadId: thread.id, cursor, limit: 50 });
+        const items = (data ?? []).map(item => ({ kind, id: item.id, label: item.name, description: item.description, enabled: item.isEnabled }));
+        return { items, cursor: nextCursor ?? null };
       }
-      return [];
+      return { items: [], cursor: null };
     },
   };
 

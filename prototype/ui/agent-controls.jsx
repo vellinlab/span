@@ -43,6 +43,7 @@ export function commonAgentCommands(api, models, options) {
       { mcp: '/mcp', skill: '/skills', plugin: '/plugins', connector: '/apps', tool: '/tools' }[kind],
       `查看${extensionLabels[kind]}`,
     ]),
+    ...(api.extensions?.kinds.includes('mcp') ? [['/mcp verbose', '展开 MCP 工具名称']] : []),
   ];
 }
 
@@ -421,13 +422,95 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       {agentsPanel && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'diff' && <DiffPanel key={panel.id} panel={panel} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
-      {panel.kind === 'extensions' && (panel.items?.length
-        ? <ul className="extensions">{panel.items.map(item => <li key={item.id}>
-          <strong>{item.label}</strong><small>{item.status ?? (item.enabled == null ? item.source : item.enabled ? '已启用' : '已停用')}</small>
-          {item.description && <p>{item.description}</p>}
-        </li>)}</ul> : <p>没有可显示的{extensionLabels[panel.extension]}。</p>)}
+      {panel.kind === 'extensions' && <ExtensionList key={panel.id} panel={panel} />}
     </div>}
   </section>;
+}
+
+const mcpAuthentication = {
+  unknown: '登录状态未知', unsupported: '不支持登录', required: '未登录', token: 'Token 鉴权', oauth: 'OAuth 鉴权',
+};
+const mcpConnections = {
+  idle: '尚未启动', connecting: '连接中', ready: '已连接', 'auth-required': '需要登录',
+  failed: '连接失败', cancelled: '已取消', disabled: '已停用',
+};
+const mcpToolPageSize = 40;
+
+function McpServerRow({ item, verbose }) {
+  const [expanded, setExpanded] = useState(verbose);
+  const [toolLimit, setToolLimit] = useState(mcpToolPageSize);
+  const authentication = mcpAuthentication[item.authentication];
+  const connection = mcpConnections[item.connection];
+  const catalog = item.toolError ? '工具读取失败' : item.tools ? `${number.format(item.tools.length)} 个工具` : '工具列表不可用';
+  const hasDetails = Boolean(item.tools?.length || item.toolError || (connection && authentication));
+  const summary = <>
+    <strong>{item.label}</strong><small>{[connection ?? authentication, catalog].filter(Boolean).join(' · ')}</small>
+  </>;
+  return <li className="extension-server">
+    {hasDetails ? <details open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
+      <summary className="extension-heading"><ChevronDown size={13} aria-hidden="true" />{summary}</summary>
+      {expanded && <div className="extension-details">
+        {connection && authentication && <small>{authentication}</small>}
+        {item.toolError && <p className="extension-error">{item.toolError}</p>}
+        {item.tools?.length > 0 && <ul className="extension-tools" aria-label={`${item.label} 的工具`}>
+          {item.tools.slice(0, toolLimit).map(name => <li key={name}><code>{name}</code></li>)}
+        </ul>}
+        {item.tools?.length > toolLimit && <button type="button" className="panel-link" onClick={event => {
+          if (toolLimit + mcpToolPageSize >= item.tools.length) {
+            event.currentTarget.closest('details')?.querySelector('summary')?.focus({ preventScroll: true });
+          }
+          setToolLimit(limit => limit + mcpToolPageSize);
+        }}>显示更多工具</button>}
+      </div>}
+    </details> : <div className="extension-heading">{summary}</div>}
+  </li>;
+}
+
+function ExtensionList({ panel }) {
+  const [listing, setListing] = useState({ items: [], cursor: null, loading: true, error: '' });
+  const pending = useRef(null);
+  const loadPage = useCallback(async (cursor = null) => {
+    if (pending.current) return;
+    const request = {};
+    pending.current = request;
+    setListing(previous => ({ ...previous, loading: true }));
+    try {
+      const page = await panel.load(cursor ?? undefined);
+      if (pending.current !== request || !page) return;
+      setListing(previous => ({
+        items: cursor === null ? page.items : [...new Map([...previous.items, ...page.items].map(item => [item.id, item])).values()],
+        cursor: cursor === page.cursor ? null : page.cursor, loading: false, error: '',
+      }));
+    } catch (error) {
+      if (pending.current === request) setListing(previous => ({ ...previous, loading: false, error: error.message }));
+    } finally {
+      if (pending.current === request) pending.current = null;
+    }
+  }, [panel.load]);
+  useEffect(() => {
+    loadPage();
+    return () => { pending.current = null; };
+  }, [loadPage]);
+  const pageButton = useCallback(button => {
+    if (!button) return;
+    return () => {
+      if (button === document.activeElement) button.closest('.agent-panel-content')?.focus({ preventScroll: true });
+    };
+  }, []);
+  return <>
+    {listing.items.length > 0 && <ul className="extensions">{listing.items.map(item => item.kind === 'mcp'
+      ? <McpServerRow key={item.id} item={item} verbose={panel.verbose} /> : <li key={item.id}>
+        <strong>{item.label}</strong><small>{item.status ?? (item.enabled == null ? item.source : item.enabled ? '已启用' : '已停用')}</small>
+        {item.description && <p>{item.description}</p>}
+      </li>)}</ul>}
+    {listing.loading && <p className="extension-note" role="status">正在读取…</p>}
+    {listing.error && !listing.loading && <p className="extension-note extension-error" role="alert">{listing.error}</p>}
+    {!listing.items.length && !listing.loading && !listing.error && <p className="extension-note">没有可显示的{extensionLabels[panel.extension]}。</p>}
+    {(listing.cursor !== null || listing.error) && <button ref={pageButton} type="button" className="panel-link extension-more"
+      aria-disabled={listing.loading || undefined} onClick={() => loadPage(listing.cursor)}>
+      {listing.error ? '重试' : '加载更多'}
+    </button>}
+  </>;
 }
 
 export function AgentMenu({ work, onSelect }) {

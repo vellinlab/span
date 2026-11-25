@@ -96,9 +96,12 @@ export type Interaction = {
 );
 export type InteractionReply = { choice: string } | { values: Record<string, string> } | { cancelled: true };
 export type ExtensionKind = 'tool' | 'mcp' | 'skill' | 'plugin' | 'connector';
-export type Extension = Choice & {
-  kind: ExtensionKind; status?: string; enabled?: boolean; source?: string;
-};
+export type Extension = Choice & { status?: string; enabled?: boolean; source?: string } & (
+  | { kind: 'mcp'; tools?: string[]; toolError?: string;
+      authentication?: 'unknown' | 'unsupported' | 'required' | 'token' | 'oauth';
+      connection?: 'idle' | 'connecting' | 'ready' | 'auth-required' | 'failed' | 'cancelled' | 'disabled' }
+  | { kind: Exclude<ExtensionKind, 'mcp'> }
+);
 export type ExtensionAction = 'enable' | 'disable' | 'install' | 'uninstall' | 'authorize' | 'refresh';
 export type WorkspaceDiff = { patch: string; untracked: string[]; mayBeTruncated: boolean };
 export type Event =
@@ -180,7 +183,7 @@ export interface AgentAdapter {
   };
   extensions?: {
     kinds: ExtensionKind[];
-    list(kind: ExtensionKind, ref: SessionRef): Promise<Extension[]>;
+    list(kind: ExtensionKind, ref: SessionRef, options?: { cursor?: string }): Promise<Page<Extension>>;
     act?(kind: ExtensionKind, ref: SessionRef, id: string, action: ExtensionAction): Promise<void>;
   };
   repository?: { diff(cwd: string): Promise<WorkspaceDiff> };

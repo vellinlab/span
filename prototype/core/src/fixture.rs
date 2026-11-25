@@ -1263,6 +1263,29 @@ pub fn run() -> Result<()> {
                 }
                 rates
             }
+            "mcpServerStatus/list" => {
+                if params["cursor"] == "mcp-next" {
+                    if let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                        && fs::remove_file(gate.join("mcp-next-error")).is_ok()
+                    {
+                        send(
+                            &output,
+                            json!({"id":id,"error":{"code":-32603,"message":"模拟读取下一页失败"}}),
+                        )?;
+                        continue;
+                    }
+                    json!({"data":[{"name":"归档服务","authStatus":"unsupported","tools":{}}],"nextCursor":null})
+                } else {
+                    let tools = (1..=42)
+                        .map(|index| (format!("document_tool_{index:02}"), json!({})))
+                        .collect::<serde_json::Map<_, _>>();
+                    json!({"data":[
+                        {"name":"团队文档与历史记录检索服务","authStatus":"oAuth","runtimeStatus":"connected","tools":tools},
+                        {"name":"缺陷跟踪服务","authStatus":"notLoggedIn","runtimeStatus":"authenticationRequired",
+                            "tools":{},"toolsError":"登录已过期，请重新授权后读取工具。"}
+                    ],"nextCursor":"mcp-next"})
+                }
+            }
             "app/list" | "skills/list" => json!({"data":[],"nextCursor":null}),
             "command/exec" if params["cwd"] == json!(cwd) => {
                 let command = params["command"].as_array().expect("command arguments");

@@ -349,6 +349,28 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     await agent.goal.update(ref, { kind: 'resume' });
     assert.deepEqual(requests.at(-1)[1].packet.params, { threadId: ref.id, origin: 'user', status: 'active' });
     assert.equal((await agent.usage()).limits[0].used, 22);
+    responses['mcpServerStatus/list'] = params => {
+      assert.equal(params.threadId, ref.id);
+      assert.equal(params.limit, 20);
+      assert.equal(params.detail, 'toolsAndAuthOnly');
+      if (params.cursor === 'tools-page') return { data: [{ name: 'empty', tools: {} }], nextCursor: null };
+      assert.equal(params.cursor, undefined);
+      return { data: [
+        { name: 'docs', authStatus: 'oAuth', runtimeStatus: 'connected', tools: { write: {}, read: {} } },
+        { name: 'issues', authStatus: 'notLoggedIn', tools: {}, toolsError: 'Expired login' },
+      ], nextCursor: 'tools-page' };
+    };
+    const extensions = await agent.extensions.list('mcp', ref);
+    assert.equal(extensions.cursor, 'tools-page');
+    assert.deepEqual(extensions.items.map(({ id, authentication, connection, tools, toolError }) =>
+      [id, authentication, connection, tools, toolError]), [
+      ['docs', 'oauth', 'ready', ['read', 'write'], undefined],
+      ['issues', 'required', undefined, undefined, 'Expired login'],
+    ]);
+    const emptyTools = await agent.extensions.list('mcp', ref, { cursor: extensions.cursor });
+    assert.equal(emptyTools.cursor, null);
+    assert.deepEqual(emptyTools.items[0].tools, []);
+    assert.deepEqual(await agent.extensions.list('skill', ref), { items: [], cursor: null });
     const diffReplies = [
       { exitCode: 128, stdout: '', stderr: 'no commits yet' },
       { exitCode: 1, stdout: '', stderr: '' },

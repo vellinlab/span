@@ -573,11 +573,11 @@ function App() {
           ? input.current : null;
         const kind = extensionCommands[command];
         if (kind && api.extensions?.kinds.includes(kind)) {
-          const scope = ++panelScope.current;
-          const items = await work.withSession((client, ref) => client.extensions.list(kind, ref));
-          if (items && scope === panelScope.current) {
-            showPanel('extensions', resultTrigger(), { extension: kind, title: extensionTitles[kind], items });
-          }
+          const verbose = kind === 'mcp' && args === 'verbose';
+          if (args && !verbose) throw new Error(kind === 'mcp' ? '用法 /mcp 或 /mcp verbose' : `用法 ${command}`);
+          if (!session) throw new Error('请先打开一个会话。');
+          showPanel('extensions', resultTrigger(), { extension: kind, title: extensionTitles[kind], verbose,
+            load: cursor => work.withSession((client, ref) => client.extensions.list(kind, ref, { cursor })) });
           return true;
         }
         if (api.execute && api.commands?.some(item => '/' + item.id === command)) {
