@@ -58,6 +58,9 @@ function rememberImage(file) {
 
 app.setName('Span Workbench Preview');
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-lcd-text');
+if (process.platform === 'linux' && !app.commandLine.hasSwitch('enable-smooth-scrolling')) {
+  app.commandLine.appendSwitch('disable-smooth-scrolling');
+}
 if (process.env.SPAN_PREVIEW_PROFILE) {
   app.setPath('userData', path.resolve(process.env.SPAN_PREVIEW_PROFILE));
 }

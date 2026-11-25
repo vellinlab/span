@@ -293,7 +293,7 @@ def trace_scroll(app, browser, chromium_roles, area):
             "captures": sum(entry["captures"] for entry in samples), "samples": samples, "bursts": bursts}
 
 
-def benchmark(name, binary, scroll_trace=False, animate_scroll=True):
+def benchmark(name, binary, scroll_trace=False, animate_scroll=False):
     electron = scroll_trace or name == "prototype"
     with tempfile.TemporaryDirectory(prefix="span-desktop-") as tmp:
         workspace = Path(tmp)
@@ -306,8 +306,8 @@ def benchmark(name, binary, scroll_trace=False, animate_scroll=True):
                    PATH=f"{tmp}:{os.environ['PATH']}")
         args = ["--demo", "--no-sandbox", "--disable-gpu", "--terminal-renderer=dom", "--remote-debugging-port=0",
                 f"--user-data-dir={workspace / 'profile'}"] if electron else []
-        if not animate_scroll:
-            args.append("--disable-smooth-scrolling")
+        if animate_scroll:
+            args.append("--enable-smooth-scrolling")
         command = ('touch "$HOME/span-terminal-ready"; n=0; while :; do '
                    'printf \'span-bench-%04d\\n\' "$n"; n=$((n+1)); sleep .055; done')
         with open(workspace / "app.log", "w+") as log, subprocess.Popen(
@@ -528,17 +528,20 @@ def catalog_benchmark(name, binary):
 report = {"runner": "AlmaLinux 8 / Xvfb 1440×960 / Openbox / one constrained CPU / software rendering",
           "runs": []}
 if WIDGET_SOCKET == "--scroll-trace":
-    report["comparison"] = "Same Electron binary, default or --disable-smooth-scrolling"
+    report["comparison"] = "Same Electron binary, EL8 default or --enable-smooth-scrolling"
     report["wheel_burst_interval_ms"] = WHEEL_BURST_INTERVAL_MS
     os.sched_setaffinity(0, {max(os.sched_getaffinity(0))})
     for animate in (True, False, False, True):
-        name = "default" if animate else "animation-disabled"
+        name = "animation-enabled" if animate else "default"
         run = benchmark(name, PREVIEW, scroll_trace=True, animate_scroll=animate)
         report["runs"].append(run)
         Path(OUTPUT).write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps({key: value for key, value in run.items() if key != "samples"}), flush=True)
     if any(run["matched"] < 30 for run in report["runs"]):
         raise SystemExit("Too few scrolls reached the calibrated offset and pixels.")
+    if any(not (burst["correct_offset"] and burst["correct_pixels"])
+           for run in report["runs"] for burst in run["bursts"]):
+        raise SystemExit("A wheel burst settled on a different offset or desktop frame.")
     paths = [[entry["expected_scroll_top"] - run["initial_scroll_top"] for entry in run["samples"]]
              for run in report["runs"]]
     if any(abs(offset - reference) > 1 for path in paths[1:] for offset, reference in zip(path, paths[0])):
