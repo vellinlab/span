@@ -396,7 +396,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
   const goal = panel.kind === 'goal' ? work.goal : undefined;
   const usage = goal?.tokens == null ? '' : [goal.tokens, goal.budget].filter(value => value != null)
     .map(value => number.format(value)).join(' / ') + ' tokens';
-  return <section className="agent-panel popup-surface" id={id} data-kind={panel.kind}
+  return <section className="agent-panel popup-surface" id={id} data-kind={panel.kind} data-archived={reasoningArchived || undefined}
     aria-label={title} onKeyDown={event => {
       if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
       event.preventDefault();

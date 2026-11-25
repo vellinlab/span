@@ -212,20 +212,28 @@ async function checkPreviewSwitch(binary) {
     assert.ok(await file.evaluate(element => element === document.activeElement));
     await writeFile(join(profile, 'follow-detail'), '');
     await strip.getByText('步骤 073', { exact: false }).waitFor();
-    const selection = await detail.evaluate(element => {
+    await detail.evaluate(element => {
       element.focus({ preventScroll: true });
       element.scrollTop = 180;
       const top = element.getBoundingClientRect().top;
       const line = [...element.querySelectorAll('p strong')].find(node => node.getBoundingClientRect().top >= top);
       const text = line.firstChild;
       window.getSelection().setBaseAndExtent(text, 0, text, text.length);
-      return { scrollTop: element.scrollTop, text: window.getSelection().toString() };
     });
+    const readSelection = () => detail.evaluate(element => {
+      const selection = window.getSelection();
+      const top = selection.rangeCount ? selection.getRangeAt(0).getBoundingClientRect().top : null;
+      return { scrollTop: element.scrollTop, text: selection.toString(),
+        offset: top === null ? null : top - element.getBoundingClientRect().top };
+    });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const selection = await readSelection();
+    assert.match(selection.text, /^复核记录 \d+$/);
     await writeFile(join(profile, 'finish'), '');
     await strip.waitFor({ state: 'detached' });
     const panel = page.getByRole('region', { name: '推理摘要' });
     await panel.getByText('已归档', { exact: true }).waitFor();
-    assert.deepEqual(await detail.evaluate(element => ({ scrollTop: element.scrollTop, text: window.getSelection().toString() })), selection);
+    assert.deepEqual(await readSelection(), selection);
     assert.ok(await detail.evaluate(element => element === document.activeElement));
     assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
     if (screenshot) await page.screenshot({ path: `${screenshot}-completed.png` });
