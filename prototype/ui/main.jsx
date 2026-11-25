@@ -890,7 +890,8 @@ function App() {
             </div>
           </div>
           {terminal && config && <Suspense fallback={<div className="terminal-panel">正在打开终端…</div>}>
-            <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer} onClose={closeTerminal} />
+            <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer}
+              covered={readingOverlay} onClose={closeTerminal} />
           </Suspense>}
         </main>
         {preview && <aside className="preview" id="file-preview" aria-label="文件预览" hidden={preview.parked} ref={previewRegion}

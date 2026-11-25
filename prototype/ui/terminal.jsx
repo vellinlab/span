@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { SquareTerminal, X } from 'lucide-react';
@@ -10,9 +10,15 @@ const OUTPUT_GAP_MS = 96;
 const OUTPUT_BATCH_MS = 64;
 const INPUT_PRIORITY_MS = 140;
 
-export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, onClose }) {
+export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, covered, onClose }) {
   const element = useRef(null);
+  const hidden = useRef(covered);
+  const restoreSelection = useRef(null);
   const [error, setError] = useState('');
+  useLayoutEffect(() => {
+    hidden.current = covered;
+    if (!covered) restoreSelection.current?.();
+  }, [covered]);
   useEffect(() => {
     setError('');
     const host = element.current;
@@ -35,6 +41,21 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     terminal.loadAddon(fit);
     terminal.open(host);
     fit.fit();
+    // xterm 6 refreshes the selection on buffer scroll even when its intersection observer has paused rendering.
+    const renderService = terminal._core?._renderService;
+    if (typeof renderService?.handleSelectionChanged === 'function') {
+      const drawSelection = renderService.handleSelectionChanged.bind(renderService);
+      let deferredSelection;
+      renderService.handleSelectionChanged = (...selection) => {
+        if (hidden.current) deferredSelection = selection;
+        else drawSelection(...selection);
+      };
+      restoreSelection.current = () => {
+        if (!deferredSelection) return;
+        drawSelection(...deferredSelection);
+        deferredSelection = undefined;
+      };
+    }
     let closed = false;
     host.dataset.renderer = 'dom';
     if (renderer !== 'dom') {
@@ -137,6 +158,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     observer.observe(host);
     return () => {
       closed = true;
+      restoreSelection.current = null;
       clearTimeout(outputTimer);
       queuedOutput = [];
       cancelAnimationFrame(frame);
