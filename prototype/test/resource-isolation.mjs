@@ -191,6 +191,14 @@ async function terminalPalette(page, screenshot, variant) {
 async function terminalInteraction(app, page, screenshot, variant, recordEcho) {
   const script = fileURLToPath(new URL('./terminal-echo.cjs', import.meta.url));
   await terminalLine(page, `"${process.execPath}" "${script}"`, 'span_echo_ready');
+  const ready = await page.locator('.xterm-rows > div').filter({ hasText: /^\s*span_echo_ready\s*$/ }).boundingBox();
+  assert.ok(ready, 'The terminal text must be visible before selecting it');
+  const y = ready.y + ready.height / 2;
+  const selection = page.locator('.xterm-selection > div').first();
+  await page.mouse.dblclick(ready.x + 12, y);
+  await selection.waitFor({ state: 'visible' });
+  await page.mouse.click(ready.x + 12, y);
+  await selection.waitFor({ state: 'detached' });
   console.log('The raw terminal fixture is ready. Capturing reference pixels.');
   await prepareEchoFrames(app, page);
   await observeEchoStages(page);
@@ -241,9 +249,32 @@ async function output(page) {
   const command = linux
     ? `n=1; while [ "$n" -le 120 ]; do printf 'span-resource-%03d\\n' "$n"; n=$((n+1)); sleep .045; done; printf '%s_%s\\n' resources done`
     : `powershell -NoLogo -NoProfile -Command "for ($i=1; $i -le 120; $i++) { [Console]::WriteLine(('span-resource-' + $i)); Start-Sleep -Milliseconds 45 }; [Console]::WriteLine(('resources_'+'done'))"`;
-  await terminalLine(page, command, 'resources_done');
-  assert.match(await page.locator('.xterm-rows').innerText(), /span-resource-120/);
-  return { outputLines: 120 };
+  const rows = page.locator('.xterm-rows');
+  await rows.locator(':scope > div').first().click({ position: { x: 12, y: 5 } });
+  const stop = await rows.evaluateHandle(container => {
+    let rowUpdates = 0;
+    const observe = records => {
+      for (const record of records) if (record.target.parentElement === container) rowUpdates++;
+    };
+    const observer = new MutationObserver(observe);
+    observer.observe(container, { childList: true, subtree: true });
+    return () => {
+      observe(observer.takeRecords());
+      observer.disconnect();
+      return rowUpdates;
+    };
+  });
+  let rowUpdates;
+  try {
+    await terminalLine(page, command, 'resources_done');
+    assert.match(await rows.innerText(), /span-resource-120/);
+  } finally {
+    rowUpdates = await stop.evaluate(finish => finish());
+    await stop.dispose();
+  }
+  assert.ok(rowUpdates > 0, 'The terminal row observer must see the streamed output');
+  console.log(`Terminal row updates across 120 output lines: ${rowUpdates}`);
+  return { outputLines: 120, rowUpdates };
 }
 
 async function hiddenOutput(app, page, { profile, capture, variant, saveImage, minimized }) {

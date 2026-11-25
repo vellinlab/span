@@ -64,10 +64,17 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
         };
       }
     }
-    // xterm 6 redraws selection on buffer scroll even when row rendering is paused.
+    // xterm 6 redraws all DOM rows for a selection refresh, including on buffer scroll.
     let restoreSelection;
     if (typeof renderService?.handleSelectionChanged === 'function') {
-      const drawSelection = renderService.handleSelectionChanged.bind(renderService);
+      const refreshSelection = renderService.handleSelectionChanged.bind(renderService);
+      let selectionDrawn = false;
+      const drawSelection = (start, end, columnSelectMode) => {
+        const selected = Boolean(start && end && (start[0] !== end[0] || start[1] !== end[1]));
+        if (!selected && !selectionDrawn) return;
+        refreshSelection(selected ? start : undefined, selected ? end : undefined, columnSelectMode);
+        selectionDrawn = selected;
+      };
       let deferredSelection;
       renderService.handleSelectionChanged = (...selection) => {
         if (hidden.current) deferredSelection = selection;
