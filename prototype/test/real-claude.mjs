@@ -260,6 +260,8 @@ try {
   const openChild = () => childCard().getByRole('button', { name: /^查看 .+ 的会话记录$/ });
   await childCard().locator('summary').click();
   await openChild().waitFor();
+  assert.equal(await childCard().locator('summary .card-status').count(), 0);
+  await childCard().locator('.agent-state[data-status="running"]').waitFor();
   const pendingCommand = page.getByLabel('待执行命令');
   await pendingCommand.waitFor();
   assert.equal(await pendingCommand.textContent(), childCommand);

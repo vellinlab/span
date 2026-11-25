@@ -264,6 +264,8 @@ const TranscriptRow = memo(function TranscriptRow({
         recordedStatus = true;
         statusText = `当时${statusLabels[status]}`;
       }
+      if (expanded && members.length === 1 && status === aggregate.status &&
+        Boolean(recordedStatus) === Boolean(aggregate.recorded)) statusText = '';
       if (members.length || row.text) detail = () => <>
         {row.text && <Markdown text={row.text} />}
         {members.length > 0 && <AgentMemberList members={members} currentKey={currentKey}
