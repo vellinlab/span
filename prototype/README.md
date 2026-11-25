@@ -29,6 +29,8 @@ Pi 可以使用 PATH 中的 CLI。本机也可用 `SPAN_PI_PATH` 指定可执行
 
 安装 Pi Teams 扩展后，可以在本机或 SSH 会话用 `/agents` 查看当前主会话的团队、成员、负责人和任务依赖。面板打开时刷新活动团队，从 Pi Teams 保存的状态确认任务是否受阻。团队的创建、分配和停用通过 Pi Teams 原生命令和工具执行。重开面板时会读取仍存在的任务板，团队数据保留周期由扩展管理。 [Pi Teams 工作流](https://github.com/vadimcomanescu/pi-teams#team-first-workflow)
 
+点击成员名可查看该成员已保存的任务、推理、工具和答复。详情打开时读取一次，先展示最近的回合，向上滚动可以继续翻页。记录读取适用于 Pi Teams 的默认会话目录，单个记录文件上限为 16 MiB。
+
 Codex 和 Pi 在 Agent 菜单中提供「技能」。在输入框用 `/skills` 也可以打开面板，并可在命令后附上搜索词。面板显示后端为当前工作区报告的技能，在第一条消息发出前也可以打开。
 
 OpenCode 使用 PATH 中的 CLI。本机也可用 `SPAN_OPENCODE_PATH` 指定可执行文件。SSH 会按顺序查找远端的 PATH、`~/.opencode/bin` 和 `~/.local/bin`。新会话默认使用远端登录目录，已保存的会话从其原工作目录恢复。OpenCode 回放的历史由 Span 按需向上分页。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/)

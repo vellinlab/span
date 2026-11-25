@@ -989,12 +989,21 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
       } else if (packet.type === 'span_pi_teams') {
         assert.equal(packet.sessionId, 'saved');
         respond(packet, [{ config: { name: 'shipping', state: 'active', members: [
-          { agentId: 'agent-1', name: 'Reviewer', status: 'running', isActive: false },
+          { agentId: '32a5c9ed', name: 'Reviewer', status: 'running', isActive: false },
         ] }, board: { schemaVersion: 1, tasks: [
           { id: 'first', subject: 'Prepare', status: 'pending' },
           { id: 'second', subject: 'Review', status: 'pending', owner: 'reviewer', dependsOn: ['first'] },
           { id: 'deleted', subject: 'Discarded', status: 'deleted' },
         ] } }]);
+      } else if (packet.type === 'span_pi_team_transcript') {
+        assert.equal(packet.sessionId, 'saved');
+        assert.equal(packet.memberId, '32a5c9ed');
+        const records = [{ type: 'session', id: 'native-child' }];
+        for (let index = 0; index < 24; index++) {
+          records.push(entry('q' + index, index ? 'r' + (index - 1) : null, 'user', 'Task ' + index));
+          records.push(entry('r' + index, 'q' + index, 'assistant', text('Result ' + index)));
+        }
+        respond(packet, records.map(record => JSON.stringify(record)).join('\n') + '\n{partial}\n');
       } else if (packet.type === 'get_commands') {
         respond(packet, { commands: [
           { name: 'skill:review', source: 'skill', description: 'Project review',
@@ -1031,11 +1040,23 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   const [team] = await agent.delegation.teams(ref);
   assert.equal(team.status, 'active');
   assert.equal(team.members[0].status, 'idle');
+  assert.equal(team.members[0].attachedTranscript, true);
   assert.deepEqual(team.tasks.map(({ id, status, assigneeId, blockedBy }) => ({ id, status, assigneeId, blockedBy })), [
     { id: 'first', status: 'pending', assigneeId: undefined, blockedBy: [] },
-    { id: 'second', status: 'blocked', assigneeId: 'agent-1', blockedBy: ['first'] },
+    { id: 'second', status: 'blocked', assigneeId: '32a5c9ed', blockedBy: ['first'] },
   ]);
   await assert.rejects(agent.delegation.teams({ ...ref, location: { kind: 'ssh', host: 'other' } }), /会话已切换/);
+  assert.throws(() => agent.delegation.watchTranscript(ref, 'cafebabe', () => {}), /没有这个 Pi 子代理/);
+  const trace = [];
+  const closeTrace = agent.delegation.watchTranscript(ref, '32a5c9ed', view => trace.push(view));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(trace[0].loading, true);
+  assert.equal(trace.at(-1).rows[0].text, 'Task 4');
+  assert.equal(trace.at(-1).rows.at(-1).text, 'Result 23');
+  trace.at(-1).loadOlder();
+  assert.equal(trace.at(-1).rows[0].text, 'Task 0');
+  assert.equal(trace.at(-1).cursor, null);
+  closeTrace();
   await agent.delegation.releaseTeamView(ref);
   assert.deepEqual(sent.at(-1), { type: 'span_pi_release_team_view', sessionId: 'saved' });
   const older = await agent.sessions.history(ref, { cursor: opened.history.cursor, limit: 1 });

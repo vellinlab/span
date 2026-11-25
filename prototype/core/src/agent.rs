@@ -706,7 +706,11 @@ async fn stdio(
 }
 
 enum PiTeamRequest {
-    Snapshot { id: Value, session: String },
+    Read {
+        id: Value,
+        session: String,
+        member: Option<String>,
+    },
     Release(String),
 }
 
@@ -739,8 +743,12 @@ async fn stdio_process(
             } else {
                 team_queue.recv().await
             };
-            let (id, session) = match request {
-                Some(PiTeamRequest::Snapshot { id, session }) => (id, session),
+            let (id, session, member) = match request {
+                Some(PiTeamRequest::Read {
+                    id,
+                    session,
+                    member,
+                }) => (id, session, member),
                 Some(PiTeamRequest::Release(session)) => {
                     if remote
                         .as_ref()
@@ -759,7 +767,11 @@ async fn stdio_process(
                 .cloned();
             let result = match identity {
                 Some(identity) => {
-                    let result = pi::team_snapshot(catalog, &mut remote, &identity).await;
+                    let result = if let Some(member) = member {
+                        pi::team_transcript(catalog, &mut remote, &identity, &member).await
+                    } else {
+                        pi::team_snapshot(catalog, &mut remote, &identity).await
+                    };
                     if pi_session.borrow().as_ref() == Some(&identity) {
                         result
                     } else {
@@ -809,8 +821,9 @@ async fn stdio_process(
     };
     let write = async {
         while let Some(packet) = requests.recv().await {
+            let kind = packet["type"].as_str().unwrap_or_default();
             if let Some(catalog) = &pi_catalog
-                && packet["type"] == "span_list_sessions"
+                && kind == "span_list_sessions"
             {
                 let result = pi::catalog(catalog, pi_session_file.get(), &packet).await;
                 event(
@@ -821,7 +834,7 @@ async fn stdio_process(
                 )?;
                 continue;
             }
-            if pi_catalog.is_some() && packet["type"] == "span_pi_release_team_view" {
+            if pi_catalog.is_some() && kind == "span_pi_release_team_view" {
                 if let Some(session) = packet["sessionId"]
                     .as_str()
                     .filter(|session| session.len() <= 128)
@@ -830,8 +843,25 @@ async fn stdio_process(
                 }
                 continue;
             }
-            if pi_catalog.is_some() && packet["type"] == "span_pi_teams" {
+            if pi_catalog.is_some() && matches!(kind, "span_pi_teams" | "span_pi_team_transcript") {
                 let id = &packet["id"];
+                let member = if kind == "span_pi_team_transcript" {
+                    let Some(member) = packet["memberId"]
+                        .as_str()
+                        .filter(|member| pi::valid_team_member(member))
+                    else {
+                        event(
+                            output,
+                            "agent",
+                            generation,
+                            pi_response(id, Err("当前会话没有这个 Pi 子代理。".into())),
+                        )?;
+                        continue;
+                    };
+                    Some(member.to_owned())
+                } else {
+                    None
+                };
                 let result = match packet["sessionId"].as_str() {
                     Some(session)
                         if !session.is_empty()
@@ -845,9 +875,10 @@ async fn stdio_process(
                                 .is_some_and(|active| active.id == session) =>
                     {
                         if team_requests
-                            .try_send(PiTeamRequest::Snapshot {
+                            .try_send(PiTeamRequest::Read {
                                 id: id.clone(),
                                 session: session.to_owned(),
+                                member,
                             })
                             .is_ok()
                         {

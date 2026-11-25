@@ -18,6 +18,7 @@ const CATALOG_PREFIX: u64 = 64 * 1024;
 const TEAM_CONFIG_LIMIT: u64 = 128 * 1024;
 const TEAM_TASKS_LIMIT: u64 = 512 * 1024;
 const TEAM_SNAPSHOT_LIMIT: u64 = 8 * 1024 * 1024;
+const TEAM_TRANSCRIPT_LIMIT: u64 = 16 * 1024 * 1024;
 
 pub(super) enum Catalog {
     Local,
@@ -288,9 +289,47 @@ pub(super) struct RemoteTeamReader {
     process: Process,
 }
 
+pub(super) fn valid_team_member(id: &str) -> bool {
+    id.len() == 8 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn local_team_transcript(parent: &Path, member: &str) -> io::Result<Vec<u8>> {
+    if !parent.is_absolute() {
+        return Ok(Vec::new());
+    }
+    let mut directory = parent.with_extension("");
+    for component in [None, Some(member), Some("run-0")] {
+        if let Some(component) = component {
+            directory.push(component);
+        }
+        match directory.symlink_metadata() {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Ok(Vec::new()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        }
+    }
+    let latest = fs::read_dir(directory)?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension()?.to_str()? != "jsonl" || !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            Some((entry.metadata().ok()?.modified().ok()?, path))
+        })
+        .max();
+    let mut bytes = Vec::new();
+    if let Some((_, file)) = latest {
+        fs::File::open(file)?
+            .take(TEAM_TRANSCRIPT_LIMIT + 1)
+            .read_to_end(&mut bytes)?;
+    }
+    Ok(bytes)
+}
+
 fn start_remote_team_reader(host: &str, session: &str) -> Result<RemoteTeamReader> {
-    // Each request supplies the JSON-encoded lead references as two NUL-delimited fields.
-    // Each response ends with an empty config record.
+    // Requests and results use NUL-delimited fields. A roster ends with an empty config field.
     // The local reader checks ownership again after decoding the remote data.
     const SCRIPT: &str = r#"
 shopt -s nullglob dotglob
@@ -298,7 +337,26 @@ export LC_ALL=C
 config_limit=$(($1 + 1))
 tasks_limit=$(($2 + 1))
 owner_field='"leadSessionId"[[:space:]]*:[[:space:]]*'
-while IFS= read -r -d '' owner_id && IFS= read -r -d '' owner_file; do
+while IFS= read -r -d '' operation; do
+  if [[ $operation == transcript ]]; then
+    IFS= read -r -d '' parent || exit 2
+    IFS= read -r -d '' member || exit 2
+    [[ $parent == /*.jsonl && $member =~ ^[[:xdigit:]]{8}$ ]] || exit 2
+    base=${parent%.jsonl}
+    directory="$base/$member/run-0"
+    if [[ -d "$directory" && ! -L "$directory" && ! -L "$base/$member" && ! -L "$base" ]]; then
+      latest=''
+      for file in "$directory/"*.jsonl; do
+        [[ -f "$file" && ! -L "$file" ]] || continue
+        if [[ -z "$latest" || "$file" -nt "$latest" ]]; then latest=$file; fi
+      done
+      if [[ -n "$latest" ]]; then head -c "$3" -- "$latest"; fi
+    fi
+    printf '\0'
+    continue
+  fi
+  [[ $operation == roster ]] || exit 2
+  IFS= read -r -d '' owner_id && IFS= read -r -d '' owner_file || exit 2
   for directory in "$HOME/.pi/teams/"*; do
     config="$directory/config.json"
     tasks="$directory/tasks.json"
@@ -317,10 +375,11 @@ while IFS= read -r -d '' owner_id && IFS= read -r -d '' owner_file; do
 done
 "#;
     let command = format!(
-        "exec bash -c {} span-pi-teams {} {}",
+        "exec bash -c {} span-pi-teams {} {} {}",
         shell_arg(SCRIPT),
         TEAM_CONFIG_LIMIT,
         TEAM_TASKS_LIMIT,
+        TEAM_TRANSCRIPT_LIMIT + 1,
     );
     Ok(RemoteTeamReader {
         session: session.to_owned(),
@@ -351,7 +410,8 @@ async fn remote_teams(
     session: &SessionIdentity,
 ) -> Result<Vec<Value>> {
     reader.session.clone_from(&session.id);
-    let mut owners = serde_json::to_vec(&session.id)?;
+    let mut owners = b"roster\0".to_vec();
+    serde_json::to_writer(&mut owners, &session.id)?;
     owners.push(0);
     if let Some(file) = &session.file {
         serde_json::to_writer(&mut owners, file)?;
@@ -412,6 +472,58 @@ pub(super) async fn team_snapshot(
         Catalog::Fixture => Vec::new(),
     };
     Ok(json!(teams))
+}
+
+pub(super) async fn team_transcript(
+    source: &Catalog,
+    remote: &mut Option<RemoteTeamReader>,
+    session: &SessionIdentity,
+    member: &str,
+) -> Result<Value> {
+    let Some(parent) = session
+        .file
+        .as_ref()
+        .filter(|file| file.ends_with(".jsonl") && !file.contains('\0'))
+    else {
+        return Ok(json!(""));
+    };
+    let bytes = match source {
+        Catalog::Local => {
+            let parent = PathBuf::from(parent);
+            let member = member.to_owned();
+            tokio::task::spawn_blocking(move || local_team_transcript(&parent, &member)).await??
+        }
+        Catalog::Ssh(host) => {
+            if remote.is_none() {
+                *remote = Some(start_remote_team_reader(host, &session.id)?);
+            }
+            let reader = remote.as_mut().expect("opened remote team reader");
+            reader.session.clone_from(&session.id);
+            let result = timeout(Duration::from_secs(10), async {
+                let request = format!("transcript\0{parent}\0{member}\0");
+                reader.process.input.write_all(request.as_bytes()).await?;
+                reader.process.input.flush().await?;
+                let mut remaining = TEAM_TRANSCRIPT_LIMIT + 2;
+                let mut field = Vec::new();
+                read_team_field(&mut reader.process.output, &mut remaining, &mut field).await?;
+                Ok::<_, io::Error>(field)
+            })
+            .await;
+            if !matches!(&result, Ok(Ok(_))) {
+                *remote = None;
+            }
+            result.map_err(|_| "读取远端 Pi 子代理记录超时。")??
+        }
+        Catalog::Fixture => Vec::new(),
+    };
+    if bytes.len() as u64 > TEAM_TRANSCRIPT_LIMIT {
+        return Err("Pi 子代理记录超过 16 MiB。".into());
+    }
+    let complete = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    Ok(json!(std::str::from_utf8(&bytes[..complete])?))
 }
 
 pub(crate) fn fixture() -> Result<()> {

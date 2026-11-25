@@ -34,9 +34,15 @@ const teamPrompt = '用 Pi Teams 创建一个发布核对任务。';
 const teamDescription = '发布任务由 Pi Teams 原生扩展创建。';
 const teamTask = '核对最终发布说明';
 const teamAnswer = '已经通过 Pi Teams 建好任务。';
+const workerPrompt = '阅读发布说明并报告一条验收标记。';
+const workerReasoning = '核对当前交接范围。';
+const workerAnswer = '发布说明的核对标记已确认。';
 const nativeCalls = [
   { name: 'team_create', arguments: { team_name: 'span-native-release', description: teamDescription }, result: 'Created team' },
   { name: 'task_create', arguments: { subject: teamTask, description: '确认改动明细和已知限制。' }, result: 'Created task' },
+  { name: 'spawn_teammate', arguments: {
+    name: 'native-reviewer', prompt: workerPrompt, cwd: ssh ? teamHome : localWorkspace, model: 'span-preview/span-pi',
+  }, result: 'Spawned teammate' },
 ];
 
 async function remoteTeamReaders() {
@@ -68,18 +74,20 @@ const gateway = createServer(async (request, response) => {
       : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
     const tools = messages.filter(message => message.role === 'tool');
     const nativeTeamRequest = prompt.includes(teamPrompt);
+    const workerRequest = prompt.includes(workerPrompt);
     const initial = prompt.includes(initialPrompt);
     const followUp = prompt.includes(followUpPrompt);
-    assert.ok(nativeTeamRequest || initial || followUp || prompt.includes(resumePrompt));
+    assert.ok(workerRequest || nativeTeamRequest || initial || followUp || prompt.includes(resumePrompt));
     if (initial && !ssh) assert.ok(prompt.includes('- ' + JSON.stringify(localReference)));
-    if (!initial && !nativeTeamRequest) assert.ok(messages.some(message => message.role === 'assistant' &&
+    if (!initial && !nativeTeamRequest && !workerRequest) assert.ok(messages.some(message => message.role === 'assistant' &&
       JSON.stringify(message.content).includes(firstAnswer)));
     if (initial && tools.length) {
       assert.ok(tools.some(tool => JSON.stringify(tool.content).includes('pi tool result')));
       assert.ok(tools.some(tool => JSON.stringify(tool.content).includes(missingFile)));
     }
-    if (!nativeTeamRequest) prompts.push({ initial, tool: tools.length > 0 });
-    const requestId = nativeTeamRequest ? 'span-native-team-' + tools.length : 'span-fixture-' + prompts.length;
+    if (!nativeTeamRequest && !workerRequest) prompts.push({ initial, tool: tools.length > 0 });
+    const requestId = workerRequest ? 'span-native-worker'
+      : nativeTeamRequest ? 'span-native-team-' + tools.length : 'span-fixture-' + prompts.length;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const send = (delta, finish_reason = null, usage = undefined) => {
       const choices = [{ index: 0, delta, finish_reason }];
@@ -88,7 +96,11 @@ const gateway = createServer(async (request, response) => {
       }) + '\n\n');
     };
     send({ role: 'assistant' });
-    if (nativeTeamRequest) {
+    if (workerRequest) {
+      send({ reasoning_content: workerReasoning });
+      send({ content: workerAnswer });
+      send({}, 'stop', { prompt_tokens: 20, completion_tokens: 9, total_tokens: 29 });
+    } else if (nativeTeamRequest) {
       assert.ok(tools.length <= nativeCalls.length);
       const next = nativeCalls[tools.length];
       if (tools.length) assert.ok(JSON.stringify(tools.at(-1).content).includes(nativeCalls[tools.length - 1].result));
@@ -172,7 +184,8 @@ export default function (pi) {
     if (!ssh) await mkdir(teamHome);
     await cp(nativeTeams, join(state, 'pi-teams-native'), { recursive: true });
     await writeFile(teamExtension, `
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { TeamManager } from '../pi-teams-native/team-manager.ts';
 import { TaskStore } from '../pi-teams-native/task-store.ts';
 
@@ -187,10 +200,23 @@ export default function (pi) {
       const registry = { resolve() {} };
       const manager = new TeamManager({ registry, getCurrentSessionId: () => ctx.sessionManager.getSessionFile() });
       const board = manager.createTeam({ team_name: 'span-release-review', description: '复核发布前的交接。' });
+      const memberId = '32a5c9ed';
       manager.registerTeammate(board.name, {
-        name: 'reviewer', agentId: 'span-reviewer', agentType: 'worker', model: 'span-preview/span-pi',
+        name: 'reviewer', agentId: memberId, agentType: 'worker', model: 'span-preview/span-pi',
         status: 'running', isActive: false, cwd: ctx.cwd,
       });
+      const directory = join(ctx.sessionManager.getSessionFile().slice(0, -6), memberId, 'run-0');
+      mkdirSync(directory, { recursive: true });
+      const records = [
+        { type: 'session', id: 'span-worker-fixture', cwd: ctx.cwd },
+        { type: 'message', id: 'request', parentId: null, message: {
+          role: 'user', content: '请核对发布交接。',
+        } },
+        { type: 'message', id: 'result', parentId: 'request', message: {
+          role: 'assistant', content: [{ type: 'text', text: '发布交接已核对。' }], stopReason: 'stop',
+        } },
+      ];
+      writeFileSync(join(directory, 'worker.jsonl'), records.map(record => JSON.stringify(record)).join('\\n') + '\\n');
       const store = new TaskStore(board.name, manager.getTasksPath(board.name));
       const checklist = store.createTask('核对原始清单', '复核已收集的结果。');
       const report = store.createTask('整理交接说明', '将结论写成可交付的说明。');
@@ -242,7 +268,13 @@ export default function (pi) {
     const connected = page.locator('.connection[data-route="stdio"]').filter({
       hasText: ssh ? 'Pi · ' + ssh : 'Pi · 本机', has: page.locator('i.ready'),
     });
-    await connected.waitFor({ timeout: 30_000 });
+    try {
+      await connected.waitFor({ timeout: 30_000 });
+    } catch (error) {
+      const alerts = await page.getByRole('alert').allTextContents();
+      if (alerts.length) console.error('Pi workbench startup:', alerts.join('\n'));
+      throw error;
+    }
     assert.deepEqual(errors, []);
     return { page, errors };
   }
@@ -459,6 +491,14 @@ export default function (pi) {
   if (nativeTeams) {
     const roster = await openTeam(resumed.page);
     await roster.getByText('已完成', { exact: true }).waitFor();
+    const member = roster.getByRole('button', { name: '查看 reviewer 的会话记录', exact: true });
+    await member.press('Enter');
+    const trace = resumed.page.getByTestId('subagent-transcript');
+    await trace.getByText('请核对发布交接。', { exact: true }).waitFor();
+    await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
+    await resumed.page.keyboard.press('Escape');
+    await member.waitFor();
+    assert.ok(await member.evaluate(element => element === document.activeElement));
     await resumed.page.keyboard.press('Escape');
     await roster.waitFor({ state: 'detached' });
     console.log('Verified Pi Teams native task-store snapshots, a live dependency transition, and session isolation on ' +
@@ -519,8 +559,16 @@ export default function (pi) {
     const roster = await openTeam(native.page, teamDescription);
     await roster.getByRole('list', { name: '团队任务' }).getByText(teamTask, { exact: true }).waitFor();
     assert.equal(await roster.getByText('复核发布前的交接。', { exact: true }).count(), 0);
+    const worker = roster.getByRole('listitem').filter({ hasText: 'native-reviewer' });
+    await worker.locator('.agent-state:is([data-status="completed"], [data-status="idle"])').waitFor();
+    await worker.getByRole('button', { name: '查看 native-reviewer 的会话记录', exact: true }).click();
+    const trace = native.page.getByTestId('subagent-transcript');
+    await trace.getByText(workerPrompt, { exact: false }).waitFor();
+    await trace.locator('[data-card="reasoning"]').getByText(workerReasoning, { exact: true }).waitFor();
+    await trace.getByText(workerAnswer, { exact: true }).waitFor();
+    if (screenshot) await native.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-worker.png') });
     assert.deepEqual(native.errors, []);
-    console.log('Verified the installed Pi Teams extension creates a team and task through its native tools on ' + (ssh ?? process.platform));
+    console.log('Verified Pi Teams creates a team, task and worker, and opens their saved transcript on ' + (ssh ?? process.platform));
   }
 } finally {
   releaseReasoning?.();

@@ -2,7 +2,7 @@ import { connectRpc } from './agent-rpc.js';
 import { sessionKey } from './agent.js';
 import { fileReferencePreview, fileReferenceText, parseFileReferences } from './file-references.js';
 import { piDelta, piMessage, piRunStatus, piText, piTool, piTurnId, piTurns } from './pi-items.js';
-import { isPiTeamsCommand, piTeamSnapshot } from './pi-teams.js';
+import { isPiTeamsCommand, piTeamSnapshot, watchPiTeamTranscript } from './pi-teams.js';
 
 const wire = {
   request: (id, type, params) => ({ ...params, id: String(id), type }),
@@ -37,6 +37,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
   let reserved = false;
   let replacingSession = false;
   let teamCapability;
+  let teamMembers = new Set();
 
   const notify = event => { if (current) onEvent({ ...event, session: current.ref }); };
   const item = (value, final) => notify({ kind: 'item', item: value, final });
@@ -230,6 +231,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
     if (typeof id !== 'string' || !id) throw new Error('Pi 未提供会话 ID。');
     if (state.sessionFile) searchPaths.set(id, state.sessionFile);
     current = { ref: ref(id), title: state.sessionName, cwd: sessionCwd };
+    teamMembers.clear();
     snapshot = null;
     run = undefined;
     pending.length = 0;
@@ -338,7 +340,20 @@ export function createPi({ generation, cwd, location, onEvent }) {
           rpc.send({ type: 'span_pi_release_team_view', sessionId: session.id }).catch(() => {}) : undefined,
         async teams(session) {
           requireSession(session);
-          return piTeamSnapshot(await request('span_pi_teams', { sessionId: session.id }));
+          const scope = current;
+          const teams = piTeamSnapshot(await request('span_pi_teams', { sessionId: session.id }), Boolean(state?.sessionFile));
+          if (scope === current) teamMembers = new Set(teams.flatMap(team =>
+            team.members.filter(member => member.attachedTranscript).map(member => member.id)));
+          return teams;
+        },
+        watchTranscript(session, memberId, listener) {
+          requireSession(session);
+          if (!teamMembers.has(memberId)) throw new Error('当前会话没有这个 Pi 子代理。');
+          const stop = watchPiTeamTranscript(() => request('span_pi_team_transcript', { sessionId: session.id, memberId }), listener);
+          return () => {
+            stop();
+            teamCapability.releaseTeamView?.(session);
+          };
         },
       };
       commands.push(...result.commands.filter(command => command.name)

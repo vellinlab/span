@@ -461,7 +461,8 @@ function SubagentTranscript({ panel, delegation, openTrace, openArtifact, openIm
   </p>;
   return <>
     {view.error && <p className="subagent-empty" role="status">{view.error}</p>}
-    <Transcript rows={view.rows} viewKey={sessionKey(member.session)} scroll={scroll} jumpToLatest={jumpToLatest}
+    <Transcript rows={view.rows} viewKey={sessionKey(member.session) || JSON.stringify([sessionKey(session), member.id])}
+      scroll={scroll} jumpToLatest={jumpToLatest}
       label="子代理会话记录" testId="subagent-transcript" activeTurnId={view.run?.status === 'running' ? view.run.id : undefined}
       cursor={view.cursor} loadOlder={view.loadOlder} loading={view.loading}
       showLatest={readingHistory} onScrollPosition={setReadingHistory} openTrace={openTrace}
