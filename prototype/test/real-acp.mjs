@@ -35,6 +35,7 @@ const childReasoning = '只查看指定的目录标记。';
 const childAnswer = '子代理已核对目录标记。';
 const delegateAnswer = '父会话已收到委派结果。';
 const marker = '.span-acp-child-trace-ci';
+const delegationProgress = [];
 let goalRequests = 0;
 let toolResult;
 let gatewayError;
@@ -90,20 +91,26 @@ const gateway = createServer(async (request, response) => {
       }
     } else if (text.includes(childPrompt)) {
       if (tool) {
+        delegationProgress.push('child tool result');
         assert.match(JSON.stringify(tool.content), /No files found/i);
         emit({ content: childAnswer });
         emit({}, 'stop', { prompt_tokens: 27, completion_tokens: 8, total_tokens: 35 });
       } else {
+        delegationProgress.push('child prompt');
         emit({ reasoning_content: childReasoning });
         await childStep;
         sendTool('span-child-glob', 'glob', { pattern: marker });
       }
     } else if (text.includes(delegate)) {
       if (tool) {
+        delegationProgress.push('parent tool result');
         assert.match(JSON.stringify(tool.content), new RegExp(childAnswer));
         emit({ content: delegateAnswer });
         emit({}, 'stop', { prompt_tokens: 28, completion_tokens: 8, total_tokens: 36 });
-      } else sendTool('span-native-task', 'task', { description: taskTitle, prompt: childPrompt, subagent_type: 'explore' });
+      } else {
+        delegationProgress.push('parent prompt');
+        sendTool('span-native-task', 'task', { description: taskTitle, prompt: childPrompt, subagent_type: 'explore' });
+      }
     } else if (text.includes(initial) && !tool) {
       emit({ reasoning_content: firstReasoning });
       await new Promise(done => { releaseReasoning = done; });
@@ -348,7 +355,7 @@ try {
   await send(delegate);
   const conversation = () => page.getByTestId('transcript');
   const card = () => conversation().locator('[data-card="delegation"]').filter({ hasText: taskTitle });
-  await card().getByText('进行中', { exact: true }).waitFor();
+  await card().getByText(/^(等待中|进行中)$/).waitFor();
   releaseChild();
   await conversation().getByText(delegateAnswer, { exact: true }).waitFor();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
@@ -378,6 +385,7 @@ try {
     console.error(await page.getByRole('alert').allTextContents().catch(() => []));
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-failure.png') }).catch(() => {});
   }
+  if (delegationProgress.length) console.error('Native delegation gateway:', delegationProgress.join(', '));
   if (gatewayError) console.error(gatewayError);
   if (ssh) {
     const stderr = await readFile(remoteLog, 'utf8').catch(() => '');
