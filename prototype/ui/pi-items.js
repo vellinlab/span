@@ -57,16 +57,24 @@ export function piRunStatus(message) {
     : message?.stopReason === 'aborted' ? { status: 'cancelled' } : { status: 'completed' };
 }
 
-export function piTurns(entries, leafId) {
-  const byId = new Map(entries.map(entry => [entry.id, entry]));
-  const branch = [];
+export function piTurnEntries(entries, leafId) {
+  const byId = new Map();
+  for (const entry of entries) byId.set(entry.id, entry);
+  const turns = [];
+  let turn = [];
   while (leafId && byId.has(leafId)) {
     const entry = byId.get(leafId);
     byId.delete(leafId);
-    branch.push(entry);
     leafId = entry.parentId;
+    if (entry.type !== 'message') continue;
+    turn.push(entry);
+    if (entry.message.role === 'user') {
+      turns.push(turn.reverse());
+      turn = [];
+    }
   }
-  return piBranchTurns(branch.reverse());
+  if (turn.length) turns.push(turn.reverse());
+  return turns.reverse();
 }
 
 export function piBranchTurns(branch, identifyTurn = (_, index) => piTurnId(index), continuation) {

@@ -678,6 +678,14 @@ export default function (pi) {
   await latest.waitFor({ state: 'detached' });
   assert.ok(await resumedLog.evaluate(log => log === document.activeElement));
   assert.equal(await resumedLog.getByText(followUpPrompt, { exact: false }).count(), 1);
+  await resumed.page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  await resumed.page.getByRole('button', { name: /^新会话/ }).click();
+  await resumed.page.getByRole('heading', { name: '开始新会话', exact: true }).waitFor();
+  assert.equal(await resumedLog.getByText(followUpAnswer, { exact: true }).count(), 0);
+  const saved = resumed.page.getByRole('treeitem', { name: 'Pi 原生会话验收', exact: true });
+  await saved.click();
+  await resumedLog.getByText(followUpAnswer, { exact: true }).waitFor();
+  assert.equal(await saved.getAttribute('aria-current'), 'true');
   assert.deepEqual(prompts.map(entry => entry.initial), [true, true, false, false]);
   assert.deepEqual(resumed.errors, []);
   console.log('Verified real Pi streaming, tools, extension dialogs, usage, and automatic workspace and session restore on ' +

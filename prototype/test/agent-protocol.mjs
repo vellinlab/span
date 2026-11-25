@@ -1068,6 +1068,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   let rejectPrompt = false;
   let cancelTeamRead = false;
   let switching;
+  let olderReplyReads = 0;
   globalThis.window = { span: {
     onEvent(callback) { receive = callback; return () => { receive = null; }; },
     async request(method, { packet } = {}) {
@@ -1096,7 +1097,10 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
       } else if (packet.type === 'get_entries') {
         respond(packet, { leafId: 'answer', entries: [
           entry('one', null, 'user', 'First'),
-          entry('two', 'one', 'assistant', text('Stored response')),
+          entry('two', 'one', 'assistant', [{ type: 'text', get text() {
+            olderReplyReads++;
+            return 'Stored response';
+          } }]),
           entry('discarded', 'one', 'assistant', text('Abandoned branch')),
           entry('question', 'two', 'user', 'Second'),
           entry('answer', 'question', 'assistant', text('Current branch')),
@@ -1169,6 +1173,8 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   await agent.interactions.respond('switch', { choice: 'yes' });
   const opened = await loading;
   assert.equal(opened.history.items[0].rows.at(-1).text, 'Current branch');
+  assert.equal(opened.history.items[0].id, 'turn:1');
+  assert.equal(olderReplyReads, 0);
   assert.deepEqual((await agent.usage(ref)).tokens,
     { total: 17, input: 8, output: 2, cached: 3, cacheWrite: 4, contextUsed: 10, contextLimit: 100 });
   const [team] = await agent.delegation.teams(ref);
@@ -1210,6 +1216,8 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.deepEqual(sent.at(-1), { type: 'span_pi_release_team_view', sessionId: 'saved' });
   const older = await agent.sessions.history(ref, { cursor: opened.history.cursor, limit: 1 });
   assert.equal(older.items[0].rows.at(-1).text, 'Stored response');
+  assert.equal(older.items[0].id, 'turn:0');
+  assert.equal(olderReplyReads, 1);
   assert.equal(older.cursor, null);
 
   const input = value => [{ kind: 'text', text: value }];
@@ -1268,6 +1276,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   await agent.interactions.respond('switch', { choice: 'yes' });
   const { history } = await reopening;
   assert.ok(history.cursor);
+  assert.equal(olderReplyReads, 1);
   receive({ event: 'agent-closed', generation: source, data: 'Pi connection closed' });
   assert.equal(events.at(-1).kind, 'disconnected');
   await assert.rejects(agent.sessions.history(ref, { cursor: history.cursor, limit: 1 }), /会话已切换/);

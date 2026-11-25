@@ -1,7 +1,7 @@
 import { connectRpc } from './agent-rpc.js';
 import { sessionKey } from './agent.js';
 import { fileReferencePreview, fileReferenceText, parseFileReferences } from './file-references.js';
-import { piDelta, piMessage, piRunStatus, piText, piTool, piTurnId, piTurns } from './pi-items.js';
+import { piBranchTurns, piDelta, piMessage, piRunStatus, piText, piTool, piTurnEntries, piTurnId } from './pi-items.js';
 import { isPiTeamsCommand, piTeamSnapshot, watchPiTeamTranscript } from './pi-teams.js';
 
 const wire = {
@@ -255,7 +255,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
     const result = { session: current, options: { model: modelId(state.model), effort: state.thinkingLevel } };
     if (limit !== undefined) {
       const response = await request('get_entries');
-      const turns = piTurns(response.entries ?? [], response.leafId);
+      const turns = piTurnEntries(response.entries ?? [], response.leafId);
       turnCount = turns.length;
       snapshot = { turns };
       result.history = historyPage(limit);
@@ -266,7 +266,9 @@ export function createPi({ generation, cwd, location, onEvent }) {
   function historyPage(limit, cursor) {
     if (cursor !== snapshot?.cursor) return { items: [], cursor: null };
     const records = snapshot?.turns ?? [];
-    const items = records.splice(Math.max(0, records.length - limit));
+    const start = Math.max(0, records.length - limit);
+    // Keep unread records in Pi's representation and only format the requested page.
+    const items = piBranchTurns(records.splice(start).flat(), (_, index) => piTurnId(start + index));
     const next = records.length ? items[0]?.id : undefined;
     snapshot = next ? { turns: records, cursor: next } : null;
     return { items, cursor: next ?? null };
