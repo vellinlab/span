@@ -285,7 +285,8 @@ export function createPi({ generation, cwd, location, onEvent }) {
     const stats = await request('get_session_stats');
     return {
       tokens: { total: stats.tokens?.total, input: stats.tokens?.input, output: stats.tokens?.output,
-        cached: stats.tokens?.cacheRead, contextUsed: stats.contextUsage?.tokens ?? undefined,
+        cached: stats.tokens?.cacheRead, ...(stats.tokens?.cacheWrite > 0 && { cacheWrite: stats.tokens.cacheWrite }),
+        contextUsed: stats.contextUsage?.tokens ?? undefined,
         contextLimit: stats.contextUsage?.contextWindow },
       cost: typeof stats.cost === 'number' ? { amount: stats.cost, currency: 'USD' } : undefined,
     };
@@ -333,6 +334,8 @@ export function createPi({ generation, cwd, location, onEvent }) {
       if (result.commands.some(isPiTeamsCommand)) teamCapability = {
         observe: true,
         teamRefreshMs: location.kind === 'ssh' ? 5000 : 2200,
+        releaseTeamView: location.kind === 'ssh' ? session =>
+          rpc.send({ type: 'span_pi_release_team_view', sessionId: session.id }).catch(() => {}) : undefined,
         async teams(session) {
           requireSession(session);
           return piTeamSnapshot(await request('span_pi_teams', { sessionId: session.id }));

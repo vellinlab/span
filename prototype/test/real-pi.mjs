@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { _electron as electron } from 'playwright';
 
 const [binary, piPath, screenshot, ssh] = process.argv.slice(2);
@@ -28,6 +29,18 @@ const afterTool = '工具已返回，整理核对结果。';
 const resumedAnswer = 'Pi 已恢复原会话。';
 const longAnswerEnd = '已读到这次长答复的末尾。';
 const followUpAnswer = 'Pi 已处理排队跟进。';
+
+async function remoteTeamReaders() {
+  const pids = (await readdir('/proc')).filter(name => /^\d+$/.test(name));
+  const readers = await Promise.all(pids.map(async pid => {
+    const comm = await readFile(`/proc/${pid}/comm`, 'utf8').catch(() => '');
+    if (comm.trim() !== 'bash') return;
+    const command = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
+    if (command.split('\0')[3] === 'span-pi-teams') return pid;
+  }));
+  return readers.filter(Boolean);
+}
+
 let releaseReasoning;
 let releaseTool;
 let releaseAnswer;
@@ -375,12 +388,25 @@ export default function (pi) {
     const task = roster.getByRole('listitem').filter({ hasText: '整理交接说明' });
     await task.getByText('受阻', { exact: true }).waitFor();
     await task.getByText('负责人 reviewer · 依赖 核对原始清单', { exact: true }).waitFor();
+    const readers = ssh ? await remoteTeamReaders() : [];
+    if (ssh) assert.equal(readers.length, 1);
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-teams.png') });
     await writeFile(teamSignal, 'done');
     await task.getByText('等待中', { exact: true }).waitFor({ timeout: 15_000 });
     await roster.getByText('已完成', { exact: true }).waitFor();
+    if (ssh) assert.deepEqual(await remoteTeamReaders(), readers);
     await page.keyboard.press('Escape');
     await roster.waitFor({ state: 'detached' });
+    if (ssh) {
+      const deadline = Date.now() + 5000;
+      let readers = await remoteTeamReaders();
+      while (readers.length && Date.now() < deadline) {
+        await delay(100);
+        readers = await remoteTeamReaders();
+      }
+      assert.deepEqual(readers, [], 'The remote team reader did not exit after closing the roster');
+      console.log('Verified Pi Teams refreshes reused one SSH process and closing the roster released it.');
+    }
   }
   if (screenshot) await page.screenshot({ path: screenshot });
   assert.deepEqual(first.errors, []);

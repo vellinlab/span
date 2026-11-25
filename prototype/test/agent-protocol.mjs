@@ -984,7 +984,8 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
         emit({ type: 'agent_settled', aborted: true });
         respond(packet);
       } else if (packet.type === 'get_session_stats') {
-        respond(packet, { tokens: { total: 17 }, contextUsage: { tokens: 10, contextWindow: 100 } });
+        respond(packet, { tokens: { total: 17, input: 8, output: 2, cacheRead: 3, cacheWrite: 4 },
+          contextUsage: { tokens: 10, contextWindow: 100 } });
       } else if (packet.type === 'span_pi_teams') {
         assert.equal(packet.sessionId, 'saved');
         respond(packet, [{ config: { name: 'shipping', state: 'active', members: [
@@ -1025,6 +1026,8 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   await agent.interactions.respond('switch', { choice: 'yes' });
   const opened = await loading;
   assert.equal(opened.history.items[0].rows.at(-1).text, 'Current branch');
+  assert.deepEqual((await agent.usage(ref)).tokens,
+    { total: 17, input: 8, output: 2, cached: 3, cacheWrite: 4, contextUsed: 10, contextLimit: 100 });
   const [team] = await agent.delegation.teams(ref);
   assert.equal(team.status, 'active');
   assert.equal(team.members[0].status, 'idle');
@@ -1033,6 +1036,8 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
     { id: 'second', status: 'blocked', assigneeId: 'agent-1', blockedBy: ['first'] },
   ]);
   await assert.rejects(agent.delegation.teams({ ...ref, location: { kind: 'ssh', host: 'other' } }), /会话已切换/);
+  await agent.delegation.releaseTeamView(ref);
+  assert.deepEqual(sent.at(-1), { type: 'span_pi_release_team_view', sessionId: 'saved' });
   const older = await agent.sessions.history(ref, { cursor: opened.history.cursor, limit: 1 });
   assert.equal(older.items[0].rows.at(-1).text, 'Stored response');
   assert.equal(older.cursor, null);
@@ -1070,7 +1075,8 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.equal(events.findLast(event => event.kind === 'run').run.status, 'failed');
 
   assert.equal(events.filter(event => event.session).every(event => sessionKey(event.session) === sessionKey(ref)), true);
-  assert.ok(sent.filter(packet => packet.type !== 'extension_ui_response').every(packet => typeof packet.id === 'string'));
+  assert.ok(sent.filter(packet => !['extension_ui_response', 'span_pi_release_team_view'].includes(packet.type))
+    .every(packet => typeof packet.id === 'string'));
 });
 
 ['opencode', 'kilo'].forEach(backend => test(`${backend} ACP scopes history, prompts and approvals to the active session`, async t => {

@@ -345,8 +345,10 @@ const teamStatuses = { active: '运行中', closed: '已关闭', orphaned: '主�
 
 function AgentsPanel({ work, openSession, openTrace, report }) {
   const { teams, members: liveMembers } = work;
-  const activeKey = sessionKey(work.session?.ref);
-  const cadence = work.api?.delegation?.teamRefreshMs;
+  const teamSession = work.session?.ref;
+  const activeKey = sessionKey(teamSession);
+  const delegation = work.api?.delegation;
+  const cadence = delegation?.teamRefreshMs;
   const ready = Boolean(activeKey && work.connection === 'ready' && !work.loading);
   const running = Boolean(cadence && work.run);
   const observing = running || teams.some(team => team.status === 'active');
@@ -355,8 +357,21 @@ function AgentsPanel({ work, openSession, openTrace, report }) {
     catch (error) { if (reportError) report(error); }
   });
   useEffect(() => {
-    if (ready) refresh(true);
+    if (ready && !document.hidden) refresh(true);
   }, [activeKey, ready, running]);
+  useEffect(() => {
+    if (!ready || !cadence) return;
+    const release = () => delegation.releaseTeamView?.(teamSession);
+    function changedVisibility() {
+      if (document.hidden) release();
+      else refresh(false);
+    }
+    document.addEventListener('visibilitychange', changedVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', changedVisibility);
+      release();
+    };
+  }, [ready, cadence, delegation, teamSession]);
   useEffect(() => {
     if (!ready || !cadence || !observing) return;
     let disposed = false;

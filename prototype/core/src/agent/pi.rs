@@ -7,7 +7,11 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::{io::AsyncReadExt, process::Command, time::timeout};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt},
+    process::Command,
+    time::timeout,
+};
 
 const CATALOG_PAGE: usize = 40;
 const CATALOG_PREFIX: u64 = 64 * 1024;
@@ -269,75 +273,123 @@ fn local_teams(root: &Path, session: &str) -> io::Result<Vec<Value>> {
     Ok(teams)
 }
 
-async fn remote_teams(host: &str, session: &str) -> Result<Vec<Value>> {
-    // Prefilter on the remote host, then parse and verify ownership again locally.
+pub(super) struct RemoteTeamReader {
+    pub(super) session: String,
+    process: Process,
+}
+
+fn start_remote_team_reader(host: &str, session: &str) -> Result<RemoteTeamReader> {
+    // Each request is a session ID and each response ends with an empty config record.
+    // The local reader checks ownership again after decoding the remote data.
     const SCRIPT: &str = r#"
 shopt -s nullglob dotglob
 export LC_ALL=C
-owner='"leadSessionId"[[:space:]]*:[[:space:]]*"'"$1"'"'
-config_limit=$(($2 + 1))
-tasks_limit=$(($3 + 1))
-for directory in "$HOME/.pi/teams/"*; do
-  config="$directory/config.json"
-  tasks="$directory/tasks.json"
-  [[ -d "$directory" && ! -L "$directory" && -f "$config" && ! -L "$config" ]] || continue
-  IFS= read -r -d '' -n "$config_limit" config_json < "$config"
-  [[ ${#config_json} -lt $config_limit && $config_json =~ $owner ]] || continue
-  task_json=''
-  if [[ -f "$tasks" && ! -L "$tasks" ]]; then
-    IFS= read -r -d '' -n "$tasks_limit" task_json < "$tasks"
-    if [[ ${#task_json} -ge $tasks_limit ]]; then task_json=''; fi
-  fi
-  printf '%s\0%s\0' "$config_json" "$task_json"
+config_limit=$(($1 + 1))
+tasks_limit=$(($2 + 1))
+while IFS= read -r session; do
+  [[ $session =~ ^[[:alnum:]-]{1,128}$ ]] || exit 2
+  owner='"leadSessionId"[[:space:]]*:[[:space:]]*"'"$session"'"'
+  for directory in "$HOME/.pi/teams/"*; do
+    config="$directory/config.json"
+    tasks="$directory/tasks.json"
+    [[ -d "$directory" && ! -L "$directory" && -f "$config" && ! -L "$config" ]] || continue
+    IFS= read -r -d '' -n "$config_limit" config_json < "$config"
+    [[ ${#config_json} -lt $config_limit && $config_json =~ $owner ]] || continue
+    task_json=''
+    if [[ -f "$tasks" && ! -L "$tasks" ]]; then
+      IFS= read -r -d '' -n "$tasks_limit" task_json < "$tasks"
+      if [[ ${#task_json} -ge $tasks_limit ]]; then task_json=''; fi
+    fi
+    printf '%s\0%s\0' "$config_json" "$task_json"
+  done
+  printf '\0'
 done
 "#;
     let command = format!(
-        "bash -c {} span-pi-teams {} {} {}",
+        "exec bash -c {} span-pi-teams {} {}",
         shell_arg(SCRIPT),
-        shell_arg(session),
         TEAM_CONFIG_LIMIT,
         TEAM_TASKS_LIMIT,
     );
-    let mut process = spawn(ssh(host).arg(command))?;
-    let mut bytes = Vec::new();
-    let status = timeout(Duration::from_secs(10), async {
-        (&mut process.output)
-            .take(TEAM_SNAPSHOT_LIMIT + 1)
-            .read_to_end(&mut bytes)
-            .await?;
-        if bytes.len() as u64 > TEAM_SNAPSHOT_LIMIT {
-            return Err(io::Error::other("Pi 团队记录超过响应大小限制。"));
+    Ok(RemoteTeamReader {
+        session: session.to_owned(),
+        process: spawn(ssh(host).arg(command))?,
+    })
+}
+
+async fn read_team_field(
+    output: &mut (impl tokio::io::AsyncBufRead + Unpin),
+    remaining: &mut u64,
+    field: &mut Vec<u8>,
+) -> io::Result<()> {
+    field.clear();
+    let count = output.take(*remaining).read_until(0, field).await?;
+    *remaining -= count as u64;
+    if field.pop() != Some(0) {
+        return Err(io::Error::other(if *remaining == 0 {
+            "Pi 团队记录超过响应大小限制。"
+        } else {
+            "远端 Pi 团队连接已关闭。"
+        }));
+    }
+    Ok(())
+}
+
+async fn remote_teams(reader: &mut RemoteTeamReader, session: &str) -> Result<Vec<Value>> {
+    reader.session = session.to_owned();
+    let process = &mut reader.process;
+    let teams = timeout(Duration::from_secs(10), async {
+        process.input.write_all(session.as_bytes()).await?;
+        process.input.write_all(b"\n").await?;
+        process.input.flush().await?;
+        let mut teams = Vec::new();
+        let mut remaining = TEAM_SNAPSHOT_LIMIT;
+        let mut config = Vec::new();
+        let mut tasks = Vec::new();
+        loop {
+            read_team_field(&mut process.output, &mut remaining, &mut config).await?;
+            if config.is_empty() {
+                return Ok::<_, io::Error>(teams);
+            }
+            read_team_field(&mut process.output, &mut remaining, &mut tasks).await?;
+            if let Ok(config) = serde_json::from_slice::<Value>(&config)
+                && session_team(&config, session)
+            {
+                let tasks = serde_json::from_slice::<Value>(&tasks).ok();
+                teams.push(json!({ "config": config, "board": tasks }));
+            }
         }
-        process.child.wait().await
     })
     .await
     .map_err(|_| "读取远端 Pi 团队超时。")??;
-    if !status.success() {
-        return Err("无法读取远端 Pi 团队。".into());
-    }
-    let mut teams = Vec::new();
-    let mut fields = bytes.split(|byte| *byte == 0);
-    while let (Some(config), Some(tasks)) = (fields.next(), fields.next()) {
-        if let Ok(config) = serde_json::from_slice::<Value>(config)
-            && session_team(&config, session)
-        {
-            let tasks = serde_json::from_slice::<Value>(tasks).ok();
-            teams.push(json!({ "config": config, "board": tasks }));
-        }
-    }
     Ok(teams)
 }
 
-pub(super) async fn team_snapshot(source: &Catalog, session: String) -> Result<Value> {
+pub(super) async fn team_snapshot(
+    source: &Catalog,
+    remote: &mut Option<RemoteTeamReader>,
+    session: &str,
+) -> Result<Value> {
     let teams = match source {
         Catalog::Local => {
             let home = env::home_dir().ok_or("无法定位 Pi 团队目录。")?;
+            let session = session.to_owned();
             tokio::task::spawn_blocking(move || {
                 local_teams(&home.join(".pi").join("teams"), &session)
             })
             .await??
         }
-        Catalog::Ssh(host) => remote_teams(host, &session).await?,
+        Catalog::Ssh(host) => {
+            if remote.is_none() {
+                *remote = Some(start_remote_team_reader(host, session)?);
+            }
+            let result =
+                remote_teams(remote.as_mut().expect("opened remote team reader"), session).await;
+            if result.is_err() {
+                *remote = None;
+            }
+            result?
+        }
         Catalog::Fixture => Vec::new(),
     };
     Ok(json!(teams))

@@ -705,6 +705,11 @@ async fn stdio(
     stdio_process(process, requests, output, generation, route, None).await
 }
 
+enum PiTeamRequest {
+    Snapshot { id: Value, session: String },
+    Release(String),
+}
+
 async fn stdio_process(
     mut process: Process,
     mut requests: mpsc::Receiver<Value>,
@@ -716,13 +721,42 @@ async fn stdio_process(
     event(output, "agent-route", generation, json!(route))?;
     let pi_session_file = OnceCell::new();
     let pi_session = RefCell::new(None::<String>);
-    let (team_requests, mut team_queue) = mpsc::channel::<(Value, String)>(1);
+    let (team_requests, mut team_queue) = mpsc::channel::<PiTeamRequest>(2);
     let teams = async {
         let Some(catalog) = &pi_catalog else {
             return std::future::pending().await;
         };
-        while let Some((id, session)) = team_queue.recv().await {
-            let result = pi::team_snapshot(catalog, session.clone()).await;
+        let mut remote: Option<pi::RemoteTeamReader> = None;
+        loop {
+            let request = if remote.is_some() {
+                match timeout(Duration::from_secs(12), team_queue.recv()).await {
+                    Ok(request) => request,
+                    Err(_) => {
+                        remote = None;
+                        continue;
+                    }
+                }
+            } else {
+                team_queue.recv().await
+            };
+            let (id, session) = match request {
+                Some(PiTeamRequest::Snapshot { id, session }) => (id, session),
+                Some(PiTeamRequest::Release(session)) => {
+                    if remote
+                        .as_ref()
+                        .is_some_and(|reader| reader.session == session)
+                    {
+                        remote = None;
+                    }
+                    continue;
+                }
+                None => return Ok(()),
+            };
+            let result = if pi_session.borrow().as_deref() == Some(session.as_str()) {
+                pi::team_snapshot(catalog, &mut remote, &session).await
+            } else {
+                Err("Pi 会话已切换。".into())
+            };
             let result = if pi_session.borrow().as_deref() == Some(session.as_str()) {
                 result
             } else {
@@ -730,7 +764,6 @@ async fn stdio_process(
             };
             event(output, "agent", generation, pi_response(&id, result))?;
         }
-        Ok(())
     };
     let read = async {
         let mut line = Vec::new();
@@ -776,6 +809,15 @@ async fn stdio_process(
                 )?;
                 continue;
             }
+            if pi_catalog.is_some() && packet["type"] == "span_pi_release_team_view" {
+                if let Some(session) = packet["sessionId"]
+                    .as_str()
+                    .filter(|session| session.len() <= 128)
+                {
+                    let _ = team_requests.try_send(PiTeamRequest::Release(session.to_owned()));
+                }
+                continue;
+            }
             if pi_catalog.is_some() && packet["type"] == "span_pi_teams" {
                 let id = &packet["id"];
                 let result = match packet["sessionId"].as_str() {
@@ -788,7 +830,10 @@ async fn stdio_process(
                             && pi_session.borrow().as_deref() == Some(session) =>
                     {
                         if team_requests
-                            .try_send((id.clone(), session.to_owned()))
+                            .try_send(PiTeamRequest::Snapshot {
+                                id: id.clone(),
+                                session: session.to_owned(),
+                            })
                             .is_ok()
                         {
                             continue;

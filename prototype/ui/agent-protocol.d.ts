@@ -203,6 +203,8 @@ export interface AgentAdapter {
     teams?(ref: SessionRef): Promise<Team[]>;
     /** Optional refresh cadence while a visible roster is observing an active team or turn. */
     teamRefreshMs?: number;
+    /** End a roster observation when the view closes or is hidden. */
+    releaseTeamView?(ref: SessionRef): void;
     act?(ref: SessionRef, action: DelegationAction): Promise<AgentMember | void>;
     manageTeam?(ref: SessionRef, action: TeamAction): Promise<Team | void>;
   };
