@@ -349,9 +349,14 @@ fn stream_reasoning(
     let id = format!("{turn}-streamed-summary");
     let following = gate.join("reasoning-following").is_file();
     let details = following || gate.join("reasoning-details").is_file();
+    let indexed = gate.join("reasoning-index").is_file();
+    let outline = "### 复核顺序\n\n- 检查会话正文\n  - 保留两级缩进\n  - 核对工具结果\n\n";
     let mut initial = if details {
-        let mut text =
-            "### 复核顺序\n\n- 检查会话正文\n  - 保留两级缩进\n  - 核对工具结果\n\n".to_owned();
+        let mut text = if indexed {
+            String::new()
+        } else {
+            outline.to_owned()
+        };
         let context = "记录核对过程、输入响应、工具结果与最终答复的顺序。".repeat(4);
         for index in 1..=144 {
             writeln!(
@@ -382,7 +387,17 @@ fn stream_reasoning(
             section_delta(section, &text)?;
         }
     }
-    let delta = |fragment: &str| section_delta(0, fragment);
+    let live_section = if indexed {
+        section_delta(0, outline)?;
+        let paragraph = ("核对历史记录的内容、引用和操作范围。".repeat(4) + "\n\n").repeat(12);
+        for section in 1..=8 {
+            section_delta(section, &format!("### 已核对记录 {section}\n\n{paragraph}"))?;
+        }
+        9
+    } else {
+        0
+    };
+    let delta = |fragment: &str| section_delta(live_section, fragment);
     delta(&initial)?;
     if !wait_for_stream_gate(&gate.join("append"), running) {
         return Ok(());

@@ -423,6 +423,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     await strip.press('Enter');
     await heading.waitFor();
     await panel.locator('ul ul').getByText('保留两级缩进', { exact: true }).waitFor();
+    if (reasoningIndex) {
+      await panel.getByRole('heading', { name: '已核对记录 8', exact: true }).waitFor();
+      await panel.getByText('开始复核长会话。', { exact: true }).waitFor();
+    }
     detailPosition = await heading.boundingBox();
     if (deferredDetails) {
       const bounds = await detail.boundingBox();
@@ -476,7 +480,8 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     const detailMutations = await detail?.evaluateHandle(element => {
       let mutations = 0;
       const observer = new MutationObserver(() => { mutations++; });
-      observer.observe(element.querySelector('.prose'), { subtree: true, childList: true, characterData: true });
+      observer.observe(element.querySelector('.reasoning-section:last-child .prose'),
+        { subtree: true, childList: true, characterData: true });
       return () => {
         observer.disconnect();
         return mutations;
@@ -680,6 +685,7 @@ async function check(binary, label, trial) {
     if (following) await writeFile(join(profile, 'fast'), '');
     if (grouped || reasoningIndex) await writeFile(join(profile, 'grouped-history'), '');
     if (reasoningDetails) await writeFile(join(profile, reasoningFollowing ? 'reasoning-following' : 'reasoning-details'), '');
+    if (reasoningIndex) await writeFile(join(profile, 'reasoning-index'), '');
     app = await electron.launch({
       executablePath: binary,
       args: ['--demo', `--force-device-scale-factor=${deviceScaleFactor}`,
