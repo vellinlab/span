@@ -119,15 +119,18 @@ async function check(binary, legacy, screenshot) {
     await composer.press('Enter');
     const workspaceDiff = page.getByRole('region', { name: '工作区 Git 改动' });
     await workspaceDiff.locator('[data-tone="add"]').getByText('+新的工作区说明', { exact: true }).waitFor();
-    await workspaceDiff.getByRole('region', { name: '未跟踪文件' }).getByText('docs/空间 目录.md', { exact: true }).waitFor();
+    const lastPath = workspaceDiff.getByRole('region', { name: '未跟踪文件' }).getByText('docs/空间 目录.md', { exact: true });
+    await lastPath.waitFor();
     const closeDiff = workspaceDiff.getByRole('button', { name: '关闭面板' });
     assert.ok(await closeDiff.evaluate(button => button === document.activeElement));
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-workspace.png') });
+    assert.ok(await lastPath.evaluate(element => element.getBoundingClientRect().bottom <=
+      element.closest('.agent-panel-content').getBoundingClientRect().bottom + 1), 'Both untracked paths fit in the narrow panel');
     await closeDiff.press('Escape');
     assert.ok(await composer.evaluate(element => element === document.activeElement));
     await composer.fill('/diff turn');
     await composer.press('Enter');
-    const turnDiff = page.getByRole('region', { name: '本轮差异' });
+    const turnDiff = page.getByRole('region', { name: '最近一次会话补丁' });
     await turnDiff.getByRole('combobox', { name: '变更文件' }).waitFor();
     return { mountedAtStart, mountedAtEnd, rawLines: 10005 };
   } finally {

@@ -35,7 +35,7 @@ export function commonAgentCommands(api, models, options) {
     ...(api.permissions?.length ? [['/permissions', '选择会话权限']] : []),
     ...(api.turns.compact ? [['/compact', '压缩上下文']] : []),
     ...(api.turns.review ? [['/review', '审查代码变更']] : []),
-    ...(api.repository ? [['/diff', '查看工作区 Git 改动'], ['/diff turn', '查看最近一轮补丁']] : []),
+    ...(api.repository ? [['/diff', '查看工作区 Git 改动'], ['/diff turn', '查看最近一次会话补丁']] : []),
     ...(api.sessions.fork ? [['/fork', '复制当前会话']] : []),
     ...(api.sessions.rename ? [['/rename', '重命名当前会话']] : []),
     ...(api.sessions.archive ? [['/archive', '归档或恢复当前会话']] : []),

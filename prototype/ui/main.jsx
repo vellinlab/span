@@ -519,7 +519,7 @@ function App() {
         if (args === 'turn' || (!args && !api.repository)) {
           const change = rows.findLast(row => row.kind === 'patch' && (row.text || row.files?.length));
           if (!change) throw new Error('当前会话没有可显示的差异。');
-          showPanel('diff', input.current, { title: '本轮差异', change });
+          showPanel('diff', input.current, { title: '最近一次会话补丁', change });
           return true;
         }
         if (args) throw new Error('用法 /diff 或 /diff turn');
