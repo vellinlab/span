@@ -11,14 +11,33 @@ const [candidate, baseline, screenshot] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const clockTicks = linux ? Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' })) : undefined;
 
-async function rendererStats(pid) {
-  if (!linux) return {};
+async function processStats(pid) {
   const memory = await readFile(`/proc/${pid}/smaps_rollup`, 'utf8');
-  const get = name => Number(memory.match(new RegExp('^' + name + ':\\s+(\\d+)', 'm'))[1]);
+  const get = name => {
+    const value = memory.match(new RegExp(`^${name}:\\s+(\\d+)`, 'm'))?.[1];
+    return value === undefined ? undefined : Number(value);
+  };
   const processStat = await readFile(`/proc/${pid}/stat`, 'utf8');
   const columns = processStat.slice(processStat.lastIndexOf(')') + 2).split(' ');
-  return { pssKiB: get('Pss'), rssKiB: get('Rss'), privateDirtyKiB: get('Private_Dirty'),
+  const pssKiB = get('Pss');
+  assert.ok(pssKiB > 0, `No proportional memory sample for Chromium process ${pid}`);
+  return { pssKiB, rssKiB: get('Rss'), privateDirtyKiB: get('Private_Dirty'),
+    anonymousPssKiB: get('Pss_Anon'), filePssKiB: get('Pss_File'), sharedPssKiB: get('Pss_Shmem'),
     cpuMs: (Number(columns[11]) + Number(columns[12])) * 1000 / clockTicks };
+}
+
+async function chromiumStartupStats(app, rendererPid) {
+  const processes = await app.evaluate(({ app }) => app.getAppMetrics().map(({ pid, type, serviceName }) =>
+    ({ pid, type, serviceName })));
+  assert.ok(processes.some(({ pid }) => pid === rendererPid), 'Capture the renderer for the first ready window');
+  return Promise.all(processes.map(async process => {
+    try {
+      return { ...process, ...await processStats(process.pid) };
+    } catch (error) {
+      if (process.pid === rendererPid || !['ENOENT', 'ESRCH'].includes(error.code)) throw error;
+      return { ...process, exitedDuringSampling: true };
+    }
+  }));
 }
 
 async function check(binary, label, display, firstOnDisplay, exercise) {
@@ -44,7 +63,8 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
       viewport: [innerWidth, innerHeight],
     }));
     const rendererPid = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getOSProcessId());
-    const renderer = await rendererStats(rendererPid);
+    const chromiumProcesses = linux ? await chromiumStartupStats(app, rendererPid) : undefined;
+    const renderer = chromiumProcesses?.find(({ pid }) => pid === rendererPid) ?? {};
 
     // Enabling Debugger reports previously parsed scripts without needing instrumentation in either renderer.
     const cdp = await page.context().newCDPSession(page);
@@ -84,7 +104,7 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
       assert.ok([...modules].some(url => /\/pi-/.test(url)));
     }
     assert.deepEqual(errors, []);
-    return { label, firstOnDisplay, ...paint, renderer, scripts,
+    return { label, firstOnDisplay, ...paint, renderer, chromiumProcesses, scripts,
       scriptBytes: scripts.reduce((sum, script) => sum + script.bytes, 0) };
   } finally {
     await app?.close();
