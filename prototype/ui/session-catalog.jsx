@@ -4,11 +4,14 @@ import { mergeSessions, sessionKey, sessionTitle } from './agent.js';
 import { catalogRowHeight, useCatalogViewport } from './catalog-viewport.js';
 import { directoryName, workspacePathKey } from './workspace-path.js';
 
-function catalogRows(sessions, project, remote, archived, filter, collapsed, matches) {
+function catalogRows(sessions, project, projectIdentity, remote, archived, filter, collapsed, matches) {
   const groups = new Map();
+  const projectKey = projectIdentity && workspacePathKey(project);
+  const identityKey = projectIdentity && workspacePathKey(projectIdentity);
   function groupFor(workspace) {
-    const key = workspacePathKey(workspace);
-    if (!groups.has(key)) groups.set(key, { workspace, entries: [] });
+    const spelling = workspacePathKey(workspace);
+    const key = spelling === projectKey ? identityKey : spelling;
+    if (!groups.has(key)) groups.set(key, { workspace: key === identityKey ? projectIdentity : workspace, entries: [] });
     return groups.get(key);
   }
   if (project && !archived && !filter && (!remote || !sessions.length)) groupFor(project);
@@ -49,7 +52,7 @@ const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selec
 });
 
 export const SessionCatalog = memo(function SessionCatalog({
-  sessions, project, remote, scope, archived, query, selected, disabled, more, searchResult, open, loadMore, scrollPosition,
+  sessions, project, projectIdentity, remote, scope, archived, query, selected, disabled, more, searchResult, open, loadMore, scrollPosition,
 }) {
   const filter = query.toLocaleLowerCase();
   const scrollScope = JSON.stringify([scope, archived, query]);
@@ -60,8 +63,8 @@ export const SessionCatalog = memo(function SessionCatalog({
   const [activeKey, setActiveKey] = useState(null);
   const keys = collapsed[view]?.scope === scrollScope ? collapsed[view].keys : undefined;
   const matches = searchResult?.items;
-  const rows = useMemo(() => catalogRows(sessions, project, remote, archived, filter, keys, matches),
-    [sessions, project, remote, archived, filter, keys, matches]);
+  const rows = useMemo(() => catalogRows(sessions, project, projectIdentity, remote, archived, filter, keys, matches),
+    [sessions, project, projectIdentity, remote, archived, filter, keys, matches]);
   const indexes = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows]);
   const active = indexes.get(activeKey);
   const { scroll, band, offsets, ensureVisible, visibleRange } = useCatalogViewport(rows, indexes, scrollScope, scrollPosition);

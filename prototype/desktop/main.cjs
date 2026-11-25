@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ClipboardItem, clipboard, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
-const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises');
+const { mkdir, mkdtemp, realpath, rm, writeFile } = require('node:fs/promises');
 const { createInterface } = require('node:readline');
 const path = require('node:path');
 const { prepareKilo, kiloGoal } = require('./kilo-goals.cjs');
@@ -184,10 +184,17 @@ ipcMain.handle('span:workspace', (event, choose) => {
   if (!choose) return {
     cwd: demo ? path.join(root, 'sample') : app.getPath('home'),
     demo,
+    windows: process.platform === 'win32',
     terminalRenderer: app.commandLine.getSwitchValue('terminal-renderer') === 'dom' ? 'dom' : 'auto',
   };
   return dialog.showOpenDialog(window, { properties: ['openDirectory'] })
     .then(result => result.filePaths[0] ?? null);
+});
+
+ipcMain.handle('span:workspace-identity', async (event, directory) => {
+  if (!trusted(event) || typeof directory !== 'string' || !path.isAbsolute(directory)
+    || directory.length > 8192 || directory.includes('\0')) throw new Error('无效的工作区路径。');
+  return process.platform === 'win32' ? realpath(directory).catch(() => directory) : directory;
 });
 
 ipcMain.handle('span:choose-files', async event => {

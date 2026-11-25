@@ -16,6 +16,7 @@ ipcRenderer.on('span:event', (_event, packet) => {
 contextBridge.exposeInMainWorld('span', {
   request: (method, params = {}) => ipcRenderer.invoke('span:request', method, params),
   workspace: (choose = false) => ipcRenderer.invoke('span:workspace', choose),
+  workspaceIdentity: directory => ipcRenderer.invoke('span:workspace-identity', directory),
   chooseFiles: () => ipcRenderer.invoke('span:choose-files'),
   stageScreenshot: bytes => ipcRenderer.invoke('span:stage-screenshot', bytes),
   discardScreenshot: file => ipcRenderer.invoke('span:discard-screenshot', file),

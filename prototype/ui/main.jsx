@@ -49,6 +49,7 @@ function workspaceRelativePath(cwd, filename) {
 
 function App() {
   const [config, setConfig] = useState(null);
+  const [workspaceIdentity, setWorkspaceIdentity] = useState(null);
   const [backend, setBackend] = useState('codex');
   const [target, setTarget] = useState('');
   const [connectionCwd, setConnectionCwd] = useState('');
@@ -149,6 +150,16 @@ function App() {
   const commands = agentCommands(api, work.models, work.options);
   const suggestions = suggesting && !files.length && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
     ? commands.filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
+  const windowsWorkspace = config?.windows && !config.ssh && !config.demo ? config.cwd : undefined;
+
+  useEffect(() => {
+    if (!windowsWorkspace) return;
+    let current = true;
+    window.span.workspaceIdentity(windowsWorkspace).then(identity => {
+      if (current) setWorkspaceIdentity({ cwd: windowsWorkspace, identity });
+    }).catch(() => {});
+    return () => { current = false; };
+  }, [windowsWorkspace]);
 
   useEffect(() => {
     if (!composerFeedback) return;
@@ -819,6 +830,7 @@ function App() {
             disabled={running || !config} onClick={chooseWorkspace}><FolderOpen size={16} /></button>
         </div>}
         {tab === 'sessions' && <SessionCatalog sessions={sessions} project={config && (config.ssh || cwd || '工作区')}
+          projectIdentity={windowsWorkspace && workspaceIdentity?.cwd === cwd ? workspaceIdentity.identity : undefined}
           remote={Boolean(config?.ssh)} scope={JSON.stringify([config?.backend, config?.ssh || cwd])}
           archived={work.archived} query={catalogQuery} selected={refKey}
           disabled={running || loading || connection !== 'ready'} more={Boolean(catalogSearch ? catalogSearch.cursor : work.sessionCursor)}
