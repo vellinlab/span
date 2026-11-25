@@ -902,8 +902,10 @@ function App() {
           }}>
           <header>
             {preview.kind === 'image' ? <Image size={16} aria-hidden="true" /> : <FileText size={16} aria-hidden="true" />}
-            <strong title={preview.path}><FileReferenceName name={previewName} path={preview.path} /></strong>
-            {previewDirectory && <span className="preview-directory" title={previewDirectory}>{previewDirectory}</span>}
+            <div className="preview-location">
+              <strong><FileReferenceName name={previewName} path={preview.path} /></strong>
+              {previewDirectory && <span className="preview-directory" title={previewDirectory}>{previewDirectory}</span>}
+            </div>
             <button className="icon-button right preview-close" aria-label="关闭预览" title="关闭预览" onClick={closePreview}><X size={16} /></button>
           </header>
           <div className="preview-content" key={preview.scope} data-kind={preview.kind} tabIndex={0}>

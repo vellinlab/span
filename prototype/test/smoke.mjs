@@ -1132,10 +1132,20 @@ try {
   const previewContent = preview.locator('.preview-content');
   const previewTitle = preview.locator('header strong');
   const previewFolder = preview.locator('.preview-directory');
+  const checkPreviewHeader = async () => {
+    assert.ok(await previewFolder.evaluate(folder => {
+      const name = folder.previousElementSibling;
+      const nameBounds = name.getBoundingClientRect();
+      const folderBounds = folder.getBoundingClientRect();
+      return nameBounds.left === folderBounds.left && nameBounds.bottom <= folderBounds.top &&
+        folder.scrollWidth === folder.clientWidth;
+    }), 'The nested folder uses a separate line below the file title and fits without clipping');
+  };
   await preview.getByRole('heading', { name: '窗口布局复核' }).waitFor();
   assert.equal(await reviewFile.getAttribute('aria-current'), 'true');
   assert.equal(await previewTitle.textContent(), reviewName);
   assert.equal(await previewFolder.textContent(), 'workbench-guides/interface-review');
+  await checkPreviewHeader();
   assert.ok(await reviewFile.evaluate(element => {
     const name = element.querySelector('.file-reference-name');
     const start = name.firstElementChild;
@@ -1161,6 +1171,7 @@ try {
   await page.waitForFunction(() => innerWidth === 1240 && innerHeight === 840);
   await reviewFile.press('Enter');
   await preview.getByRole('heading', { name: '窗口布局复核' }).waitFor();
+  await checkPreviewHeader();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-file-location-wide.png') });
   await upDirectory.press('Enter');
   await upDirectory.press('Enter');
