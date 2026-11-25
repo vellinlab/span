@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, ChevronRight, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
@@ -721,12 +721,11 @@ export function AgentMenu({ work, onSelect }) {
   </div>;
 }
 
-export function GoalStrip({ goal, capability, expanded, toggle }) {
-  if (!goal) return null;
-  const status = goal.status === 'active' && capability?.activeWithoutTurn ? '已启用' : statuses[goal.status];
-  return <button type="button" className="goal-strip" title={goal.objective} aria-expanded={expanded}
-    aria-controls={expanded ? 'goal-panel' : undefined} data-status={goal.status} onClick={toggle}>
-    <Goal size={16} className="goal-icon" /><span>{goal.objective}</span><small>{status}</small>
+export const GoalStrip = memo(function GoalStrip({ objective, status, activeWithoutTurn, expanded, toggle }) {
+  const label = status === 'active' && activeWithoutTurn ? '已启用' : statuses[status];
+  return <button type="button" className="goal-strip" title={objective} aria-expanded={expanded}
+    aria-controls={expanded ? 'goal-panel' : undefined} data-status={status} onClick={toggle}>
+    <Goal size={16} className="goal-icon" /><span>{objective}</span><small>{label}</small>
     <ChevronDown size={13} className="goal-chevron" />
   </button>;
-}
+});

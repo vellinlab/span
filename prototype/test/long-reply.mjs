@@ -443,6 +443,12 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       desktop = await observeDesktopDraft(app, area);
       sampleInput = await prepareInputSampling(app, page, composer, area, desktop);
     }
+    const draft = !sampleInput && '推理更新期间保留的草稿';
+    if (draft) {
+      await composer.fill(draft);
+      await composer.press('End');
+      await composer.press('Shift+ArrowLeft');
+    }
     // The fixed strip changes the timeline height. Let its resize observer
     // settle before leaving the bottom to inspect an older message.
     await settleFrame(page);
@@ -517,6 +523,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     assert.ok(connected && updates >= 20, `Only ${updates} updates reached the original strip.`);
     assert.equal(await position(), before);
     assert.deepEqual(await strip.boundingBox(), geometry);
+    if (draft) assert.deepEqual(await composer.evaluate(element => ({
+      value: element.value, focused: element === document.activeElement,
+      start: element.selectionStart, end: element.selectionEnd,
+    })), { value: draft, focused: true, start: draft.length - 1, end: draft.length });
     assert.ok(await goal.evaluate(element => {
       const goal = element.getBoundingClientRect();
       const strip = element.previousElementSibling.getBoundingClientRect();

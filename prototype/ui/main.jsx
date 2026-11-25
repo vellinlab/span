@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
@@ -48,6 +48,11 @@ function workspaceRelativePath(cwd, filename) {
   return compare(path).startsWith(compare(root)) ? path.slice(root.length) : null;
 }
 
+const ComposerInput = memo(function ComposerInput({ input, value, placeholder, suggest, change, keyDown, paste }) {
+  return <textarea ref={input} rows={1} placeholder={placeholder} aria-label="消息" value={value}
+    onFocus={() => suggest(true)} onBlur={() => suggest(false)} onChange={change} onKeyDown={keyDown} onPaste={paste} />;
+});
+
 function App() {
   const [config, setConfig] = useState(null);
   const [workspaceIdentity, setWorkspaceIdentity] = useState(null);
@@ -94,6 +99,7 @@ function App() {
   const reasoningHadFocus = useRef(false);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
+  const composerActions = useRef(null);
   const commandSelection = useRef(null);
   const closeTerminal = useCallback(() => setTerminal(false), []);
   const report = useCallback(error => setError(error.message), []);
@@ -148,9 +154,8 @@ function App() {
   const canAttach = localFiles && connection === 'ready' && !loading && !interaction && (!running || canSteer || canQueue);
   const pastingScreenshot = pasting === composerKey;
   const canSendDraft = Boolean(draft.trim() || files.length);
-  const commands = agentCommands(api, work.models, work.options);
   const suggestions = suggesting && !files.length && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
-    ? commands.filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
+    ? agentCommands(api, work.models, work.options).filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
   const windowsWorkspace = config?.windows && !config.ssh && !config.demo ? config.cwd : undefined;
 
   useEffect(() => {
@@ -396,9 +401,22 @@ function App() {
   const latestWork = useRef();
   latestWork.current = { newSession, openSearch, openSession, openMemberTrace, list: work.list, archived: work.archived, catalogSearch,
     composerKey, draft, visibleDraft, files, canAttach, canSendImages };
+  // Keep memoized controls bound to the conversation represented by the committed DOM.
+  useLayoutEffect(() => {
+    composerActions.current = { setDraft, textareaKey, pasteScreenshot, toggleReasoningPanel, toggleGoalPanel };
+  });
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openTrace = useCallback((member, trigger) => latestWork.current.openMemberTrace(member, trigger), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
+  const changeDraft = useCallback(event => {
+    composerActions.current.setDraft(event.target.value);
+    setSuggesting(true);
+    setCommandIndex(0);
+  }, []);
+  const onDraftKey = useCallback(event => composerActions.current.textareaKey(event), []);
+  const onDraftPaste = useCallback(event => composerActions.current.pasteScreenshot(event), []);
+  const onReasoningToggle = useCallback(event => composerActions.current.toggleReasoningPanel(event.currentTarget), []);
+  const onGoalToggle = useCallback(event => composerActions.current.toggleGoalPanel(event.currentTarget), []);
   const loadCatalogPage = useCallback(() => {
     const { list, archived, catalogSearch } = latestWork.current;
     if (catalogSearch) catalogSearch.load?.();
@@ -426,6 +444,16 @@ function App() {
     setPanel({ kind, id, focus: Boolean(trigger), ...options });
     setSuggesting(false);
     if (kind === 'usage') work.refreshUsage().catch(report);
+  }
+
+  function toggleReasoningPanel(trigger) {
+    if (reasoningExpanded) closePanel();
+    else showPanel('reasoning', trigger, { sessionKey: refKey, turnId: liveReasoning.turnId });
+  }
+
+  function toggleGoalPanel(trigger) {
+    if (panel?.kind === 'goal') closePanel();
+    else showPanel('goal', trigger);
   }
 
   function showExtensions(kind, trigger, options = {}) {
@@ -634,8 +662,8 @@ function App() {
     const scope = work.timelineScope();
     const followLatest = !running || transcriptIsAtEnd(scroll.current);
     setSuggesting(false);
-    const command = text.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
-    const known = command && (commands.some(([name]) => name === command[1]) ||
+    const command = text.startsWith('/') && text.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
+    const known = command && (agentCommands(api, work.models, work.options).some(([name]) => name === command[1]) ||
       (command[1] === '/diff' && rows.some(row => row.kind === 'patch')));
     let dispatched = false;
     try {
@@ -941,11 +969,9 @@ function App() {
               <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host}
                 focusTarget={interactionRegion} returnFocus={input} />
               {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningExpanded} hadFocus={reasoningHadFocus}
-                toggle={event => reasoningExpanded ? closePanel() : showPanel('reasoning', event.currentTarget, {
-                  sessionKey: refKey, turnId: liveReasoning.turnId,
-                })} />}
-              <GoalStrip goal={goal} capability={api?.goal} expanded={panel?.kind === 'goal'}
-                toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
+                toggle={onReasoningToggle} />}
+              {goal && <GoalStrip objective={goal.objective} status={goal.status} activeWithoutTurn={api?.goal?.activeWithoutTurn}
+                expanded={panel?.kind === 'goal'} toggle={onGoalToggle} />}
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
                 {files.length > 0 && <ul className="composer-files" aria-label="待发送的附件">
                   {files.map(file => <li className="file-reference" key={file.path}>
@@ -959,14 +985,9 @@ function App() {
                     }}><X size={13} /></button>
                   </li>)}
                 </ul>}
-                <textarea ref={input} rows={1} placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '描述要完成的任务…'}
-                  aria-label="消息" value={draft} onFocus={() => setSuggesting(true)} onBlur={() => setSuggesting(false)}
-                  onPaste={pasteScreenshot}
-                  onChange={event => {
-                    setDraft(event.target.value);
-                    setSuggesting(true);
-                    setCommandIndex(0);
-                  }} onKeyDown={textareaKey} />
+                <ComposerInput input={input} value={draft}
+                  placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '描述要完成的任务…'}
+                  suggest={setSuggesting} change={changeDraft} keyDown={onDraftKey} paste={onDraftPaste} />
                 <div className="composer-bar">
                   {localFiles && <button type="button" className="icon-button composer-attach" aria-label="添加本机文件"
                     title={canSendImages ? '添加本机文件，也可在输入框粘贴截图' : '添加本机文件'}
