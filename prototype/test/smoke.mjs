@@ -1066,6 +1066,12 @@ try {
   assert.equal(await failedCommand.locator('.tool-output').count(), 0);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  const terminalPanel = page.locator('section.terminal-panel');
+  const showTerminalAfterReview = await terminalToggle.getAttribute('aria-pressed') === 'true';
+  if (showTerminalAfterReview) {
+    await terminalToggle.click();
+    await terminalPanel.waitFor({ state: 'hidden' });
+  }
   await waitForTranscriptEnd();
   const messageType = heading => {
     const prose = heading.closest('.prose');
@@ -1075,12 +1081,13 @@ try {
       headingSize: parseFloat(getComputedStyle(heading).fontSize),
       lineHeight: parseFloat(getComputedStyle(prose).lineHeight),
       inView: block.top >= viewport.top && block.bottom <= viewport.bottom,
+      offset: block.top - viewport.top,
     };
   };
   const progressType = await progressHeading.evaluate(messageType);
   const answerType = await groupAnswer.evaluate(messageType);
   assert.ok(progressType.inView && answerType.inView && progressType.headingSize < answerType.headingSize &&
-    progressType.lineHeight < answerType.lineHeight, 'The progress and answer should fit together with a clear reading hierarchy.');
+    progressType.lineHeight < answerType.lineHeight, `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
   assert.ok(await progressHeading.evaluate(heading => {
     const prose = heading.closest('.prose');
     const outer = prose.querySelector(':scope > ul');
@@ -1107,6 +1114,11 @@ try {
     await progressBlock.dispose();
     await waitForTranscriptEnd();
     await page.screenshot({ path: screenshot.replace(/\.png$/, '-commentary.png') });
+  }
+  if (showTerminalAfterReview) {
+    await terminalToggle.click();
+    await terminalPanel.waitFor();
+    await waitForTranscriptEnd();
   }
   assert.ok(await failureSummary.evaluate(summary => {
     const title = summary.querySelector('.card-title').getBoundingClientRect();
