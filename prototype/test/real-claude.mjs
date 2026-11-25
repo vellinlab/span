@@ -270,7 +270,11 @@ try {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent-approval.png') });
   await openChild().click();
   const childTranscript = () => page.getByTestId('subagent-transcript');
-  await childTranscript().getByText(childPrompt, { exact: true }).waitFor();
+  const delegatedPrompt = childTranscript().getByText(childPrompt, { exact: true });
+  await delegatedPrompt.waitFor();
+  const promptOffset = await delegatedPrompt.evaluate(element =>
+    element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top);
+  assert.ok(promptOffset >= 0 && promptOffset <= 36, `Short child transcripts should start under the header (${promptOffset}px)`);
   await approvalCard.getByRole('button', { name: '仅允许这次', exact: true }).press('Enter');
   await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
   assert.match(childToolResult ?? '', /span-claude-child/);
