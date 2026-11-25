@@ -158,6 +158,36 @@ def trace_scroll(app, browser, chromium_roles, area):
         mouse(button, False)
         screen.flush()
 
+    def observe_wheel(direction, target):
+        before = pixels()
+        while screen.pending_events():
+            screen.next_event()
+        sent = clock()
+        sent_monotonic = time.monotonic()
+        roll(direction)
+        deadline = sent_monotonic + .55
+        first_pixel = exact_pixel = None
+        captures = 0
+        while exact_pixel is None and time.monotonic() < deadline:
+            if not screen.pending_events():
+                select([screen], [], [], max(0, deadline - time.monotonic()))
+                continue
+            event = screen.next_event()
+            if event.type != screen.extension_event.DamageNotify:
+                continue
+            rect = event.area
+            if rect.x >= x + width or rect.x + rect.width <= x or rect.y >= y + height or rect.y + rect.height <= y:
+                continue
+            rendered = pixels()
+            captured = clock()
+            captures += 1
+            if first_pixel is None and rendered != before:
+                first_pixel = captured - sent
+            if rendered == target and rendered != before:
+                exact_pixel = captured - sent
+        return sent_monotonic, {"sent_at": sent, "direction": direction, "first_pixel_ms": first_pixel,
+                                "expected_pixel_ms": exact_pixel, "captures": captures}
+
     directions = [-1] * 6 + [1] * 6
     directions *= 3
     # Replay the same real wheel path after the virtualized rows have been measured.
@@ -181,49 +211,31 @@ def trace_scroll(app, browser, chromium_roles, area):
                zip([calibration_top, *offsets], offsets, directions)), "Scroll calibration must reach each next offset"
     assert all(left != right for left, right in zip([initial, *reference], reference)), "Scroll calibration must move visible text"
 
-    initial_state = browser_trace("start")
+    browser_trace("start")
     time.sleep(.18)
     assert pixels() == initial, "The scroll replay starts on different desktop pixels"
     screen.damage_query_version()
     watched = root.damage_create(damage.DamageReportRawRectangles)
     screen.sync()
-    start = stats(app.pid, chromium_roles)
-    start_display = process_cpu_ms(display_pid)
     samples = []
-    intervals = (31, 45, 76)
+    # Keep identical wheel and terminal workloads when the animation changes.
+    intervals = (254, 293, 331)
     try:
+        for direction, target in ((-1, reference[0]), (1, initial)):
+            _, warm = observe_wheel(direction, target)
+            assert warm["expected_pixel_ms"] is not None and warm["captures"] > 0, "X11 must report correct wheel frames"
+        initial_state = browser_trace("start")
+        start = stats(app.pid, chromium_roles)
+        start_display = process_cpu_ms(display_pid)
+        started = time.monotonic()
         for index, (direction, target) in enumerate(zip(directions, reference)):
-            before = pixels()
-            while screen.pending_events():
-                screen.next_event()
-            sent = clock()
-            roll(direction)
-            end = time.monotonic() + .55
-            first_pixel = exact_pixel = None
-            captures = 0
-            while exact_pixel is None and time.monotonic() < end:
-                if not screen.pending_events():
-                    select([screen], [], [], max(0, end - time.monotonic()))
-                    continue
-                event = screen.next_event()
-                if event.type != screen.extension_event.DamageNotify:
-                    continue
-                rect = event.area
-                if rect.x >= x + width or rect.x + rect.width <= x or rect.y >= y + height or rect.y + rect.height <= y:
-                    continue
-                rendered = pixels()
-                captured = clock()
-                captures += 1
-                if first_pixel is None and rendered != before:
-                    first_pixel = captured - sent
-                if rendered == target and rendered != before:
-                    exact_pixel = captured - sent
             gap = intervals[(index + index // 3) % len(intervals)]
-            samples.append({"sent_at": sent, "direction": direction, "pause_after_ms": gap,
-                            "first_pixel_ms": first_pixel, "expected_pixel_ms": exact_pixel, "captures": captures})
-            time.sleep(gap / 1000)
+            sent_monotonic, observed = observe_wheel(direction, target)
+            samples.append({**observed, "wheel_interval_ms": gap})
+            time.sleep(max(0, sent_monotonic + gap / 1000 - time.monotonic()))
     finally:
         screen.damage_destroy(watched)
+    elapsed = (time.monotonic() - started) * 1000
     end_display = process_cpu_ms(display_pid)
     end = stats(app.pid, chromium_roles)
     final_state = browser_trace("finish")
@@ -249,10 +261,11 @@ def trace_scroll(app, browser, chromium_roles, area):
             "renderer_cpu_ms": end["by_role"]["renderer"]["cpu_ms"] - start["by_role"]["renderer"]["cpu_ms"],
             "app_cpu_ms": end["tree_cpu_ms"] - start["tree_cpu_ms"], "xvfb_cpu_ms": end_display - start_display,
             "renderer_pss_kib": end["by_role"]["renderer"]["Pss"], "matched": len(verified),
-            "terminal_lines": terminal_lines, "samples": samples}
+            "terminal_lines": terminal_lines, "elapsed_ms": elapsed, "initial_scroll_top": initial_state["top"],
+            "captures": sum(entry["captures"] for entry in samples), "samples": samples}
 
 
-def benchmark(name, binary, scroll_trace=False):
+def benchmark(name, binary, scroll_trace=False, animate_scroll=True):
     electron = scroll_trace or name == "prototype"
     with tempfile.TemporaryDirectory(prefix="span-desktop-") as tmp:
         workspace = Path(tmp)
@@ -265,6 +278,8 @@ def benchmark(name, binary, scroll_trace=False):
                    PATH=f"{tmp}:{os.environ['PATH']}")
         args = ["--demo", "--no-sandbox", "--disable-gpu", "--terminal-renderer=dom", "--remote-debugging-port=0",
                 f"--user-data-dir={workspace / 'profile'}"] if electron else []
+        if not animate_scroll:
+            args.append("--disable-smooth-scrolling")
         command = ('touch "$HOME/span-terminal-ready"; n=0; while :; do '
                    'printf \'span-bench-%04d\\n\' "$n"; n=$((n+1)); sleep .055; done')
         with open(workspace / "app.log", "w+") as log, subprocess.Popen(
@@ -485,16 +500,20 @@ def catalog_benchmark(name, binary):
 report = {"runner": "AlmaLinux 8 / Xvfb 1440×960 / Openbox / one constrained CPU / software rendering",
           "runs": []}
 if WIDGET_SOCKET == "--scroll-trace":
-    base = ("baseline", "/artifacts/terminal-window-baseline/span-preview")
-    report["baseline_renderer"] = Path("/artifacts/terminal-window-baseline-commit.txt").read_text().strip()
+    report["comparison"] = "Same Electron binary, default or --disable-smooth-scrolling"
     os.sched_setaffinity(0, {max(os.sched_getaffinity(0))})
-    for target in (base, NEXT, NEXT, base):
-        run = benchmark(*target, scroll_trace=True)
+    for animate in (True, False, False, True):
+        name = "default" if animate else "animation-disabled"
+        run = benchmark(name, PREVIEW, scroll_trace=True, animate_scroll=animate)
         report["runs"].append(run)
         Path(OUTPUT).write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps({key: value for key, value in run.items() if key != "samples"}), flush=True)
     if any(run["matched"] < 30 for run in report["runs"]):
         raise SystemExit("Too few scrolls reached the calibrated offset and pixels.")
+    paths = [[entry["expected_scroll_top"] - run["initial_scroll_top"] for entry in run["samples"]]
+             for run in report["runs"]]
+    if any(abs(offset - reference) > 1 for path in paths[1:] for offset, reference in zip(path, paths[0])):
+        raise SystemExit("The two scrolling modes did not traverse equivalent positions.")
 elif WIDGET_SOCKET == "--catalog":
     base = ("baseline", "/artifacts/catalog-baseline/span-preview")
     report["baseline_renderer"] = Path("/artifacts/catalog-baseline-commit.txt").read_text().strip()
