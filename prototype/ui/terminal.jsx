@@ -84,11 +84,18 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       if (!queuedBytes) return;
       clearTimeout(outputTimer);
       outputTimer = undefined;
-      const batch = queuedOutput;
+      let batch = queuedOutput[0];
+      if (queuedOutput.length > 1) {
+        batch = new Uint8Array(queuedBytes);
+        let offset = 0;
+        for (const bytes of queuedOutput) {
+          batch.set(bytes, offset);
+          offset += bytes.length;
+        }
+      }
       queuedOutput = [];
       queuedBytes = 0;
-      // Keep the PTY chunks in order and let xterm parse this batch before repainting its rows.
-      for (const bytes of batch) writeOutput(bytes);
+      writeOutput(batch);
     }
     const unsubscribe = window.span.onEvent(packet => {
       if (packet.generation !== source) return;
@@ -98,13 +105,14 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
         const continuous = now - lastOutput < OUTPUT_GAP_MS;
         lastOutput = now;
         // Show the first output and interactive echo immediately. Coalesce only continuous DOM output.
-        if (!continuous || now < prioritizeInputUntil || host.dataset.renderer === 'webgl') {
-          flushOutput();
+        const immediate = !continuous || now < prioritizeInputUntil || host.dataset.renderer === 'webgl';
+        if (immediate && !queuedBytes) {
           writeOutput(bytes);
         } else {
           queuedOutput.push(bytes);
           queuedBytes += bytes.length;
-          if (queuedBytes >= ACK_BYTES) flushOutput();
+          // xterm can parse the first write after a key synchronously. Include the reply in that write.
+          if (immediate || queuedBytes >= ACK_BYTES) flushOutput();
           else outputTimer ??= setTimeout(flushOutput, OUTPUT_BATCH_MS);
         }
       }

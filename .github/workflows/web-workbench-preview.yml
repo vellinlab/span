@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  TERMINAL_RENDERER_BASELINE: ca5959c94a8bfe1db2b42387b95431621b2687fc
+  TERMINAL_RENDERER_BASELINE: 7b6b7c8dbde37521cf565afc3c4b05966adb96a9
 
 concurrency:
   group: span-web-workbench-${{ github.ref }}

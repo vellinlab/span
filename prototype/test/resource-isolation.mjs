@@ -53,7 +53,19 @@ async function echoSample(app, page, key) {
   await page.keyboard.press(key);
   const result = await app.evaluate(() => globalThis.spanTerminalEcho.result);
   assert.ok(Number.isFinite(result.ms), `No matching echo for ${key} after ${result.frames} frames (best match ${result.bestMatch})`);
-  return result.ms;
+  const stages = await page.evaluate(() => {
+    const probe = window.spanTerminalStages;
+    return probe ? probe.sample() ?? {} : null;
+  });
+  if (stages) {
+    assert.equal(stages.key, key);
+    assert.ok(Number.isFinite(stages.keyToDomMs), `No DOM update for ${key}`);
+    if (linux) {
+      assert.ok(Number.isFinite(stages.keyToPacketMs), `No PTY echo packet for ${key}`);
+      assert.ok(stages.keyToDomMs >= stages.keyToPacketMs);
+    }
+  }
+  return { paintedMs: result.ms, ...stages };
 }
 
 async function prepareEchoFrames(app, page) {
@@ -109,6 +121,44 @@ async function prepareEchoFrames(app, page) {
   await echoSample(app, page, 'b');
 }
 
+async function observeEchoStages(page) {
+  await page.evaluate(trackPackets => {
+    const row = document.querySelector('.xterm-rows > div');
+    const listeners = new AbortController();
+    let sample;
+    let startedAt;
+    let tail;
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'a' && event.key !== 'b') return;
+      startedAt = performance.now();
+      sample = { key: event.key };
+      tail = '';
+    }, { capture: true, signal: listeners.signal });
+    const observer = new MutationObserver(() => {
+      if (sample && sample.keyToDomMs === undefined && row.textContent.trim() === `span_echo_${sample.key}`) {
+        sample.keyToDomMs = performance.now() - startedAt;
+      }
+    });
+    observer.observe(row, { childList: true });
+    // Linux PTYs preserve the fixture's bytes. ConPTY can emit screen diffs instead of the complete text.
+    const unsubscribe = trackPackets ? window.span.onEvent(packet => {
+      if (!sample || sample.keyToPacketMs !== undefined || packet.event !== 'terminal') return;
+      const marker = `span_echo_${sample.key}`;
+      const text = tail + atob(packet.data);
+      if (text.includes(marker)) sample.keyToPacketMs = performance.now() - startedAt;
+      tail = text.slice(-(marker.length - 1));
+    }) : undefined;
+    window.spanTerminalStages = {
+      sample: () => sample,
+      stop() {
+        observer.disconnect();
+        unsubscribe?.();
+        listeners.abort();
+      },
+    };
+  }, linux);
+}
+
 async function terminalPalette(page, screenshot, variant) {
   await page.keyboard.press('p');
   await page.locator('.xterm-rows').getByText('REVERSE', { exact: true }).waitFor();
@@ -142,26 +192,28 @@ async function terminalInteraction(app, page, screenshot, variant, recordEcho) {
   await terminalLine(page, `"${process.execPath}" "${script}"`, 'span_echo_ready');
   console.log('The raw terminal fixture is ready. Capturing reference pixels.');
   await prepareEchoFrames(app, page);
+  await observeEchoStages(page);
   console.log('The frame observer matched both reference keys. Measuring idle and streaming echo.');
-  const idleMs = [];
+  const idle = [];
   for (const key of 'abababab') {
     await delay(165);
-    idleMs.push(await echoSample(app, page, key));
+    idle.push(await echoSample(app, page, key));
   }
   await page.keyboard.press('g');
   await page.waitForFunction(() => document.querySelector('.xterm-rows').innerText.includes('span_interaction_3'),
     null, { timeout: interactionTimeoutMs });
-  const streamingMs = [];
-  for (const key of 'abababababab') {
-    await delay(165 + streamingMs.length % 3 * 16);
-    streamingMs.push(await echoSample(app, page, key));
+  const streaming = [];
+  for (const key of 'ab'.repeat(12)) {
+    await delay(150 + streaming.length % 5 * 19);
+    streaming.push(await echoSample(app, page, key));
   }
+  await page.evaluate(() => window.spanTerminalStages.stop());
   const frames = await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].webContents.endFrameSubscription();
     return globalThis.spanTerminalEcho.frames;
   });
-  assert.ok(frames >= idleMs.length + streamingMs.length + 2);
-  await recordEcho({ idleMs, streamingMs, frames });
+  assert.ok(frames >= idle.length + streaming.length + 2);
+  await recordEcho({ idle, streaming, frames });
   assert.match(await page.locator('.xterm-rows').innerText(), /span_interaction_\d+/);
   const palette = await terminalPalette(page, screenshot, variant);
   await page.keyboard.press(linux ? 'q' : 'f');
@@ -338,14 +390,17 @@ for (const workload of ['idle', 'output', 'scroll', 'reflow', 'reflow', 'scroll'
   }
 }
 if (baselineBinary) {
-  for (const variant of ['candidate', 'baseline']) {
+  for (const [index, variant] of ['baseline', 'candidate', 'candidate', 'baseline'].entries()) {
+    const pair = Math.floor(index / 2) + 1;
     const executable = variant === 'baseline' ? baselineBinary : binary;
     const samples = await trial('interaction', variant, executable, async sample => {
-      report.interaction.push({ workload: 'interaction', variant, ...sample });
+      report.interaction.push({ workload: 'interaction', variant, pair, ...sample });
       await publish();
-      console.log(`${variant} terminal echo in ms: ${JSON.stringify({ idle: sample.idleMs, streaming: sample.streamingMs })}`);
+      const painted = sample.streaming.map(key => key.paintedMs).sort((a, b) => a - b);
+      const p95 = painted[Math.ceil(painted.length * 0.95) - 1];
+      console.log(`${variant} terminal echo pair ${pair}: streaming P95 ${p95.toFixed(1)} ms across ${painted.length} keys`);
     });
-    report.palettes.push({ variant, samples });
+    report.palettes.push({ variant, pair, samples });
     await publish();
   }
 }
