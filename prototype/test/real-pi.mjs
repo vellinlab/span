@@ -538,25 +538,21 @@ export default function (pi) {
     await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
     assert.equal(await trace.getAttribute('data-items'), '40');
     if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-trace-compact.png') });
-    // Mount the first visible turn without triggering the older page yet.
-    await trace.evaluate(element => { element.scrollTop = 410; });
-    const note = trace.getByText('核对历史任务 4', { exact: true });
-    await note.waitFor({ state: 'attached' });
-    assert.equal(await trace.getAttribute('data-items'), '40');
-    const before = await note.evaluate(element => {
-      const timeline = element.closest('.timeline');
-      timeline.scrollTop = 0;
-      return element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+    const scrollToStart = () => trace.evaluate(element => { element.scrollTop = 0; });
+    const topOffset = locator => locator.evaluate(async element => {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      return element.getBoundingClientRect().top - element.closest('.timeline').getBoundingClientRect().top;
     });
-    assert.ok(before >= 0 && before <= 40, `Expected to start reading the first turn, observed ${before}px.`);
+    await scrollToStart();
     await resumed.page.waitForFunction(() => document.querySelector('[data-testid="subagent-transcript"]')?.dataset.items === '48');
-    await resumed.page.waitForFunction(({ label, offset }) => {
-      const timeline = document.querySelector('[data-testid="subagent-transcript"]');
-      const note = [...timeline.querySelectorAll('.user-message')].find(element => element.textContent === label);
-      return note && Math.abs(note.getBoundingClientRect().top - timeline.getBoundingClientRect().top - offset) <= 2;
-    }, { label: '核对历史任务 4', offset: before });
-    await trace.evaluate(element => { element.scrollTop = 0; });
-    await trace.getByText('核对历史任务 0', { exact: true }).waitFor();
+    const anchored = await topOffset(trace.getByText('核对历史任务 4', { exact: true }));
+    await scrollToStart();
+    const atStart = await topOffset(trace.getByText('核对历史任务 0', { exact: true }));
+    // Both first rows have the same layout. Compare their rendered insets
+    // without assuming the virtualizer had mounted the old first row in advance.
+    assert.ok(atStart >= 0 && Math.abs(anchored - atStart) <= 2,
+      `Prepending moved the first previously loaded task from ${atStart}px to ${anchored}px.`);
     const memberLatest = resumed.page.getByRole('button', { name: '滚到子代理最新消息', exact: true });
     await memberLatest.waitFor();
     if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-history-compact.png') });
