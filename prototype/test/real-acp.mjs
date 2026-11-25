@@ -33,6 +33,7 @@ let toolResult;
 let gatewayError;
 let releaseReasoning;
 let releaseTool;
+let releaseGoalStep;
 const gateway = createServer(async (request, response) => {
   try {
     assert.equal(request.url, '/v1/chat/completions');
@@ -61,9 +62,15 @@ const gateway = createServer(async (request, response) => {
         emit({ content: goalAnswer });
         emit({}, 'stop', { prompt_tokens: 28, completion_tokens: 10, total_tokens: 38 });
       } else if (goalRequests < 2) {
-        emit({ reasoning_content: goalRequests++ ? goalResumedReasoning : goalReasoning });
-        await once(response, 'close');
-        return;
+        const firstStep = goalRequests++ === 0;
+        emit({ reasoning_content: firstStep ? goalReasoning : goalResumedReasoning });
+        if (!firstStep) {
+          await once(response, 'close');
+          return;
+        }
+        await new Promise(done => { releaseGoalStep = done; });
+        if (response.destroyed) return;
+        emit({}, 'stop', { prompt_tokens: 19, completion_tokens: 6, total_tokens: 25 });
       } else {
         emit({ tool_calls: [{ index: 0, id: 'span-goal-report', type: 'function',
           function: { name: 'goal_report', arguments: JSON.stringify({ status: 'complete', reason: goalReport }) } }] });
@@ -279,6 +286,10 @@ try {
     const goalPosition = await goalProgress.boundingBox();
     await page.getByPlaceholder('追加指令…').waitFor();
     await send(goalInstruction);
+    await page.getByTestId('transcript').getByText(goalInstruction, { exact: true }).waitFor();
+    // Kilo hands off between model steps. Keep the first step streaming while it admits the user prompt.
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    releaseGoalStep();
     await page.getByTestId('transcript').getByText(goalInstructionAnswer, { exact: true }).waitFor();
     await goalProgress.getByText(goalResumedReasoning, { exact: true }).waitFor();
     assert.deepEqual(await goalProgress.boundingBox(), goalPosition);
@@ -319,6 +330,7 @@ try {
 } finally {
   releaseReasoning?.();
   releaseTool?.();
+  releaseGoalStep?.();
   await app?.close().catch(() => {});
   gateway.closeAllConnections();
   gateway.close();
