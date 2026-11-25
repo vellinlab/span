@@ -1067,6 +1067,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   let branch = false;
   let rejectPrompt = false;
   let cancelTeamRead = false;
+  let disconnectDuringHistory = false;
   let switching;
   let olderReplyReads = 0;
   globalThis.window = { span: {
@@ -1105,6 +1106,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
           entry('question', 'two', 'user', 'Second'),
           entry('answer', 'question', 'assistant', text('Current branch')),
         ] });
+        if (disconnectDuringHistory) receive({ event: 'agent-closed', generation: source, data: 'Pi connection closed' });
       } else if (packet.type === 'prompt' && rejectPrompt) {
         emit({ id: packet.id, type: 'response', success: false, error: 'Pi refused the prompt' });
       } else if (packet.type === 'prompt') {
@@ -1277,7 +1279,11 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   const { history } = await reopening;
   assert.ok(history.cursor);
   assert.equal(olderReplyReads, 1);
-  receive({ event: 'agent-closed', generation: source, data: 'Pi connection closed' });
+  disconnectDuringHistory = true;
+  const interrupted = agent.sessions.resume(ref, 1);
+  await Promise.resolve();
+  await agent.interactions.respond('switch', { choice: 'yes' });
+  await assert.rejects(interrupted, /会话已切换/);
   assert.equal(events.at(-1).kind, 'disconnected');
   await assert.rejects(agent.sessions.history(ref, { cursor: history.cursor, limit: 1 }), /会话已切换/);
 });

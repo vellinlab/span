@@ -26,6 +26,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
   const commands = [];
   const tools = new Map();
   let current;
+  let viewVersion = 0;
   let snapshot;
   let run;
   let turnCount = 0;
@@ -65,6 +66,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
   }
 
   function clearSessionView(cancelDialogs = false) {
+    viewVersion++;
     closeTeamTrace?.();
     closeDialogs(cancelDialogs);
     current = undefined;
@@ -246,7 +248,10 @@ export function createPi({ generation, cwd, location, onEvent }) {
   }
 
   async function opened(limit, sessionCwd) {
-    state = await request('get_state');
+    const opening = ++viewVersion;
+    const received = await request('get_state');
+    if (opening !== viewVersion) throw new Error('Pi 会话已切换。');
+    state = received;
     const id = state.sessionId;
     if (typeof id !== 'string' || !id) throw new Error('Pi 未提供会话 ID。');
     if (state.sessionFile) searchPaths.set(id, state.sessionFile);
@@ -255,6 +260,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
     const result = { session: current, options: { model: modelId(state.model), effort: state.thinkingLevel } };
     if (limit !== undefined) {
       const response = await request('get_entries');
+      if (opening !== viewVersion) throw new Error('Pi 会话已切换。');
       const turns = piTurnEntries(response.entries ?? [], response.leafId);
       turnCount = turns.length;
       snapshot = { turns };
