@@ -298,7 +298,7 @@ try {
   await restoredCommand.locator('summary').press('Enter');
   const restoredOutput = restoredCommand.getByLabel('工具输出', { exact: true });
   await restoredOutput.waitFor();
-  assert.match(await restoredOutput.textContent(), /span-claude-child/);
+  assert.equal((await restoredOutput.textContent()).trim(), 'span-claude-child');
   if (screenshot) await page.screenshot({ path: screenshot });
   await childPanel().getByRole('button', { name: '关闭面板' }).press('Escape');
   await send('/agents');

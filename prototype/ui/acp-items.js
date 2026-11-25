@@ -6,6 +6,8 @@ const status = { pending: 'pending', in_progress: 'running', completed: 'complet
 const planStatus = { pending: 'pending', in_progress: 'running', completed: 'completed' };
 const textOf = block => block?.type === 'text' && typeof block.text === 'string' ? block.text : '';
 const visibleToUser = block => !block?.annotations?.audience?.length || block.annotations.audience.includes('user');
+const consoleStart = '```console\n';
+const consoleEnd = '\n```';
 
 export function acpOperation(tool = {}, cwd) {
   const input = tool.rawInput;
@@ -18,7 +20,7 @@ export function acpOperation(tool = {}, cwd) {
   return { kind: 'permissions', cwd };
 }
 
-export function acpTurn(id, notify, childSession) {
+export function acpTurn(id, notify, { childSession, consoleFences } = {}) {
   const reply = new Map();
   const tools = new Map();
   const members = new Map();
@@ -31,13 +33,13 @@ export function acpTurn(id, notify, childSession) {
     const key = 'tool:' + update.toolCallId;
     const current = { ...tools.get(key), ...update };
     tools.set(key, current);
-    const text = current.content?.map(part => textOf(part.content)).filter(Boolean).join('\n')
-      || current.rawOutput?.output || current.rawOutput?.error;
+    const content = current.content?.map(part => textOf(part.content)).filter(Boolean).join('\n');
+    const text = content || current.rawOutput?.output || current.rawOutput?.error;
     const toolStatus = status[current.status] ?? 'unknown';
     const final = toolStatus === 'completed' || toolStatus === 'failed';
     const command = current.rawInput?.command;
     const path = current.locations?.[0]?.path;
-    const child = childSession(current);
+    const child = childSession?.(current);
     const actor = child?.id ? { id: child.id, name: child.title } : undefined;
     if (actor && !members.has(actor.id)) {
       members.set(actor.id, actor);
@@ -47,8 +49,11 @@ export function acpTurn(id, notify, childSession) {
     const diff = current.rawInput?.diff ?? current.rawOutput?.metadata?.diff;
     if (current.kind === 'execute' && typeof command === 'string') {
       const exit = current.rawOutput?.metadata?.exit;
+      const wrapped = consoleFences && current.content?.length === 1 &&
+        content.startsWith(consoleStart) && content.endsWith(consoleEnd);
       item({ kind: 'command', id: key, command, cwd: path ?? current.rawInput?.workdir,
-        text, exitCode: Number.isInteger(exit) ? exit : undefined, status: toolStatus, ...owner }, final);
+        text: wrapped ? content.slice(consoleStart.length, -consoleEnd.length) : text,
+        exitCode: Number.isInteger(exit) ? exit : undefined, status: toolStatus, ...owner }, final);
     } else if (current.kind === 'edit' && typeof diff === 'string') {
       item({ kind: 'patch', id: key, files: path ? [{ path, diff }] : [], text: path ? undefined : diff,
         status: toolStatus, ...owner }, final);
@@ -122,7 +127,7 @@ function filePath(uri) {
   }
 }
 
-export function acpReplay(childSession) {
+export function acpReplay(projectionOptions) {
   const turns = [];
   let events = [];
   let projection;
@@ -150,7 +155,7 @@ export function acpReplay(childSession) {
   function beginTurn() {
     saveTurn();
     id = acpTurnId(turns.length);
-    projection = acpTurn(id, event => events.push(event), childSession);
+    projection = acpTurn(id, event => events.push(event), projectionOptions);
   }
   return {
     append(item) {

@@ -55,7 +55,7 @@ export function createAcpSubagents(root, { ref, notify }) {
     const member = { id, name: update.name || '子代理', detail: update.task, status: 'running',
       session: ref(id), parent: ref(parentId), attachedTranscript: true };
     const child = { member, parentId, parentTurn, run, rows: [], events: [], characters: 0, listeners: new Set() };
-    child.projection = acpTurn(run.id, event => enqueue(child, event), () => undefined);
+    child.projection = acpTurn(run.id, event => enqueue(child, event), { consoleFences: true });
     children.set(id, child);
     if (typeof update.prompt === 'string' && update.prompt) {
       enqueue(child, { kind: 'item', final: true, item: { kind: 'user', id: 'delegated-prompt', turnId: run.id, text: update.prompt } });

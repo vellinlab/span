@@ -37,6 +37,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
 
   const ref = id => ({ backend, location, id });
   const childSession = tool => childSessionKey ? tool._meta?.[childSessionKey] : undefined;
+  const projectionOptions = { childSession, consoleFences: claude };
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }), error => {
     goals?.close();
@@ -294,7 +295,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
 
   function startTurn(state, goal = false, announce = goal) {
     const run = { id: acpTurnId(state.nextTurn++), status: 'running' };
-    const turn = { run, goal, projection: acpTurn(run.id, event => notify(state.id, event), childSession) };
+    const turn = { run, goal, projection: acpTurn(run.id, event => notify(state.id, event), projectionOptions) };
     state.turn = turn;
     if (announce) notify(state.id, { kind: 'run', run });
     return turn;
@@ -407,7 +408,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   }
 
   async function replay(entry, limit) {
-    const state = { id: entry.sessionId, usage: {}, replay: acpReplay(childSession) };
+    const state = { id: entry.sessionId, usage: {}, replay: acpReplay(projectionOptions) };
     if (nativeSubagents) state.subagents = createAcpSubagents(state, { ref, notify });
     loading = state;
     try {

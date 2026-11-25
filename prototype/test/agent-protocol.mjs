@@ -42,7 +42,7 @@ test('append-only readers reuse completed log lines and rebuild when the backend
 });
 
 test('ACP history preserves user-visible content and turn boundaries while hiding assistant-only context', () => {
-  const replay = acpReplay(() => {});
+  const replay = acpReplay();
   const chunk = (sessionUpdate, messageId, text, audience) => replay.update({ sessionUpdate, messageId,
     content: { type: 'text', text, annotations: audience && { audience } } });
   chunk('user_message_chunk', 'user', 'A visible request.', ['user']);
@@ -56,6 +56,22 @@ test('ACP history preserves user-visible content and turn boundaries while hidin
     ['A visible request.', 'First response.'],
     ['A visible summary.', 'The goal is complete.'],
   ]);
+});
+
+test('Claude commands remove only the bridge’s console wrapper from saved output', () => {
+  const raw = '  Check the archive\n```\nKeep the embedded backticks';
+  const fenced = '```console\n' + raw + '\n```';
+  const tool = { kind: 'execute', rawInput: { command: 'echo fixture' } };
+  function read(options, result) {
+    const replay = acpReplay(options);
+    replay.update({ sessionUpdate: 'tool_call', toolCallId: 'shell', status: 'in_progress', ...tool });
+    replay.update({ sessionUpdate: 'tool_call_update', toolCallId: 'shell', status: 'completed', ...result });
+    return replay.finish()[0].rows[0].text;
+  }
+  const content = [{ type: 'content', content: { type: 'text', text: fenced } }];
+  assert.equal(read({ consoleFences: true }, { content }), raw);
+  assert.equal(read({ consoleFences: true }, { rawOutput: { output: fenced } }), fenced);
+  assert.equal(read(undefined, { content }), fenced);
 });
 
 test('command output indexes only new chunks and can jump to a replaced or compacted log', () => {
