@@ -785,8 +785,13 @@ test('streamed reasoning keeps a bounded preview and preserves the full summary'
   const delta = (section, text) => ({ kind: 'delta', delta: { kind: 'reasoning', id: 'r', turnId: 't', section, text } });
   const summary = '# 验证路径\r\n' + '内容。'.repeat(100_000) + '最终检查';
   const whitespace = ' '.repeat(300) + '\r\n';
-  const rows = applyTimeline([], [delta(0, summary), delta(1, '## 覆核'), delta(0, whitespace)]);
-  assert.ok(turnReasoning(rows, 't').preview.endsWith('最终检查'));
+  const initial = applyTimeline([], [delta(0, summary)]);
+  const initialPreview = turnReasoning(initial, 't').preview;
+  assert.ok(initialPreview.endsWith('最终检查'));
+  const emptyLine = applyTimeline(initial, [delta(0, '\r\n1. ')]);
+  assert.equal(turnReasoning(emptyLine, 't').preview, initialPreview);
+  const rows = applyTimeline(initial, [delta(1, '## 覆核'), delta(0, whitespace)]);
+  assert.equal(turnReasoning(rows, 't').preview, '覆核');
 
   const unicodeBoundary = '😀' + '新'.repeat(239);
   const marker = applyTimeline(rows, [delta(0, '- ')]);

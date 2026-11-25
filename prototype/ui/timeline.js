@@ -227,12 +227,19 @@ function summaryTail(previous, fragment) {
   const trimmed = fragment.trimEnd();
   if (!trimmed) return { tail, preview: previous?.preview };
   const content = trimmed === fragment ? tail : summarySuffix(previous?.tail, trimmed);
+  const fragmentStart = Math.max(0, content.length - trimmed.length);
   const lines = content.split('\n');
-  for (let index = lines.length - 1; index >= 0; index--) {
-    const line = lines[index].trim().replace(/^(?:>[ \t]*)+/, '');
+  let end = content.length;
+  for (let index = lines.length - 1; index >= 0 && end > fragmentStart; index--) {
+    const raw = lines[index];
+    const start = end - raw.length;
+    const newText = raw.slice(Math.max(0, fragmentStart - start)).trim();
+    end = start - 1;
+    if (!newText) continue;
+    const line = raw.trim().replace(/^(?:>[ \t]*)+/, '');
     if (/^([-*_])(?:[ \t]*\1){2,}$|^(?:`{3,}[^`]*|~{3,}[^~]*)$/.test(line)) continue;
     const preview = line.replace(/^(?:[-*+]|#{1,6}|\d{1,9}[.)])(?:[ \t]+|$)/, '');
-    if (preview) return { tail, preview };
+    if (preview) return { tail, preview, advanced: true };
   }
   // A chunk can end at an empty Markdown block before its words arrive.
   return { tail, preview: previous?.preview };
@@ -269,7 +276,7 @@ function addReasoning({ rows, positions, write }, data, final, delta) {
       tails[index] = summary;
     }
   }
-  const preview = summary?.preview || previous?.preview;
+  const preview = (delta && !summary.advanced ? undefined : summary?.preview) || previous?.preview;
   if (existing === undefined) positions.set(key, [index]);
   if (preview && !previous?.preview) {
     const reasoning = reasoningPositionsKey(turnId);
