@@ -446,9 +446,16 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     await cdp.send('Performance.enable');
     const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
       .map(({ name, value }) => [name, value]));
-    const pss = async () => linux ? Number((await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8'))
-      .match(/^Pss:\s+(\d+) kB$/m)[1]) : undefined;
-    const startPssKiB = await pss();
+    const processMemory = async () => {
+      if (!linux) return;
+      const memory = await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8');
+      const kib = field => Number(memory.match(new RegExp(`^${field}:\\s+(\\d+)`, 'm'))[1]);
+      return { pssKiB: kib('Pss'), rssKiB: kib('Rss'), privateDirtyKiB: kib('Private_Dirty') };
+    };
+    const memorySample = (process, performance) => ({
+      ...process, usedHeapBytes: performance.JSHeapUsedSize, domNodes: performance.Nodes,
+    });
+    const startMemory = await processMemory();
     const start = await metrics();
     await writeFile(join(profile, 'append'), '');
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
@@ -459,7 +466,17 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     }
     await settleFrame(page);
     const end = await metrics();
-    const endPssKiB = await pss();
+    const endMemory = await processMemory();
+    let diagnosticMemory;
+    if (linux && reasoningIndex) {
+      await cdp.send('HeapProfiler.collectGarbage');
+      await settleFrame(page);
+      diagnosticMemory = {
+        before: memorySample(startMemory, start),
+        after: memorySample(endMemory, end),
+        afterGc: memorySample(await processMemory(), await metrics()),
+      };
+    }
     const { connected, updates } = await mutating.evaluate(read => read());
     await mutating.dispose();
     const bodyUpdates = await detailMutations?.evaluate(read => read());
@@ -589,7 +606,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       assert.ok(await answer.evaluate(element => element.getBoundingClientRect().bottom <=
         element.closest('.timeline').getBoundingClientRect().bottom));
     }
-    return { label, updates, bodyUpdates, startPssKiB, endPssKiB, typing,
+    return { label, updates, bodyUpdates, startPssKiB: startMemory?.pssKiB, endPssKiB: endMemory?.pssKiB, typing, diagnosticMemory,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000, layouts: end.LayoutCount - start.LayoutCount };
