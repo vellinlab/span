@@ -293,7 +293,12 @@ try {
   await childCard().locator('summary').click();
   await openChild().click();
   await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
-  await childTranscript().locator('[data-card="command"]').filter({ hasText: childCommand }).waitFor();
+  await childTranscript().getByText(childPrompt, { exact: true }).waitFor();
+  const restoredCommand = childTranscript().locator('[data-card="command"]').filter({ hasText: childCommand });
+  await restoredCommand.locator('summary').press('Enter');
+  const restoredOutput = restoredCommand.getByLabel('工具输出', { exact: true });
+  await restoredOutput.waitFor();
+  assert.match(await restoredOutput.textContent(), /span-claude-child/);
   if (screenshot) await page.screenshot({ path: screenshot });
   await childPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
   await send('/agents');

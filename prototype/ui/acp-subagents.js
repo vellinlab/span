@@ -59,6 +59,10 @@ export function createAcpSubagents(root, { ref, notify }) {
     children.set(id, child);
     if (typeof update.prompt === 'string' && update.prompt) {
       enqueue(child, { kind: 'item', final: true, item: { kind: 'user', id: 'delegated-prompt', turnId: run.id, text: update.prompt } });
+    } else if (root.replay && typeof update.task === 'string' && update.task.trim() && update.task !== member.name) {
+      // The AIR bridge can restore a task description without the original prompt field.
+      enqueue(child, { kind: 'item', final: true, item: { kind: 'notice', id: 'delegated-task', turnId: run.id,
+        title: '委派任务', text: update.task } });
     }
     announce(child, true);
   }

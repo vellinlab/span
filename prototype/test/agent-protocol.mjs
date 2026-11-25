@@ -781,7 +781,8 @@ test('Claude ACP isolates child output and approval and restores the final child
       if (packet.method === 'session/prompt') prompt = packet;
       if (packet.method === 'session/load') {
         chunk('root', 'user_message_chunk', 'Delegate');
-        spawn('saved-child');
+        update('root', { sessionUpdate: 'subagent_spawned', subagentSessionId: 'saved-child',
+          name: 'Inspector', task: 'Look at the saved fixture.' });
         chunk('saved-child', 'agent_message_chunk', 'Saved child result.');
         chunk('root', 'agent_message_chunk', 'Root result.');
         chunk('root', 'user_message_chunk', 'Later request');
@@ -828,7 +829,8 @@ test('Claude ACP isolates child output and approval and restores the final child
   assert.deepEqual(first.rows.map(row => row.kind), ['user', 'delegation', 'message']);
   assert.equal(first.rows[1].members[0].status, 'completed');
   const cleanup = agent.delegation.watchTranscript(ref, 'saved-child', snapshot => { view = snapshot; });
-  assert.equal(view.rows.at(-1).text, 'Saved child result.');
+  assert.deepEqual(view.rows.map(row => [row.kind, row.text]),
+    [['notice', 'Look at the saved fixture.'], ['message', 'Saved child result.']]);
   cleanup();
 });
 
