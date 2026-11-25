@@ -92,6 +92,26 @@ function modelInfo(model) {
     defaultTier: model.defaultServiceTier };
 }
 
+function reviewItem(item, review, final) {
+  if (!review || !item) return item;
+  if (item.type === 'userMessage' && !item.clientId) return null;
+  if (item.type === 'exitedReviewMode') {
+    review.exited = true;
+    if (item.review?.trim()) review.fallback = { id: item.id, text: item.review };
+    return null;
+  }
+  if (item.type !== 'agentMessage' || item.phase === 'commentary') return item;
+  // The inline reviewer emits its internal output before it exits, then the formatted reply.
+  if (!review.exited || !final || !item.text?.trim()) return null;
+  review.replied = true;
+  return { ...item, phase: 'final_answer' };
+}
+
+function reviewFallback(review) {
+  return review?.fallback && !review.replied
+    ? { ...review.fallback, type: 'agentMessage', phase: 'final_answer' } : null;
+}
+
 /**
  * @param {string} backend
  * @param {import('./agent-protocol').AdapterContext} context
@@ -101,18 +121,30 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   const native = backend === featureBackend;
   const pending = new Map();
   const active = new Set();
+  const reviews = new Map();
   const ref = id => ({ backend, location, id });
   const session = (thread, overrides = { cwd: undefined }) => ({
     ref: ref(thread.id), cwd: thread.cwd ?? overrides.cwd, title: thread.name,
     preview: fileReferencePreview(thread.preview), branch: thread.gitInfo?.branch, updatedAt: thread.updatedAt,
   });
-  const normalizeTurn = turn => ({
-    id: turn.id, run: normalizeRun(turn),
-    rows: (turn.items ?? []).map(item => normalizeItem(item, turn.id, ref)).filter(Boolean),
-  });
-  const normalizePage = page => ({
-    items: [...(page.data ?? [])].reverse().map(normalizeTurn), cursor: page.nextCursor ?? null,
-  });
+  function normalizeTurn(turn, review, final = true) {
+    const turnId = review?.id ?? turn.id;
+    const items = (turn.items ?? []).map(item => reviewItem(item, review, final)).filter(Boolean);
+    const fallback = final && reviewFallback(review);
+    if (fallback) items.push(fallback);
+    return { id: turnId, run: normalizeRun({ ...turn, id: turnId }),
+      rows: items.map(item => normalizeItem(item, turnId, ref)).filter(Boolean) };
+  }
+
+  function normalizePage(page) {
+    const turns = [...(page.data ?? [])].reverse();
+    const reviewIds = new Set(turns.filter(turn => turn.items?.some(item =>
+      item.type === 'enteredReviewMode' || item.type === 'exitedReviewMode')).map(turn => turn.id));
+    return { items: turns.map(turn => {
+      const id = turn.rootTurnId || turn.id;
+      return normalizeTurn(turn, reviewIds.has(id) ? { id } : undefined);
+    }), cursor: page.nextCursor ?? null };
+  }
   const opened = response => ({
     session: session(response.thread, response),
     options: { model: response.model, effort: response.reasoningEffort,
@@ -170,54 +202,75 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     }
     if (!threadId) return;
     const { turnId, itemId } = params;
+    const review = reviews.get(threadId);
+    const reviewing = review && turnId && (turnId === review.id || turnId === review.transportId);
+    const eventTurnId = reviewing ? review.id : turnId;
     if (Object.hasOwn(deltaKinds, method)) {
+      if (reviewing && deltaKinds[method] === 'message') return;
       notify(threadId, { kind: 'delta', delta: {
-        id: itemId, turnId, kind: deltaKinds[method], text: params.delta, section: params.summaryIndex,
+        id: itemId, turnId: eventTurnId,
+        kind: deltaKinds[method], text: params.delta, section: params.summaryIndex,
       } });
       return;
     }
     switch (method) {
       case 'item/started':
       case 'item/completed': {
-        const item = normalizeItem(params.item, turnId, ref);
-        if (item) notify(threadId, { kind: 'item', item, final: method === 'item/completed' });
+        let scope = reviewing ? review : undefined;
+        if (params.item?.type === 'enteredReviewMode' && active.has(threadId) && !scope) {
+          scope = { id: turnId };
+          reviews.set(threadId, scope);
+        }
+        const final = method === 'item/completed';
+        const selected = reviewItem(params.item, scope, final);
+        const item = selected && normalizeItem(selected, scope?.id ?? turnId, ref);
+        if (item) notify(threadId, { kind: 'item', item, final });
         break;
       }
       case 'item/fileChange/patchUpdated':
         notify(threadId, { kind: 'item', final: false, item: {
-          id: itemId, turnId, kind: 'patch', files: patches(params.changes), status: 'running',
+          id: itemId, turnId: eventTurnId, kind: 'patch', files: patches(params.changes), status: 'running',
         } });
         break;
       case 'item/mcpToolCall/progress':
         notify(threadId, { kind: 'item', final: false, item: {
-          id: itemId, turnId, kind: 'tool', text: params.message, status: 'running',
+          id: itemId, turnId: eventTurnId, kind: 'tool', text: params.message, status: 'running',
         } });
         break;
       case 'turn/diff/updated':
         notify(threadId, { kind: 'item', final: false, item: {
-          id: '@turn-diff', turnId, kind: 'patch', files: [], text: params.diff,
+          id: '@turn-diff', turnId: eventTurnId, kind: 'patch', files: [], text: params.diff,
         } });
         break;
       case 'turn/plan/updated':
         notify(threadId, { kind: 'item', final: false, item: {
-          id: '@turn-plan', turnId, kind: 'plan', text: params.explanation, steps: planSteps(params.plan),
+          id: '@turn-plan', turnId: eventTurnId, kind: 'plan', text: params.explanation, steps: planSteps(params.plan),
         } });
         break;
       case 'turn/started':
-      case 'turn/completed':
-        for (const item of normalizeTurn(params.turn).rows) {
-          notify(threadId, { kind: 'item', item, final: method === 'turn/completed' });
+      case 'turn/completed': {
+        const final = method === 'turn/completed';
+        const { turn } = params;
+        const scope = review && (turn.id === review.id || turn.rootTurnId === review.id) ? review : undefined;
+        if (!final && scope && turn.id !== scope.id) scope.transportId = turn.id;
+        const { rows, run } = normalizeTurn(turn, scope, final);
+        for (const item of rows) {
+          notify(threadId, { kind: 'item', item, final });
         }
-        notify(threadId, { kind: 'run', run: normalizeRun(params.turn) });
-        if (method === 'turn/completed') {
+        if (final && scope && turn.id !== scope.id) break;
+        notify(threadId, { kind: 'run', run });
+        if (final) {
+          if (scope) reviews.delete(threadId);
           for (const [key, entry] of pending) {
-            if (entry.threadId === threadId && (!entry.prompt.turnId || entry.prompt.turnId === params.turn.id)) {
+            if (entry.threadId === threadId &&
+              (!entry.prompt.turnId || entry.prompt.turnId === run.id || entry.prompt.turnId === scope?.transportId)) {
               pending.delete(key);
               notify(threadId, { kind: 'interactionResolved', id: key });
             }
           }
         }
         break;
+      }
       case 'thread/name/updated':
         notify(threadId, { kind: 'session', info: { title: params.threadName } });
         break;
@@ -271,6 +324,11 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     return { items: (result.data ?? []).map(item => ({ ...session(item), archived })), cursor: result.nextCursor ?? null };
   }
 
+  function reviewTransportId(thread, turnId) {
+    const review = reviews.get(thread.id);
+    return review?.id === turnId ? review.transportId ?? turnId : turnId;
+  }
+
   return {
     localFileReferences: location.kind === 'local',
     localImageInputs: native && location.kind === 'local',
@@ -313,6 +371,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       ...(native && {
         async release(thread) {
           active.delete(thread.id);
+          reviews.delete(thread.id);
           for (const [key, entry] of pending) {
             if (entry.threadId === thread.id) pending.delete(key);
           }
@@ -351,10 +410,11 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         const result = await request('turn/start', params);
         return normalizeRun(result.turn);
       },
-      stop: (thread, turnId) => request('turn/interrupt', { threadId: thread.id, turnId }),
+      stop: (thread, turnId) => request('turn/interrupt', { threadId: thread.id, turnId: reviewTransportId(thread, turnId) }),
       ...(native && {
         steer: (thread, expectedTurnId, input, clientId) => request('turn/steer', {
-          threadId: thread.id, expectedTurnId, clientUserMessageId: clientId, input: inputs(input, location.kind === 'local'),
+          threadId: thread.id, expectedTurnId: reviewTransportId(thread, expectedTurnId),
+          clientUserMessageId: clientId, input: inputs(input, location.kind === 'local'),
         }),
         compact: thread => request('thread/compact/start', { threadId: thread.id }),
         async review(thread, target) {

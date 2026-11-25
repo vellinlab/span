@@ -276,7 +276,10 @@ const TranscriptRow = memo(function TranscriptRow({
       break;
     case 'notice':
       title = row.title;
-      if (row.text) detail = () => <Markdown text={row.text} />;
+      if (row.text) {
+        if (!expanded) hint = row.text;
+        detail = () => <Markdown text={row.text} />;
+      }
       break;
   }
 

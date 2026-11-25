@@ -47,7 +47,7 @@ ready_socket() {
     return 1
 }
 
-/artifacts/node prototype/test/real-agent.mjs "$binary" stdio --image --diff
+/artifacts/node prototype/test/real-agent.mjs "$binary" stdio --image --diff --review
 install -d -m 0700 "$CODEX_HOME/app-server-control"
 socket="$CODEX_HOME/app-server-control/app-server-control.sock"
 python3.9 -c 'import socket, sys; sock = socket.socket(socket.AF_UNIX); sock.bind(sys.argv[1]); sock.close()' "$socket"

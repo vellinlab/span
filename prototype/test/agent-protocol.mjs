@@ -403,6 +403,48 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.equal(card.source, 'workspace');
     assert.equal(card.status, 'failed');
     assert.ok(!JSON.stringify(card).includes('unrelated argument'));
+
+    const mark = { type: 'enteredReviewMode', id: 'mark', review: 'current changes' };
+    const prompt = { type: 'userMessage', id: 'prompt', content: [{ type: 'text', text: 'Review all changes' }] };
+    const raw = { type: 'agentMessage', id: 'raw', text: '{"findings":[]}' };
+    const fallback = { type: 'exitedReviewMode', id: 'exit', review: 'No response from reviewer' };
+    const reply = { type: 'agentMessage', id: 'result', text: 'The review was interrupted.' };
+    const root = { id: 'review', rootTurnId: 'review', status: 'interrupted', items: [reply] };
+    const nested = { id: 'worker', rootTurnId: 'review', status: 'inProgress', items: [] };
+    const reviewStart = events.length;
+    const publishReview = (method, fields) => publish('agent', { method, params: { threadId: 'thread', ...fields } });
+    responses['review/start'] = { turn: { id: 'review', status: 'inProgress' } };
+    assert.equal((await agent.turns.review(ref, { kind: 'worktree' })).id, 'review');
+    assert.deepEqual(requests.at(-1)[1].packet.params, {
+      threadId: 'thread', target: { type: 'uncommittedChanges' }, delivery: 'inline',
+    });
+    const publishItem = (item, turnId = 'review', method = 'item/completed') => publishReview(method, { turnId, item });
+    publishItem(mark);
+    publishReview('turn/started', { turn: nested });
+    publishItem(prompt, 'worker');
+    publishItem(raw, 'worker', 'item/started');
+    publishReview('item/agentMessage/delta', { turnId: 'worker', itemId: raw.id, delta: raw.text });
+    publishReview('item/reasoning/summaryTextDelta', { turnId: 'worker', itemId: 'summary', summaryIndex: 0, delta: 'Check the changes' });
+    assert.deepEqual(events.slice(reviewStart).map(event => event.run?.id ?? event.item?.id ?? event.delta?.turnId),
+      ['mark', 'review', 'review']);
+    await agent.turns.stop(ref, 'review');
+    assert.deepEqual(requests.at(-1)[1].packet.params, { threadId: 'thread', turnId: 'worker' });
+    publishItem(fallback);
+    publishItem(reply);
+    publishReview('turn/completed', { turn: root });
+    assert.deepEqual(applyTimeline([], events.slice(reviewStart)).map(row => [row.kind, row.text, row.phase]), [
+      ['notice', '当前工作区改动', undefined], ['reasoning', undefined, undefined],
+      ['message', reply.text, 'final'],
+    ]);
+    responses['thread/turns/list'] = { data: [
+      { ...root, items: [mark, fallback, reply] },
+      { ...nested, status: 'interrupted', items: [prompt] },
+      { id: 'older-review', status: 'completed', items: [mark, fallback] },
+    ] };
+    const savedReview = await agent.sessions.history(ref, { limit: 20 });
+    assert.deepEqual(historyRows(savedReview.items).filter(row => row.kind === 'message').map(row => row.text),
+      [fallback.review, reply.text]);
+    assert.ok(!historyRows(savedReview.items).some(row => row.kind === 'user'));
   } finally {
     agent.close();
   }

@@ -486,6 +486,7 @@ p { margin-block: 0 12px; }
 .activity :is(summary, .card-heading):has(> .file-reference-name) > .card-title { flex: none; max-width: 48%; }
 .activity[data-card="reasoning"] .card-title { flex: none; font-weight: 500; }
 .activity[data-card="reasoning"] .card-hint { color: #a7b0ad; }
+.activity[data-card="notice"] .card-title { flex: none; font-weight: 500; }
 .card-status {
   display: inline-flex;
   gap: 4px;

@@ -10,7 +10,9 @@ const args = process.argv.slice(2);
 const [binary, route = 'stdio', ssh] = args.filter(arg => !arg.startsWith('--'));
 const imageTest = args.includes('--image');
 const diffTest = args.includes('--diff');
+const reviewTest = args.includes('--review');
 const expected = imageTest ? 'Span preview sent two images.' : 'Span preview is connected.';
+const reviewResult = 'The modified heading no longer matches the documented section.';
 const imageName = '会话验收.png';
 const profile = await mkdtemp(join(tmpdir(), 'span-real-'));
 const image = join(profile, imageName);
@@ -86,6 +88,22 @@ try {
     await diff.getByRole('button', { name: '关闭面板' }).press('Escape');
     console.log('Verified /diff against the real Codex App Server and a local Git worktree.');
   }
+  if (reviewTest) {
+    await composer.fill('/review');
+    await composer.press('Enter');
+    const transcript = page.getByTestId('transcript');
+    await transcript.getByText('当前工作区改动', { exact: true }).waitFor();
+    await transcript.locator('.agent-reply').getByText(reviewResult, { exact: true }).waitFor();
+    await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
+    assert.equal(await transcript.getByText(reviewResult, { exact: true }).count(), 1);
+    assert.equal(await transcript.locator('.user-message').getByText(/^Review the current code changes/).count(), 0);
+    await composer.fill('/copy');
+    await composer.press('Enter');
+    await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
+    const text = await app.evaluate(({ clipboard }) => clipboard.readText());
+    assert.ok(text.startsWith(reviewResult) && text.includes('[P2] Keep the documented heading') &&
+      text.includes('README.md:1-1'));
+  }
   await composer.fill(`/rename ${title}`);
   await composer.press('Enter');
   await page.locator('.breadcrumb strong').filter({ hasText: title }).waitFor();
@@ -111,6 +129,14 @@ try {
     .filter({ hasText: ssh ?? '本机' }).waitFor({ timeout: 30_000 });
   await resumed.locator('.breadcrumb strong').getByText(title, { exact: true }).waitFor();
   await resumed.getByTestId('transcript').getByText(expected, { exact: true }).waitFor();
+  if (reviewTest) {
+    const transcript = resumed.getByTestId('transcript');
+    const finding = transcript.locator('.agent-reply li').filter({ hasText: '[P2] Keep the documented heading' });
+    await finding.waitFor();
+    assert.equal(await finding.count(), 1);
+    assert.equal(await transcript.locator('.user-message').getByText(/^Review the current code changes/).count(), 0);
+    console.log('Verified a real Codex review produces one readable, copyable result and reopens with the same content.');
+  }
   if (imageTest) {
     const attachments = resumed.getByRole('list', { name: '已发送的附件' });
     const attachment = attachments.getByRole('button', { name: '预览图片 · ' + imageName });

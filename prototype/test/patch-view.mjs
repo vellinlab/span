@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright';
@@ -16,7 +16,7 @@ async function check(binary, legacy, screenshot) {
     app = await electron.launch({
       executablePath: binary,
       args: ['--demo', ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-webgl'] : [])],
-      env: { ...process.env, SPAN_PREVIEW_PROFILE: profile },
+      env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_STREAM_GATE: profile },
     });
     const page = await app.firstWindow();
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
@@ -132,6 +132,32 @@ async function check(binary, legacy, screenshot) {
     await composer.press('Enter');
     const turnDiff = page.getByRole('region', { name: '最近一次会话补丁' });
     await turnDiff.getByRole('combobox', { name: '变更文件' }).waitFor();
+    await turnDiff.getByRole('button', { name: '关闭面板' }).press('Escape');
+
+    await composer.fill('/review');
+    await composer.press('Enter');
+    const review = page.locator('[data-card="notice"]').filter({ hasText: '当前工作区改动' });
+    await review.getByText('当前工作区改动', { exact: true }).waitFor();
+    const reasoning = page.locator('.reasoning-strip');
+    await reasoning.getByText('核对改动和对应的会话状态。', { exact: true }).waitFor();
+    assert.equal(await page.locator('.user-message').getByText('current changes', { exact: true }).count(), 0);
+    assert.equal(await page.getByText('{"findings":[]}', { exact: true }).count(), 0);
+    await writeFile(join(profile, 'finish-inline-review'), '');
+    const finding = page.locator('.agent-reply li').filter({ hasText: '[P2] 保留阅读位置' });
+    await finding.waitFor();
+    await reasoning.waitFor({ state: 'detached' });
+    assert.equal(await finding.count(), 1);
+    assert.equal(await page.getByText('代码审查完成', { exact: true }).count(), 0);
+    assert.ok(await finding.evaluate(element => {
+      const finding = element.getBoundingClientRect();
+      const viewport = element.closest('.timeline').getBoundingClientRect();
+      return finding.top >= viewport.top && finding.bottom <= viewport.bottom;
+    }));
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-review.png') });
+    await composer.fill('/copy');
+    await composer.press('Enter');
+    await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
+    assert.ok((await readClipboard()).includes('[P2] 保留阅读位置'));
     return { mountedAtStart, mountedAtEnd, rawLines: 10005 };
   } finally {
     await app?.close();

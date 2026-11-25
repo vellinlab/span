@@ -88,9 +88,8 @@ export function normalizeItem(item, turnId, ref) {
     case 'contextCompaction':
       return { ...base, kind: 'notice', title: '已压缩上下文' };
     case 'enteredReviewMode':
-    case 'exitedReviewMode':
-      return { ...base, kind: 'notice', title: item.type === 'enteredReviewMode' ? '开始代码审查' : '代码审查完成',
-        text: item.review };
+      return { ...base, kind: 'notice', title: '代码审查',
+        text: item.review === 'current changes' ? '当前工作区改动' : item.review };
     default:
       return null;
   }

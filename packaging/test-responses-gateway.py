@@ -18,6 +18,8 @@ FIRST_PROMPT = "Create the fixture file."
 SECOND_PROMPT = "Continue the existing fixture session."
 FIRST_REPLY = "Fixture file created."
 SECOND_REPLY = "Fixture session continued."
+REVIEW_PROMPT = "Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings."
+REVIEW_REPLY = "The modified heading no longer matches the documented section."
 
 
 class Responses(BaseHTTPRequestHandler):
@@ -41,8 +43,10 @@ class Responses(BaseHTTPRequestHandler):
             for text in item["content"]
             if text.get("type") == "input_text"
         )
-        expected_model = IMAGE_MODEL if latest_prompt == IMAGE_PROMPT else MODEL
-        if request.get("model") != expected_model:
+        expected_models = (MODEL, IMAGE_MODEL) if latest_prompt == REVIEW_PROMPT else (
+            (IMAGE_MODEL,) if latest_prompt == IMAGE_PROMPT else (MODEL,)
+        )
+        if request.get("model") not in expected_models:
             raise ValueError("Unexpected model in request")
         if latest_prompt == SECOND_PROMPT:
             if not any(
@@ -80,6 +84,26 @@ class Responses(BaseHTTPRequestHandler):
             if len(images) != 2 or not all(part.get("image_url", "").startswith("data:image/") for part in images):
                 raise ValueError("The selected and pasted images did not both reach the model as image inputs")
             item = self.message("preview-image-message", "Span preview sent two images.")
+        elif latest_prompt == REVIEW_PROMPT:
+            workdir = next(
+                line.removeprefix("  <cwd>").removesuffix("</cwd>")
+                for message in inputs if message.get("role") == "user"
+                for part in message["content"] if part.get("type") == "input_text"
+                for line in part["text"].splitlines() if line.startswith("  <cwd>")
+            )
+            finding = {
+                "title": "[P2] Keep the documented heading",
+                "body": "Update the reference when changing the heading.",
+                "confidence_score": 0.98,
+                "priority": 2,
+                "code_location": {
+                    "absolute_file_path": str(Path(workdir) / "README.md"),
+                    "line_range": {"start": 1, "end": 1},
+                },
+            }
+            review = {"findings": [finding], "overall_correctness": "patch is incorrect",
+                      "overall_explanation": REVIEW_REPLY, "overall_confidence_score": 0.98}
+            item = self.message("preview-review-message", json.dumps(review))
         else:
             raise ValueError("Unexpected prompt in request")
         response_id = f"fixture-{self.server.responses + 1}"

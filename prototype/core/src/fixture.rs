@@ -231,6 +231,62 @@ fn wait_for_stream_gate(path: &Path, running: &AtomicBool) -> bool {
     false
 }
 
+fn inline_review(
+    output: &Output,
+    running: &AtomicBool,
+    thread_id: &str,
+    turn: &str,
+    focus: &str,
+) -> io::Result<()> {
+    let reasoning = format!("{turn}-summary");
+    let internal = format!("{turn}-internal");
+    for (method, item) in [
+        (
+            "item/completed",
+            json!({"type":"userMessage","id":format!("{turn}-input"),
+            "content":[{"type":"text","text":focus}]}),
+        ),
+        (
+            "item/completed",
+            json!({"type":"reasoning","id":reasoning,"summary":["核对改动和对应的会话状态。"]}),
+        ),
+        (
+            "item/started",
+            json!({"type":"agentMessage","id":internal,"text":"{\"findings\":[]}"}),
+        ),
+    ] {
+        notice(
+            output,
+            method,
+            json!({"threadId":thread_id,"turnId":turn,"item":item}),
+        )?;
+    }
+    let ready = env::var_os("SPAN_PREVIEW_STREAM_GATE").is_none_or(|path| {
+        wait_for_stream_gate(&PathBuf::from(path).join("finish-inline-review"), running)
+    });
+    let report = "发现一处会话恢复问题。\n\n- **[P2] 保留阅读位置** — `prototype/ui/transcript.jsx`\n  恢复会话时复用此前保存的阅读位置。";
+    let status = if ready { "completed" } else { "interrupted" };
+    notice(
+        output,
+        "item/completed",
+        json!({"threadId":thread_id,"turnId":turn,"item":{
+        "type":"exitedReviewMode","id":format!("{turn}-exit"),"review":report}}),
+    )?;
+    let item = json!({"type":"agentMessage","id":format!("{turn}-result"),"text":report});
+    notice(
+        output,
+        "item/completed",
+        json!({"threadId":thread_id,"turnId":turn,"item":item}),
+    )?;
+    running.store(false, Ordering::Release);
+    notice(
+        output,
+        "turn/completed",
+        json!({"threadId":thread_id,"turn":{
+        "id":turn,"status":status,"items":[item]}}),
+    )
+}
+
 fn stream_command_output(
     output: &Output,
     running: &AtomicBool,
@@ -625,6 +681,54 @@ pub fn run() -> Result<()> {
                 let start = end.saturating_sub(limit);
                 let page: Vec<_> = history[start..end].iter().rev().collect();
                 json!({"data":page,"nextCursor":(start > 0).then(|| start.to_string())})
+            }
+            "review/start" => {
+                let thread_id = params["threadId"].as_str().unwrap_or(THREAD).to_owned();
+                let focus = match params["target"]["type"].as_str() {
+                    Some("uncommittedChanges") => Some("current changes"),
+                    Some("custom") => params["target"]["instructions"].as_str(),
+                    _ => None,
+                };
+                let Some(focus) = focus.filter(|_| params["delivery"] == "inline") else {
+                    send(
+                        &output,
+                        json!({"id":id,"error":{"message":"无效的审查范围。"}}),
+                    )?;
+                    continue;
+                };
+                if background.swap(true, Ordering::AcqRel) {
+                    send(
+                        &output,
+                        json!({"id":id,"error":{"message":"已有任务在运行。"}}),
+                    )?;
+                    continue;
+                }
+                turn_count += 1;
+                let turn = format!("live-review-{turn_count}");
+                send(
+                    &output,
+                    json!({"id":id,"result":{"turn":{"id":turn,"status":"inProgress"},
+                    "reviewThreadId":thread_id}}),
+                )?;
+                notice(
+                    &output,
+                    "item/completed",
+                    json!({"threadId":thread_id,"turnId":turn,"item":{
+                    "type":"enteredReviewMode","id":format!("{turn}-enter"),"review":focus}}),
+                )?;
+                notice(
+                    &output,
+                    "turn/started",
+                    json!({"threadId":thread_id,"turn":{
+                    "id":format!("{turn}-internal"),"rootTurnId":turn,"status":"inProgress","items":[]}}),
+                )?;
+                let output = output.clone();
+                let running = background.clone();
+                let focus = focus.to_owned();
+                thread::spawn(move || {
+                    let _ = inline_review(&output, &running, &thread_id, &turn, &focus);
+                });
+                continue;
             }
             "turn/start" => {
                 let submitted = params["input"][0]["text"].as_str().unwrap_or_default();
