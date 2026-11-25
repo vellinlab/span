@@ -5,9 +5,9 @@ import { attachmentArtifacts, attachmentName, fileReferenceText } from './file-r
 const wire = { ...jsonRpc, request: (id, method, params) => ({ jsonrpc: '2.0', id, method, params }) };
 const approvalOptions = new Map([
   ['allow_once', { label: '仅允许这次', effect: 'allow' }],
-  ['allow_always', { label: '始终允许', effect: 'allow' }],
+  ['allow_always', { label: '始终允许', effect: 'allow', remember: true }],
   ['reject_once', { label: '拒绝', effect: 'deny' }],
-  ['reject_always', { label: '始终拒绝', effect: 'deny' }],
+  ['reject_always', { label: '始终拒绝', effect: 'deny', remember: true }],
 ]);
 const choice = ({ value, name, description }) => ({ id: value, label: name || value, description });
 const configChoices = item => (item?.options ?? []).flatMap(option => option.options ?? [option])

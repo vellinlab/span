@@ -67,7 +67,8 @@ function InteractionCard({ request, count, respond, item, host, focusTarget, onF
     {request.cancel && <button type="button" aria-disabled={busy || undefined}
       onClick={() => answer({ cancelled: true })}>取消</button>}
     {approval ? request.choices.map(choice => <button type="button" key={choice.id} aria-disabled={busy || undefined}
-      data-effect={choice.effect} onClick={() => answer({ choice: choice.id })}>{choice.label}</button>)
+      data-effect={choice.effect} data-remember={choice.remember || undefined}
+      onClick={() => answer({ choice: choice.id })}>{choice.label}</button>)
       : <button className="primary" aria-disabled={busy || undefined}>提交回答</button>}
   </div>;
   return <section className="approval" aria-label={request.title} ref={focusTarget} tabIndex={-1}

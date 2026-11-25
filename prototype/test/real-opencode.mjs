@@ -155,6 +155,10 @@ try {
     const bounds = element.getBoundingClientRect();
     return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
   }));
+  const remember = approval.getByRole('button', { name: '始终允许', exact: true });
+  assert.equal(await remember.getAttribute('data-remember'), 'true');
+  const background = button => button.evaluate(element => getComputedStyle(element).backgroundColor);
+  assert.notEqual(await background(allow), await background(remember));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
   await allow.press('Enter');
   await approval.waitFor({ state: 'detached' });

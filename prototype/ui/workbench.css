@@ -870,8 +870,8 @@ p { margin-block: 0 12px; }
 .approval pre { margin: 0; padding: 4px 8px; border-radius: 5px; background: var(--canvas); font: 12px/18px var(--mono); white-space: pre-wrap; }
 .approval-actions { justify-content: flex-end; flex-wrap: wrap; border-top: 1px solid var(--line); }
 .approval-actions button { min-height: 28px; padding-block: 3px; }
-.approval-actions button[data-effect="allow"] { color: #eedbad; background: #c4a45827; }
-.approval-actions button[data-effect="allow"]:hover { background: #c4a45842; }
+.approval-actions button[data-effect="allow"]:not([data-remember]) { color: #eedbad; background: #c4a45827; }
+.approval-actions button[data-effect="allow"]:not([data-remember]):hover { background: #c4a45842; }
 .approval-actions button[aria-disabled="true"] { cursor: default; opacity: .5; }
 .approval-error { margin-inline-end: auto; color: #efb8ad; }
 @container (min-width: 760px) {

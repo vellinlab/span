@@ -91,7 +91,7 @@ export type Interaction = {
   id: string; title: string; detail?: string; turnId?: string; itemId?: string; cancel?: boolean;
   scope?: 'connection';
 } & (
-  | { kind: 'approval'; choices: (Choice & { effect?: 'allow' | 'deny' })[];
+  | { kind: 'approval'; choices: (Choice & { effect?: 'allow' | 'deny'; remember?: boolean })[];
       operation?: { kind: 'command' | 'files' | 'network' | 'permissions'; command?: string; cwd?: string;
         target?: string; protocol?: string; root?: string; permissions?: Json } }
   | { kind: 'input'; fields: InteractionField[] }
