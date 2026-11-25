@@ -799,10 +799,34 @@ try {
   await liveReasoning.getByText(approvalSummary, { exact: true }).waitFor();
   const approvalContext = archivedReasoning.filter({ hasText: approvalSummary });
   assert.equal(await approvalContext.count(), 0);
-  await transcript.evaluate(element => { element.scrollTop = 300; });
+  await transcript.evaluate(async element => {
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    element.scrollTop = 300;
+  });
   const latest = page.getByRole('button', { name: '滚到最新消息' });
   await latest.waitFor();
-  const anchor = await transcript.evaluate(element => element.scrollTop);
+  const readingPosition = () => transcript.evaluate(async element => {
+    let previous;
+    let stable = 0;
+    for (let frame = 0; frame < 30; frame++) {
+      await new Promise(requestAnimationFrame);
+      const viewport = element.getBoundingClientRect();
+      const first = [...element.querySelectorAll('.message[data-empty="false"] > *')].find(row => {
+        const bounds = row.getBoundingClientRect();
+        return bounds.bottom > viewport.top + 2 && bounds.top < viewport.bottom;
+      });
+      if (!first) continue;
+      const offset = first.getBoundingClientRect().top - viewport.top;
+      const current = { text: first.textContent.trim().slice(0, 100), offset, scrollTop: element.scrollTop };
+      stable = current.text === previous?.text && current.offset === previous.offset &&
+        current.scrollTop === previous.scrollTop ? stable + 1 : 0;
+      if (stable === 2) return current;
+      previous = current;
+    }
+    throw new Error('The reading position did not settle.');
+  });
+  const anchor = await readingPosition();
   await composer.fill('/usage');
   await composer.press('Enter');
   const approval = page.getByRole('region', { name: '确认命令操作' });
@@ -810,7 +834,10 @@ try {
   await approval.getByText(process.env.SPAN_TEST_SSH_ALIAS || '本机', { exact: true }).waitFor();
   await approval.getByText('工作目录', { exact: true }).waitFor();
   await page.getByText('等待审批', { exact: true }).waitFor();
-  assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - anchor) <= 2);
+  const afterApproval = await readingPosition();
+  assert.equal(afterApproval.text, anchor.text);
+  assert.ok(Math.abs(afterApproval.offset - anchor.offset) <= 2,
+    `Approval moved the visible message from ${anchor.offset}px to ${afterApproval.offset}px.`);
   const layout = await approval.evaluate(element => {
     const body = element.querySelector('.approval-body');
     const actions = element.querySelector('.approval-actions');
@@ -829,7 +856,7 @@ try {
   await approvalContext.locator('.card-body').getByText(approvalSummary, { exact: true }).waitFor();
   assert.ok(await approval.isVisible());
   await contextTitle.press('Enter');
-  await transcript.evaluate((element, top) => { element.scrollTop = top; }, anchor);
+  await transcript.evaluate((element, top) => { element.scrollTop = top; }, anchor.scrollTop);
   await latest.waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
   const windowSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
