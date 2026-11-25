@@ -39,6 +39,7 @@ enum Backend {
     Codex,
     Clue,
     Pi,
+    OpenCode,
 }
 
 impl Backend {
@@ -50,6 +51,8 @@ impl Backend {
             (Self::Clue, false) => "clue",
             (Self::Pi, true) => "pi.exe",
             (Self::Pi, false) => "pi",
+            (Self::OpenCode, true) => "opencode.exe",
+            (Self::OpenCode, false) => "opencode",
         }
     }
 }
@@ -73,6 +76,7 @@ impl Agent {
             Some("codex") => Backend::Codex,
             Some("clue") => Backend::Clue,
             Some("pi") => Backend::Pi,
+            Some("opencode") => Backend::OpenCode,
             _ => return Err("未知的 Agent 后端。".into()),
         };
         let location = if params["demo"] == true {
@@ -416,6 +420,43 @@ async fn serve(
                 "stdio"
             };
             stdio_process(process, requests, output, generation, route, Some(catalog)).await?;
+        }
+        (Backend::OpenCode, Location::Ssh(target)) => {
+            let mut process = spawn(
+                ssh(&target).arg(r#"printf 'span-opencode-cwd %s\n' "$PWD"; exec opencode acp"#),
+            )?;
+            let directory = timeout(Duration::from_secs(12), async {
+                let mut line = Vec::new();
+                loop {
+                    read_line(&mut process.output, &mut line).await?;
+                    if let Ok(line) = std::str::from_utf8(&line)
+                        && let Some(directory) = line.strip_prefix("span-opencode-cwd ")
+                        && directory.starts_with('/')
+                    {
+                        return Ok::<_, io::Error>(
+                            directory.trim_end_matches(['\r', '\n']).to_owned(),
+                        );
+                    }
+                }
+            })
+            .await
+            .map_err(|_| "等待 SSH OpenCode 工作目录超时。")??;
+            event(
+                output,
+                "agent",
+                generation,
+                json!({"method":"span/backendWorkspace", "params":{"cwd":directory}}),
+            )?;
+            stdio(process, requests, output, generation, "stdio").await?;
+        }
+        (Backend::OpenCode, Location::Local(cwd)) => {
+            let program = env::var_os("SPAN_OPENCODE_PATH")
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| backend.binary().into());
+            let process = spawn(Command::new(program).arg("acp").current_dir(cwd)).map_err(|error| {
+                format!("无法启动 OpenCode。请检查 CLI 安装，或将 SPAN_OPENCODE_PATH 指向可执行文件。\n{error}")
+            })?;
+            stdio(process, requests, output, generation, "stdio").await?;
         }
         (_, Location::Fixture) => {
             let process = spawn(Command::new(env::current_exe()?).arg("--fixture"))?;

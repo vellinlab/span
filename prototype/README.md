@@ -18,6 +18,7 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 | Clue | 已注册。本机或 SSH 使用现有的 `clue app-server` 兼容路径。使用基础会话和回合操作。 |
 | Claude Code | 协议可映射 SDK 的会话、流式内容、审批、检查点和子代理。Agent Teams 通过独立的成员、任务和团队操作表示，按可用性启用。 |
 | Pi Agent | 已注册。本机和 SSH 启动 `pi --mode rpc`，使用 Pi 自己保存的会话。支持模型和思考级别、`steer`、`follow_up`、会话统计、扩展命令及交互。 |
+| OpenCode | 本机和 SSH 通过 ACP 连接 `opencode acp`。使用 OpenCode 保存的会话，支持流式回复和推理、工具活动、审批、停止、用量，以及当前会话公开的模型和模式。 |
 
 [Claude Code Agent SDK](https://code.claude.com/docs/en/headless) · [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) · [Pi RPC](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc-commands.md)
 
@@ -26,6 +27,8 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 Pi 可以使用 PATH 中的 CLI。本机也可用 `SPAN_PI_PATH` 指定可执行文件。工作台读取 Pi 为当前工作区返回的会话目录，通过 Pi RPC 恢复会话，并显示当前历史分支。扩展注册的命令可从斜杠菜单发送给 Pi。 [Pi RPC 协议](https://github.com/earendil-works/pi/blob/v1.6.0/packages/coding-agent/docs/rpc.md)
 
 Codex 和 Pi 在 Agent 菜单中提供「技能」。在输入框用 `/skills` 也可以打开面板，并可在命令后附上搜索词。面板显示后端为当前工作区报告的技能，在第一条消息发出前也可以打开。
+
+OpenCode 使用 PATH 中的 CLI。本机也可用 `SPAN_OPENCODE_PATH` 指定可执行文件。SSH 新会话默认使用远端登录目录，已保存的会话从其原工作目录恢复。OpenCode 回放的历史由 Span 按需向上分页。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/)
 
 工作台启动时恢复上次成功连接的 Agent、主机和本地工作区。每个连接保留自己最后打开的会话，点击「新会话」后会记住空白状态。无法连接时，可以重试或从连接设置选择其他后端、主机和本地目录。首次启动默认连接本机 Codex。
 

@@ -4,6 +4,9 @@ import { codexAdapter, clueAdapter } from './codex.js';
 const definitions = [codexAdapter, clueAdapter, {
   id: 'pi', label: 'Pi', locations: ['local', 'ssh'],
   load: () => import('./pi.js').then(module => module.createPi),
+}, {
+  id: 'opencode', label: 'OpenCode', locations: ['local', 'ssh'],
+  load: () => import('./opencode.js').then(module => module.createOpenCode),
 }];
 
 export const agentBackends = definitions.map(({ id, label, locations }) => ({ id, label, locations }));

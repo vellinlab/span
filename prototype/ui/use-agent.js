@@ -205,6 +205,9 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       case 'usage':
         updateUsage(event.usage);
         break;
+      case 'models':
+        setModels(event.models);
+        break;
       case 'session':
         setSession(previous => previous ? { ...previous, ...event.info } : previous);
         setSessions(previous => previous.map(entry => sessionKey(entry.ref) === sessionKey(event.session)
@@ -259,6 +262,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       setSession(selected);
       putSession(selected, Boolean(opened) && !archived);
       setOptions(state.options ?? {});
+      if (state.models) setModels(state.models);
 
       const goalVersion = callbacks.current.goal;
       client.goal?.read(selected.ref).then(value => {
@@ -491,6 +495,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     active.current = { ref: entry.ref, key: sessionKey(entry.ref) };
     adoptDraft(config, entry.ref);
     setSession(entry);
+    if (started.models) {
+      setModels(started.models);
+      if (started.options) setOptions(previous => ({ ...started.options, ...previous }));
+    }
     if (!archived) putSession(entry, true);
     return entry.ref;
   }

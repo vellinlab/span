@@ -231,7 +231,7 @@ test('a delayed snapshot cannot recreate a closed team or bring back its old tas
 test('session identities are scoped by backend and host, and the factory rejects unknown backends', async () => {
   const refs = [session('codex', local), session('codex', remote), session('clue', remote)];
   assert.equal(new Set(refs.map(sessionKey)).size, refs.length);
-  assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi']);
+  assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi', 'opencode']);
   await assert.rejects(createAgent('missing', { location: local }), /不支持/);
 });
 
@@ -792,4 +792,114 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
 
   assert.equal(events.filter(event => event.session).every(event => sessionKey(event.session) === sessionKey(ref)), true);
   assert.ok(sent.filter(packet => packet.type !== 'extension_ui_response').every(packet => typeof packet.id === 'string'));
+});
+
+test('OpenCode ACP scopes directory, replay, long-running prompts and approvals to the active session', async t => {
+  const events = [];
+  const packets = [];
+  const source = 214;
+  const listeners = new Set();
+  const catalogEntry = { sessionId: 'saved', cwd: '/remote/work', title: 'Saved session' };
+  const configOptions = [
+    { id: 'model', currentValue: 'span/test', options: [{ value: 'span/test', name: 'Test' }] },
+    { id: 'effort', currentValue: 'low', options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }] },
+    { id: 'mode', currentValue: 'build', options: [{ value: 'build', name: 'Build' }] },
+  ];
+  const emit = (event, data) => listeners.forEach(listener => listener({ event, generation: source, data }));
+  const packet = data => emit('agent', { jsonrpc: '2.0', ...data });
+  const update = (sessionId, update) => packet({ method: 'session/update', params: { sessionId, update } });
+  const chunk = (sessionId, sessionUpdate, messageId, text) =>
+    update(sessionId, { sessionUpdate, messageId, content: { type: 'text', text } });
+  let ongoing;
+  globalThis.window = { span: {
+    onEvent(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    async request(method, args) {
+      if (method === 'agent.start') {
+        assert.equal(args.ssh, 'dev');
+        emit('agent', { method: 'span/backendWorkspace', params: { cwd: '/remote home' } });
+        emit('agent-route', 'stdio');
+        return;
+      }
+      if (method !== 'agent.send') return;
+      const sent = args.packet;
+      packets.push(sent);
+      assert.equal(sent.jsonrpc, '2.0');
+      const answer = result => packet({ id: sent.id, result });
+      switch (sent.method) {
+        case 'initialize':
+          answer({ protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { list: {}, close: {} } } });
+          break;
+        case 'session/list':
+          answer({ sessions: [catalogEntry] });
+          break;
+        case 'session/load':
+          assert.equal(sent.params.cwd, '/remote/work');
+          chunk('saved', 'user_message_chunk', 'one', 'First question');
+          chunk('saved', 'agent_message_chunk', 'reply-one', 'Before the tool.');
+          update('saved', { sessionUpdate: 'tool_call', toolCallId: 'cmd', kind: 'execute', rawInput: { command: 'echo test' } });
+          update('saved', { sessionUpdate: 'tool_call_update', toolCallId: 'cmd', status: 'completed' });
+          chunk('saved', 'agent_message_chunk', 'reply-one', 'After the tool.');
+          chunk('saved', 'user_message_chunk', 'two', 'Second question');
+          chunk('saved', 'agent_message_chunk', 'reply-two', 'Second answer');
+          answer({ configOptions });
+          break;
+        case 'session/new':
+          assert.equal(sent.params.cwd, '/remote home');
+          answer({ sessionId: 'new', configOptions });
+          break;
+        case 'session/prompt':
+          ongoing = sent;
+          break;
+        case 'session/cancel':
+          assert.equal(sent.params.sessionId, ongoing.params.sessionId);
+          packet({ id: ongoing.id, result: { stopReason: 'cancelled' } });
+          break;
+        case 'session/set_config_option':
+          assert.equal(sent.params.configId, 'effort');
+          assert.equal(sent.params.value, 'high');
+          answer({ configOptions });
+          break;
+        case 'session/close':
+          answer({});
+          break;
+      }
+    },
+  } };
+  const agent = await createAgent('opencode', { location: remote, cwd: 'C:\\irrelevant', generation: source,
+    onEvent: event => events.push(event) });
+  t.after(() => { agent.close(); delete globalThis.window; });
+  await agent.open();
+  const catalog = await agent.sessions.list({});
+  assert.equal(catalog.items[0].cwd, '/remote/work');
+  const saved = await agent.sessions.resume(catalog.items[0].ref, 1);
+  assert.equal(saved.models[0].label, 'Test');
+  assert.deepEqual(historyRows(saved.history.items).map(row => row.text), ['Second question', 'Second answer']);
+  const older = await agent.sessions.history(saved.session.ref, { cursor: saved.history.cursor, limit: 1 });
+  assert.deepEqual(historyRows(older.items).map(row => row.text ?? row.command),
+    ['First question', 'Before the tool.', 'echo test', 'After the tool.']);
+  await agent.sessions.release(saved.session.ref);
+  const fresh = await agent.sessions.start({});
+  const session = fresh.session.ref;
+  const run = await agent.turns.start(session, [{ kind: 'text', text: 'New request' }], { effort: 'high' }, 'draft');
+  assert.equal(run.status, 'running');
+  assert.equal(events.findLast(event => event.kind === 'item').item.clientId, 'draft');
+  const permission = (id, sessionId) => packet({ id, method: 'session/request_permission', params: {
+    sessionId, toolCall: { toolCallId: 'active-tool', kind: 'execute', rawInput: { command: 'echo open' } },
+    options: [{ optionId: 'once', kind: 'allow_once' }, { optionId: 'deny', kind: 'reject_once' }],
+  } });
+  permission('stale', 'saved');
+  assert.equal(packets.at(-1).result.outcome.outcome, 'cancelled');
+  chunk('new', 'agent_thought_chunk', 'thought', 'Check result.');
+  permission('approval', 'new');
+  const approval = events.findLast(event => event.kind === 'interaction').request;
+  assert.equal(approval.operation.cwd, '/remote home');
+  assert.equal(approval.operation.command, 'echo open');
+  await agent.interactions.respond(approval.id, { choice: 'deny' });
+  assert.deepEqual(packets.at(-1).result.outcome, { outcome: 'selected', optionId: 'deny' });
+  await agent.turns.stop(session, run.id);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.findLast(event => event.kind === 'run').run.status, 'cancelled');
 });

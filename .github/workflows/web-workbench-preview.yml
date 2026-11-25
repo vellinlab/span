@@ -196,6 +196,11 @@ jobs:
           diff -qr preview/resources/app verified-preview/preview/resources/app
       - name: Verify native Codex on Windows
         run: node prototype/test/backend-windows.mjs "$PWD/verified-preview/preview/span-preview.exe"
+      - name: Verify native OpenCode on Windows
+        run: |
+          bash prototype/test/install-opencode.sh windows "$PWD/opencode-test"
+          node prototype/test/real-opencode.mjs "$PWD/verified-preview/preview/span-preview.exe" \
+            "$PWD/opencode-test/opencode.exe" "$PWD/windows-workbench-opencode.png"
       - name: Prepare the baseline renderers for terminal output and preview
         run: |
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE"; do

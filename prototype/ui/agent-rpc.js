@@ -1,8 +1,8 @@
-const jsonRpc = {
+export const jsonRpc = {
   request: (id, method, params) => ({ id, method, params }),
   response: packet => packet.method || packet.id == null ? undefined : {
     id: packet.id, value: packet.result,
-    error: packet.error && Object.assign(new Error(packet.error.message), { code: packet.error.code }),
+    error: packet.error && Object.assign(new Error(packet.error.message), { code: packet.error.code, data: packet.error.data }),
   },
   event: packet => Boolean(packet.method),
 };
@@ -58,22 +58,29 @@ export function connectRpc(generation, onPacket, onRoute, onClosed, wire = jsonR
   }
 
   // Response shapes belong to the wire protocol and are normalized by the adapter.
-  /** @param {string} method @param {object | null} params @returns {Promise<any>} */
-  function request(method, params = {}) {
+  function beginRequest(method, params, deadline) {
     const packet = wire.request(++next, method, params);
     const { id } = packet;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+    let sent;
+    const response = new Promise((resolve, reject) => {
+      const timer = deadline == null ? undefined : setTimeout(() => {
         calls.delete(id);
         reject(new Error('Agent 响应超时。'));
-      }, 30000);
+      }, deadline);
       calls.set(id, { resolve, reject, timer });
-      send(packet).catch(error => {
+      sent = send(packet);
+      sent.catch(error => {
         calls.delete(id);
         clearTimeout(timer);
         reject(error);
       });
     });
+    return { sent, response };
+  }
+
+  /** @param {string} method @param {object | null} params @returns {Promise<any>} */
+  function request(method, params = {}) {
+    return beginRequest(method, params, 30_000).response;
   }
 
   function close() {
@@ -89,5 +96,5 @@ export function connectRpc(generation, onPacket, onRoute, onClosed, wire = jsonR
     calls.clear();
   }
 
-  return { ready, request, send, close };
+  return { ready, request, beginRequest, send, close };
 }

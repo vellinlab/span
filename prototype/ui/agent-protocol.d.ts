@@ -25,7 +25,7 @@ export type Model = Choice & {
 };
 export type RunOptions = { model?: string; effort?: string; tier?: string; mode?: string; permissions?: string };
 export type Turn = { id: string; run: Run; rows: TimelineItem[] };
-export type OpenSession = { session: Session; options?: RunOptions; history?: Page<Turn> };
+export type OpenSession = { session: Session; options?: RunOptions; models?: Model[]; history?: Page<Turn> };
 export type Goal = {
   objective: string; status: 'active' | 'paused' | 'complete' | 'blocked' | 'limited' | 'unknown';
   budget?: number; tokens?: number; seconds?: number;
@@ -117,6 +117,7 @@ export type Event =
       | { kind: 'run'; run: Run }
       | { kind: 'goal'; goal: Goal | null }
       | { kind: 'usage'; usage: Usage }
+      | { kind: 'models'; models: Model[] }
       | { kind: 'interaction'; request: Interaction }
       | { kind: 'interactionResolved'; id: string }
       | { kind: 'session'; info: Partial<Session> }
