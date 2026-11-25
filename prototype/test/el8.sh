@@ -141,7 +141,8 @@ tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs \
     /artifacts/linux/span-preview /artifacts/resource-isolation.json \
     /artifacts/terminal-baseline/span-preview "$(cat /artifacts/terminal-baseline-commit.txt)" \
-    /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)"
+    /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)" \
+    /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)"
 
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &

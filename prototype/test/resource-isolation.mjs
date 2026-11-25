@@ -6,7 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
 
-const [binary, reportPath, baselineBinary, baselineCommit, coveredBaseline, coveredBaselineCommit] = process.argv.slice(2);
+const [binary, reportPath, baselineBinary, baselineCommit, coveredBaseline, coveredBaselineCommit,
+  minimizedBaseline, minimizedBaselineCommit] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const initialSize = [880, 640];
 const activeWindowMs = 7500;
@@ -245,7 +246,7 @@ async function output(page) {
   return { outputLines: 120 };
 }
 
-async function coveredOutput(page, profile, capture, variant, saveImage) {
+async function hiddenOutput(app, page, { profile, capture, variant, saveImage, minimized }) {
   const script = fileURLToPath(new URL('./terminal-covered-output.cjs', import.meta.url));
   const gate = join(profile, 'begin-terminal-output');
   await terminalLine(page, `"${process.execPath}" "${script}" "${gate}"`, 'span_covered_ready');
@@ -255,6 +256,7 @@ async function coveredOutput(page, profile, capture, variant, saveImage) {
   const beforeCover = await dimensions();
   const observation = await screen.evaluateHandle(element => {
     let intersecting;
+    let windowHidden;
     let batches = 0;
     let tail = '';
     let packets = 0;
@@ -262,6 +264,7 @@ async function coveredOutput(page, profile, capture, variant, saveImage) {
     const generations = new Set();
     const visibility = new IntersectionObserver(entries => { intersecting = entries.at(-1).isIntersecting; });
     visibility.observe(element);
+    const stopWindow = window.span.onWindowHidden(hidden => { windowHidden = hidden; });
     const observer = new MutationObserver(() => { batches++; });
     const unsubscribe = window.span.onEvent(packet => {
       if (packet.event !== 'terminal') return;
@@ -273,36 +276,48 @@ async function coveredOutput(page, profile, capture, variant, saveImage) {
     });
     return {
       get intersecting() { return intersecting; },
+      get windowHidden() { return windowHidden; },
       get received() { return received; },
       begin() { observer.observe(element.querySelector('.xterm-rows'), { childList: true, subtree: true, characterData: true }); },
       finish() { observer.disconnect(); return { batches, packets, generations: generations.size }; },
-      stop() { visibility.disconnect(); unsubscribe(); },
+      stop() { visibility.disconnect(); stopWindow(); unsubscribe(); },
     };
   });
+  let preview;
   try {
-    await page.getByRole('button', { name: '文件', exact: true }).click();
-    await page.getByRole('button', { name: 'README.md' }).click();
-    const preview = page.getByRole('complementary', { name: '文件预览' });
-    await preview.getByText('Span 工作台预览', { exact: true }).waitFor();
-    await page.waitForFunction(state => state.intersecting === (document.querySelector('.xterm').getBoundingClientRect().left < innerWidth), observation);
-    assert.equal(await observation.evaluate(state => state.intersecting), variant === 'baseline');
+    if (minimized) {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
+      await page.waitForFunction(state => state.windowHidden === true, observation, { polling: 50 });
+      assert.ok(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()));
+    } else {
+      await page.getByRole('button', { name: '文件', exact: true }).click();
+      await page.getByRole('button', { name: 'README.md' }).click();
+      preview = page.getByRole('complementary', { name: '文件预览' });
+      await preview.getByText('Span 工作台预览', { exact: true }).waitFor();
+      await page.waitForFunction(state => state.intersecting === (document.querySelector('.xterm').getBoundingClientRect().left < innerWidth), observation);
+      assert.equal(await observation.evaluate(state => state.intersecting), variant === 'baseline');
+    }
     assert.deepEqual(await dimensions(), beforeCover);
     await observation.evaluate(state => state.begin());
     const before = await capture();
     await writeFile(gate, '');
-    await page.waitForFunction(state => state.received, observation, { timeout: 12_000 });
+    await page.waitForFunction(state => state.received, observation, { polling: 50, timeout: 12_000 });
     await delay(250);
     const covered = await capture();
     const events = await observation.evaluate(state => state.finish());
     assert.ok(events.packets > 0);
     assert.equal(events.generations, 1);
-    if (variant === 'baseline') assert.ok(events.batches >= 10, `Expected baseline terminal updates, saw ${events.batches}`);
-    else {
+    if (variant === 'candidate') {
       assert.equal(events.batches, 0);
-      assert.equal(await readyRow.count(), 1, 'The covered terminal keeps its previous DOM until reveal');
+      assert.equal(await readyRow.count(), 1, 'The hidden terminal keeps its previous DOM until reveal');
+    } else if (!minimized) {
+      assert.ok(events.batches >= 10, `Expected baseline terminal updates, saw ${events.batches}`);
     }
     const revealStarted = performance.now();
-    await preview.getByRole('button', { name: '关闭预览' }).click();
+    if (minimized) {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
+      await page.waitForFunction(state => state.windowHidden === false, observation, { polling: 50 });
+    } else await preview.getByRole('button', { name: '关闭预览' }).click();
     await page.waitForFunction(() => {
       const rows = [...document.querySelectorAll('.xterm-rows > div')];
       const last = rows.findIndex(row => row.textContent.trim() === 'span_hidden_080');
@@ -311,7 +326,8 @@ async function coveredOutput(page, profile, capture, variant, saveImage) {
     });
     const revealDomMs = performance.now() - revealStarted;
     assert.deepEqual(await dimensions(), beforeCover);
-    if (saveImage) await page.screenshot({ path: reportPath.replace(/\.json$/, `-${variant}-terminal-revealed.png`) });
+    const restored = minimized ? 'restored' : 'revealed';
+    if (saveImage) await page.screenshot({ path: reportPath.replace(/\.json$/, `-${variant}-terminal-${restored}.png`) });
     await terminalLine(page, linux ? `printf '%s_%s\\n' span_covered still_open` : 'echo span_covered_still_open', 'span_covered_still_open');
     assert.equal(await observation.evaluate(state => state.finish().generations), 1);
     return { variant, events, before, covered, revealDomMs };
@@ -417,7 +433,9 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     const capture = () => snapshot(app, page, cdp, pid);
     const beforeOpen = await capture();
     await openTerminal();
-    if (workload === 'covered') return await coveredOutput(page, profile, capture, variant, saveImage);
+    if (workload === 'covered' || workload === 'minimized') {
+      return await hiddenOutput(app, page, { profile, capture, variant, saveImage, minimized: workload === 'minimized' });
+    }
     await terminalLine(page, linux ? `printf '%s_%s\\n' resources ready` : 'echo resources_ready', 'resources_ready');
     await settle(page);
     const beforeWorkload = await capture();
@@ -450,17 +468,19 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
 
 const report = {
   platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
-  window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, trials: [], interaction: [], palettes: [], covered: [],
+  window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, minimizedBaselineCommit,
+  trials: [], interaction: [], palettes: [], covered: [], minimized: [],
 };
 const run = (workload, variant) => trial(workload, variant, variant === 'baseline' ? baselineBinary : binary);
 const publish = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
-if (coveredBaseline) {
+for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimized', minimizedBaseline]]) {
+  if (!hiddenBaseline) continue;
   for (const [index, variant] of ['baseline', 'candidate', 'candidate', 'baseline'].entries()) {
-    const executable = variant === 'baseline' ? coveredBaseline : binary;
-    const sample = await trial('covered', variant, executable, undefined, index < 2);
-    report.covered.push(sample);
+    const executable = variant === 'baseline' ? hiddenBaseline : binary;
+    const sample = await trial(workload, variant, executable, undefined, index < 2);
+    report[workload].push(sample);
     await publish();
-    console.log(`${variant} covered terminal DOM batches: ${sample.events.batches}`);
+    console.log(`${variant} ${workload} terminal DOM batches: ${sample.events.batches}`);
   }
 }
 let outputPair = 0;

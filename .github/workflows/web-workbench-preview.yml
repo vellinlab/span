@@ -12,6 +12,7 @@ env:
   FOLLOWING_REPLY_BASELINE: 28b8963cefc13f084686e0d29127ee4232f4f824
   TERMINAL_RENDERER_BASELINE: 7b6b7c8dbde37521cf565afc3c4b05966adb96a9
   TERMINAL_COVER_BASELINE: 1f708fcb93da896f425cdc292ad07adddc1204e6
+  TERMINAL_WINDOW_BASELINE: 127feffb69fbd7a752c49b7666f3198a3c0e8cb6
 
 concurrency:
   group: span-web-workbench-${{ github.ref }}
@@ -111,7 +112,8 @@ jobs:
             reasoning-index:d33986d300a411e407892e61a1646265baa5853a \
             grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51 \
             terminal:"$TERMINAL_RENDERER_BASELINE" \
-            terminal-cover:"$TERMINAL_COVER_BASELINE"
+            terminal-cover:"$TERMINAL_COVER_BASELINE" \
+            terminal-window:"$TERMINAL_WINDOW_BASELINE"
           do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
@@ -161,6 +163,7 @@ jobs:
             /tmp/span-workbench-artifacts/following-reply-baseline-commit.txt
             /tmp/span-workbench-artifacts/startup-loading-baseline-commit.txt
             /tmp/span-workbench-artifacts/grouped-history-baseline-commit.txt
+            /tmp/span-workbench-artifacts/terminal-window-baseline-commit.txt
             /tmp/span-workbench-artifacts/streaming-output-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-details-baseline-commit.txt
@@ -221,7 +224,8 @@ jobs:
             "$PWD/verified-preview/preview/span-preview.exe" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
       - name: Prepare the baseline renderers for terminal output and preview
         run: |
-          for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" following-reply:"$FOLLOWING_REPLY_BASELINE"; do
+          for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" \
+            terminal-window:"$TERMINAL_WINDOW_BASELINE" following-reply:"$FOLLOWING_REPLY_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
             source_dir=$(mktemp -d)
@@ -253,7 +257,8 @@ jobs:
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
             "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
-            "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE"
+            "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
+            "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE"
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Publish Windows preview and screenshot
         if: always()

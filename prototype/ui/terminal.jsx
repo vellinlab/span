@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { SquareTerminal, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
+import { observeWindowHidden } from './window-visibility.js';
 
 let generation = Math.trunc(performance.timeOrigin * 1_000);
 const ACK_BYTES = 64 * 1024;
@@ -13,12 +14,14 @@ const INPUT_PRIORITY_MS = 140;
 export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, covered, onClose }) {
   const element = useRef(null);
   const hidden = useRef(covered);
-  const restoreSelection = useRef(null);
+  const applyRenderVisibility = useRef(null);
   const [error, setError] = useState('');
-  useLayoutEffect(() => {
-    hidden.current = covered;
-    if (!covered) restoreSelection.current?.();
-  }, [covered]);
+  useLayoutEffect(() => observeWindowHidden(windowHidden => {
+    const paused = covered || windowHidden;
+    if (hidden.current === paused) return;
+    hidden.current = paused;
+    applyRenderVisibility.current?.();
+  }), [covered]);
   useEffect(() => {
     setError('');
     const host = element.current;
@@ -41,8 +44,28 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     terminal.loadAddon(fit);
     terminal.open(host);
     fit.fit();
-    // xterm 6 refreshes the selection on buffer scroll even when its intersection observer has paused rendering.
     const renderService = terminal._core?._renderService;
+    let intersection = { isIntersecting: true };
+    const outsideViewport = { isIntersecting: false };
+    const setIntersection = typeof renderService?._handleIntersectionChange === 'function'
+      ? renderService._handleIntersectionChange.bind(renderService) : undefined;
+    if (setIntersection) {
+      // Electron window visibility can change without changing the terminal's intersection.
+      renderService._handleIntersectionChange = entry => {
+        intersection = entry;
+        if (!hidden.current) setIntersection(entry);
+      };
+      if (typeof renderService._renderRows === 'function') {
+        const drawRows = renderService._renderRows.bind(renderService);
+        renderService._renderRows = (start, end) => {
+          // A frame can already be queued when the window is hidden.
+          if (hidden.current) terminal.refresh(start, end);
+          else drawRows(start, end);
+        };
+      }
+    }
+    // xterm 6 redraws selection on buffer scroll even when row rendering is paused.
+    let restoreSelection;
     if (typeof renderService?.handleSelectionChanged === 'function') {
       const drawSelection = renderService.handleSelectionChanged.bind(renderService);
       let deferredSelection;
@@ -50,12 +73,17 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
         if (hidden.current) deferredSelection = selection;
         else drawSelection(...selection);
       };
-      restoreSelection.current = () => {
+      restoreSelection = () => {
         if (!deferredSelection) return;
         drawSelection(...deferredSelection);
         deferredSelection = undefined;
       };
     }
+    applyRenderVisibility.current = () => {
+      setIntersection?.(hidden.current ? outsideViewport : intersection);
+      if (!hidden.current) restoreSelection?.();
+    };
+    if (hidden.current) applyRenderVisibility.current();
     let closed = false;
     host.dataset.renderer = 'dom';
     if (renderer !== 'dom') {
@@ -158,7 +186,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     observer.observe(host);
     return () => {
       closed = true;
-      restoreSelection.current = null;
+      applyRenderVisibility.current = null;
       clearTimeout(outputTimer);
       queuedOutput = [];
       cancelAnimationFrame(frame);
