@@ -211,6 +211,8 @@ function App() {
       (trigger?.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
     } else if (focus === 'composer') {
       input.current?.focus({ preventScroll: true });
+    } else if (focus === 'conversation') {
+      (hasSession ? scroll.current : input.current)?.focus({ preventScroll: true });
     }
     if (!preview || preview.parked) return;
     if (previewBlocked) {
@@ -222,7 +224,7 @@ function App() {
       const target = preview.attachment ? '.preview-close' : '.preview-content';
       previewRegion.current?.querySelector(target)?.focus({ preventScroll: true });
     }
-  }, [preview, previewBlocked, readingOverlay]);
+  }, [hasSession, preview, previewBlocked, readingOverlay]);
 
   const loadPreview = useCallback(async (read, path, attachment = false, root) => {
     const scope = ++previewScope.current;
@@ -396,9 +398,9 @@ function App() {
     dismissPreview('trigger');
   }
 
-  function restorePreview() {
-    previewFocus.current = 'content';
-    setPreview({ ...preview, parked: false });
+  function togglePreview() {
+    previewFocus.current = preview.parked ? 'content' : 'conversation';
+    setPreview({ ...preview, parked: !preview.parked });
   }
 
   function toggleTerminal() {
@@ -762,9 +764,9 @@ function App() {
           </div>
           {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
         </div>
-        {preview?.parked && <button className="icon-button" aria-label="恢复文件预览" aria-controls="file-preview"
-          title={previewBlocked ? '处理请求后可恢复文件预览' : `恢复文件预览 · ${preview.path}`}
-          disabled={previewBlocked} onClick={restorePreview}><FileText size={16} /></button>}
+        {preview && (preview.parked || readingOverlay) && <button type="button" className="preview-toggle"
+          aria-controls="file-preview" title={previewBlocked ? '处理请求后可继续预览' : undefined}
+          disabled={previewBlocked} onClick={togglePreview}>{preview.parked ? '继续预览' : '返回会话'}</button>}
         <button className="icon-button terminal-toggle" aria-label="切换终端" title="切换终端"
           aria-pressed={terminal && !readingOverlay} onClick={toggleTerminal}><SquareTerminal size={16} /></button>
       </div>

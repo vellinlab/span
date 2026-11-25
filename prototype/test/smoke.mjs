@@ -743,7 +743,7 @@ try {
   if (!wasTerminalOpen) await terminalToggle.click();
   await page.locator('section.terminal-panel').waitFor();
   const preview = page.getByRole('complementary', { name: '文件预览' });
-  const restorePreview = page.getByRole('button', { name: '恢复文件预览' });
+  const restorePreview = page.getByRole('button', { name: '继续预览', exact: true });
   let fileContent;
   if (!process.env.SPAN_TEST_SSH_ALIAS) {
     await page.getByRole('button', { name: '文件', exact: true }).click();

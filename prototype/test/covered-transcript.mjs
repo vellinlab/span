@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { _electron as electron } from 'playwright';
 
-const [candidate, baseline, frameBaseline] = process.argv.slice(2);
+const [candidate, baseline, frameBaseline, screenshot] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const tail = '·'.repeat(145);
 
@@ -124,6 +126,99 @@ async function check(binary, label, following, cover = 'preview') {
   }
 }
 
+async function checkPreviewSwitch(binary) {
+  const profile = await mkdtemp(join(tmpdir(), 'span-preview-switch-'));
+  let app;
+  let filename;
+  try {
+    await writeFile(join(profile, 'reasoning-details'), '');
+    app = await electron.launch({
+      executablePath: binary,
+      args: ['--demo', '--disable-webgl', ...(linux ? ['--no-sandbox'] : [])],
+      env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_STREAM_GATE: profile },
+    });
+    const page = await app.firstWindow();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(800, 640));
+    await page.waitForFunction(() => innerWidth <= 820 && innerHeight <= 660);
+    const { cwd } = await page.evaluate(() => window.span.workspace(false));
+    filename = join(cwd, `${basename(profile)}.md`);
+    const paragraphs = Array.from({ length: 64 }, (_, index) => `${index + 1}. 核对工作区里的配置与命令输出。`);
+    await writeFile(filename, `# 工作区复核记录\n\n${paragraphs.join('\n')}`);
+
+    const transcript = page.getByTestId('transcript');
+    const composer = page.getByRole('textbox', { name: '消息' });
+    const goal = page.locator('.goal-strip');
+    const strip = page.getByRole('button', { name: '实时推理摘要' });
+    const detail = page.locator('#reasoning-panel .agent-panel-content');
+    await transcript.getByText('第 160 项', { exact: false }).waitFor();
+    await composer.fill('/goal 核对工作区的配置与命令输出');
+    await composer.press('Enter');
+    await goal.getByText('核对工作区的配置与命令输出').waitFor();
+    await composer.fill('验证高频推理摘要。');
+    await composer.press('Enter');
+    await strip.getByText('开始复核长会话。').waitFor();
+    await composer.fill('根据复核记录继续检查配置。');
+    await composer.evaluate(element => element.setSelectionRange(2, 8));
+    await strip.press('Enter');
+    await detail.getByText('保留两级缩进', { exact: true }).waitFor();
+    const detailTop = await detail.evaluate(element => { element.scrollTop = 180; return element.scrollTop; });
+    const transcriptTop = await transcript.evaluate(element => { element.scrollTop = 300; return element.scrollTop; });
+    assert.ok(detailTop > 0 && transcriptTop > 0);
+    await page.getByRole('button', { name: '滚到最新消息' }).waitFor();
+    const stripBounds = await strip.boundingBox();
+    const readSummary = await strip.elementHandle();
+    const initialSummary = await readSummary.textContent();
+
+    await page.getByRole('button', { name: '文件', exact: true }).click();
+    const file = page.getByRole('button', { name: basename(filename), exact: true });
+    await file.press('Enter');
+    const preview = page.getByRole('complementary', { name: '文件预览' });
+    const content = preview.locator('.preview-content');
+    await content.getByText('工作区复核记录').waitFor();
+    const previewContent = await content.elementHandle();
+    const fileTop = await content.evaluate(element => { element.scrollTop = 300; return element.scrollTop; });
+    assert.equal(fileTop, 300);
+    assert.ok(await page.locator('main[inert]').count());
+    if (screenshot) await page.screenshot({ path: `${screenshot}-file.png` });
+    await writeFile(join(profile, 'append'), '');
+    const marker = join(profile, 'appended');
+    for (let attempt = 0; attempt < 300 && !existsSync(marker); attempt++) await delay(25);
+    assert.ok(existsSync(marker), 'The fixture must finish sending all 72 updates while the file covers the summary.');
+    assert.equal(await readSummary.textContent(), initialSummary);
+
+    await page.getByRole('button', { name: '返回会话', exact: true }).press('Enter');
+    await strip.getByText('步骤 072', { exact: false }).waitFor();
+    assert.deepEqual(await strip.boundingBox(), stripBounds);
+    assert.ok(await readSummary.evaluate(element => element.isConnected));
+    assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
+    assert.equal(await detail.evaluate(element => element.scrollTop), detailTop);
+    assert.ok(await transcript.evaluate(element => element === document.activeElement));
+    assert.deepEqual(await composer.evaluate(({ value, selectionStart, selectionEnd }) =>
+      [value, selectionStart, selectionEnd]), ['根据复核记录继续检查配置。', 2, 8]);
+    assert.ok(await goal.evaluate(element => element.nextElementSibling.matches('form.composer') &&
+      element.getBoundingClientRect().bottom < element.nextElementSibling.getBoundingClientRect().top));
+    if (screenshot) await page.screenshot({ path: `${screenshot}-conversation.png` });
+
+    await page.getByRole('button', { name: '继续预览', exact: true }).press('Enter');
+    await content.waitFor();
+    assert.ok(await previewContent.evaluate(element => element.isConnected && element === document.activeElement));
+    assert.equal(await content.evaluate(element => element.scrollTop), fileTop);
+    await content.press('Escape');
+    await preview.waitFor({ state: 'detached' });
+    assert.ok(await file.evaluate(element => element === document.activeElement));
+    await writeFile(join(profile, 'follow-detail'), '');
+    await strip.getByText('步骤 073', { exact: false }).waitFor();
+    await writeFile(join(profile, 'finish'), '');
+    await strip.waitFor({ state: 'detached' });
+    return { fileTop, transcriptTop, detailTop };
+  } finally {
+    await app?.close();
+    if (filename) await rm(filename, { force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 3 });
+  }
+}
+
+const previewSwitch = await checkPreviewSwitch(candidate);
 const trials = [];
 for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
   if (baseline) trials.push(await check(baseline, 'baseline', true));
@@ -134,4 +229,4 @@ for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
 trials.push(await check(candidate, 'candidate', false));
 trials.push(await check(candidate, 'candidate', true, 'minimized'));
 trials.push(await check(candidate, 'candidate', false, 'minimized'));
-console.log(JSON.stringify({ platform: process.platform, trials }, null, 2));
+console.log(JSON.stringify({ platform: process.platform, previewSwitch, trials }, null, 2));

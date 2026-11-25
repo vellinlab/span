@@ -145,6 +145,15 @@ p { margin-block: 0 12px; }
   flex: none;
 }
 .topbar .icon-button { app-region: no-drag; }
+.preview-toggle {
+  flex: none;
+  min-height: 30px;
+  padding: 3px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  app-region: no-drag;
+}
 .icon-button[aria-pressed="true"] { color: var(--accent); background: var(--selected); }
 .right { margin-left: auto; }
 
