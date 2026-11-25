@@ -311,8 +311,12 @@ function firstVisibleMessage(element, viewport) {
   }
 }
 
+export function transcriptIsAtEnd(element) {
+  return element.scrollHeight - element.clientHeight - element.scrollTop < 40;
+}
+
 function readAnchor(element, rows, layout) {
-  if (element.scrollHeight - element.clientHeight - element.scrollTop < 40) return;
+  if (transcriptIsAtEnd(element)) return;
   const viewport = element.getBoundingClientRect();
   const item = firstVisibleMessage(element, viewport);
   if (item) {
@@ -369,8 +373,7 @@ export const Transcript = memo(function Transcript({
       following.current = false;
       setInspectedCard(key);
     } else if (!open && inspectedCard === key) {
-      const element = scroll.current;
-      following.current = element.scrollHeight - element.clientHeight - element.scrollTop < 40;
+      following.current = transcriptIsAtEnd(scroll.current);
       setInspectedCard(null);
     }
   }, [inspectedCard, scroll]);
@@ -426,6 +429,16 @@ export const Transcript = memo(function Transcript({
   useLayoutEffect(() => {
     latest.current = { rows, layout, historyPages, restore, openGroups };
   }, [rows, layout, historyPages, restore, openGroups]);
+
+  useLayoutEffect(() => {
+    if (restore || !jumpToLatest.current || !rows.length) return;
+    jumpToLatest.current = false;
+    following.current = true;
+    releaseGroupAnchor();
+    setInspectedCard(null);
+    virtual.scrollToEnd();
+    onScrollPosition(false);
+  }, [rows, virtual, jumpToLatest, onScrollPosition, restore, releaseGroupAnchor]);
 
   useLayoutEffect(() => {
     if (liveTurnId === activeTurnId) {
@@ -500,7 +513,7 @@ export const Transcript = memo(function Transcript({
       if (attempts) frame = requestAnimationFrame(() => align(attempts - 1));
       else {
         jumpToLatest.current = false;
-        following.current = element.scrollHeight - element.clientHeight - element.scrollTop < 40;
+        following.current = transcriptIsAtEnd(element);
         onScrollPosition(!following.current);
         setRestore(undefined);
       }
@@ -508,16 +521,6 @@ export const Transcript = memo(function Transcript({
     align(2);
     return () => cancelAnimationFrame(frame);
   }, [layout.count, virtual, jumpToLatest, scroll, onScrollPosition, restore, loading, target]);
-
-  useLayoutEffect(() => {
-    if (restore || !jumpToLatest.current || !rows.length) return;
-    jumpToLatest.current = false;
-    following.current = true;
-    releaseGroupAnchor();
-    setInspectedCard(null);
-    virtual.scrollToEnd();
-    onScrollPosition(false);
-  }, [rows, virtual, jumpToLatest, onScrollPosition, restore, releaseGroupAnchor]);
 
   useLayoutEffect(() => {
     const element = scroll.current;
@@ -564,7 +567,7 @@ export const Transcript = memo(function Transcript({
     const height = element.clientHeight;
     // A resize can scroll the list before its observer has restored the viewport.
     if (height !== viewportSize.current?.height || element.ownerDocument.defaultView.innerWidth !== viewportSize.current.windowWidth) return;
-    const atBottom = element.scrollHeight - height - element.scrollTop < 40;
+    const atBottom = transcriptIsAtEnd(element);
     following.current = atBottom;
     if (atBottom && inspectedCard) setInspectedCard(null);
     onScrollPosition(!atBottom);

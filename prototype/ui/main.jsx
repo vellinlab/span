@@ -16,7 +16,7 @@ import { SessionActions } from './session-actions.jsx';
 import { directoryName, SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
-import { Transcript } from './transcript.jsx';
+import { Transcript, transcriptIsAtEnd } from './transcript.jsx';
 import { turnReasoning, turnReasoningRows } from './timeline.js';
 import { useAgent } from './use-agent.js';
 import { draftKey, useDrafts } from './use-drafts.js';
@@ -575,6 +575,7 @@ function App() {
     if ((!text && !files.length) || connection !== 'ready' || loading || pastingScreenshot) return;
     const submitted = raw === draft ? visibleDraft : setDraft(raw);
     const scope = work.timelineScope();
+    const followLatest = !running || transcriptIsAtEnd(scroll.current);
     setSuggesting(false);
     const command = text.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
     const known = command && (commands.some(([name]) => name === command[1]) ||
@@ -590,7 +591,7 @@ function App() {
       if (!known || nativePrompt) prepareMarkdown().catch(() => {});
       const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '', submitted)
         : await work.send(text, effectiveOptions(), delivery, {
-          files, followLatest: !showLatest,
+          files, followLatest,
           onDispatch() {
             const screenshots = files.filter(file => file.screenshot).map(file => file.path);
             if (screenshots.length) window.span.retainScreenshots(screenshots);
@@ -601,7 +602,7 @@ function App() {
         });
       if (sent) {
         clearSent(submitted);
-        if (dispatched && running && showLatest && work.timelineScope() === scope) {
+        if (dispatched && running && !followLatest && work.timelineScope() === scope) {
           setComposerFeedback({ scope, text: delivery === 'followUp' ? '已排队' : '已追加' });
         }
       }

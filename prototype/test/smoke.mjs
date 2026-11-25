@@ -920,6 +920,7 @@ try {
   await sendPlanMessage('完成计划。');
   const planAnswer = transcript.getByText('计划验收完成。', { exact: true });
   await planAnswer.waitFor();
+  await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
   await planSummary.getByText('已完成 3/3', { exact: true }).waitFor();
   await steps.waitFor({ state: 'detached' });
   await waitForTranscriptEnd();
