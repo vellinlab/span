@@ -10,8 +10,8 @@ case "$platform" in
         digest=d4fc63f09bd14ee2308c05d34c231a8d09c3e945fd2e86ef4ea1a41b31dd1830
         ;;
     linux)
-        archive=opencode-linux-x64-baseline-musl.tar.gz
-        digest=bc6b0d702163d859161ee8e43ea3f16d1bd43b305ac7ce17742eb01ba72489f3
+        archive=opencode-linux-x64-baseline.tar.gz
+        digest=8443113b3f3dfebf8b0fa91c4377e5519a62b9231732d9344a5df001e4a852b3
         ;;
     *) exit 2 ;;
 esac
@@ -25,4 +25,5 @@ if [[ "$platform" == windows ]]; then
 else
     tar -xzf "$destination/$archive" -C "$destination"
     test -x "$destination/opencode"
+    "$destination/opencode" --version
 fi
