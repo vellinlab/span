@@ -269,7 +269,7 @@ try {
   await openChild().click();
   const childTranscript = () => page.getByTestId('subagent-transcript');
   await childTranscript().getByText(childPrompt, { exact: true }).waitFor();
-  await approval.press('Enter');
+  await approvalCard.getByRole('button', { name: '仅允许这次', exact: true }).press('Enter');
   await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
   assert.match(childToolResult ?? '', /span-claude-child/);
   await transcript().getByText(delegateAnswer, { exact: true }).waitFor();
