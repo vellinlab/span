@@ -525,10 +525,10 @@ try {
   await page.getByRole('button', { name: '停止', exact: true }).evaluate(button => button.click());
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await liveReasoning.waitFor({ state: 'detached' });
-  await reasoningPanel.waitFor({ state: 'detached' });
-  assert.ok(await composer.evaluate(element => element === document.activeElement));
+  await reasoningPanel.getByText('已归档', { exact: true }).waitFor();
   assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - restoredReasoningAnchor) <= 2);
   await reasoningJump.press('Enter');
+  await reasoningPanel.waitFor({ state: 'detached' });
   await reasoningJump.waitFor({ state: 'detached' });
   assert.ok(await transcript.evaluate(element => element === document.activeElement));
   await transcript.getByText('流式输出已接通。', { exact: true }).waitFor();

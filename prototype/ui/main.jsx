@@ -125,8 +125,11 @@ function App() {
   const liveReasoning = turnReasoning(rows, running ? run.id : undefined);
   const showReasoning = Boolean(liveReasoning?.preview && !interaction);
   const reasoningOpen = panel?.kind === 'reasoning';
-  const reasoningDetails = reasoningOpen && liveReasoning
-    ? turnReasoningRows(rows, liveReasoning.turnId) : undefined;
+  const keepReasoning = reasoningOpen && panel.sessionKey === refKey && connection === 'ready' && !interaction &&
+    (!running || run.id === panel.turnId);
+  const reasoningArchived = keepReasoning && !running;
+  const reasoningDetails = keepReasoning ? turnReasoningRows(rows, panel.turnId) : undefined;
+  const reasoningExpanded = keepReasoning && panel.turnId === liveReasoning?.turnId;
   const previewBlocked = previewOverlay && Boolean(interaction);
   const readingOverlay = previewCoversConversation && !interaction;
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
@@ -191,17 +194,22 @@ function App() {
   }, [commandIndex, suggestions.length]);
 
   useLayoutEffect(() => {
-    if (showReasoning) return;
-    const focused = reasoningHadFocus.current || (reasoningOpen &&
-      document.getElementById('reasoning-panel')?.contains(document.activeElement));
+    if (showReasoning && (!reasoningOpen || keepReasoning)) return;
+    const region = reasoningOpen ? document.getElementById('reasoning-panel') : null;
+    const stripHadFocus = reasoningHadFocus.current;
     reasoningHadFocus.current = false;
+    if (keepReasoning) {
+      if (stripHadFocus) region?.querySelector('.agent-panel-content')?.focus({ preventScroll: true });
+      return;
+    }
+    const focused = stripHadFocus || region?.contains(document.activeElement);
     if (reasoningOpen) {
       panelScope.current++;
       panelTrigger.current = null;
       setPanel(null);
     }
     if (focused) (interactionRegion.current ?? input.current)?.focus({ preventScroll: true });
-  }, [reasoningOpen, showReasoning]);
+  }, [keepReasoning, reasoningOpen, showReasoning]);
 
   useLayoutEffect(() => {
     const focus = previewFocus.current;
@@ -874,7 +882,7 @@ function App() {
               {loading && !rows.length && <div className="live" role="status"><i />{rememberedReading?.anchor ? '正在恢复阅读位置' : '正在加载会话'}</div>}
               <div className="composer-overlay-anchor" aria-hidden="true" />
               <div className="composer-overlay">
-                <AgentPanel panel={panel} work={work} reasoning={reasoningDetails}
+                <AgentPanel panel={panel} work={work} reasoning={reasoningDetails} reasoningArchived={reasoningArchived}
                   onClose={closePanel} report={report} openSession={openRef} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}
@@ -887,8 +895,10 @@ function App() {
               </div>
               <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host}
                 focusTarget={interactionRegion} returnFocus={input} />
-              {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningOpen} hadFocus={reasoningHadFocus}
-                toggle={event => reasoningOpen ? closePanel() : showPanel('reasoning', event.currentTarget)} />}
+              {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningExpanded} hadFocus={reasoningHadFocus}
+                toggle={event => reasoningExpanded ? closePanel() : showPanel('reasoning', event.currentTarget, {
+                  sessionKey: refKey, turnId: liveReasoning.turnId,
+                })} />}
               <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
@@ -927,6 +937,7 @@ function App() {
                         running && !showReasoning ? '正在处理' : ''}</span>
                   {showLatest && rows.length > 0 && <button type="button" className="composer-control jump-latest"
                     title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
+                      if (reasoningArchived) closePanel({ restoreFocus: false });
                       const timeline = scroll.current;
                       timeline.scrollTop = timeline.scrollHeight;
                       timeline.focus({ preventScroll: true });

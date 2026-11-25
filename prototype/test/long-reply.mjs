@@ -556,8 +556,15 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       await strip.getByText(archived, { exact: true }).waitFor();
       assert.deepEqual(await strip.boundingBox(), geometry);
     }
+    if (detail && label === 'candidate') await strip.focus();
     await writeFile(join(profile, 'finish'), '');
     await strip.waitFor({ state: 'detached' });
+    if (detail && label === 'candidate') {
+      await panel.getByText('已归档', { exact: true }).waitFor();
+      assert.ok(await detail.evaluate(element => element === document.activeElement));
+      await detail.press('Escape');
+      assert.ok(await composer.evaluate(element => element === document.activeElement));
+    }
     if (detail) await detail.waitFor({ state: 'detached' });
     await latest.click();
     const archive = transcript.locator('[data-card="reasoning"]').filter({ hasText: archived });

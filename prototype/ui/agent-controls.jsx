@@ -377,7 +377,7 @@ function DiffPanel({ panel }) {
   </div>;
 }
 
-export function AgentPanel({ panel, work, reasoning, onClose, report, openSession }) {
+export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, report, openSession }) {
   const close = useRef(null);
   const content = useRef(null);
   const { id: panelId, focus, editGoal } = panel ?? {};
@@ -404,7 +404,8 @@ export function AgentPanel({ panel, work, reasoning, onClose, report, openSessio
       onClose();
     }}>
     <header><strong>{title}</strong>
-      {usage && <small className="goal-usage" title={usage}>{usage}</small>}
+      {usage && <small className="panel-meta" title={usage}>{usage}</small>}
+      {reasoningArchived && <small className="panel-meta">已归档</small>}
       {usagePanel && <button type="button" className="panel-link usage-refresh" aria-disabled={work.usageRefreshing}
         onClick={() => { if (!work.usageRefreshing) work.refreshUsage().catch(report); }}>
         {work.usageRefreshing ? '刷新中…' : '刷新用量'}

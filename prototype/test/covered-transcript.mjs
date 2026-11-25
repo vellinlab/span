@@ -212,8 +212,26 @@ async function checkPreviewSwitch(binary) {
     assert.ok(await file.evaluate(element => element === document.activeElement));
     await writeFile(join(profile, 'follow-detail'), '');
     await strip.getByText('步骤 073', { exact: false }).waitFor();
+    const selection = await detail.evaluate(element => {
+      element.focus({ preventScroll: true });
+      element.scrollTop = 180;
+      const top = element.getBoundingClientRect().top;
+      const line = [...element.querySelectorAll('p strong')].find(node => node.getBoundingClientRect().top >= top);
+      const text = line.firstChild;
+      window.getSelection().setBaseAndExtent(text, 0, text, text.length);
+      return { scrollTop: element.scrollTop, text: window.getSelection().toString() };
+    });
     await writeFile(join(profile, 'finish'), '');
     await strip.waitFor({ state: 'detached' });
+    const panel = page.getByRole('region', { name: '推理摘要' });
+    await panel.getByText('已归档', { exact: true }).waitFor();
+    assert.deepEqual(await detail.evaluate(element => ({ scrollTop: element.scrollTop, text: window.getSelection().toString() })), selection);
+    assert.ok(await detail.evaluate(element => element === document.activeElement));
+    assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
+    if (screenshot) await page.screenshot({ path: `${screenshot}-completed.png` });
+    await detail.press('Escape');
+    await panel.waitFor({ state: 'detached' });
+    assert.ok(await composer.evaluate(element => element === document.activeElement));
     return { fileTop, transcriptTop, detailTop };
   } finally {
     await app?.close();
