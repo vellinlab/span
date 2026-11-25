@@ -85,6 +85,7 @@ function App() {
   const previewRegion = useRef(null);
   const previewTrigger = useRef(null);
   const previewFocus = useRef(null);
+  const conversationFocus = useRef(null);
   const directoryLabel = useRef(null);
   const directoryFocus = useRef(false);
   const interactionRegion = useRef(null);
@@ -212,7 +213,11 @@ function App() {
     } else if (focus === 'composer') {
       input.current?.focus({ preventScroll: true });
     } else if (focus === 'conversation') {
-      (hasSession ? scroll.current : input.current)?.focus({ preventScroll: true });
+      const previous = conversationFocus.current?.deref();
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      if (!previous || document.activeElement !== previous) {
+        (hasSession ? scroll.current : input.current)?.focus({ preventScroll: true });
+      }
     }
     if (!preview || preview.parked) return;
     if (previewBlocked) {
@@ -840,7 +845,8 @@ function App() {
         </nav>
       </Sidebar>}
       <div className="workspace-area" data-preview-overlay={previewOverlay || undefined}>
-        <main className="main" inert={readingOverlay}>
+        <main className="main" inert={readingOverlay}
+          onFocusCapture={event => { conversationFocus.current = new WeakRef(event.target); }}>
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
             <div className="transcript-viewport">
               <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}

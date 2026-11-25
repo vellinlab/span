@@ -161,6 +161,7 @@ async function checkPreviewSwitch(binary) {
     await composer.evaluate(element => element.setSelectionRange(2, 8));
     await strip.press('Enter');
     await detail.getByText('保留两级缩进', { exact: true }).waitFor();
+    await detail.focus();
     const detailTop = await detail.evaluate(element => { element.scrollTop = 180; return element.scrollTop; });
     const transcriptTop = await transcript.evaluate(element => { element.scrollTop = 300; return element.scrollTop; });
     assert.ok(detailTop > 0 && transcriptTop > 0);
@@ -192,12 +193,15 @@ async function checkPreviewSwitch(binary) {
     assert.ok(await readSummary.evaluate(element => element.isConnected));
     assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
     assert.equal(await detail.evaluate(element => element.scrollTop), detailTop);
-    assert.ok(await transcript.evaluate(element => element === document.activeElement));
+    assert.ok(await detail.evaluate(element => element === document.activeElement));
     assert.deepEqual(await composer.evaluate(({ value, selectionStart, selectionEnd }) =>
       [value, selectionStart, selectionEnd]), ['根据复核记录继续检查配置。', 2, 8]);
     assert.ok(await goal.evaluate(element => element.nextElementSibling.matches('form.composer') &&
       element.getBoundingClientRect().bottom < element.nextElementSibling.getBoundingClientRect().top));
     if (screenshot) await page.screenshot({ path: `${screenshot}-conversation.png` });
+    await page.keyboard.press('PageDown');
+    await page.waitForFunction(top => document.querySelector('#reasoning-panel .agent-panel-content').scrollTop > top, detailTop);
+    assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
 
     await page.getByRole('button', { name: '继续预览', exact: true }).press('Enter');
     await content.waitFor();
