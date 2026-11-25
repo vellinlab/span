@@ -82,9 +82,12 @@ async function trial(disableAnimation) {
     await timeline.evaluate(element => {
       element.spanWheelTrace = [];
       element.addEventListener('wheel', event => {
-        element.spanWheelTrace.push({ direction: Math.sign(event.deltaY), time: performance.now() });
+        const mode = event.deltaMode;
+        const delta = event.deltaY;
+        element.spanWheelTrace.push({ mode, delta, direction: Math.sign(delta), time: performance.now() });
       }, { passive: true, capture: true });
     });
+    const readTrace = () => timeline.evaluate(element => element.spanWheelTrace.splice(0));
     async function reset() {
       await timeline.evaluate(element => { element.scrollTop = element.scrollHeight - element.clientHeight - 540; });
       await delay(dispatchIntervalMs);
@@ -140,6 +143,7 @@ async function trial(disableAnimation) {
       samples.push(sample);
     }
     const after = await measure();
+    const isolatedTrace = await readTrace();
     const terminalLines = await terminalLine() - terminalStart;
     assert.ok(terminalStart > 0 && terminalLines > 0, 'PTY output must continue throughout the scrolling comparison.');
     for (let index = 0; index < 4; index++) {
@@ -152,12 +156,18 @@ async function trial(disableAnimation) {
       const settledFrame = await driver.request('frame');
       assert.ok((offset - startingOffset) * direction > 0 && result.changed > 0, 'A wheel burst must move the transcript.');
       const exact = Math.abs(offset - target.top) <= 1 && settledFrame === target.frame;
-      bursts.push({ direction, ...result, startingOffset, offset, expectedOffset: target.top, settledFrame, exact });
-      // Reuse the same starting point after a full sweep, even if Chromium coalesced the burst differently.
+      const events = await readTrace();
+      const single = isolatedTrace.find(event => event.direction === direction);
+      const delta = events.reduce((sum, event) => sum + event.delta, 0);
+      // Chromium can combine native notches into one WheelEvent before dispatching it to JS.
+      const expectedDelta = single ? single.delta * 3 : null;
+      const received = single && events.every(event => event.direction === direction && event.mode === single.mode) &&
+        Math.abs(delta - expectedDelta) < 0.01;
+      bursts.push({ direction, ...result, startingOffset, offset, expectedOffset: target.top, settledFrame, exact,
+        delta, expectedDelta, received: Boolean(received), events });
+      // Keep an unsettled burst from changing the starting point for the next sweep.
       if (direction === 1 && !exact) await restoreReference();
     }
-    const trace = await timeline.evaluate(element => element.spanWheelTrace);
-    assert.deepEqual(trace.map(item => item.direction), [...directions, ...directions, ...directions, ...directions]);
     const renderer = await app.evaluate(({ BrowserWindow, app }) => {
       const pid = BrowserWindow.getAllWindows()[0].webContents.getOSProcessId();
       return app.getAppMetrics().find(process => process.pid === pid)?.memory;
@@ -174,7 +184,7 @@ async function trial(disableAnimation) {
       rendererWorkingSetKiB: renderer.workingSetSize, rendererPrivateKiB: renderer.privateBytes,
       firstPixelP95Ms: percentile(samples, 'first'), exactPixelP95Ms: percentile(samples, 'expected'),
       matched: samples.filter(item => item.expected != null).length,
-      samples, bursts, trace,
+      samples, bursts, trace: isolatedTrace,
     };
   } finally {
     driver?.close();
@@ -192,6 +202,10 @@ for (const disabled of [false, true, true, false]) {
   await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
   const { samples, bursts, trace, ...summary } = run;
   console.log(JSON.stringify({ ...summary, bursts }));
+  assert.deepEqual(trace.map(item => item.direction), [...directions, ...directions], 'Check all isolated wheel events.');
+  for (const burst of bursts) assert.ok(burst.received && burst.exact,
+    `The wheel burst delta ${burst.delta}/${burst.expectedDelta} reached ${burst.offset}/${burst.expectedOffset}. ` +
+    `The desktop frame matched: ${burst.exact}.`);
   assert.ok(run.matched >= 10, 'The desktop must paint at least ten of the twelve calibrated wheel targets.');
   assert.ok(run.offsets.every((offset, index) => Math.abs(offset - report.trials[0].offsets[index]) <= 1),
     'The isolated-wheel comparison must cover equivalent offsets.');
