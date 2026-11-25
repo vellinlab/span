@@ -213,6 +213,11 @@ jobs:
           bash prototype/test/install-acp.sh claude-agent-acp windows "$PWD/claude-test"
           node prototype/test/real-claude.mjs "$PWD/verified-preview/preview/span-preview.exe" \
             "$PWD/claude-test/claude-agent-acp.exe" "$PWD/windows-workbench-claude.png"
+      - name: Verify native Pi on Windows
+        run: |
+          bash prototype/test/install-pi.sh "$PWD/pi-test"
+          SPAN_TEST_PI_TEAMS="$PWD/pi-test/team-state-fixture" node prototype/test/real-pi.mjs \
+            "$PWD/verified-preview/preview/span-preview.exe" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
       - name: Prepare the baseline renderers for terminal output and preview
         run: |
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE"; do
@@ -248,9 +253,6 @@ jobs:
           node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
             "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
             "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE"
-          bash prototype/test/install-pi.sh "$PWD/pi-test"
-          SPAN_TEST_PI_TEAMS="$PWD/pi-test/team-state-fixture" node prototype/test/real-pi.mjs \
-            "$binary" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Publish Windows preview and screenshot
         if: always()
