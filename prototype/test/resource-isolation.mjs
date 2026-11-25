@@ -191,14 +191,25 @@ async function terminalPalette(page, screenshot, variant) {
 async function terminalInteraction(app, page, screenshot, variant, recordEcho) {
   const script = fileURLToPath(new URL('./terminal-echo.cjs', import.meta.url));
   await terminalLine(page, `"${process.execPath}" "${script}"`, 'span_echo_ready');
-  const ready = await page.locator('.xterm-rows > div').filter({ hasText: /^\s*span_echo_ready\s*$/ }).boundingBox();
+  const rows = page.locator('.xterm-rows');
+  const ready = await rows.locator(':scope > div').filter({ hasText: /^\s*span_echo_ready\s*$/ }).boundingBox();
   assert.ok(ready, 'The terminal text must be visible before selecting it');
+  const x = ready.x + 12;
   const y = ready.y + ready.height / 2;
   const selection = page.locator('.xterm-selection > div').first();
-  await page.mouse.dblclick(ready.x + 12, y);
+  await page.mouse.dblclick(x, y);
   await selection.waitFor({ state: 'visible' });
-  await page.mouse.click(ready.x + 12, y);
+  await page.mouse.click(x, y);
   await selection.waitFor({ state: 'detached' });
+  await settle(page);
+  const emptyClickUpdates = await countTerminalRowUpdates(rows, async () => {
+    await page.mouse.click(x, y);
+    await settle(page);
+  });
+  const selectionMessage = `${variant} repeated empty terminal selection updated ${emptyClickUpdates} rows`;
+  if (variant === 'candidate') assert.equal(emptyClickUpdates, 0, selectionMessage);
+  else assert.ok(emptyClickUpdates > 0, selectionMessage);
+  console.log(selectionMessage);
   console.log('The raw terminal fixture is ready. Capturing reference pixels.');
   await prepareEchoFrames(app, page);
   await observeEchoStages(page);
@@ -245,12 +256,7 @@ async function terminalInteraction(app, page, screenshot, variant, recordEcho) {
   return palette;
 }
 
-async function output(page) {
-  const command = linux
-    ? `n=1; while [ "$n" -le 120 ]; do printf 'span-resource-%03d\\n' "$n"; n=$((n+1)); sleep .045; done; printf '%s_%s\\n' resources done`
-    : `powershell -NoLogo -NoProfile -Command "for ($i=1; $i -le 120; $i++) { [Console]::WriteLine(('span-resource-' + $i)); Start-Sleep -Milliseconds 45 }; [Console]::WriteLine(('resources_'+'done'))"`;
-  const rows = page.locator('.xterm-rows');
-  await rows.locator(':scope > div').first().click({ position: { x: 12, y: 5 } });
+async function countTerminalRowUpdates(rows, action) {
   const stop = await rows.evaluateHandle(container => {
     let rowUpdates = 0;
     const observe = records => {
@@ -266,12 +272,25 @@ async function output(page) {
   });
   let rowUpdates;
   try {
-    await terminalLine(page, command, 'resources_done');
-    assert.match(await rows.innerText(), /span-resource-120/);
+    await action();
   } finally {
     rowUpdates = await stop.evaluate(finish => finish());
     await stop.dispose();
   }
+  return rowUpdates;
+}
+
+async function output(page) {
+  const command = linux
+    ? `n=1; while [ "$n" -le 120 ]; do printf 'span-resource-%03d\\n' "$n"; n=$((n+1)); sleep .045; done; printf '%s_%s\\n' resources done`
+    : `powershell -NoLogo -NoProfile -Command "for ($i=1; $i -le 120; $i++) { [Console]::WriteLine(('span-resource-' + $i)); Start-Sleep -Milliseconds 45 }; [Console]::WriteLine(('resources_'+'done'))"`;
+  const rows = page.locator('.xterm-rows');
+  await rows.locator(':scope > div').first().click({ position: { x: 12, y: 5 } });
+  await settle(page);
+  const rowUpdates = await countTerminalRowUpdates(rows, async () => {
+    await terminalLine(page, command, 'resources_done');
+    assert.match(await rows.innerText(), /span-resource-120/);
+  });
   assert.ok(rowUpdates > 0, 'The terminal row observer must see the streamed output');
   console.log(`Terminal row updates across 120 output lines: ${rowUpdates}`);
   return { outputLines: 120, rowUpdates };
