@@ -260,6 +260,9 @@ jobs:
             "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
             "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE"
           mv preview-under-test.zip span-web-windows-x86_64.zip
+      - name: Compare native Windows wheel rendering with and without animation
+        timeout-minutes: 3
+        run: node prototype/test/scroll-windows.mjs "$PWD/verified-preview/preview/span-preview.exe" "$PWD/windows-workbench-scroll.json"
       - name: Publish Windows preview and screenshot
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -271,4 +274,5 @@ jobs:
             windows-workbench-startup.json
             windows-workbench-resource-isolation.json
             windows-workbench-following-reply.json
+            windows-workbench-scroll.json
           if-no-files-found: warn
