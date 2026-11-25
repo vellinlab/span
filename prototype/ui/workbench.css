@@ -980,7 +980,7 @@ p { margin-block: 0 12px; }
   padding: 10px 13px 12px;
   scrollbar-color: #697477 transparent;
 }
-.agent-panel[data-kind="reasoning"] .agent-panel-content:focus-visible { outline-offset: -2px; }
+.agent-panel:is([data-kind="reasoning"], [data-kind="usage"]) .agent-panel-content:focus-visible { outline-offset: -2px; }
 .agent-panel[data-kind="reasoning"] .reasoning-sections + .reasoning-sections {
   padding-block-start: 12px;
   border-block-start: 1px solid var(--line);
@@ -995,7 +995,7 @@ p { margin-block: 0 12px; }
   font-variant-numeric: tabular-nums;
 }
 .goal-panel-main { display: flex; flex-direction: column; min-height: 0; }
-.agent-panel:is([data-kind="goal"], [data-kind="reasoning"]) header .icon-button { width: 26px; height: 26px; }
+.agent-panel:is([data-kind="goal"], [data-kind="reasoning"], [data-kind="usage"]) header .icon-button { width: 26px; height: 26px; }
 .goal-panel-main > .agent-panel-content { padding-block: 8px; }
 .goal-objective { margin: 0; line-height: 21px; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
 .goal-actions { flex: none; align-items: center; padding: 4px 8px; border-top: 1px solid var(--line); justify-content: flex-end; }
@@ -1043,7 +1043,8 @@ p { margin-block: 0 12px; }
 .quota time { font-size: 11px; line-height: 17px; font-variant-numeric: tabular-nums; }
 .usage-panel dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 155px), 1fr)); gap: 3px 16px; }
 .usage-panel :is(dl, dd, p), .agent-groups p { margin: 0; }
-.usage-refresh { justify-self: end; }
+.agent-panel[data-kind="usage"] header { gap: 4px; }
+.usage-refresh { margin-inline-start: auto; min-inline-size: 68px; padding-block: 2px; text-align: center; }
 .usage-refresh[aria-disabled="true"] { cursor: default; }
 .agent-group :is(h3, h4) { margin: 0 0 4px; font-size: 12px; font-weight: 600; }
 .agent-task-group h4 { color: var(--muted); }

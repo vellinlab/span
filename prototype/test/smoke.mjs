@@ -502,14 +502,35 @@ try {
       && outer.scrollWidth === outer.clientWidth && meter.value === 92;
   }), 'Long quota labels wrap while the percentage and meter remain intact');
   assert.equal(await accountUsage.locator('time').getAttribute('datetime'), new Date(1795670400000).toISOString());
-  if (screenshot) {
-    await weekly.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: screenshot.replace(/\.png$/, '-usage-compact.png') });
-  }
+  const closeUsage = usage.getByRole('button', { name: '关闭面板' });
+  const refreshUsage = usage.getByRole('button', { name: '刷新用量' });
+  const usageDetails = usage.getByRole('group', { name: '用量明细' });
+  await closeUsage.press('Tab');
+  assert.ok(await usageDetails.evaluate(element => document.activeElement === element));
+  assert.ok(await usageDetails.evaluate(element => element.scrollHeight > element.clientHeight));
+  const refreshPosition = await refreshUsage.boundingBox();
+  await usageDetails.press('End');
+  await page.waitForFunction(() => {
+    const body = document.querySelector('[data-kind="usage"] .agent-panel-content');
+    return body.scrollHeight - body.clientHeight - body.scrollTop <= 2;
+  });
+  assert.deepEqual(await refreshUsage.boundingBox(), refreshPosition);
+  const usageScroll = await usageDetails.evaluate(element => element.scrollTop);
+  await refreshUsage.focus();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-usage-compact.png') });
+  await writeFile(join(profile, 'usage-live-update'), '');
+  await refreshUsage.press('Enter');
+  await accountUsage.getByText('已用 67%', { exact: true }).waitFor();
+  await usage.getByRole('button', { name: '刷新中…' }).waitFor();
+  await writeFile(join(profile, 'usage-reply'), '');
+  await refreshUsage.waitFor();
+  await accountUsage.getByText('已用 67%', { exact: true }).waitFor();
+  assert.equal(await accountUsage.getByText('已用 31%', { exact: true }).count(), 0);
+  assert.ok(Math.abs(await usageDetails.evaluate(element => element.scrollTop) - usageScroll) <= 2);
+  await Promise.all([rm(join(profile, 'usage-live-update')), rm(join(profile, 'usage-reply'))]);
   await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), usageSize);
   await page.waitForFunction(([width, height]) => Math.abs(innerWidth - width) <= 2 && Math.abs(innerHeight - height) <= 2, usageSize);
   await writeFile(join(profile, 'usage-context-only'), '');
-  const refreshUsage = usage.getByRole('button', { name: '刷新用量' });
   await refreshUsage.click();
   await usage.getByRole('button', { name: '刷新中…' }).waitFor();
   await writeFile(join(profile, 'usage-reply'), '');
@@ -519,8 +540,12 @@ try {
   assert.equal(await usage.getByText('当前没有可显示的用量。').count(), 0);
   await refreshUsage.waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-usage-context-only.png') });
-  await rm(join(profile, 'usage-context-only'));
-  await usage.getByRole('button', { name: '关闭面板' }).click();
+  await Promise.all([rm(join(profile, 'usage-context-only')), rm(join(profile, 'usage-reply'))]);
+  await closeUsage.press('Tab');
+  assert.ok(await usageDetails.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Escape');
+  await usage.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => document.activeElement === element));
   await composer.fill('/agents');
   await composer.press('Enter');
   await page.getByRole('region', { name: '代理与团队' }).getByText('fixture-subagent', { exact: true }).waitFor();

@@ -194,7 +194,7 @@ function quotaWindow(minutes) {
   return ` · ${minutes} 分钟`;
 }
 
-function UsagePanel({ usage, refreshing, refresh, report }) {
+function UsagePanel({ usage, refreshing }) {
   const { tokens, limits, cost } = usage;
   const contextUsed = Number.isFinite(tokens?.contextUsed) && tokens.contextUsed >= 0 ? tokens.contextUsed : undefined;
   const contextLimit = Number.isFinite(tokens?.contextLimit) && tokens.contextLimit > 0 ? tokens.contextLimit : undefined;
@@ -231,8 +231,6 @@ function UsagePanel({ usage, refreshing, refresh, report }) {
     {!hasContext && !stats.length && !limits?.length && <p role="status">
       {refreshing ? '正在读取用量…' : '当前没有可显示的用量。'}
     </p>}
-    <button type="button" className="panel-link usage-refresh" aria-disabled={refreshing}
-      onClick={() => { if (!refreshing) refresh().catch(report); }}>{refreshing ? '刷新中…' : '刷新用量'}</button>
   </div>;
 }
 
@@ -365,26 +363,30 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
   const reasoningPanel = panel.kind === 'reasoning';
+  const usagePanel = panel.kind === 'usage';
+  const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : undefined;
   const id = panel.kind === 'goal' || reasoningPanel ? `${panel.kind}-panel` : undefined;
   const goal = panel.kind === 'goal' ? work.goal : undefined;
   const usage = goal?.tokens == null ? '' : [goal.tokens, goal.budget].filter(value => value != null)
     .map(value => number.format(value)).join(' / ') + ' tokens';
   return <section className="agent-panel popup-surface" id={id} data-kind={panel.kind}
     aria-label={title} onKeyDown={event => {
-      if (event.key === 'Escape' && panel.focus) setPanel(null);
+      if (event.key === 'Escape' && (panel.focus || usagePanel)) setPanel(null);
     }}>
     <header><strong>{title}</strong>
       {usage && <small className="goal-usage" title={usage}>{usage}</small>}
+      {usagePanel && <button type="button" className="panel-link usage-refresh" aria-disabled={work.usageRefreshing}
+        onClick={() => { if (!work.usageRefreshing) work.refreshUsage().catch(report); }}>
+        {work.usageRefreshing ? '刷新中…' : '刷新用量'}
+      </button>}
       <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
     </header>
     {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal}
       action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}
-      tabIndex={reasoningPanel ? 0 : undefined} role={reasoningPanel ? 'group' : undefined}
-      aria-label={reasoningPanel ? '推理摘要正文' : undefined}>
+      tabIndex={detailsLabel ? 0 : undefined} role={detailsLabel ? 'group' : undefined} aria-label={detailsLabel}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} />}
-      {panel.kind === 'usage' && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing}
-        refresh={work.refreshUsage} report={report} />}
+      {usagePanel && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing} />}
       {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
       {panel.kind === 'extensions' && (panel.items?.length

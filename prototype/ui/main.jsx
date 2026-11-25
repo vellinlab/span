@@ -266,8 +266,8 @@ function App() {
   function closePanel() {
     panelScope.current++;
     setPanel(null);
-    if (panelTrigger.current) {
-      (panelTrigger.current.isConnected ? panelTrigger.current : input.current)?.focus({ preventScroll: true });
+    if (panelTrigger.current || document.activeElement?.closest('.agent-panel')) {
+      (panelTrigger.current?.isConnected ? panelTrigger.current : input.current)?.focus({ preventScroll: true });
       panelTrigger.current = null;
     }
   }

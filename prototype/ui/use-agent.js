@@ -125,6 +125,12 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     update(previous => updateRoster(previous, id, entry));
   }
 
+  function updateUsage(value) {
+    const received = usageRefresh.current?.received;
+    if (received) for (const field of Object.keys(value)) received.add(field);
+    setUsage(previous => ({ ...previous, ...value }));
+  }
+
   function receive(event) {
     if (event.kind === 'connection') {
       setRoute(event.route);
@@ -143,7 +149,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       return;
     }
     if (event.kind === 'quota') {
-      setUsage(previous => ({ ...previous, limits: event.limits }));
+      updateUsage({ limits: event.limits });
       return;
     }
     if (event.kind === 'connectionInteraction' || event.kind === 'connectionInteractionResolved') {
@@ -187,7 +193,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
         setGoal(event.goal);
         break;
       case 'usage':
-        setUsage(previous => ({ ...previous, ...event.usage }));
+        updateUsage(event.usage);
         break;
       case 'session':
         setSession(previous => previous ? { ...previous, ...event.info } : previous);
@@ -565,13 +571,21 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   async function refreshUsage() {
     const client = agent.current;
     if (!client?.usage || usageRefresh.current) return;
-    const request = client.usage(active.current?.ref);
+    const target = active.current;
+    const request = { received: new Set() };
     usageRefresh.current = request;
     const current = () => client === agent.current && usageRefresh.current === request;
     setUsageRefreshing(true);
     try {
-      const value = await request;
-      if (current()) setUsage(previous => ({ ...previous, ...value }));
+      const value = await client.usage(target?.ref);
+      if (!current()) return;
+      const sameSession = target?.key === active.current?.key;
+      // Notifications supersede the requested snapshot only for the fields they update.
+      const fields = Object.entries(value).filter(([field]) => (sameSession || field === 'limits') && !request.received.has(field));
+      if (fields.length) {
+        const snapshot = Object.fromEntries(fields);
+        setUsage(previous => ({ ...previous, ...snapshot }));
+      }
     } catch (error) {
       if (current()) throw error;
     } finally {

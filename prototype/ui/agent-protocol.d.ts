@@ -34,9 +34,11 @@ export type GoalAction =
   | { kind: 'set'; objective: string; budget?: number }
   | { kind: 'edit'; objective: string; budget: number | null }
   | { kind: 'pause' | 'resume' | 'clear' };
+/** Each provided field replaces its group. Omitted fields leave their groups unchanged. */
 export type Usage = {
   tokens?: { total?: number; input?: number; output?: number; cached?: number; reasoning?: number;
     contextUsed?: number; contextLimit?: number };
+  /** Account-wide limits for the active Agent connection. */
   limits?: { id: string; label: string; used: number; windowMinutes?: number; resetsAt?: number }[];
   cost?: { amount: number; currency: string };
 };
