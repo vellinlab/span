@@ -9,6 +9,19 @@ let line = 0;
 stdout.write('\x1b[?1049h');
 const echo = key => stdout.write(`\x1b[1;1Hspan_echo_${key}\x1b[K\x1b[2;1H`);
 stdin.on('data', key => {
+  if (key === 'p') {
+    clearInterval(output);
+    stdout.write('\x1b[2J\x1b[H' + [
+      '\x1b[31mERROR\x1b[0m  Unable to read src/build.rs',
+      '\x1b[33mWARN\x1b[0m   Using the cached configuration',
+      '\x1b[32mREADY\x1b[0m  Workspace connected',
+      '\x1b[34mINFO\x1b[0m   src/build.rs:42',
+      '\x1b[35mNOTE\x1b[0m   Build artifacts saved',
+      '\x1b[90mTRACE\x1b[0m  Last check took 28 ms',
+      '\x1b[38;2;52;70;92mRGB\x1b[0m    \x1b[7;34;47m REVERSE \x1b[0m',
+    ].join('\r\n'));
+    return;
+  }
   if (key === 'f') {
     clearInterval(output);
     stdout.write(`\x1b[${stdout.rows};1H\x1b[2K\x1b[32m绘_echo_final\x1b[0m`);

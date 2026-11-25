@@ -109,7 +109,35 @@ async function prepareEchoFrames(app, page) {
   await echoSample(app, page, 'b');
 }
 
-async function terminalInteraction(app, page, screenshot, recordEcho) {
+async function terminalPalette(page, screenshot, variant) {
+  await page.keyboard.press('p');
+  await page.locator('.xterm-rows').getByText('REVERSE', { exact: true }).waitFor();
+  await page.screenshot({ path: screenshot.replace(/-end\.png$/, '-palette.png'), timeout: interactionTimeoutMs });
+  const samples = await page.locator('.xterm-rows').evaluate((rows, labels) => {
+    const defaultBackground = getComputedStyle(rows.closest('.xterm-scrollable-element')).backgroundColor;
+    const spans = [...rows.querySelectorAll('div > span')];
+    return labels.map(label => {
+      const span = spans.find(item => item.textContent.trim() === label);
+      if (!span) throw Error(`No terminal color sample for ${label}`);
+      const style = getComputedStyle(span);
+      const background = style.backgroundColor === 'rgba(0, 0, 0, 0)' ? defaultBackground : style.backgroundColor;
+      return { label, foreground: style.color, background };
+    });
+  }, ['ERROR', 'WARN', 'READY', 'INFO', 'NOTE', 'TRACE', 'RGB', 'REVERSE']);
+  const luminance = color => color.match(/\d+/g).slice(0, 3).map(value => {
+    const srgb = Number(value) / 255;
+    return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+  }).reduce((total, value, channel) => total + value * [0.2126, 0.7152, 0.0722][channel], 0);
+  for (const sample of samples) {
+    const [dark, light] = [luminance(sample.foreground), luminance(sample.background)].sort((a, b) => a - b);
+    sample.contrast = (light + 0.05) / (dark + 0.05);
+    if (variant === 'candidate') assert.ok(sample.contrast >= 4.5, `${sample.label}: ${JSON.stringify(sample)}`);
+  }
+  assert.notEqual(samples.at(-1).background, samples[0].background, 'Reverse video must paint a distinct background');
+  return samples;
+}
+
+async function terminalInteraction(app, page, screenshot, variant, recordEcho) {
   const script = fileURLToPath(new URL('./terminal-echo.cjs', import.meta.url));
   await terminalLine(page, `"${process.execPath}" "${script}"`, 'span_echo_ready');
   console.log('The raw terminal fixture is ready. Capturing reference pixels.');
@@ -135,6 +163,7 @@ async function terminalInteraction(app, page, screenshot, recordEcho) {
   assert.ok(frames >= idleMs.length + streamingMs.length + 2);
   await recordEcho({ idleMs, streamingMs, frames });
   assert.match(await page.locator('.xterm-rows').innerText(), /span_interaction_\d+/);
+  const palette = await terminalPalette(page, screenshot, variant);
   await page.keyboard.press(linux ? 'q' : 'f');
   console.log('The echo samples reached matching frames. Checking the final terminal output and reopening.');
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')].some(row => {
@@ -152,6 +181,7 @@ async function terminalInteraction(app, page, screenshot, recordEcho) {
   await page.getByRole('button', { name: '切换终端' }).click();
   await terminalLine(page, linux ? `printf '%s_%s\\n' span_echo reopened` : 'echo span_echo_reopened', 'span_echo_reopened');
   assert.doesNotMatch(await page.locator('.xterm-rows').innerText(), /绘_echo_final/);
+  return palette;
 }
 
 async function output(page) {
@@ -242,8 +272,7 @@ async function trial(workload, variant, executable, recordEcho) {
       await openTerminal();
       const screenshot = reportPath.replace(/\.json$/, `-${variant}-terminal-end.png`);
       try {
-        await terminalInteraction(app, page, screenshot, recordEcho);
-        return;
+        return await terminalInteraction(app, page, screenshot, variant, recordEcho);
       } catch (error) {
         console.error(`${variant} terminal interaction failed`, error);
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.endFrameSubscription())
@@ -292,7 +321,7 @@ async function trial(workload, variant, executable, recordEcho) {
 
 const report = {
   platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
-  window: initialSize, activeWindowMs, baselineCommit, trials: [], interaction: [],
+  window: initialSize, activeWindowMs, baselineCommit, trials: [], interaction: [], palettes: [],
 };
 const run = (workload, variant) => trial(workload, variant, variant === 'baseline' ? baselineBinary : binary);
 const publish = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
@@ -311,10 +340,12 @@ for (const workload of ['idle', 'output', 'scroll', 'reflow', 'reflow', 'scroll'
 if (baselineBinary) {
   for (const variant of ['candidate', 'baseline']) {
     const executable = variant === 'baseline' ? baselineBinary : binary;
-    await trial('interaction', variant, executable, async sample => {
+    const samples = await trial('interaction', variant, executable, async sample => {
       report.interaction.push({ workload: 'interaction', variant, ...sample });
       await publish();
       console.log(`${variant} terminal echo in ms: ${JSON.stringify({ idle: sample.idleMs, streaming: sample.streamingMs })}`);
     });
+    report.palettes.push({ variant, samples });
+    await publish();
   }
 }

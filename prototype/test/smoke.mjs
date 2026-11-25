@@ -199,12 +199,29 @@ try {
     assert.equal(await page.locator('.xterm-rows').getByText('UNC paths are not supported.', { exact: false }).count(), 0);
   }
   await terminal.focus();
-  await page.keyboard.type(linux ? 'printf "span_%s_%s\\n" local pty' : 'echo span_local_pty');
+  const localEcho = exerciseWebgl ? 'printf "\\033[31mspan_%s_%s\\033[0m\\n" local pty'
+    : linux ? 'printf "span_%s_%s\\n" local pty' : 'echo span_local_pty';
+  await page.keyboard.type(localEcho);
   await page.keyboard.press('Enter');
   if (exerciseWebgl) {
     const accelerated = page.locator('.terminal-canvas[data-renderer="webgl"]');
     await accelerated.waitFor();
     assert.equal(await accelerated.locator('.xterm-rows').count(), 0);
+    let redPixels = 0;
+    for (let frame = 0; frame < 12 && redPixels < 12; frame++) {
+      const png = await accelerated.screenshot({ scale: 'css', timeout: 10_000 });
+      redPixels = await app.evaluate(({ nativeImage }, data) => {
+        const pixels = nativeImage.createFromBuffer(Buffer.from(data, 'base64')).toBitmap();
+        let red = 0;
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (Math.abs(pixels[index] - 121) <= 3 && Math.abs(pixels[index + 1] - 127) <= 3 &&
+            Math.abs(pixels[index + 2] - 225) <= 3) red++;
+        }
+        return red;
+      }, png.toString('base64'));
+    }
+    assert.ok(redPixels >= 12, `WebGL terminal echo painted ${redPixels} pixels matching the error red`);
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-terminal-color.png') });
     assert.ok(await accelerated.evaluate(host => {
       for (const canvas of host.querySelectorAll('.xterm-screen canvas')) {
         const extension = canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context');
@@ -215,7 +232,8 @@ try {
       }
       return false;
     }));
-    await page.locator('.terminal-canvas[data-renderer="dom"] .xterm-rows').waitFor();
+    const restored = page.locator('.terminal-canvas[data-renderer="dom"] .xterm-rows');
+    await restored.locator('.xterm-fg-1').filter({ hasText: /^span_local_pty$/ }).waitFor();
     console.log('Verified the terminal returned to DOM rendering after WebGL context loss.');
   }
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
