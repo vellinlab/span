@@ -8,7 +8,7 @@ import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { TextReader } from './text-reader.jsx';
 import { delegatedMembers } from './timeline.js';
-import { Transcript } from './transcript.jsx';
+import { LatestMessageButton, Transcript } from './transcript.jsx';
 
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', waiting: '等待中', limited: '达到用量上限', unknown: '状态未知',
@@ -467,6 +467,7 @@ function SubagentTranscript({ panel, delegation, openSession, canOpenSession, op
       cursor={view.cursor} loadOlder={view.loadOlder} loading={view.loading}
       showLatest={readingHistory} onScrollPosition={setReadingHistory} openTrace={openTrace}
       openSession={openSession} canOpenSession={canOpenSession} openArtifact={openArtifact} openImage={openImage} />
+    {readingHistory && <LatestMessageButton className="subagent-latest" label="滚到子代理最新消息" scroll={scroll} />}
   </>;
 }
 

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ArrowDown, ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
+  ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
   GitBranch, Image, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
@@ -17,7 +17,7 @@ import { SessionActions } from './session-actions.jsx';
 import { SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
-import { Transcript, transcriptIsAtEnd } from './transcript.jsx';
+import { LatestMessageButton, Transcript, transcriptIsAtEnd } from './transcript.jsx';
 import { turnReasoning, turnReasoningRows } from './timeline.js';
 import { useAgent } from './use-agent.js';
 import { draftKey, useDrafts } from './use-drafts.js';
@@ -981,13 +981,8 @@ function App() {
                       work.stopping ? '正在停止…' : pastingScreenshot ? '正在添加截图' :
                         composerFeedback?.scope === work.timelineScope() ? composerFeedback.text :
                         running && !showReasoning ? '正在处理' : ''}</span>
-                  {showLatest && rows.length > 0 && <button type="button" className="composer-control jump-latest"
-                    title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
-                      if (reasoningArchived) closePanel({ restoreFocus: false });
-                      const timeline = scroll.current;
-                      timeline.scrollTop = timeline.scrollHeight;
-                      timeline.focus({ preventScroll: true });
-                    }}><ArrowDown size={15} aria-hidden="true" /><span>最新消息</span></button>}
+                  {showLatest && rows.length > 0 && <LatestMessageButton scroll={scroll} className="composer-control"
+                    onJump={() => { if (reasoningArchived) closePanel({ restoreFocus: false }); }} />}
                   {connection === 'ready' && <AgentMenu work={work} onSelect={(kind, trigger) =>
                     kind === 'skill' ? showExtensions(kind, trigger) : showPanel(kind, trigger)} />}
                   {running && api?.turns.stop && <button ref={stopButton} type="button" className="send stop" aria-label="停止"

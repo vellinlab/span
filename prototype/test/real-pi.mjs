@@ -504,6 +504,8 @@ export default function (pi) {
     const roster = await openTeam(resumed.page);
     await roster.getByText('已完成', { exact: true }).waitFor();
     const member = roster.getByRole('button', { name: '查看 reviewer 的会话记录', exact: true });
+    const parentLog = resumed.page.getByTestId('transcript');
+    const parentOffset = await parentLog.evaluate(element => element.scrollTop);
     if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-roster-compact.png') });
     const trace = resumed.page.getByTestId('subagent-transcript');
     if (teamReadGate) {
@@ -536,11 +538,37 @@ export default function (pi) {
     await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
     assert.equal(await trace.getAttribute('data-items'), '40');
     if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-trace-compact.png') });
-    await trace.evaluate(element => { element.scrollTop = 0; });
+    // Mount the first visible turn without triggering the older page yet.
+    await trace.evaluate(element => { element.scrollTop = 410; });
+    const note = trace.getByText('核对历史任务 4', { exact: true });
+    await note.waitFor({ state: 'attached' });
+    assert.equal(await trace.getAttribute('data-items'), '40');
+    const before = await note.evaluate(element => {
+      const timeline = element.closest('.timeline');
+      timeline.scrollTop = 0;
+      return element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+    });
+    assert.ok(before >= 0 && before <= 40, `Expected to start reading the first turn, observed ${before}px.`);
     await resumed.page.waitForFunction(() => document.querySelector('[data-testid="subagent-transcript"]')?.dataset.items === '48');
+    await resumed.page.waitForFunction(({ label, offset }) => {
+      const timeline = document.querySelector('[data-testid="subagent-transcript"]');
+      const note = [...timeline.querySelectorAll('.user-message')].find(element => element.textContent === label);
+      return note && Math.abs(note.getBoundingClientRect().top - timeline.getBoundingClientRect().top - offset) <= 2;
+    }, { label: '核对历史任务 4', offset: before });
     await trace.evaluate(element => { element.scrollTop = 0; });
     await trace.getByText('核对历史任务 0', { exact: true }).waitFor();
-    console.log('Verified a Pi member transcript larger than 16 MiB opens the active branch and loads older turns on request.');
+    const memberLatest = resumed.page.getByRole('button', { name: '滚到子代理最新消息', exact: true });
+    await memberLatest.waitFor();
+    if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-history-compact.png') });
+    await memberLatest.press('Enter');
+    await memberLatest.waitFor({ state: 'detached' });
+    await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
+    await resumed.page.waitForFunction(() => {
+      const timeline = document.querySelector('[data-testid="subagent-transcript"]');
+      return timeline === document.activeElement && timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
+    });
+    assert.equal(await parentLog.evaluate(element => element.scrollTop), parentOffset);
+    console.log('Verified a Pi member transcript larger than 16 MiB preserves the reading anchor while loading older turns and jumps back to the latest reply.');
     await resumed.page.keyboard.press('Escape');
     await member.waitFor();
     assert.ok(await member.evaluate(element => element === document.activeElement));

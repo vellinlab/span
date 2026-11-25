@@ -1,7 +1,7 @@
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
-  ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
+  ArrowDown, ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
   Folder, Image, ListChecks, Search, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
@@ -321,6 +321,15 @@ export function transcriptIsAtEnd(element) {
   return element.scrollHeight - element.clientHeight - element.scrollTop < 40;
 }
 
+export function LatestMessageButton({ scroll, className, label = '滚到最新消息', onJump }) {
+  return <button type="button" className={`jump-latest ${className}`} title={label} aria-label={label} onClick={() => {
+    onJump?.();
+    const timeline = scroll.current;
+    timeline.scrollTop = timeline.scrollHeight;
+    timeline.focus({ preventScroll: true });
+  }}><ArrowDown size={15} aria-hidden="true" /><span>最新消息</span></button>;
+}
+
 function readAnchor(element, rows, layout) {
   if (transcriptIsAtEnd(element)) return;
   const viewport = element.getBoundingClientRect();
@@ -490,12 +499,13 @@ export const Transcript = memo(function Transcript({
   }, [activeTurnId, liveTurnId, rawLayout, scroll, virtual]);
 
   useLayoutEffect(() => {
+    if (!remember) return;
     const element = scroll.current;
     return () => {
       const current = latest.current;
       if (!viewKey || current?.restore || !current?.rows.length) return;
       const anchor = readAnchor(element, current.rows, current.layout);
-      remember?.(viewKey, { anchor, pages: current.historyPages, expansion: Array.from(expanded.current).slice(-64),
+      remember(viewKey, { anchor, pages: current.historyPages, expansion: Array.from(expanded.current).slice(-64),
         openGroups: Array.from(current.openGroups).slice(-64),
         ungroupedTurns: anchor && ungroupedTurns.current.has(anchor.turnId) ? [anchor.turnId] : [] });
     };

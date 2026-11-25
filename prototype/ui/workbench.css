@@ -1038,12 +1038,28 @@ p { margin-block: 0 12px; }
 }
 .agent-panel[data-kind="subagent"] .agent-panel-content {
   display: flex;
+  position: relative;
   flex-direction: column;
   flex: 1;
   padding: 0 6px;
   overflow: hidden;
 }
 .agent-panel[data-kind="subagent"] .timeline { flex: 0 1 auto; container-type: inline-size; overscroll-behavior: contain; }
+.subagent-latest {
+  position: absolute;
+  inset-inline-end: 17px;
+  bottom: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.subagent-latest:hover:not(:disabled) { background: var(--selected); }
 .agent-panel[data-kind="subagent"] .reading-column { width: calc(100% - 12px); margin-block-start: 0; }
 .agent-panel[data-kind="subagent"] .user-message {
   max-width: 100%;
