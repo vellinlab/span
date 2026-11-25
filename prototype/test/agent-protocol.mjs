@@ -96,9 +96,16 @@ test('native Task records use structured child IDs, prepend older pages and igno
   const part = (type, id, text, synthetic) => ({ type, id, text, synthetic });
   assert.deepEqual(pages[0].args, ['ses_child', 'ses_root', '/workspace', undefined]);
   pages[0].resolve({ cursor: 'older', items: [message('assistant', 'response', [
-    part('reasoning', 'summary', 'Check provenance'), part('text', 'result', 'Verified')], 'prompt')] });
+    part('reasoning', 'summary', 'Check provenance'),
+    { type: 'tool', id: 'search', tool: 'glob', state: { status: 'completed',
+      title: 'Users\\operator\\Workspace', input: { pattern: '**/marker.txt', path: 'C:\\Users\\operator\\Workspace' } } },
+    part('text', 'result', 'Verified')], 'prompt')] });
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(views.at(-1).rows.map(row => row.kind), ['reasoning', 'message']);
+  assert.deepEqual(views.at(-1).rows.map(row => row.kind), ['reasoning', 'tool', 'message']);
+  const search = views.at(-1).rows[1];
+  assert.equal(search.name, '搜索文件');
+  assert.equal(search.query, '**/marker.txt');
+  assert.deepEqual(search.target, { kind: 'path', path: 'C:\\Users\\operator\\Workspace' });
   const saved = views.at(-1).rows.at(-1);
   views.at(-1).loadOlder();
   views.at(-1).loadOlder();

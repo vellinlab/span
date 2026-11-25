@@ -1,5 +1,6 @@
 import { applyTimeline } from './timeline.js';
 import { parseFileReferences } from './file-references.js';
+import { toolPathTarget } from './tool-target.js';
 
 export const acpTurnId = index => 'acp-turn:' + index;
 const status = { pending: 'pending', in_progress: 'running', completed: 'completed', failed: 'failed' };
@@ -64,8 +65,11 @@ export function acpTurn(id, notify, { childSession, consoleFences, projectTask }
       item({ kind: 'patch', id: key, files: path ? [{ path, diff }] : [], text: path ? undefined : diff,
         status: toolStatus, ...owner }, final);
     } else {
-      item({ kind: 'tool', id: key, name: current.title, text, status: toolStatus,
-        target: path ? { kind: 'path', path } : undefined, ...owner }, final);
+      const query = current.kind === 'search' && typeof current.rawInput?.pattern === 'string'
+        ? current.rawInput.pattern : undefined;
+      const target = toolPathTarget(path ?? (query ? current.rawInput?.path : undefined));
+      item({ kind: 'tool', id: key, name: query ? '搜索文件' : current.title, text, status: toolStatus,
+        query, target, ...owner }, final);
     }
     if (final) tools.delete(key);
   }

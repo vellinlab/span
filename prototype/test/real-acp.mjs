@@ -368,7 +368,10 @@ try {
     await trace.getByText(childReasoning, { exact: true }).waitFor();
     await trace.getByText(childAnswer, { exact: true }).waitFor();
     const tool = trace.locator('[data-card="tool"]');
+    await tool.locator('summary').getByText('搜索文件', { exact: true }).waitFor();
+    await tool.locator('summary').getByText(marker, { exact: true }).waitFor();
     await tool.locator('summary').press('Enter');
+    await tool.locator('.tool-context').getByText(marker, { exact: true }).waitFor();
     assert.match(await tool.getByLabel('工具输出', { exact: true }).textContent(), /No files found/i);
   }
   await showTrace();

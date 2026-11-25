@@ -3,7 +3,10 @@ import { applyTimeline, mergeHistory } from './timeline.js';
 
 const nativeId = value => typeof value === 'string' && /^ses_[a-z0-9]{1,100}$/i.test(value);
 const toolStatuses = { pending: 'pending', running: 'in_progress', completed: 'completed', error: 'failed' };
-const toolKinds = { bash: 'execute', shell: 'execute', task: 'think', edit: 'edit', patch: 'edit', apply_patch: 'edit', write: 'edit' };
+const toolKinds = {
+  bash: 'execute', shell: 'execute', task: 'think', edit: 'edit', patch: 'edit', apply_patch: 'edit', write: 'edit',
+  glob: 'search', grep: 'search',
+};
 
 function traceRows(messages, projectTask) {
   const events = [];
@@ -23,9 +26,12 @@ function traceRows(messages, projectTask) {
         item({ kind: 'reasoning', id: part.id, sections: [part.text] });
       } else if (!user && part.type === 'tool' && part.state) {
         const { state, tool } = part;
+        const kind = toolKinds[tool] ?? 'other';
+        const directory = kind === 'search' ? state.input?.path ?? info.path?.cwd : undefined;
         tools ??= acpTurn(turnId, event => events.push(event), { projectTask });
         tools.update({ sessionUpdate: 'tool_call', toolCallId: part.id, title: state.title || tool,
-          kind: toolKinds[tool] ?? 'other', status: toolStatuses[state.status], rawInput: state.input,
+          kind, status: toolStatuses[state.status], rawInput: state.input,
+          locations: directory ? [{ path: directory }] : undefined,
           rawOutput: { output: state.output, error: state.error, metadata: state.metadata } });
       }
     }

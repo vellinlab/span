@@ -229,18 +229,21 @@ const TranscriptRow = memo(function TranscriptRow({
       else if (row.files?.length > 1) hint = `${row.files.length} 个文件`;
       detail = () => <PatchView files={row.files ?? []} text={row.text} />;
       break;
-    case 'tool':
+    case 'tool': {
       title = row.name || '调用工具';
-      hint = row.source;
-      path = row.target?.kind === 'path' ? row.target.path : undefined;
-      if (path || row.text) detail = () => <>
-        {path && <dl className="tool-context">
-          <dt>路径</dt><dd><PathText path={path} /></dd>
+      hint = row.query ? (expanded ? undefined : row.query) : row.source;
+      const targetPath = row.target?.kind === 'path' ? row.target.path : undefined;
+      if (!row.query) path = targetPath;
+      if (targetPath || row.query || row.text) detail = () => <>
+        {(targetPath || row.query) && <dl className="tool-context">
+          {row.query && <><dt>匹配规则</dt><dd><PathText path={row.query} /></dd></>}
+          {targetPath && <><dt>{row.query ? '搜索目录' : '路径'}</dt><dd><PathText path={targetPath} /></dd></>}
           {row.source && <><dt>来源</dt><dd>{row.source}</dd></>}
         </dl>}
         {row.text && <ToolOutput row={row} />}
       </>;
       break;
+    }
     case 'search':
       title = row.query;
       if (row.url || row.text) detail = () => <>{row.url && <SourceLink url={row.url}>{row.url}</SourceLink>}
@@ -286,7 +289,8 @@ const TranscriptRow = memo(function TranscriptRow({
       break;
   }
 
-  return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} recordedStatus={recordedStatus}
+  const icon = row.kind === 'tool' && row.query ? Search : cardIcons[row.kind] ?? CodeXml;
+  return <Card type={row.kind} icon={icon} status={status} recordedStatus={recordedStatus}
     statusText={statusText} statusNote={statusNote} failurePreview={expanded ? undefined : activityFailurePreview(row, status)}
     title={title} hint={hint} path={path} expanded={expanded} scroll={scroll} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });

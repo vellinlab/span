@@ -82,7 +82,7 @@ export type TimelineItem = ItemBase & (
   | { kind: 'plan'; text?: string; steps?: PlanStep[] }
   | { kind: 'command'; command?: string; cwd?: string; text?: string; exitCode?: number }
   | { kind: 'patch'; files: { path: string; action?: string; diff?: string }[]; text?: string }
-  | { kind: 'tool'; name: string; source?: string; target?: ToolTarget; text?: string; errorMessage?: string }
+  | { kind: 'tool'; name: string; source?: string; target?: ToolTarget; query?: string; text?: string; errorMessage?: string }
   | { kind: 'delegation'; action: string; members: AgentMember[]; text?: string }
   | { kind: 'search'; query: string; url?: string; text?: string }
   | { kind: 'artifact'; artifacts: Artifact[]; text?: string }
