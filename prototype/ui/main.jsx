@@ -589,13 +589,16 @@ function App() {
         && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
       if (!known || nativePrompt) prepareMarkdown().catch(() => {});
       const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '', submitted)
-        : await work.send(text, effectiveOptions(), delivery, () => {
-          const screenshots = files.filter(file => file.screenshot).map(file => file.path);
-          if (screenshots.length) window.span.retainScreenshots(screenshots);
-          dispatched = true;
-          setComposerFeedback(null);
-          setDispatchedDraft(submitted);
-        }, files);
+        : await work.send(text, effectiveOptions(), delivery, {
+          files, followLatest: !showLatest,
+          onDispatch() {
+            const screenshots = files.filter(file => file.screenshot).map(file => file.path);
+            if (screenshots.length) window.span.retainScreenshots(screenshots);
+            dispatched = true;
+            setComposerFeedback(null);
+            setDispatchedDraft(submitted);
+          },
+        });
       if (sent) {
         clearSent(submitted);
         if (dispatched && running && showLatest && work.timelineScope() === scope) {

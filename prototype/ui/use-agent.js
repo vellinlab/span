@@ -485,7 +485,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     return entry.ref;
   }
 
-  async function send(text, selectedOptions, delivery = 'steer', onDispatch, files = []) {
+  async function send(text, selectedOptions, delivery = 'steer', { onDispatch, files = [], followLatest = true } = {}) {
     const client = agent.current;
     const steering = currentRun.current;
     if (!client || connection !== 'ready' || loading || busy.current || (files.length && !client.localFileReferences) ||
@@ -497,7 +497,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     const clientId = crypto.randomUUID();
     pendingSend.current = clientId;
     setRun(steering ?? { status: 'running' });
-    if (!steering) jumpToLatest.current = true;
+    if (!steering || followLatest) jumpToLatest.current = true;
     let added = false;
     try {
       const ref = await ensureSession(client, (text || files[0]?.name || '').slice(0, 48), scope);
