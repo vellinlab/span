@@ -4,7 +4,7 @@ use std::{
     env,
     fmt::Write as _,
     fs,
-    io::{self, BufRead, BufWriter},
+    io::{self, BufRead, BufWriter, Write as _},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
