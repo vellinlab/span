@@ -5,7 +5,7 @@ import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegat
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
-import { applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
+import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, visibleRow } from '../ui/timeline.js';
 
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
@@ -99,6 +99,21 @@ test('timeline layout survives streaming text and changes when rows become visib
   assert.notEqual(timelineLayout(mixed), layout);
   assert.equal(timelineLayout(mixed).getItemKey(2), mixed[2].key);
   assert.equal(timelineLayout(mixed).estimateSize(1), 34);
+});
+
+test('only finished failures with short plain-text output add a diagnostic line', () => {
+  const item = { id: 'check', turnId: 'turn', kind: 'command', text: '  检查文件失败。\r\n' };
+  const running = applyTimeline([], [{ kind: 'item', item: { ...item, status: 'running' }, final: false }]);
+  const layout = timelineLayout(running);
+  assert.equal(activityFailurePreview(running[0]), undefined);
+  assert.equal(layout.estimateSize(0), 34);
+  const failed = applyTimeline(running, [{ kind: 'item', item: { ...item, status: 'completed', exitCode: 1 }, final: true }]);
+  assert.equal(activityFailurePreview(failed[0]), '检查文件失败。');
+  assert.equal(timelineLayout(failed).estimateSize(0), 52);
+  for (const text of ['x'.repeat(241), '准备\n检查文件失败。', '\x1b[31mError']) {
+    assert.equal(activityFailurePreview({ ...failed[0], text }), undefined);
+  }
+  assert.equal(activityFailurePreview({ ...failed[0], exitCode: 0 }), undefined);
 });
 
 test('completed activity groups preserve chronology and exclude failure, prose and other scopes', () => {
@@ -402,6 +417,8 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.equal(card.name, 'read_file');
     assert.equal(card.source, 'workspace');
     assert.equal(card.status, 'failed');
+    assert.equal(activityFailurePreview(card), 'Missing file');
+    assert.deepEqual(JSON.parse(card.text), { message: 'Missing file' });
     assert.ok(!JSON.stringify(card).includes('unrelated argument'));
 
     const mark = { type: 'enteredReviewMode', id: 'mark', review: 'current changes' };

@@ -196,6 +196,7 @@ export default function (pi) {
     const failed = log.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
     await failed.getByText('失败', { exact: true }).waitFor();
     assert.equal(await failed.locator('summary .card-icon.lucide-circle-alert').count(), 1);
+    await failed.locator('summary .card-failure-preview').filter({ hasText: missingFile }).waitFor();
     const target = failed.locator('summary > .file-reference-name');
     assert.equal(await target.getAttribute('title'), missingPath);
     assert.equal(await target.textContent(), missingFile);

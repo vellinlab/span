@@ -963,6 +963,37 @@ try {
       title.getBoundingClientRect().right < status.getBoundingClientRect().left &&
       getComputedStyle(lead).color === getComputedStyle(status).color;
   }), 'Failed activities use the same warning at the leading icon and the status label.');
+  const failureSummary = failedCommand.locator('summary');
+  const diagnostic = failureSummary.locator('.card-failure-preview');
+  await diagnostic.filter({ hasText: '缺少待复核的记录。' }).waitFor();
+  assert.equal(await failedCommand.locator('.tool-output').count(), 0);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  await waitForTranscriptEnd();
+  assert.ok(await failureSummary.evaluate(summary => {
+    const title = summary.querySelector('.card-title').getBoundingClientRect();
+    const preview = summary.querySelector('.card-failure-preview').getBoundingClientRect();
+    const viewport = summary.closest('.timeline').getBoundingClientRect();
+    return Math.abs(title.left - preview.left) <= 1 && title.bottom <= preview.top &&
+      preview.top >= viewport.top && preview.bottom <= viewport.bottom;
+  }), 'The compact failure diagnostic should align beneath the title and be fully visible');
+  if (screenshot) {
+    const previous = await page.addStyleTag({ content:
+      '.activity summary:has(> .card-failure-preview) { padding-block-end: 4px; } .card-failure-preview { display: none; }' });
+    await waitForTranscriptEnd();
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-failure-diagnostic-before.png') });
+    await previous.evaluate(element => element.remove());
+    await waitForTranscriptEnd();
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-failure-diagnostic.png') });
+  }
+  await failureSummary.press('Enter');
+  await failedCommand.locator('.tool-output').getByText('缺少待复核的记录。', { exact: true }).waitFor();
+  assert.equal(await diagnostic.count(), 0);
+  assert.ok(await failureSummary.evaluate(element => document.activeElement === element));
+  await failureSummary.press('Enter');
+  await diagnostic.waitFor();
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), windowSize);
+  await page.waitForFunction(([width, height]) => Math.abs(innerWidth - width) <= 2 && Math.abs(innerHeight - height) <= 2, windowSize);
   await waitForTranscriptEnd();
   assert.ok(await groupAnswer.evaluate(element => {
     const answer = element.getBoundingClientRect();
@@ -992,7 +1023,7 @@ try {
   await firstCommand.waitFor({ state: 'detached' });
   assert.ok(await group.evaluate(element => element === document.activeElement));
   await failedCommand.getByText('退出码 1', { exact: true }).waitFor();
-  console.log('Verified completed tool groups preserve the failure card and unmount folded commands and output.');
+  console.log('Verified completed tool groups, concise failure diagnostics, and unmounting folded output.');
 
   await composer.fill('这段草稿留在原会话。');
   await page.getByRole('button', { name: /新会话/ }).click();

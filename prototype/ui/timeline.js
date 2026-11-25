@@ -39,7 +39,24 @@ export function hasReasoningSection(row, index) {
 
 function estimateRow(row) {
   if (!visibleRow(row)) return 0;
-  return row.kind === 'message' || row.kind === 'user' ? 92 : 34;
+  if (row.kind === 'message' || row.kind === 'user') return 92;
+  return activityFailurePreview(row) ? 52 : 34;
+}
+
+export function activityStatus(row) {
+  const status = row.final && row.status === 'running' ? undefined : row.status;
+  if (row.kind === 'command' && row.exitCode != null && row.exitCode !== 0 && (!status || status === 'completed')) {
+    return 'failed';
+  }
+  return status;
+}
+
+export function activityFailurePreview(row, status = activityStatus(row)) {
+  if (!row.final || status !== 'failed' || (row.kind !== 'command' && row.kind !== 'tool')) return;
+  const text = row.errorMessage || row.text;
+  if (!text || text.length > 240) return;
+  const line = text.trim();
+  if (line && !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(line)) return line;
 }
 
 function routineActivity(row) {

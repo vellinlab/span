@@ -459,6 +459,18 @@ p { margin-block: 0 12px; }
   border-radius: 0 6px 6px 0;
 }
 .activity summary { cursor: pointer; list-style: none; }
+.activity summary:has(> .card-failure-preview) { position: relative; padding-block-end: 22px; }
+.card-failure-preview {
+  position: absolute;
+  inset-inline: 53px 9px;
+  inset-block-end: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  line-height: 18px;
+  text-align: start;
+}
 .activity :is(summary, button.card-heading):hover { background: var(--hover); color: #ededed; }
 .activity button.card-heading {
   width: 100%;

@@ -12,7 +12,7 @@ import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, TextReader } from './text-reader.jsx';
-import { delegatedMembers, groupedTimelineLayout, timelineLayout, visibleRow } from './timeline.js';
+import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, timelineLayout, visibleRow } from './timeline.js';
 
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
 
@@ -104,7 +104,7 @@ function CommandText({ command, titleRef, force }) {
   </div>;
 }
 
-function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, expanded, toggle, scroll, children }) {
+function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, failurePreview, expanded, toggle, scroll, children }) {
   const titleRef = useRef(null);
   const reveal = useRef(null);
   useLayoutEffect(() => {
@@ -139,7 +139,9 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
       reveal.current = details.open ? details : null;
       toggle(details.open);
     }}>
-      <summary><ChevronRight size={13} className="card-chevron" />{head}</summary>
+      <summary><ChevronRight size={13} className="card-chevron" />{head}
+        {failurePreview && <bdi className="card-failure-preview" title={failurePreview}>{failurePreview}</bdi>}
+      </summary>
       {expanded && <div className="card-body">{children(titleRef)}</div>}
     </details> : <div className="card-heading"><span className="card-placeholder" />{head}</div>}
   </div>;
@@ -179,7 +181,7 @@ const TranscriptRow = memo(function TranscriptRow({
   </div>;
 
   let title, hint, path, detail, recordedStatus, statusText, statusNote;
-  let status = row.final && row.status === 'running' ? undefined : row.status;
+  let status = activityStatus(row);
   switch (row.kind) {
     case 'reasoning':
       title = '推理摘要';
@@ -214,7 +216,6 @@ const TranscriptRow = memo(function TranscriptRow({
       title = firstBreak < 0 ? command || '执行命令' : `${command.slice(0, firstBreak).trimEnd() || '执行命令'} …`;
       if (row.exitCode != null && row.exitCode !== 0) {
         statusNote = `退出码 ${row.exitCode}`;
-        if (!status || status === 'completed') status = 'failed';
       }
       if (command || hasContext) detail = titleRef => <>
         {command && <CommandText command={command} titleRef={titleRef} force={!hasContext} />}
@@ -284,7 +285,7 @@ const TranscriptRow = memo(function TranscriptRow({
   }
 
   return <Card type={row.kind} icon={cardIcons[row.kind] ?? CodeXml} status={status} recordedStatus={recordedStatus}
-    statusText={statusText} statusNote={statusNote}
+    statusText={statusText} statusNote={statusNote} failurePreview={expanded ? undefined : activityFailurePreview(row, status)}
     title={title} hint={hint} path={path} expanded={expanded} scroll={scroll} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 

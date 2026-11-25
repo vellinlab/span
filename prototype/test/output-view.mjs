@@ -38,6 +38,7 @@ async function check(binary, legacy, screenshot) {
     await summary.getByText('失败', { exact: true }).waitFor();
     await timeline.getByText('检查已结束。', { exact: true }).waitFor();
     assert.equal(await command.locator('pre').count(), 0);
+    assert.equal(await summary.locator('.card-failure-preview').count(), 0);
     await summary.click();
     const viewport = command.locator('pre');
     await viewport.waitFor();

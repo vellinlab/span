@@ -61,6 +61,7 @@ export function normalizeItem(item, turnId, ref) {
       const target = toolPathTarget(item.arguments?.path);
       return { ...base, kind: 'tool', name: item.tool ?? item.name, source: item.server ?? item.namespace,
         ...(target && { target }),
+        ...(typeof item.error?.message === 'string' && { errorMessage: item.error.message }),
         text: detailText(item.error ?? item.result?.structuredContent ?? item.result?.content ?? item.contentItems ?? item.output) };
     }
     case 'webSearch': {
