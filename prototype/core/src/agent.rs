@@ -709,9 +709,14 @@ enum PiTeamRequest {
     Read {
         id: Value,
         session: String,
-        member: Option<String>,
+        transcript: Option<PiTranscriptRequest>,
     },
     Release(String),
+}
+
+struct PiTranscriptRequest {
+    member: String,
+    offset: Option<u64>,
 }
 
 async fn stdio_process(
@@ -731,6 +736,7 @@ async fn stdio_process(
             return std::future::pending().await;
         };
         let mut remote: Option<pi::RemoteTeamReader> = None;
+        let mut stored: Option<pi::TeamTranscript> = None;
         loop {
             let request = if remote.is_some() {
                 match timeout(Duration::from_secs(12), team_queue.recv()).await {
@@ -743,18 +749,21 @@ async fn stdio_process(
             } else {
                 team_queue.recv().await
             };
-            let (id, session, member) = match request {
+            let (id, session, transcript) = match request {
                 Some(PiTeamRequest::Read {
                     id,
                     session,
-                    member,
-                }) => (id, session, member),
+                    transcript,
+                }) => (id, session, transcript),
                 Some(PiTeamRequest::Release(session)) => {
                     if remote
                         .as_ref()
                         .is_some_and(|reader| reader.session == session)
                     {
                         remote = None;
+                    }
+                    if stored.as_ref().is_some_and(|view| view.owner.id == session) {
+                        stored = None;
                     }
                     continue;
                 }
@@ -767,14 +776,23 @@ async fn stdio_process(
                 .cloned();
             let result = match identity {
                 Some(identity) => {
-                    let result = if let Some(member) = member {
-                        pi::team_transcript(catalog, &mut remote, &identity, &member).await
+                    let result = if let Some(PiTranscriptRequest { member, offset }) = transcript {
+                        pi::team_transcript(
+                            catalog,
+                            &mut remote,
+                            &mut stored,
+                            &identity,
+                            &member,
+                            offset,
+                        )
+                        .await
                     } else {
                         pi::team_snapshot(catalog, &mut remote, &identity).await
                     };
                     if pi_session.borrow().as_ref() == Some(&identity) {
                         result
                     } else {
+                        stored = None;
                         Err("Pi 会话已切换。".into())
                     }
                 }
@@ -845,7 +863,7 @@ async fn stdio_process(
             }
             if pi_catalog.is_some() && matches!(kind, "span_pi_teams" | "span_pi_team_transcript") {
                 let id = &packet["id"];
-                let member = if kind == "span_pi_team_transcript" {
+                let transcript = if kind == "span_pi_team_transcript" {
                     let Some(member) = packet["memberId"]
                         .as_str()
                         .filter(|member| pi::valid_team_member(member))
@@ -858,7 +876,22 @@ async fn stdio_process(
                         )?;
                         continue;
                     };
-                    Some(member.to_owned())
+                    let offset = packet["cursor"]
+                        .as_str()
+                        .and_then(|cursor| cursor.parse::<u64>().ok());
+                    if offset.is_none() && !packet["cursor"].is_null() {
+                        event(
+                            output,
+                            "agent",
+                            generation,
+                            pi_response(id, Err("Pi 子代理的历史页已失效，请重新打开。".into())),
+                        )?;
+                        continue;
+                    }
+                    Some(PiTranscriptRequest {
+                        member: member.to_owned(),
+                        offset,
+                    })
                 } else {
                     None
                 };
@@ -878,7 +911,7 @@ async fn stdio_process(
                             .try_send(PiTeamRequest::Read {
                                 id: id.clone(),
                                 session: session.to_owned(),
-                                member,
+                                transcript,
                             })
                             .is_ok()
                         {

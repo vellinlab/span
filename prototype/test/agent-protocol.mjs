@@ -1035,12 +1035,13 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
       } else if (packet.type === 'span_pi_team_transcript') {
         assert.equal(packet.sessionId, 'saved');
         assert.equal(packet.memberId, '32a5c9ed');
-        const records = [{ type: 'session', id: 'native-child' }];
-        for (let index = 0; index < 24; index++) {
+        const older = packet.cursor === '12345';
+        const records = [];
+        for (let index = older ? 0 : 4; index < (older ? 4 : 24); index++) {
           records.push(entry('q' + index, index ? 'r' + (index - 1) : null, 'user', 'Task ' + index));
           records.push(entry('r' + index, 'q' + index, 'assistant', text('Result ' + index)));
         }
-        respond(packet, records.map(record => JSON.stringify(record)).join('\n') + '\n{partial}\n');
+        respond(packet, { entries: records, cursor: older ? null : '12345' });
       } else if (packet.type === 'get_commands') {
         respond(packet, { commands: [
           { name: 'skill:review', source: 'skill', description: 'Project review',
@@ -1090,8 +1091,15 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.equal(trace[0].loading, true);
   assert.equal(trace.at(-1).rows[0].text, 'Task 4');
   assert.equal(trace.at(-1).rows.at(-1).text, 'Result 23');
+  assert.equal(sent.filter(packet => packet.type === 'span_pi_team_transcript').length, 1);
+  const lastKey = trace.at(-1).rows.at(-1).key;
   trace.at(-1).loadOlder();
+  trace.at(-1).loadOlder();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.filter(packet => packet.type === 'span_pi_team_transcript').length, 2);
+  assert.equal(sent.at(-1).cursor, '12345');
   assert.equal(trace.at(-1).rows[0].text, 'Task 0');
+  assert.equal(trace.at(-1).rows.at(-1).key, lastKey);
   assert.equal(trace.at(-1).cursor, null);
   closeTrace();
   await agent.delegation.releaseTeamView(ref);

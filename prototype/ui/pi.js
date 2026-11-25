@@ -336,8 +336,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
       if (result.commands.some(isPiTeamsCommand)) teamCapability = {
         observe: true,
         teamRefreshMs: location.kind === 'ssh' ? 5000 : 2200,
-        releaseTeamView: location.kind === 'ssh' ? session =>
-          rpc.send({ type: 'span_pi_release_team_view', sessionId: session.id }).catch(() => {}) : undefined,
+        releaseTeamView: session => rpc.send({ type: 'span_pi_release_team_view', sessionId: session.id }).catch(() => {}),
         async teams(session) {
           requireSession(session);
           const scope = current;
@@ -349,7 +348,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
         watchTranscript(session, memberId, listener) {
           requireSession(session);
           if (!teamMembers.has(memberId)) throw new Error('当前会话没有这个 Pi 子代理。');
-          const stop = watchPiTeamTranscript(() => request('span_pi_team_transcript', { sessionId: session.id, memberId }), listener);
+          const stop = watchPiTeamTranscript(cursor => request('span_pi_team_transcript', { sessionId: session.id, memberId, cursor }), listener);
           return () => {
             stop();
             teamCapability.releaseTeamView?.(session);

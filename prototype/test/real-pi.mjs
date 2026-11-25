@@ -207,16 +207,24 @@ export default function (pi) {
       });
       const directory = join(ctx.sessionManager.getSessionFile().slice(0, -6), memberId, 'run-0');
       mkdirSync(directory, { recursive: true });
-      const records = [
-        { type: 'session', id: 'span-worker-fixture', cwd: ctx.cwd },
-        { type: 'message', id: 'request', parentId: null, message: {
-          role: 'user', content: '请核对发布交接。',
-        } },
-        { type: 'message', id: 'result', parentId: 'request', message: {
-          role: 'assistant', content: [{ type: 'text', text: '发布交接已核对。' }], stopReason: 'stop',
-        } },
-      ];
-      writeFileSync(join(directory, 'worker.jsonl'), records.map(record => JSON.stringify(record)).join('\\n') + '\\n');
+      const records = [{ type: 'session', id: 'span-worker-fixture', cwd: ctx.cwd }];
+      const abandoned = '旧'.repeat(96 * 1024);
+      for (let index = 0; index < 64; index++) {
+        records.push({ type: 'message', id: 'discarded-' + index, parentId: null,
+          message: { role: 'user', content: abandoned } });
+      }
+      for (let index = 0; index < 24; index++) {
+        let parentId = index ? 'result-' + (index - 1) : null;
+        if (index === 10) {
+          records.push({ type: 'thinking_level_change', id: 'level', parentId, thinkingLevel: 'medium', padding: abandoned });
+          parentId = 'level';
+        }
+        records.push({ type: 'message', id: 'request-' + index, parentId,
+          message: { role: 'user', content: index === 23 ? '请核对发布交接。' : '核对历史任务 ' + index } });
+        records.push({ type: 'message', id: 'result-' + index, parentId: 'request-' + index,
+          message: { role: 'assistant', content: [{ type: 'text', text: index === 23 ? '发布交接已核对。' : '已完成历史任务 ' + index }], stopReason: 'stop' } });
+      }
+      writeFileSync(join(directory, 'worker.jsonl'), records.map(record => JSON.stringify(record)).join('\\n') + '\\n{"id":"unfinished');
       const store = new TaskStore(board.name, manager.getTasksPath(board.name));
       const checklist = store.createTask('核对原始清单', '复核已收集的结果。');
       const report = store.createTask('整理交接说明', '将结论写成可交付的说明。');
@@ -496,6 +504,12 @@ export default function (pi) {
     const trace = resumed.page.getByTestId('subagent-transcript');
     await trace.getByText('请核对发布交接。', { exact: true }).waitFor();
     await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
+    assert.equal(await trace.getAttribute('data-items'), '40');
+    await trace.evaluate(element => { element.scrollTop = 0; });
+    await resumed.page.waitForFunction(() => document.querySelector('[data-testid="subagent-transcript"]')?.dataset.items === '48');
+    await trace.evaluate(element => { element.scrollTop = 0; });
+    await trace.getByText('核对历史任务 0', { exact: true }).waitFor();
+    console.log('Verified a Pi member transcript larger than 16 MiB opens the active branch and loads older turns on request.');
     await resumed.page.keyboard.press('Escape');
     await member.waitFor();
     assert.ok(await member.evaluate(element => element === document.activeElement));

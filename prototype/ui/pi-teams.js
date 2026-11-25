@@ -1,5 +1,5 @@
-import { piTurns } from './pi-items.js';
-import { historyRows } from './timeline.js';
+import { piBranchTurns } from './pi-items.js';
+import { historyRows, mergeHistory } from './timeline.js';
 
 const memberStatuses = new Map([
   ['running', 'running'], ['completed', 'completed'], ['failed', 'failed'],
@@ -42,40 +42,27 @@ export function piTeamSnapshot(records, hasSessionFile) {
 }
 
 export function watchPiTeamTranscript(read, listener) {
-  const pageSize = 20;
   let subscribed = true;
-  let turns = [];
-  let view = { rows: [], cursor: null, loading: true, loadOlder };
+  let view = { rows: [], cursor: null, loading: false, loadOlder: () => { if (view.cursor) void load(view.cursor); } };
   function publish(changes) {
     view = { ...view, ...changes };
     listener(view);
   }
-  function loadOlder() {
-    if (!subscribed) return;
-    const page = turns.splice(Math.max(0, turns.length - pageSize));
-    publish({ cursor: turns.at(-1)?.id ?? null, rows: [...historyRows(page), ...view.rows], loading: false });
-  }
-  listener(view);
-  read().then(text => {
-    if (!subscribed) return;
-    if (text) {
-      const lines = text.trimEnd().split('\n');
-      if (JSON.parse(lines.shift())?.type !== 'session') throw new Error('Pi 子代理会话记录格式无效。');
-      const entries = [];
-      for (const line of lines) {
-        let entry;
-        try { entry = JSON.parse(line); } catch { continue; }
-        if (entry?.id) entries.push(entry);
-      }
-      turns = piTurns(entries, entries.at(-1)?.id);
+  async function load(cursor) {
+    if (!subscribed || view.loading) return;
+    publish({ loading: true, error: undefined });
+    try {
+      const page = await read(cursor);
+      if (!subscribed) return;
+      const turns = piBranchTurns(page.entries, entry => entry.id);
+      publish({ cursor: page.cursor, rows: mergeHistory(view.rows, historyRows(turns)), loading: false });
+    } catch (error) {
+      if (subscribed) publish({ error: error.message, loading: false });
     }
-    loadOlder();
-  }).catch(error => {
-    if (subscribed) publish({ error: error.message, loading: false });
-  });
+  }
+  void load();
   return () => {
     subscribed = false;
-    turns = [];
     view = { rows: [], cursor: null, loading: false };
   };
 }

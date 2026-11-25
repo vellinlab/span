@@ -66,7 +66,10 @@ export function piTurns(entries, leafId) {
     branch.push(entry);
     leafId = entry.parentId;
   }
-  branch.reverse();
+  return piBranchTurns(branch.reverse());
+}
+
+export function piBranchTurns(branch, identifyTurn = (_, index) => piTurnId(index)) {
   const turns = [];
   let turn;
   let index = 0;
@@ -76,7 +79,7 @@ export function piTurns(entries, leafId) {
     if (entry.type !== 'message') continue;
     const message = entry.message;
     if (!turn || message.role === 'user') {
-      const id = piTurnId(turns.length);
+      const id = identifyTurn(entry, turns.length);
       turn = { id, run: { id, status: 'completed' }, rows: [] };
       turns.push(turn);
       index = 0;

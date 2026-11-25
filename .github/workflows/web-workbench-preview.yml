@@ -51,6 +51,7 @@ jobs:
               --manifest-path /artifacts/baseline-source/prototype/core/Cargo.toml
             cp /tmp/span-pty-baseline-target/release/span-workbench-core /artifacts/span-workbench-pty-baseline
             cargo build --locked --release --manifest-path prototype/core/Cargo.toml
+            cargo test --locked --release --manifest-path prototype/core/Cargo.toml agent::pi::transcript::tests
             readelf --version-info "$binary" | grep -oE "GLIBC_[0-9]+(\.[0-9]+)+" | sort -Vu > /artifacts/glibc-service.txt
             test "$(tail -1 /artifacts/glibc-service.txt | cat - <(echo GLIBC_2.28) | sort -V | tail -1)" = GLIBC_2.28
           '
@@ -180,6 +181,7 @@ jobs:
         run: |
           rustup toolchain install 1.98.1 --profile minimal
           cargo +1.98.1 build --locked --release --manifest-path prototype/core/Cargo.toml
+          cargo +1.98.1 test --locked --release --manifest-path prototype/core/Cargo.toml agent::pi::transcript::tests
           cd prototype
           npm ci --no-audit --no-fund
           npm run check
