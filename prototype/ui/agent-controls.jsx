@@ -528,8 +528,8 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       onClose();
     }}>
     <header>
-      {panel.returnTo && <button ref={close} className="icon-button agent-panel-back" type="button" aria-label="返回代理与团队" onClick={() => onClose()}>
-        <ArrowLeft size={15} />
+      {panel.returnTo && <button ref={close} className="panel-link agent-panel-back" type="button" aria-label="返回代理与团队" onClick={() => onClose()}>
+        <ArrowLeft size={15} aria-hidden="true" />返回
       </button>}
       <strong title={panel.kind === 'subagent' ? title : undefined}>{title}</strong>
       {usage && <small className="panel-meta" title={usage}>{usage}</small>}

@@ -451,7 +451,10 @@ export default function (pi) {
     await members.getByText('reviewer', { exact: true }).waitFor();
     await members.getByText('空闲', { exact: true }).waitFor();
     const task = roster.getByRole('listitem').filter({ hasText: '整理交接说明' });
-    await task.getByText('受阻', { exact: true }).waitFor();
+    const blocked = task.getByText('受阻', { exact: true });
+    await blocked.waitFor();
+    const stateColor = label => roster.getByText(label, { exact: true }).evaluate(element => getComputedStyle(element).color);
+    assert.notEqual(await stateColor('受阻'), await stateColor('等待中'));
     const metadata = task.getByText('负责人 reviewer · 依赖 核对原始清单', { exact: true });
     await metadata.waitFor();
     assert.ok(await metadata.evaluate(element => {
@@ -501,6 +504,7 @@ export default function (pi) {
     const roster = await openTeam(resumed.page);
     await roster.getByText('已完成', { exact: true }).waitFor();
     const member = roster.getByRole('button', { name: '查看 reviewer 的会话记录', exact: true });
+    if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-roster-compact.png') });
     const trace = resumed.page.getByTestId('subagent-transcript');
     if (teamReadGate) {
       const reading = teamReadGate + '.reading';
@@ -531,6 +535,7 @@ export default function (pi) {
     await trace.getByText('请核对发布交接。', { exact: true }).waitFor();
     await trace.getByText('发布交接已核对。', { exact: true }).waitFor();
     assert.equal(await trace.getAttribute('data-items'), '40');
+    if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-trace-compact.png') });
     await trace.evaluate(element => { element.scrollTop = 0; });
     await resumed.page.waitForFunction(() => document.querySelector('[data-testid="subagent-transcript"]')?.dataset.items === '48');
     await trace.evaluate(element => { element.scrollTop = 0; });
@@ -601,11 +606,15 @@ export default function (pi) {
     assert.equal(await roster.getByText('复核发布前的交接。', { exact: true }).count(), 0);
     const worker = roster.getByRole('listitem').filter({ hasText: 'native-reviewer' });
     await worker.locator('.agent-state:is([data-status="completed"], [data-status="idle"])').waitFor();
+    const rosterBounds = await roster.boundingBox();
     await worker.getByRole('button', { name: '查看 native-reviewer 的会话记录', exact: true }).click();
     const trace = native.page.getByTestId('subagent-transcript');
     await trace.getByText(workerPrompt, { exact: false }).waitFor();
     await trace.locator('[data-card="reasoning"]').getByText(workerReasoning, { exact: true }).waitFor();
     await trace.getByText(workerAnswer, { exact: true }).waitFor();
+    const detailBounds = await native.page.getByRole('region', { name: 'native-reviewer', exact: true }).boundingBox();
+    assert.ok(Math.abs(detailBounds.x - rosterBounds.x) <= 1 && Math.abs(detailBounds.width - rosterBounds.width) <= 1,
+      'The desktop roster and member transcript should keep the same horizontal bounds');
     if (screenshot) await native.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-worker.png') });
     assert.deepEqual(native.errors, []);
     console.log('Verified Pi Teams creates a team, task and worker, and opens their saved transcript on ' + (ssh ?? process.platform));

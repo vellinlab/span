@@ -533,6 +533,7 @@ p { margin-block: 0 12px; }
   white-space: nowrap;
 }
 :is(.card-status, .agent-state)[data-status="running"] { color: #dbca9d; }
+.agent-state[data-status="blocked"] { color: #e0c78c; }
 :is(.card-status, .agent-state)[data-status="failed"] { color: var(--failure); }
 :is(.card-status, .agent-state)[data-status="completed"] { color: var(--accent); }
 :is(.card-status, .agent-state)[data-recorded="true"] { color: var(--muted); }
@@ -1018,14 +1019,23 @@ p { margin-block: 0 12px; }
 .agent-menu-entries button:focus-visible { outline-width: 1px; outline-offset: -1px; }
 .agent-menu-entries button:focus-visible svg { color: var(--accent); }
 .agent-panel { display: flex; flex-direction: column; font-size: 13px; }
-.agent-panel:is([data-kind="goal"], [data-kind="reasoning"], [data-kind="diff"], [data-kind="extensions"], [data-kind="subagent"]) {
+.agent-panel:is([data-kind="goal"], [data-kind="reasoning"], [data-kind="diff"], [data-kind="extensions"]) {
   inset-inline: 0 auto;
   width: min(100%, 560px);
 }
+.agent-panel:is([data-kind="agents"], [data-kind="subagent"]) { width: min(100%, 560px); }
 .agent-panel[data-kind="reasoning"] { --panel-height: 320px; }
 .agent-panel[data-kind="subagent"] { --panel-height: 310px; }
 .agent-panel[data-kind="subagent"] > header strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-panel-back { margin-inline-end: 4px; }
+.agent-panel-back {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  min-height: 26px;
+  margin-inline-end: 7px;
+  padding-inline: 5px;
+}
 .agent-panel[data-kind="subagent"] .agent-panel-content {
   display: flex;
   flex-direction: column;
@@ -1035,6 +1045,15 @@ p { margin-block: 0 12px; }
 }
 .agent-panel[data-kind="subagent"] .timeline { flex: 0 1 auto; container-type: inline-size; overscroll-behavior: contain; }
 .agent-panel[data-kind="subagent"] .reading-column { width: calc(100% - 12px); margin-block-start: 0; }
+.agent-panel[data-kind="subagent"] .user-message {
+  max-width: 100%;
+  margin-inline: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-inline-start: 2px solid var(--activity-line);
+  border-radius: 0 6px 6px 0;
+  background: #c2dbc90b;
+}
 .subagent-empty { color: var(--muted); padding-inline: 8px; }
 .agent-panel > header {
   display: flex;

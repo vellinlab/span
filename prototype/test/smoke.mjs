@@ -1381,6 +1381,7 @@ try {
   assert.ok(await failedAgent.evaluate(detail => detail.getBoundingClientRect().bottom <=
     detail.closest('.agent-panel-content').getBoundingClientRect().bottom + 1),
     'Both lines of the failure detail should be visible in the narrow roster');
+  const rosterBounds = await agents.boundingBox();
   const agentDetails = agents.getByRole('group', { name: '代理与团队明细' });
   await agents.getByRole('button', { name: '关闭面板' }).press('Tab');
   assert.ok(await agentDetails.evaluate(element => element === document.activeElement));
@@ -1392,9 +1393,18 @@ try {
   await cardAgent.focus();
   const parentTop = await transcript.evaluate(element => element.scrollTop);
   await cardAgent.press('Enter');
-  await trace.getByText('复核工作台键盘导航。', { exact: true }).waitFor();
+  const taskNote = trace.locator('.user-message').filter({ hasText: '复核工作台键盘导航。' });
+  await taskNote.waitFor();
   await trace.getByText('检查窄窗口与返回焦点。', { exact: true }).waitFor();
   await trace.getByText('子代理的会话记录。', { exact: true }).waitFor();
+  const traceBounds = await panel.boundingBox();
+  assert.ok(Math.abs(traceBounds.x - rosterBounds.x) <= 1 && Math.abs(traceBounds.width - rosterBounds.width) <= 1,
+    'The roster and the child transcript should occupy the same horizontal space');
+  assert.ok(await taskNote.evaluate(element => {
+    const task = element.getBoundingClientRect();
+    const track = element.closest('.message').getBoundingClientRect();
+    return Math.abs(task.left - track.left) <= 1;
+  }), 'The delegated instruction should start at the same edge as the child conversation');
   assert.ok(await panel.evaluate(element => element.getBoundingClientRect().height <= 244),
     'The child panel should fit the short transcript instead of using its full height.');
   assert.equal(await trace.getByText('已记录首轮检查。', { exact: true }).count(), 0);
@@ -1414,6 +1424,7 @@ try {
   await rosterAgent.press('Enter');
   await agents.waitFor({ state: 'detached' });
   await trace.getByText('子代理的会话记录。', { exact: true }).waitFor();
+  assert.equal((await panel.getByRole('button', { name: '返回代理与团队' }).textContent()).trim(), '返回');
   await page.keyboard.press('Escape');
   await rosterAgent.waitFor();
   assert.ok(await rosterAgent.evaluate(element => element === document.activeElement));
