@@ -439,8 +439,27 @@ try {
   const reasoningPanel = page.getByRole('region', { name: '推理摘要' });
   await reasoningPanel.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
   await reasoningPanel.getByText('再确认工具结果和最终回复的前后顺序。', { exact: true }).waitFor();
+  await reasoningPanel.getByText('确认目标卡片和输入区之间的间距。', { exact: false }).waitFor();
+  const summaryLayout = await reasoningPanel.evaluate(panel => {
+    const [earlier, later] = panel.querySelectorAll('.reasoning-sections');
+    const [first, second] = earlier.querySelectorAll('.prose');
+    const x = element => element.getBoundingClientRect().left;
+    const title = panel.querySelector('header strong');
+    const list = first.querySelector('ul');
+    const indent = x(list.querySelector('ul li')) - x(list.querySelector('li'));
+    return {
+      aligned: Math.abs(x(title) - x(first)) <= 1 && Math.abs(x(first) - x(second)) <= 1,
+      nested: indent >= 16 && indent <= 23,
+      groups: getComputedStyle(earlier).borderTopWidth === '0px' && getComputedStyle(later).borderTopWidth === '1px',
+      aboveStrip: panel.getBoundingClientRect().bottom <= document.querySelector('.reasoning-strip').getBoundingClientRect().top,
+    };
+  });
+  assert.deepEqual(summaryLayout, { aligned: true, nested: true, groups: true, aboveStrip: true });
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-expanded.png') });
-  await reasoningPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
+  await reasoningPanel.getByRole('button', { name: '关闭面板' }).press('Tab');
+  const reasoningBody = reasoningPanel.getByRole('group', { name: '推理摘要正文' });
+  assert.ok(await reasoningBody.evaluate(element => element === document.activeElement));
+  await reasoningBody.press('Escape');
   await reasoningPanel.waitFor({ state: 'detached' });
   assert.ok(await liveReasoning.evaluate(element => element === document.activeElement));
   await liveReasoning.press('Enter');

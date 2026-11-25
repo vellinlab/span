@@ -330,7 +330,8 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
   }, [panel]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
-  const id = panel.kind === 'goal' || panel.kind === 'reasoning' ? `${panel.kind}-panel` : undefined;
+  const reasoningPanel = panel.kind === 'reasoning';
+  const id = panel.kind === 'goal' || reasoningPanel ? `${panel.kind}-panel` : undefined;
   const goal = panel.kind === 'goal' ? work.goal : undefined;
   const usage = goal?.tokens == null ? '' : [goal.tokens, goal.budget].filter(value => value != null)
     .map(value => number.format(value)).join(' / ') + ' tokens';
@@ -343,9 +344,11 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
       <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
     </header>
     {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal}
-      action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}>
+      action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}
+      tabIndex={reasoningPanel ? 0 : undefined} role={reasoningPanel ? 'group' : undefined}
+      aria-label={reasoningPanel ? '推理摘要正文' : undefined}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
-      {panel.kind === 'reasoning' && <ReasoningText rows={reasoning} scroll={content} />}
+      {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} />}
       {panel.kind === 'usage' && <UsagePanel usage={work.usage} refresh={work.refreshUsage} report={report} />}
       {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}

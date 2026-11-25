@@ -388,6 +388,11 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     await heading.waitFor();
     await panel.locator('ul ul').getByText('保留两级缩进', { exact: true }).waitFor();
     detailPosition = await heading.boundingBox();
+    if (label === 'candidate') {
+      const bounds = await detail.boundingBox();
+      assert.ok(detailPosition.y - bounds.y >= 8 && detailPosition.y - bounds.y <= 14,
+        'The first heading should start just inside the summary viewport.');
+    }
     if (reasoningFollowing) {
       initialHeading = await heading.elementHandle();
       await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
@@ -513,6 +518,21 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       const link = panel.getByRole('link', { name: '迟到引用', exact: true });
       await link.waitFor();
       assert.equal(await link.getAttribute('href'), 'https://example.com/span/reference');
+      if (label === 'candidate') {
+        await panel.getByRole('button', { name: '关闭面板' }).press('Tab');
+        assert.ok(await detail.evaluate(element => element === document.activeElement),
+          'The reasoning viewport stays keyboard-focusable when it contains a link.');
+        await page.keyboard.press('Home');
+        await page.waitForFunction(() => document.querySelector('#reasoning-panel .agent-panel-content').scrollTop <= 2);
+        await page.keyboard.press('PageDown');
+        await page.waitForFunction(() => {
+          const body = document.querySelector('#reasoning-panel .agent-panel-content');
+          return body.scrollTop >= body.clientHeight / 2;
+        });
+        await page.keyboard.press('End');
+        await revealBottom();
+        assert.equal(await position(), before);
+      }
       archived = '引用检查完成。';
       await strip.getByText(archived, { exact: true }).waitFor();
       assert.deepEqual(await strip.boundingBox(), geometry);
