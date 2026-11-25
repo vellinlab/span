@@ -122,6 +122,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   const pending = new Map();
   const active = new Set();
   const reviews = new Map();
+  const reviewPageEdges = new Map();
   const ref = id => ({ backend, location, id });
   const session = (thread, overrides = { cwd: undefined }) => ({
     ref: ref(thread.id), cwd: thread.cwd ?? overrides.cwd, title: thread.name,
@@ -136,10 +137,21 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       rows: items.map(item => normalizeItem(item, turnId, ref)).filter(Boolean) };
   }
 
-  function normalizePage(page) {
+  function normalizePage(page, threadId, cursor) {
     const turns = [...(page.data ?? [])].reverse();
-    const reviewIds = new Set(turns.filter(turn => turn.items?.some(item =>
-      item.type === 'enteredReviewMode' || item.type === 'exitedReviewMode')).map(turn => turn.id));
+    const reviewIds = new Set();
+    for (const turn of turns) {
+      if (turn.items?.some(item => item.type === 'enteredReviewMode' || item.type === 'exitedReviewMode')) {
+        reviewIds.add(turn.id);
+      }
+    }
+    // The server can split the review's request turn from its result across pages.
+    const edge = reviewPageEdges.get(threadId);
+    if (edge && edge.cursor === cursor) reviewIds.add(edge.id);
+    const oldest = turns[0]?.rootTurnId || turns[0]?.id;
+    if (page.nextCursor && reviewIds.has(oldest) && active.has(threadId)) {
+      reviewPageEdges.set(threadId, { cursor: page.nextCursor, id: oldest });
+    } else reviewPageEdges.delete(threadId);
     return { items: turns.map(turn => {
       const id = turn.rootTurnId || turn.id;
       return normalizeTurn(turn, reviewIds.has(id) ? { id } : undefined);
@@ -149,8 +161,9 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     session: session(response.thread, response),
     options: { model: response.model, effort: response.reasoningEffort,
       tier: response.serviceTier, mode: response.collaborationMode?.mode },
-    history: response.initialTurnsPage ? normalizePage(response.initialTurnsPage)
-      : response.thread.turns?.length ? normalizePage({ data: [...response.thread.turns].reverse() }) : undefined,
+    history: response.initialTurnsPage ? normalizePage(response.initialTurnsPage, response.thread.id)
+      : response.thread.turns?.length
+        ? normalizePage({ data: [...response.thread.turns].reverse() }, response.thread.id) : undefined,
   });
 
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }),
@@ -366,12 +379,14 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         }
       },
       async history(thread, { limit, cursor }) {
-        return normalizePage(await request('thread/turns/list', { threadId: thread.id, ...pageRequest(limit), cursor }));
+        const page = await request('thread/turns/list', { threadId: thread.id, ...pageRequest(limit), cursor });
+        return normalizePage(page, thread.id, cursor);
       },
       ...(native && {
         async release(thread) {
           active.delete(thread.id);
           reviews.delete(thread.id);
+          reviewPageEdges.delete(thread.id);
           for (const [key, entry] of pending) {
             if (entry.threadId === thread.id) pending.delete(key);
           }

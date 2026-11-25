@@ -9,6 +9,38 @@ const mainFile = 'prototype/ui/workbench.css';
 const lastLine = '+    include(record_5000, "new workbench rule");';
 const reply = '已记录文件变更。\n\n```text\npatch preview ready\n```';
 
+async function checkReview(page, composer, profile, legacy, screenshot) {
+  await composer.fill('/review');
+  await composer.press('Enter');
+  const userEcho = page.locator('.user-message').getByText('current changes', { exact: true });
+  const raw = page.getByText('{"findings":[]}', { exact: true });
+  const reasoning = page.locator('.reasoning-strip');
+  if (legacy) {
+    await userEcho.waitFor();
+    await raw.waitFor();
+  } else {
+    await page.locator('[data-card="notice"]').getByText('当前工作区改动', { exact: true }).waitFor();
+    await reasoning.getByText('核对改动和对应的会话状态。', { exact: true }).waitFor();
+    assert.equal(await userEcho.count(), 0);
+    assert.equal(await raw.count(), 0);
+  }
+  if (screenshot && !legacy) await page.screenshot({ path: screenshot.replace(/\.png$/, '-running.png') });
+  await writeFile(join(profile, 'finish-inline-review'), '');
+  const finding = page.locator('.agent-reply li').filter({ hasText: '[P2] 保留阅读位置' });
+  await finding.waitFor();
+  await reasoning.waitFor({ state: 'detached' });
+  const completion = page.getByText('代码审查完成', { exact: true });
+  assert.equal(await completion.count(), Number(legacy));
+  assert.equal(await finding.count(), 1);
+  await page.waitForFunction(() => {
+    const finding = [...document.querySelectorAll('.agent-reply li')]
+      .find(item => item.textContent.includes('[P2] 保留阅读位置'))?.getBoundingClientRect();
+    const viewport = document.querySelector('.timeline').getBoundingClientRect();
+    return finding && finding.top >= viewport.top && finding.bottom <= viewport.bottom;
+  });
+  if (screenshot) await page.screenshot({ path: screenshot });
+}
+
 async function check(binary, legacy, screenshot) {
   const profile = await mkdtemp(join(tmpdir(), 'span-patch-'));
   let app;
@@ -23,6 +55,16 @@ async function check(binary, legacy, screenshot) {
     await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
     await page.getByText('第 160 项', { exact: false }).waitFor();
     const composer = page.getByRole('textbox', { name: '消息' });
+    const readClipboard = async () => (await app.evaluate(({ clipboard }) => clipboard.readText())).replaceAll('\r\n', '\n');
+    const reviewShot = legacy ? screenshot?.replace(/-before\.png$/, '-review-before.png')
+      : screenshot?.replace(/\.png$/, '-review.png');
+    await checkReview(page, composer, profile, legacy, reviewShot);
+    if (!legacy) {
+      await composer.fill('/copy');
+      await composer.press('Enter');
+      await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
+      assert.ok((await readClipboard()).includes('[P2] 保留阅读位置'));
+    }
     await composer.fill('验证长差异与文件切换。');
     await composer.press('Enter');
     const patch = page.locator('[data-card="patch"]');
@@ -96,7 +138,6 @@ async function check(binary, legacy, screenshot) {
     const copy = patch.getByRole('button', { name: '复制差异' });
     await copy.click();
     await patch.locator('[title="已复制差异"]').waitFor({ timeout: 5000 });
-    const readClipboard = async () => (await app.evaluate(({ clipboard }) => clipboard.readText())).replaceAll('\r\n', '\n');
     const raw = await readClipboard();
     assert.ok(raw.startsWith('--- a/' + mainFile) && raw.endsWith(lastLine + '\n'));
     assert.equal(raw.split('\n').length, 10006);
@@ -133,31 +174,6 @@ async function check(binary, legacy, screenshot) {
     const turnDiff = page.getByRole('region', { name: '最近一次会话补丁' });
     await turnDiff.getByRole('combobox', { name: '变更文件' }).waitFor();
     await turnDiff.getByRole('button', { name: '关闭面板' }).press('Escape');
-
-    await composer.fill('/review');
-    await composer.press('Enter');
-    const review = page.locator('[data-card="notice"]').filter({ hasText: '当前工作区改动' });
-    await review.getByText('当前工作区改动', { exact: true }).waitFor();
-    const reasoning = page.locator('.reasoning-strip');
-    await reasoning.getByText('核对改动和对应的会话状态。', { exact: true }).waitFor();
-    assert.equal(await page.locator('.user-message').getByText('current changes', { exact: true }).count(), 0);
-    assert.equal(await page.getByText('{"findings":[]}', { exact: true }).count(), 0);
-    await writeFile(join(profile, 'finish-inline-review'), '');
-    const finding = page.locator('.agent-reply li').filter({ hasText: '[P2] 保留阅读位置' });
-    await finding.waitFor();
-    await reasoning.waitFor({ state: 'detached' });
-    assert.equal(await finding.count(), 1);
-    assert.equal(await page.getByText('代码审查完成', { exact: true }).count(), 0);
-    assert.ok(await finding.evaluate(element => {
-      const finding = element.getBoundingClientRect();
-      const viewport = element.closest('.timeline').getBoundingClientRect();
-      return finding.top >= viewport.top && finding.bottom <= viewport.bottom;
-    }));
-    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-review.png') });
-    await composer.fill('/copy');
-    await composer.press('Enter');
-    await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');
-    assert.ok((await readClipboard()).includes('[P2] 保留阅读位置'));
     return { mountedAtStart, mountedAtEnd, rawLines: 10005 };
   } finally {
     await app?.close();

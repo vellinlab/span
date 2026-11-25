@@ -445,6 +445,12 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.deepEqual(historyRows(savedReview.items).filter(row => row.kind === 'message').map(row => row.text),
       [fallback.review, reply.text]);
     assert.ok(!historyRows(savedReview.items).some(row => row.kind === 'user'));
+    responses['thread/turns/list'] = params => params.cursor === 'review-worker'
+      ? { data: [{ ...nested, status: 'interrupted', items: [prompt] }] }
+      : { data: [{ ...root, items: [mark, fallback, reply] }], nextCursor: 'review-worker' };
+    const head = await agent.sessions.history(ref, { limit: 1 });
+    const older = await agent.sessions.history(ref, { limit: 1, cursor: head.cursor });
+    assert.deepEqual(historyRows(older.items), []);
   } finally {
     agent.close();
   }
