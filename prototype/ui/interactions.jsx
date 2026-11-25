@@ -44,12 +44,18 @@ function ApprovalDetails({ request, item }) {
   </>;
 }
 
-function InteractionCard({ request, count, respond, item, host, focusTarget, onFocus, onBlur }) {
+function InteractionCard({ request, count, respond, item, host, focusTarget, restoreFocus }) {
   const sending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
   const approval = request.kind === 'approval';
   const Icon = approval ? ShieldCheck : CircleHelp;
+  useLayoutEffect(() => {
+    const region = focusTarget.current;
+    return () => {
+      restoreFocus.current = region.contains(region.ownerDocument.activeElement);
+    };
+  }, [focusTarget, restoreFocus]);
 
   async function answer(reply) {
     if (sending.current) return;
@@ -74,7 +80,7 @@ function InteractionCard({ request, count, respond, item, host, focusTarget, onF
       : <button className="primary" aria-disabled={busy || undefined}>提交回答</button>}
   </div>;
   return <section className="approval" aria-label={request.title} ref={focusTarget} tabIndex={-1}
-    onFocusCapture={onFocus} onBlurCapture={onBlur} data-kind={request.kind} aria-busy={busy || undefined}>
+    data-kind={request.kind} aria-busy={busy || undefined}>
     <header><Icon size={16} aria-hidden="true" /><strong>{request.title}</strong>
       {count > 1 && <small>还有 {count - 1} 项</small>}<small className="approval-host" title={host}>{host}</small></header>
     {approval ? <>
@@ -98,17 +104,12 @@ function InteractionCard({ request, count, respond, item, host, focusTarget, onF
 export function Interactions({ requests, respond, item, host, focusTarget, returnFocus }) {
   const request = requests[0];
   const key = request ? JSON.stringify([request.turnId, request.id]) : null;
-  const hadFocus = useRef(false);
+  const restoreFocus = useRef(false);
   useLayoutEffect(() => {
-    if (!hadFocus.current) return;
-    if (focusTarget.current) focusTarget.current.focus({ preventScroll: true });
-    else {
-      hadFocus.current = false;
-      returnFocus.current?.focus({ preventScroll: true });
-    }
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    (focusTarget.current ?? returnFocus.current)?.focus({ preventScroll: true });
   }, [key, focusTarget, returnFocus]);
   return request && <InteractionCard key={key} request={request} count={requests.length} respond={respond} item={item} host={host}
-    focusTarget={focusTarget} onFocus={() => { hadFocus.current = true; }} onBlur={event => {
-      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) hadFocus.current = false;
-    }} />;
+    focusTarget={focusTarget} restoreFocus={restoreFocus} />;
 }

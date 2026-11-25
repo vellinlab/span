@@ -79,6 +79,47 @@ fn approval_requests(output: &Output, turn: &str, cwd: &Path) -> io::Result<()> 
     )
 }
 
+fn withdraw_approval(
+    output: &Output,
+    running: &AtomicBool,
+    thread_id: &str,
+    turn: &str,
+    cwd: &Path,
+    gate: &Path,
+) -> io::Result<()> {
+    notice(
+        output,
+        "item/completed",
+        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning",
+            "id":format!("{turn}-withdrawn-summary"),"summary":["已准备可撤回的审批请求。"]}}),
+    )?;
+    if !wait_for_stream_gate(&gate.join("show-withdrawable-approval"), running) {
+        return Ok(());
+    }
+    let item = approval_command(turn, cwd, "inProgress");
+    let request_id = format!("{turn}-withdrawn-approval");
+    send(
+        output,
+        json!({"id":request_id,"method":"item/commandExecution/requestApproval",
+            "params":{"threadId":thread_id,"turnId":turn,"itemId":item["id"],
+                "command":item["command"],"cwd":cwd}}),
+    )?;
+    if !wait_for_stream_gate(&gate.join("withdraw-approval"), running) {
+        return Ok(());
+    }
+    notice(
+        output,
+        "serverRequest/resolved",
+        json!({"threadId":thread_id,"requestId":request_id}),
+    )?;
+    running.store(false, Ordering::Release);
+    notice(
+        output,
+        "turn/completed",
+        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+    )
+}
+
 fn patch_sample(turn: &str) -> Value {
     let mut large = String::from(
         "--- a/prototype/ui/workbench.css\n+++ b/prototype/ui/workbench.css\n@@ -1,5001 +1,5001 @@\n--- old source prefix\n+++ new source prefix\n",
@@ -841,6 +882,18 @@ pub fn run() -> Result<()> {
                     )?;
                     reviewed = false;
                     review = Some((turn, false));
+                    continue;
+                }
+                if submitted == "验证后台撤回审批。"
+                    && let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                {
+                    let output = output.clone();
+                    let background = background.clone();
+                    let cwd = cwd.clone();
+                    thread::spawn(move || {
+                        let _ =
+                            withdraw_approval(&output, &background, &thread_id, &turn, &cwd, &gate);
+                    });
                     continue;
                 }
                 if params["input"][0]["text"] == "验证任务计划。" {

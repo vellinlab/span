@@ -1001,6 +1001,27 @@ try {
     console.log('Verified the compact preview fills the workspace, yields to approval or terminal, and restores keyboard focus.');
   }
   await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
+  await composer.fill('验证后台撤回审批。');
+  await composer.press('Enter');
+  await liveReasoning.getByText('已准备可撤回的审批请求。', { exact: true }).waitFor();
+  await liveReasoning.focus();
+  await writeFile(join(profile, 'show-withdrawable-approval'), '');
+  await approvalDetails.waitFor();
+  assert.ok(await approval.evaluate(element => document.activeElement === element));
+  await transcript.evaluate((element, top) => { element.scrollTop = top; }, anchor.scrollTop);
+  const beforeWithdrawal = await readingPosition();
+  await approvalDetails.focus();
+  await approvalDetails.evaluate(element => element.blur());
+  const focusOutsideCard = () => page.evaluate(() => document.activeElement === document.body);
+  assert.ok(await focusOutsideCard());
+  await writeFile(join(profile, 'withdraw-approval'), '');
+  await approval.waitFor({ state: 'detached' });
+  assert.ok(await focusOutsideCard(), 'Withdrawing an approval after the reader left it must not focus the composer.');
+  const afterWithdrawal = await readingPosition();
+  assert.equal(afterWithdrawal.text, beforeWithdrawal.text);
+  assert.ok(Math.abs(afterWithdrawal.offset - beforeWithdrawal.offset) <= 2);
+  await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
+  console.log('Verified backend approval withdrawal preserves the reading position and leaves focus outside the card.');
   const heading = page.locator('.breadcrumb strong');
   const previousTitle = await heading.textContent();
   const longTitle = '工作台架构评审与 Windows 和 EL8 桌面的窗口布局验收';
