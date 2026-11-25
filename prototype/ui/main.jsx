@@ -778,11 +778,13 @@ function App() {
       <div className="workspace-area" data-preview-overlay={previewOverlay || undefined}>
         <main className="main" inert={readingOverlay}>
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
-            <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
-              rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
-              liveReasoningTurn={liveReasoning?.turnId} activeTurnId={run?.id}
-              jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
-              openArtifact={openArtifact} openImage={previewImage} canOpenSession={!running && !loading && connection === 'ready'} />
+            <div className="transcript-viewport">
+              <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
+                rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
+                liveReasoningTurn={liveReasoning?.turnId} activeTurnId={run?.id}
+                jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
+                openArtifact={openArtifact} openImage={previewImage} canOpenSession={!running && !loading && connection === 'ready'} />
+            </div>
             <div className="composer-wrap reading-column">
               {!rows.length && !session && !loading && !error && <div className="welcome"><h1>开始新会话</h1></div>}
               {error && <div className="error">

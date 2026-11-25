@@ -41,6 +41,56 @@ async function checkAlignment(page) {
   assert.ok(send.right <= composer.right && composer.right <= pageWidth, 'Composer must fit within the window');
 }
 
+async function checkTranscriptEdge(app, page, transcript, screenshot) {
+  const originalTop = await transcript.evaluate(element => element.scrollTop);
+  try {
+    const { crop, focusPoint, scrollTop } = await transcript.evaluate(async timeline => {
+      const viewport = timeline.getBoundingClientRect();
+      const nearby = [...timeline.querySelectorAll('.message[data-kind="message"] strong')]
+        .filter(node => /^第 \d+ 项/.test(node.textContent) && Math.abs(node.getBoundingClientRect().top - viewport.bottom) < 100)
+        .sort((a, b) => Math.abs(a.getBoundingClientRect().top - viewport.bottom) - Math.abs(b.getBoundingClientRect().top - viewport.bottom));
+      const heading = nearby[0];
+      if (!heading) throw Error('No history heading near the bottom edge');
+      for (let frame = 0; frame < 6; frame++) {
+        const rect = heading.getBoundingClientRect();
+        timeline.scrollTop += rect.top + rect.height / 2 - viewport.bottom;
+        await new Promise(requestAnimationFrame);
+      }
+      const rect = heading.getBoundingClientRect();
+      if (rect.top + 5 >= viewport.bottom || rect.bottom - 5 <= viewport.bottom) throw Error('The history heading was not clipped');
+      const x = Math.ceil(rect.left);
+      const y = Math.floor(viewport.bottom) - 10;
+      return { crop: { x, y, width: Math.floor(rect.right) - x, height: 10 },
+        focusPoint: { x: x + 2, y: y + 8 }, scrollTop: timeline.scrollTop };
+    });
+    const baseline = await page.addStyleTag({ content: '.transcript-viewport::before, .transcript-viewport::after { visibility: hidden }' });
+    const before = await page.screenshot({ path: screenshot.replace(/\.png$/, '-transcript-edge-before.png'), scale: 'css' });
+    await baseline.evaluate(element => element.remove());
+    const after = await page.screenshot({ path: screenshot.replace(/\.png$/, '-transcript-edge-after.png'), scale: 'css' });
+    const subdued = await app.evaluate(({ nativeImage }, { before, after, crop }) => {
+      const pixels = png => nativeImage.createFromBuffer(Buffer.from(png, 'base64')).crop(crop).toBitmap();
+      const original = pixels(before), softened = pixels(after);
+      let changed = 0;
+      for (let index = 0; index < original.length; index += 4) {
+        if (original[index] > 110 && softened[index] < original[index] - 25) changed++;
+      }
+      return changed;
+    }, { before: before.toString('base64'), after: after.toString('base64'), crop });
+    assert.ok(subdued >= 12, `Expected the clipped heading to recede, observed ${subdued} toned-down pixels`);
+    assert.ok(await transcript.evaluate((element, { focusPoint, scrollTop }) => {
+      const overlay = getComputedStyle(element.parentElement, '::after');
+      return element.scrollTop === scrollTop && overlay.pointerEvents === 'none' && Number.parseFloat(overlay.height) <= 14 &&
+        element.contains(document.elementFromPoint(focusPoint.x, focusPoint.y));
+    }, { focusPoint, scrollTop }));
+  } finally {
+    await transcript.evaluate(async (element, top) => {
+      element.scrollTop = top;
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    }, originalTop);
+  }
+}
+
 try {
   const page = await app.firstWindow();
   page.on('pageerror', error => console.error(error));
@@ -363,7 +413,10 @@ try {
       && rect.x === goalRect.x && rect.width === goalRect.width && rect.bottom < goalRect.top;
   }, liveRect));
   assert.equal(await transcript.evaluate(element => element.scrollTop), reasoningAnchor);
-  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
+  if (screenshot) {
+    await checkTranscriptEdge(app, page, transcript, screenshot);
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning.png') });
+  }
   await liveReasoning.press('Enter');
   const reasoningPanel = page.getByRole('region', { name: '推理摘要' });
   await reasoningPanel.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
