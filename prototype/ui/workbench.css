@@ -460,7 +460,7 @@ p { margin-block: 0 12px; }
 }
 .card-chevron, .card-icon { color: #a8b6b1; }
 .card-placeholder { width: 13px; flex: none; }
-.card-title, .card-hint, .agent-member-label, .agent-member-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-title, .card-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-title { font-weight: 600; }
 .activity[data-card="activity-group"] .card-title { font-weight: 500; }
 .activity[data-failed="true"] { border-left-color: color-mix(in srgb, var(--failure) 48%, transparent); }
@@ -612,7 +612,7 @@ p { margin-block: 0 12px; }
 .agent-member-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
+  align-items: start;
   column-gap: 12px;
   row-gap: 3px;
   padding-block: 5px;
@@ -620,28 +620,31 @@ p { margin-block: 0 12px; }
 .agent-member-row + .agent-member-row { border-top: 1px solid var(--line); }
 .agent-member-name {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
   justify-self: start;
-  padding: 2px 0;
+  padding: 1px 0;
   text-align: start;
 }
-.agent-member-name svg { color: var(--accent); flex: none; }
+.agent-member-name svg { color: var(--accent); flex: none; margin-block-start: 4px; }
 .agent-member-name:disabled { opacity: 1; }
 .agent-member-name:disabled svg { color: var(--muted); opacity: .55; }
 .agent-member-name:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+.agent-member-label, .agent-member-meta { min-width: 0; overflow-wrap: anywhere; }
 .agent-member-meta, .agent-member-detail { grid-column: 1 / -1; color: var(--muted); }
 .agent-member-meta { font-size: 11px; }
 .agent-member-detail { margin: 0; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-state {
   display: inline-flex;
   grid-column: 2;
+  justify-self: end;
   align-items: center;
   gap: 4px;
   color: var(--muted);
   font-size: 11px;
+  line-height: 24px;
   white-space: nowrap;
 }
 .activity[data-card="delegation"] .prose + .agent-member-list { margin-top: 5px; }
@@ -980,7 +983,7 @@ p { margin-block: 0 12px; }
   padding: 10px 13px 12px;
   scrollbar-color: #697477 transparent;
 }
-.agent-panel:is([data-kind="reasoning"], [data-kind="usage"]) .agent-panel-content:focus-visible { outline-offset: -2px; }
+.agent-panel-content[tabindex]:focus-visible { outline-offset: -2px; }
 .agent-panel[data-kind="reasoning"] .reasoning-sections + .reasoning-sections {
   padding-block-start: 12px;
   border-block-start: 1px solid var(--line);

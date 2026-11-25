@@ -304,9 +304,9 @@ function AgentTaskList({ tasks, members }) {
     const metadata = [task.assigneeId && `负责人 ${assignee ? memberName(assignee) : task.assigneeId}`,
       dependencies && `依赖 ${dependencies}`].filter(Boolean).join(' · ');
     return <li key={task.id} className="agent-member-row">
-      <span className="agent-member-label" title={task.title}>{task.title}</span>
+      <span className="agent-member-label">{task.title}</span>
       <AgentStatus status={task.status} />
-      {metadata && <small className="agent-member-meta" title={metadata}>{metadata}</small>}
+      {metadata && <small className="agent-member-meta">{metadata}</small>}
     </li>;
   })}</ul>;
 }
@@ -364,14 +364,15 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
   const title = panel.title ?? titles[panel.kind];
   const reasoningPanel = panel.kind === 'reasoning';
   const usagePanel = panel.kind === 'usage';
-  const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : undefined;
+  const agentsPanel = panel.kind === 'agents';
+  const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : agentsPanel ? '代理与团队明细' : undefined;
   const id = panel.kind === 'goal' || reasoningPanel ? `${panel.kind}-panel` : undefined;
   const goal = panel.kind === 'goal' ? work.goal : undefined;
   const usage = goal?.tokens == null ? '' : [goal.tokens, goal.budget].filter(value => value != null)
     .map(value => number.format(value)).join(' / ') + ' tokens';
   return <section className="agent-panel popup-surface" id={id} data-kind={panel.kind}
     aria-label={title} onKeyDown={event => {
-      if (event.key === 'Escape' && (panel.focus || usagePanel)) setPanel(null);
+      if (event.key === 'Escape' && (panel.focus || usagePanel || agentsPanel)) setPanel(null);
     }}>
     <header><strong>{title}</strong>
       {usage && <small className="goal-usage" title={usage}>{usage}</small>}
@@ -387,7 +388,7 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} />}
       {usagePanel && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing} />}
-      {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
+      {agentsPanel && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
       {panel.kind === 'extensions' && (panel.items?.length
         ? <ul className="extensions">{panel.items.map(item => <li key={item.id}>

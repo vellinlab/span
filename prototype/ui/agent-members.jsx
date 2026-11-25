@@ -25,7 +25,7 @@ export const AgentMemberList = memo(function AgentMemberList({ members, parentNa
     const parent = parentName?.(member.parent);
     const role = member.role && member.role !== name ? member.role : undefined;
     const metadata = [role, member.model, parent && `父代理 ${parent}`].filter(Boolean).join(' · ');
-    const label = <span className="agent-member-label" title={name}>{name}</span>;
+    const label = <span className="agent-member-label">{name}</span>;
     return <li key={member.id} className="agent-member-row">
       {member.session && sessionKey(member.session) !== currentKey ? <button className="agent-member-name" type="button"
         aria-label={`打开 ${name} 的会话`}
@@ -33,8 +33,8 @@ export const AgentMemberList = memo(function AgentMemberList({ members, parentNa
         {label}<ArrowUpRight size={13} aria-hidden="true" />
       </button> : label}
       <AgentStatus status={member.status} recorded={member.recorded} />
-      {metadata && <small className="agent-member-meta" title={metadata}>{metadata}</small>}
-      {showDetail && member.detail && <p className="agent-member-detail">{member.detail}</p>}
+      {metadata && <small className="agent-member-meta">{metadata}</small>}
+      {(showDetail || member.status === 'failed') && member.detail && <p className="agent-member-detail">{member.detail}</p>}
     </li>;
   })}</ul>;
 });

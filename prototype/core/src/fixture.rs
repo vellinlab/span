@@ -16,7 +16,9 @@ use std::{
 
 const THREAD: &str = "workspace-review";
 const TITLE: &str = "工作台架构评审";
-const REVIEW_AGENT: &str = "键盘导航和窄窗布局复核";
+const REVIEW_AGENT: &str = "键盘导航与窄窗口布局复核，核对 Windows 和 EL8 下的状态、结果与会话归属";
+const REVIEW_MODEL: &str =
+    "fixture-review-workbench-layout-keyboard-navigation-window-rendering-delegated-agent";
 const READING_REVIEW: &str = r#"# 工作台会话验收
 
 已确认会话可以继续。当前回合的文件、终端和执行记录均归属正确。
@@ -732,7 +734,7 @@ pub fn run() -> Result<()> {
                 if params["input"][0]["text"] == "验证子代理导航。" {
                     for item in [
                         json!({"type":"subAgentActivity","id":format!("{turn}-review-agent"),"kind":"started",
-                            "agentThreadId":"fixture-subagent","agentPath":format!("/review/{REVIEW_AGENT}"),"model":"fixture-review"}),
+                            "agentThreadId":"fixture-subagent","agentPath":format!("/review/{REVIEW_AGENT}"),"model":REVIEW_MODEL}),
                         json!({"type":"collabAgentToolCall","id":format!("{turn}-review-wait"),"tool":"wait","status":"completed",
                             "senderThreadId":thread_id,"receiverThreadIds":["fixture-subagent","fixture-compare"],
                             "agentsStates":{"fixture-subagent":{"status":"completed","message":"已核对键盘焦点。"},
