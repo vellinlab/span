@@ -1100,9 +1100,11 @@ try {
   console.log('Verified the rich answer layout and long code overflow at two window sizes.');
 
   await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
-  const readClipboard = () => app.evaluate(async ({ clipboard }) => ({
-    text: (await clipboard.readText()).replaceAll('\r\n', '\n'), html: await clipboard.readHTML(),
-  }));
+  const readClipboard = () => app.evaluate(async ({ clipboard }) => {
+    const [item] = await clipboard.read();
+    const read = async type => item?.types.includes(type) ? (await item.getType(type)).text() : '';
+    return { text: (await read('text/plain')).replaceAll('\r\n', '\n'), html: await read('text/html') };
+  });
   const feedback = page.locator('.composer-status');
   await composer.fill('/copy');
   const formats = page.getByLabel('会话命令');
@@ -1111,7 +1113,10 @@ try {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-copy-formats.png') });
   await composer.press('ArrowDown');
   await composer.press('Enter');
-  await feedback.filter({ hasText: /^已复制富文本$/ }).waitFor();
+  const copyReady = feedback.filter({ hasText: /^已复制富文本$/ });
+  const copyError = page.getByRole('alert');
+  await copyReady.or(copyError).first().waitFor();
+  if (!await copyReady.isVisible()) assert.fail(await copyError.innerText());
   const richReply = await readClipboard();
   assert.ok(richReply.text.startsWith('# 工作台会话验收\n') &&
     richReply.text.endsWith('回放和继续会话均已验证。'));

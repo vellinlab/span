@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ClipboardItem, clipboard, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises');
 const { createInterface } = require('node:readline');
@@ -245,7 +245,7 @@ ipcMain.handle('span:copy-rich', async (event, markdown) => {
   const revision = ++clipboardRevision;
   const html = await request('clipboard.rich', { markdown });
   if (revision !== clipboardRevision || closing) return false;
-  await clipboard.write({ text: markdown, html });
+  await clipboard.write([new ClipboardItem({ 'text/plain': markdown, 'text/html': html })]);
   return revision === clipboardRevision;
 });
 
