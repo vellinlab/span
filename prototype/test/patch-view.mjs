@@ -113,6 +113,22 @@ async function check(binary, legacy, screenshot) {
     assert.equal(await readClipboard(), reply);
     await assert.rejects(page.evaluate(() => window.span.copyText({ text: '无效测试文本' })), /无效的剪贴板文本/);
     assert.equal(await readClipboard(), reply);
+    await composer.fill('/d');
+    await page.getByRole('button', { name: /\/diff 查看工作区 Git 改动/ }).waitFor();
+    await composer.fill('/diff');
+    await composer.press('Enter');
+    const workspaceDiff = page.getByRole('region', { name: '工作区 Git 改动' });
+    await workspaceDiff.locator('[data-tone="add"]').getByText('+新的工作区说明', { exact: true }).waitFor();
+    await workspaceDiff.getByRole('region', { name: '未跟踪文件' }).getByText('docs/空间 目录.md', { exact: true }).waitFor();
+    const closeDiff = workspaceDiff.getByRole('button', { name: '关闭面板' });
+    assert.ok(await closeDiff.evaluate(button => button === document.activeElement));
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-workspace.png') });
+    await closeDiff.press('Escape');
+    assert.ok(await composer.evaluate(element => element === document.activeElement));
+    await composer.fill('/diff turn');
+    await composer.press('Enter');
+    const turnDiff = page.getByRole('region', { name: '本轮差异' });
+    await turnDiff.getByRole('combobox', { name: '变更文件' }).waitFor();
     return { mountedAtStart, mountedAtEnd, rawLines: 10005 };
   } finally {
     await app?.close();

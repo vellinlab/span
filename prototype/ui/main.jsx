@@ -516,9 +516,23 @@ function App() {
         await work.archive();
         return true;
       case '/diff': {
-        const change = rows.findLast(row => row.kind === 'patch' && (row.text || row.files?.length));
-        if (!change) throw new Error('当前会话没有可显示的差异。');
-        output('本轮差异', change.text || change.files.map(file => file.diff || file.path).join('\n'));
+        if (args === 'turn' || (!args && !api.repository)) {
+          const change = rows.findLast(row => row.kind === 'patch' && (row.text || row.files?.length));
+          if (!change) throw new Error('当前会话没有可显示的差异。');
+          showPanel('diff', input.current, { title: '本轮差异', change });
+          return true;
+        }
+        if (args) throw new Error('用法 /diff 或 /diff turn');
+        const directory = session?.cwd;
+        if (!directory) throw new Error('请先打开一个有工作目录的会话。');
+        showPanel('diff', input.current, { directory, loading: true });
+        const id = panelScope.current;
+        try {
+          const result = await work.withSession(client => client.repository.diff(directory));
+          if (result && id === panelScope.current) setPanel(panel => ({ ...panel, result, loading: false }));
+        } catch (error) {
+          if (id === panelScope.current) setPanel(panel => ({ ...panel, error: error.message, loading: false }));
+        }
         return true;
       }
       default: {

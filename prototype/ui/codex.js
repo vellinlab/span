@@ -126,6 +126,27 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   const request = rpc.request;
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
 
+  async function workspaceDiff(cwd) {
+    const limit = 256 * 1024;
+    const git = args => request('command/exec', {
+      cwd, command: ['git', '--no-pager', '-c', 'core.fsmonitor=false', '-c', 'core.quotePath=false', ...args],
+      env: { GIT_OPTIONAL_LOCKS: '0' }, timeoutMs: 10_000, outputBytesCap: limit,
+    });
+    const args = ['diff', '--no-color', '--no-ext-diff', '--no-textconv'];
+    let diff = await git([...args, 'HEAD', '--']);
+    if (diff.exitCode !== 0 && (await git(['rev-parse', '--verify', '--quiet', 'HEAD'])).exitCode === 1) {
+      diff = await git([...args, '--cached', '--']);
+    }
+    if (diff.exitCode !== 0) throw new Error(diff.stderr.trim() || '无法读取 Git 改动。');
+    const untracked = await git(['ls-files', '--others', '--exclude-standard', '-z']);
+    if (untracked.exitCode !== 0) throw new Error(untracked.stderr.trim() || '无法列出未跟踪文件。');
+    const paths = untracked.stdout.split('\0');
+    // A capped response may end partway through a path. Only show complete records.
+    const partialPath = paths.pop();
+    return { patch: diff.stdout, untracked: paths,
+      mayBeTruncated: Boolean(partialPath) || [diff.stdout, untracked.stdout].some(text => new TextEncoder().encode(text).length >= limit) };
+  }
+
   function packet({ id, method, params: payload }) {
     const params = payload ?? {};
     const threadId = params.threadId ?? params.conversationId;
@@ -380,7 +401,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         }
         return [...models.values()];
       },
-      modes, permissions, extensions,
+      modes, permissions, extensions, repository: { diff: workspaceDiff },
       goal: {
         async read(thread) {
           return normalizeGoal((await request('thread/goal/get', { threadId: thread.id })).goal);

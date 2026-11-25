@@ -15,12 +15,12 @@ function toneFor(line, inHunk) {
   if (line.startsWith('-')) return 'remove';
 }
 
-export const PatchView = memo(function PatchView({ files, text }) {
+export const PatchView = memo(function PatchView({ files, text, label = '本轮差异', directory }) {
   const [selection, setSelection] = useState('');
   const positions = useRef(new Map());
   const scroll = useRef(null);
   const sources = files.map((file, index) => ({ label: file.path, diff: file.diff, key: JSON.stringify([file.path, index]) }));
-  if (text) sources.push({ label: '本轮差异', diff: text, key: 'turn' });
+  if (text) sources.push({ label, diff: text, key: 'turn' });
   const active = sources.find(source => source.key === selection) ?? sources[0];
   if (!active) return null;
   function select(key) {
@@ -34,7 +34,7 @@ export const PatchView = memo(function PatchView({ files, text }) {
       {sources.length > 1 ? <select aria-label="变更文件" title={active.label} value={active.key}
         onChange={event => select(event.target.value)}>
         {sources.map(source => <option key={source.key} value={source.key}>{source.label}</option>)}
-      </select> : files.length > 0 && <PathText className="card-path" path={active.label} />}
+      </select> : (directory || files.length > 0) && <PathText className="card-path" path={directory || active.label} />}
       {active.diff && <CopyTextButton key={active.key} text={active.diff} label="复制差异" copiedLabel="已复制差异" />}
     </header>
     {active.diff ? <TextReader key={active.key} kind="diff" pagesLabel="差异分页" text={active.diff} label={active.key === 'turn' ? active.label : `${active.label}的差异`}

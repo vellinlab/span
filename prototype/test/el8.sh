@@ -6,7 +6,7 @@ if [[ ${1:-} != desktop ]]; then
         --define 'preview_runtime /artifacts/linux' --define 'dist .el8' \
         --define '_binary_payload w6.gzdio' prototype/test/span-web-preview.spec
     dnf -y install /artifacts/span-0.1.0-1.el8.x86_64.rpm /tmp/span-preview-rpmbuild/RPMS/x86_64/span-web-preview-*.rpm \
-        curl nss alsa-lib cups-libs mesa-libgbm libXScrnSaver libXtst libxkbcommon \
+        curl git nss alsa-lib cups-libs mesa-libgbm libXScrnSaver libXtst libxkbcommon \
         python39 python39-pip python3-pyatspi xorg-x11-server-Xvfb xdotool \
         dbus-daemon openbox openssh-server openssl google-noto-sans-cjk-ttc-fonts ImageMagick
     python3.9 -m pip install --disable-pip-version-check python-xlib==0.33

@@ -979,7 +979,7 @@ p { margin-block: 0 12px; }
   width: min(100%, 560px);
 }
 .agent-panel[data-kind="reasoning"] { --panel-height: 320px; }
-.agent-panel header {
+.agent-panel > header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -996,6 +996,22 @@ p { margin-block: 0 12px; }
 .agent-panel[data-kind="agents"] .agent-panel-content { padding-block: 8px; }
 .agent-panel[data-kind="agents"] .agent-member-row { padding-block: 4px; }
 .agent-panel-content[tabindex]:focus-visible { outline-offset: -2px; }
+.workspace-diff { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.workspace-diff .card-path { color: var(--muted); }
+.workspace-diff p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.workspace-diff p.diff-error { color: var(--failure); white-space: pre-wrap; }
+.workspace-diff h3 { margin: 2px 0 5px; font-size: 12px; font-weight: 600; }
+.agent-panel[data-kind="diff"] .text-scroll {
+  max-height: 148px;
+  margin: 0;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--canvas);
+  line-height: var(--text-line-height);
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+.workspace-diff .diff-toolbar { margin: 0; }
 .agent-panel[data-kind="reasoning"] .reasoning-sections + .reasoning-sections {
   padding-block-start: 12px;
   border-block-start: 1px solid var(--line);

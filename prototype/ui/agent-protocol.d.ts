@@ -100,6 +100,7 @@ export type Extension = Choice & {
   kind: ExtensionKind; status?: string; enabled?: boolean; source?: string;
 };
 export type ExtensionAction = 'enable' | 'disable' | 'install' | 'uninstall' | 'authorize' | 'refresh';
+export type WorkspaceDiff = { patch: string; untracked: string[]; mayBeTruncated: boolean };
 export type Event =
   | { kind: 'connection'; route: 'shared' | 'stdio' | 'fixture' | 'remote' }
   | { kind: 'disconnected'; error?: string }
@@ -182,6 +183,7 @@ export interface AgentAdapter {
     list(kind: ExtensionKind, ref: SessionRef): Promise<Extension[]>;
     act?(kind: ExtensionKind, ref: SessionRef, id: string, action: ExtensionAction): Promise<void>;
   };
+  repository?: { diff(cwd: string): Promise<WorkspaceDiff> };
   artifacts?: {
     list?(ref: SessionRef, cursor?: string): Promise<Page<Artifact>>;
     read?(ref: SessionRef, artifact: Artifact): Promise<{ mime: string; text?: string; base64?: string }>;

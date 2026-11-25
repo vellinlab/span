@@ -288,7 +288,8 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
       const { packet } = params;
       if (method === 'agent.start') publish('agent-route', 'shared');
       if (packet?.method && packet.id != null) {
-        publish('agent', { id: packet.id, result: responses[packet.method] ?? {} });
+        const response = responses[packet.method];
+        publish('agent', { id: packet.id, result: (typeof response === 'function' ? response(packet.params) : response) ?? {} });
       }
     },
   } };
@@ -333,6 +334,27 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     await agent.goal.update(ref, { kind: 'resume' });
     assert.deepEqual(requests.at(-1)[1].packet.params, { threadId: ref.id, origin: 'user', status: 'active' });
     assert.equal((await agent.usage()).limits[0].used, 22);
+    const diffReplies = [
+      { exitCode: 128, stdout: '', stderr: 'no commits yet' },
+      { exitCode: 1, stdout: '', stderr: '' },
+      { exitCode: 0, stdout: '+已暂存\n', stderr: '' },
+      { exitCode: 0, stdout: 'docs/工作 记录.md\0docs/a\nb.md\0cut-off', stderr: '' },
+    ];
+    responses['command/exec'] = params => {
+      assert.equal(params.cwd, '/remote workspace');
+      assert.deepEqual(params.env, { GIT_OPTIONAL_LOCKS: '0' });
+      assert.equal(params.outputBytesCap, 262144);
+      return diffReplies.shift();
+    };
+    assert.deepEqual(await agent.repository.diff('/remote workspace'), {
+      patch: '+已暂存\n', untracked: ['docs/工作 记录.md', 'docs/a\nb.md'], mayBeTruncated: true,
+    });
+    assert.deepEqual(requests.slice(-4).map(([, { packet }]) => packet.params.command.slice(6)), [
+      ['diff', '--no-color', '--no-ext-diff', '--no-textconv', 'HEAD', '--'],
+      ['rev-parse', '--verify', '--quiet', 'HEAD'],
+      ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--cached', '--'],
+      ['ls-files', '--others', '--exclude-standard', '-z'],
+    ]);
     const scope = { threadId: 'thread', turnId: 't' };
     publish('agent', { method: 'item/reasoning/textDelta', params: { ...scope, itemId: 'r', delta: 'raw' } });
     publish('agent', { method: 'item/reasoning/summaryTextDelta',

@@ -1127,6 +1127,16 @@ pub fn run() -> Result<()> {
                 rates
             }
             "app/list" | "skills/list" => json!({"data":[],"nextCursor":null}),
+            "command/exec" if params["cwd"] == json!(cwd) => {
+                let command = params["command"].as_array().expect("command arguments");
+                if command.ends_with(&[json!("HEAD"), json!("--")]) {
+                    let patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-旧的工作区说明\n+新的工作区说明\n";
+                    json!({"exitCode":0,"stdout":patch,"stderr":""})
+                } else {
+                    json!({"exitCode":0,"stdout":"docs/检查记录.md\0docs/空间 目录.md\0","stderr":""})
+                }
+            }
+            "command/exec" => json!({"exitCode":1,"stdout":"","stderr":"Git 工作目录不匹配。"}),
             _ => json!({}),
         };
         send(&output, json!({"id":id,"result":result}))?;

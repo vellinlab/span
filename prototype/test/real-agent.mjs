@@ -1,13 +1,15 @@
 import { _electron as electron } from 'playwright';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { pasteNativeImage, samplePng } from './clipboard-image.mjs';
 
 const args = process.argv.slice(2);
-const [binary, route = 'stdio', ssh] = args.filter(arg => arg !== '--image');
+const [binary, route = 'stdio', ssh] = args.filter(arg => !arg.startsWith('--'));
 const imageTest = args.includes('--image');
+const diffTest = args.includes('--diff');
 const expected = imageTest ? 'Span preview sent two images.' : 'Span preview is connected.';
 const imageName = '会话验收.png';
 const profile = await mkdtemp(join(tmpdir(), 'span-real-'));
@@ -30,6 +32,23 @@ try {
     await page.getByRole('button', { name: '连接 SSH' }).click();
   }
   await (ssh ? ready.filter({ hasText: ssh }) : ready).waitFor({ timeout: 30_000 });
+  if (diffTest) {
+    const workspace = join(profile, 'git workspace');
+    await mkdir(workspace);
+    const git = (...args) => execFileSync('git', args, { cwd: workspace, encoding: 'utf8' });
+    git('init', '-q');
+    await writeFile(join(workspace, 'README.md'), 'Committed text\n');
+    git('add', 'README.md');
+    git('-c', 'user.name=Span CI', '-c', 'user.email=ci@example.test', 'commit', '-qm', 'Workspace diff fixture');
+    await writeFile(join(workspace, 'README.md'), 'Current working tree\n');
+    await writeFile(join(workspace, 'Untracked notes.md'), 'Local notes\n');
+    await app.evaluate(({ dialog }, workspace) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
+    }, workspace);
+    await page.getByRole('button', { name: '选择本地工作区', exact: true }).click();
+    await page.locator('.breadcrumb-workspace').getByText('git workspace', { exact: true }).waitFor();
+    await ready.waitFor({ timeout: 30_000 });
+  }
   if (imageTest) {
     await page.getByRole('button', { name: 'Agent 控件', exact: true }).click();
     await page.getByRole('button', { name: '运行设置', exact: true }).click();
@@ -58,6 +77,15 @@ try {
   assert.equal(await alert.count(), 0);
   const title = `Span CI Search ${process.pid}`;
   const composer = page.getByRole('textbox', { name: '消息' });
+  if (diffTest) {
+    await composer.fill('/diff');
+    await composer.press('Enter');
+    const diff = page.getByRole('region', { name: '工作区 Git 改动' });
+    await diff.getByText('+Current working tree', { exact: true }).waitFor();
+    await diff.getByText('Untracked notes.md', { exact: true }).waitFor();
+    await diff.getByRole('button', { name: '关闭面板' }).press('Escape');
+    console.log('Verified /diff against the real Codex App Server and a local Git worktree.');
+  }
   await composer.fill(`/rename ${title}`);
   await composer.press('Enter');
   await page.locator('.breadcrumb strong').filter({ hasText: title }).waitFor();

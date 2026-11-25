@@ -3,14 +3,17 @@ import { ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizo
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
 import { mergeAgentMember } from './delegation.js';
+import { PathText } from './file-reference-name.jsx';
+import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
+import { TextReader } from './text-reader.jsx';
 import { delegatedMembers } from './timeline.js';
 
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', limited: '达到用量上限', unknown: '状态未知',
 };
 const number = new Intl.NumberFormat('zh-CN');
-const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息' };
+const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息', diff: '工作区 Git 改动' };
 const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
 
 export function commonAgentCommands(api, models, options) {
@@ -32,6 +35,7 @@ export function commonAgentCommands(api, models, options) {
     ...(api.permissions?.length ? [['/permissions', '选择会话权限']] : []),
     ...(api.turns.compact ? [['/compact', '压缩上下文']] : []),
     ...(api.turns.review ? [['/review', '审查代码变更']] : []),
+    ...(api.repository ? [['/diff', '查看工作区 Git 改动'], ['/diff turn', '查看最近一轮补丁']] : []),
     ...(api.sessions.fork ? [['/fork', '复制当前会话']] : []),
     ...(api.sessions.rename ? [['/rename', '重命名当前会话']] : []),
     ...(api.sessions.archive ? [['/archive', '归档或恢复当前会话']] : []),
@@ -354,18 +358,39 @@ function AgentsPanel({ work, openSession, report }) {
   </div>;
 }
 
+function DiffPanel({ panel }) {
+  const files = useRef(null);
+  if (panel.change) return <PatchView files={panel.change.files ?? []} text={panel.change.text} />;
+  const result = panel.result;
+  const untracked = result?.untracked.map(path => /[\r\n]/.test(path) ? JSON.stringify(path) : path).join('\n');
+  return <div className="workspace-diff">
+    {!result?.patch && <PathText className="card-path" path={panel.directory} />}
+    {panel.loading && <p role="status">正在读取 Git 改动…</p>}
+    {panel.error && <p className="diff-error" role="status">{panel.error}</p>}
+    {result?.mayBeTruncated && <p role="status">部分输出可能超过 256 KiB 显示上限。</p>}
+    {result?.patch && <PatchView files={[]} text={result.patch} label="工作区差异" directory={panel.directory} />}
+    {untracked && <section aria-label="未跟踪文件">
+      <h3>未跟踪文件</h3>
+      <TextReader kind="output" label="未跟踪文件路径" pagesLabel="路径分页" text={untracked} scroll={files} />
+    </section>}
+    {result && !result.patch && !untracked && !result.mayBeTruncated && <p>工作区没有 Git 改动。</p>}
+  </div>;
+}
+
 export function AgentPanel({ panel, work, reasoning, setPanel, report, openSession }) {
   const close = useRef(null);
   const content = useRef(null);
+  const { id: panelId, focus, editGoal } = panel ?? {};
   useLayoutEffect(() => {
-    if (panel?.focus && !panel.editGoal) close.current?.focus({ preventScroll: true });
-  }, [panel]);
+    if (focus && !editGoal) close.current?.focus({ preventScroll: true });
+  }, [panelId, focus, editGoal]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
   const reasoningPanel = panel.kind === 'reasoning';
   const usagePanel = panel.kind === 'usage';
   const agentsPanel = panel.kind === 'agents';
-  const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : agentsPanel ? '代理与团队明细' : undefined;
+  const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : agentsPanel ? '代理与团队明细'
+    : panel.kind === 'diff' ? '差异明细' : undefined;
   const id = panel.kind === 'goal' || reasoningPanel ? `${panel.kind}-panel` : undefined;
   const goal = panel.kind === 'goal' ? work.goal : undefined;
   const usage = goal?.tokens == null ? '' : [goal.tokens, goal.budget].filter(value => value != null)
@@ -389,6 +414,7 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
       {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} />}
       {usagePanel && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing} />}
       {agentsPanel && <AgentsPanel work={work} openSession={openSession} report={report} />}
+      {panel.kind === 'diff' && <DiffPanel key={panel.id} panel={panel} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
       {panel.kind === 'extensions' && (panel.items?.length
         ? <ul className="extensions">{panel.items.map(item => <li key={item.id}>
