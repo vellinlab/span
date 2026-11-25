@@ -1042,7 +1042,6 @@ p { margin-block: 0 12px; }
 }
 .agent-panel[data-kind="subagent"] .agent-panel-content {
   display: flex;
-  position: relative;
   flex-direction: column;
   flex: 1;
   padding: 0 6px;
@@ -1061,20 +1060,20 @@ p { margin-block: 0 12px; }
   max-height: clamp(72px, calc(var(--subagent-panel-height) - 106px), 178px);
 }
 .subagent-latest {
-  position: absolute;
-  inset-inline-end: 17px;
-  bottom: 9px;
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 5px;
+  min-height: 26px;
+  margin-inline: 4px;
   padding: 3px 7px;
   color: var(--accent);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
   font-size: 12px;
+  white-space: nowrap;
 }
-.subagent-latest:hover:not(:disabled) { background: var(--selected); }
+@container (max-width: 380px) {
+  .subagent-latest span { display: none; }
+}
 .agent-panel[data-kind="subagent"] .reading-column { width: calc(100% - 12px); margin-block-start: 0; }
 .agent-panel[data-kind="subagent"] .user-message {
   max-width: 100%;

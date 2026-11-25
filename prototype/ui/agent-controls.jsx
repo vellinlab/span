@@ -445,11 +445,10 @@ function AgentsPanel({ work, openSession, openTrace, report }) {
   </div>;
 }
 
-function SubagentTranscript({ panel, delegation, openSession, canOpenSession, openTrace, openArtifact, openImage }) {
+function SubagentTranscript({ panel, delegation, scroll, showLatest, onScrollPosition,
+  openSession, canOpenSession, openTrace, openArtifact, openImage }) {
   const [view, setView] = useState();
   const [error, setError] = useState('');
-  const [readingHistory, setReadingHistory] = useState(false);
-  const scroll = useRef(null);
   const jumpToLatest = useRef(true);
   const { member, session } = panel;
   useEffect(() => {
@@ -465,9 +464,8 @@ function SubagentTranscript({ panel, delegation, openSession, canOpenSession, op
       scroll={scroll} jumpToLatest={jumpToLatest}
       label="子代理会话记录" testId="subagent-transcript" activeTurnId={view.run?.status === 'running' ? view.run.id : undefined}
       cursor={view.cursor} loadOlder={view.loadOlder} loading={view.loading}
-      showLatest={readingHistory} onScrollPosition={setReadingHistory} openTrace={openTrace}
+      showLatest={showLatest} onScrollPosition={onScrollPosition} openTrace={openTrace}
       openSession={openSession} canOpenSession={canOpenSession} openArtifact={openArtifact} openImage={openImage} />
-    {readingHistory && <LatestMessageButton className="subagent-latest" label="滚到子代理最新消息" scroll={scroll} />}
   </>;
 }
 
@@ -494,7 +492,10 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
   const close = useRef(null);
   const content = useRef(null);
   const extensionSearch = useRef(null);
+  const memberScroll = useRef(null);
+  const [readingMember, setReadingMember] = useState();
   const { id: panelId, focus, editGoal, rosterPosition } = panel ?? {};
+  const onMemberScroll = useCallback(reading => setReadingMember(reading ? panelId : undefined), [panelId]);
   useLayoutEffect(() => {
     if (!focus || editGoal) return;
     let trigger;
@@ -512,6 +513,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
   const reasoningPanel = panel.kind === 'reasoning';
   const usagePanel = panel.kind === 'usage';
   const agentsPanel = panel.kind === 'agents';
+  const readingMemberHistory = panel.kind === 'subagent' && readingMember === panelId;
   const memberSession = panel.kind === 'subagent' && work.api?.delegation?.resumeMemberSession && panel.member.session;
   const canResumeMember = Boolean(memberSession && !work.loading && work.run?.status !== 'running' && work.connection === 'ready');
   const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : agentsPanel ? '代理与团队明细'
@@ -541,6 +543,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       </button>}
       {memberSession && <button type="button" className="panel-link" disabled={!canResumeMember}
         onClick={() => openSession(memberSession)}>打开会话</button>}
+      {readingMemberHistory && <LatestMessageButton className="subagent-latest" label="滚到子代理最新消息" scroll={memberScroll} />}
       {!panel.returnTo && <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => onClose()}>
         <X size={15} />
       </button>}
@@ -553,6 +556,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       {usagePanel && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing} />}
       {agentsPanel && <AgentsPanel work={work} openSession={openSession} openTrace={openTrace} report={report} />}
       {panel.kind === 'subagent' && <SubagentTranscript key={panel.id} panel={panel} delegation={work.api?.delegation}
+        scroll={memberScroll} showLatest={readingMemberHistory} onScrollPosition={onMemberScroll}
         openSession={openSession} canOpenSession={canResumeMember} openTrace={openTrace}
         openArtifact={openArtifact} openImage={openImage} />}
       {panel.kind === 'diff' && <DiffPanel key={panel.id} panel={panel} />}

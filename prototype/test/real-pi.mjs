@@ -555,6 +555,11 @@ export default function (pi) {
       `Prepending moved the first previously loaded task from ${atStart}px to ${anchored}px.`);
     const memberLatest = resumed.page.getByRole('button', { name: '滚到子代理最新消息', exact: true });
     await memberLatest.waitFor();
+    assert.ok(await memberLatest.evaluate(button => {
+      const panel = button.closest('[data-kind="subagent"]');
+      return panel?.querySelector(':scope > header').contains(button) &&
+        button.getBoundingClientRect().bottom <= panel.querySelector('.timeline').getBoundingClientRect().top;
+    }), 'The return control should sit above the member transcript');
     if (screenshot) await resumed.page.screenshot({ path: screenshot.replace(/\.png$/, '-teams-history-compact.png') });
     await memberLatest.press('Enter');
     await memberLatest.waitFor({ state: 'detached' });
