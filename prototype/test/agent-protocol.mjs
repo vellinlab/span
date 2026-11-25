@@ -850,6 +850,24 @@ test('timeline updates can branch from the same rows without sharing new positio
   assert.deepEqual(continued.map(row => row.text), ['Start', 'B', 'C', '?']);
 });
 
+test('late fragments leave the completed transcript and its layout unchanged', () => {
+  const message = { kind: 'message', id: 'message', turnId: 't', text: 'Answer' };
+  const reasoning = { kind: 'reasoning', id: 'summary', turnId: 't', sections: ['Summary'] };
+  const rows = applyTimeline([], [message, reasoning].map(item => ({ kind: 'item', final: true, item })));
+  const layout = timelineLayout(rows);
+  const late = [
+    { kind: 'delta', delta: { ...message, text: 'late message' } },
+    { kind: 'delta', delta: { ...reasoning, section: 0, text: 'late summary' } },
+  ];
+  assert.equal(applyTimeline(rows, late), rows);
+  assert.equal(applyTimeline(rows, []), rows);
+  const updated = applyTimeline(rows, [...late, { kind: 'delta', delta: { ...message, id: 'next', turnId: 'other' } }]);
+  assert.equal(updated.length, 3);
+  assert.equal(updated[0], rows[0]);
+  assert.equal(updated[1], rows[1]);
+  assert.equal(timelineLayout(rows), layout);
+});
+
 test('Claude ACP separates the native Goal snapshot from the lifetime of its turns', async t => {
   const generation = 47;
   const events = [];

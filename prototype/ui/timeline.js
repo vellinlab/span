@@ -384,7 +384,8 @@ function addDelta(state, delta) {
 }
 
 export function applyTimeline(previous, events) {
-  const rows = [...previous];
+  if (!events.length) return previous;
+  let rows = previous;
   let index = positionsByRows.get(previous);
   let ownsIndex = !index;
   if (!index) {
@@ -421,7 +422,7 @@ export function applyTimeline(previous, events) {
   const groups = groupsByRows.get(previous);
   let groupingChangedAt = Infinity;
   const state = {
-    rows,
+    get rows() { return rows; },
     positions,
     write(position, row) {
       const earlier = rows[position];
@@ -439,6 +440,9 @@ export function applyTimeline(previous, events) {
           layout = undefined;
         }
       }
+      // A batch of late fragments can be discarded without publishing a new
+      // transcript or copying the loaded history.
+      if (rows === previous) rows = previous.slice();
       rows[position] = row;
     },
   };
@@ -447,6 +451,7 @@ export function applyTimeline(previous, events) {
     else if (event.kind === 'delta') addDelta(state, event.delta);
   }
   positionsByRows.set(rows, index);
+  if (rows === previous) return previous;
   if (reasoningView) reasoningViewByRows.set(rows, reasoningView);
   // Stable callbacks let the virtualizer retain measured offsets during text-only updates.
   if (layout) layoutByRows.set(rows, layout);
