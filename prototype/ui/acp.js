@@ -1,6 +1,7 @@
 import { connectRpc, jsonRpc } from './agent-rpc.js';
 import { acpOperation, acpReplay, acpTurn, acpTurnId } from './acp-items.js';
 import { createAcpSubagents } from './acp-subagents.js';
+import { createAcpTaskTraces } from './acp-task-traces.js';
 import { attachmentArtifacts, attachmentName, fileReferenceText } from './file-references.js';
 import { createKiloGoals } from './kilo-goals.js';
 
@@ -27,6 +28,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   const modes = [];
   const local = location.kind === 'local';
   const claude = backend === 'claude';
+  const nativeTasks = backend === 'opencode' || backend === 'kilo';
   const sessionSettings = claude ? { _meta: { claudeCode: { options: { promptSuggestions: false } } } } : {};
   let workspace = local ? cwd : undefined;
   let capabilities;
@@ -41,13 +43,25 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }), error => {
     goals?.close();
-    active?.subagents?.close();
-    loading?.subagents?.close();
+    closeTraces(active);
+    closeTraces(loading);
     active = loading = undefined;
     dialogs.clear();
     onEvent({ kind: 'disconnected', error });
   }, wire);
   const request = rpc.request;
+
+  function attachTraces(state) {
+    if (nativeSubagents && !state.subagents) state.subagents = createAcpSubagents(state, { ref, notify });
+    if (nativeTasks && !state.tasks) {
+      state.tasks = createAcpTaskTraces(state, { ref, readHistory: (sessionId, parentId, cwd, cursor) =>
+        window.span.request('agent.acpChildHistory', { generation, sessionId, parentId, cwd, cursor }) });
+    }
+  }
+
+  function closeTraces(state) {
+    (state?.subagents ?? state?.tasks)?.close();
+  }
 
   function sessionInfo(entry) {
     return { ref: ref(entry.sessionId), cwd: entry.cwd, title: entry.title,
@@ -114,11 +128,11 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
 
   function activate(state, entry, config) {
     loading = undefined;
-    if (active !== state) active?.subagents?.close();
+    if (active !== state) closeTraces(active);
     active = state;
     state.id = entry.sessionId;
     state.entry = entry;
-    if (nativeSubagents && !state.subagents) state.subagents = createAcpSubagents(state, { ref, notify });
+    attachTraces(state);
     goals?.attach(state);
     sessions.set(state.id, entry);
     commands.splice(0, commands.length, ...(state.commands ?? []));
@@ -295,7 +309,8 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
 
   function startTurn(state, goal = false, announce = goal) {
     const run = { id: acpTurnId(state.nextTurn++), status: 'running' };
-    const turn = { run, goal, projection: acpTurn(run.id, event => notify(state.id, event), projectionOptions) };
+    const turn = { run, goal, projection: acpTurn(run.id, event => notify(state.id, event),
+      { ...projectionOptions, projectTask: state.tasks?.project }) };
     state.turn = turn;
     if (announce) notify(state.id, { kind: 'run', run });
     return turn;
@@ -408,8 +423,9 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   }
 
   async function replay(entry, limit) {
-    const state = { id: entry.sessionId, usage: {}, replay: acpReplay(projectionOptions) };
-    if (nativeSubagents) state.subagents = createAcpSubagents(state, { ref, notify });
+    const state = { id: entry.sessionId, entry, usage: {} };
+    attachTraces(state);
+    state.replay = acpReplay({ ...projectionOptions, projectTask: state.tasks?.project });
     loading = state;
     try {
       const response = await request('session/load', sessionParams(entry));
@@ -420,7 +436,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       const opened = activate(state, entry, response.configOptions);
       return { ...opened, history: historyPage(state, limit) };
     } finally {
-      if (state !== active) state.subagents?.close();
+      if (state !== active) closeTraces(state);
       if (loading === state) loading = undefined;
     }
   }
@@ -446,10 +462,16 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       capabilities = initialized.agentCapabilities;
       if (claude) adapter.goal = createClaudeGoal(air(initialized)?.goal);
       nativeSubagents = claude && Boolean(capabilities?.sessionCapabilities?.subagents);
-      if (nativeSubagents) adapter.delegation = {
+      if (nativeSubagents || nativeTasks) adapter.delegation = {
         observe: true,
-        async members(session) { return requireActive(session).subagents.members(); },
-        watchTranscript(session, memberId, listener) { return requireActive(session).subagents.watch(memberId, listener); },
+        async members(session) {
+          const state = requireActive(session);
+          return (state.subagents ?? state.tasks).members();
+        },
+        watchTranscript(session, memberId, listener) {
+          const state = requireActive(session);
+          return (state.subagents ?? state.tasks).watch(memberId, listener);
+        },
       };
       if (backend === 'kilo' && await window.span.request('agent.kiloGoal', { generation, probe: true, cwd: workspace }).catch(() => false)) {
         goals = createKiloGoals({ generation, requireActive, synchronize: synchronizeGoal,
@@ -468,8 +490,8 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     },
     close() {
       goals?.close();
-      active?.subagents?.close();
-      loading?.subagents?.close();
+      closeTraces(active);
+      closeTraces(loading);
       active = loading = undefined;
       dialogs.clear();
       sessions.clear();
@@ -500,7 +522,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       async release(session) {
         if (session.id !== active?.id) return;
         goals?.close();
-        active.subagents?.close();
+        closeTraces(active);
         for (const [key, dialog] of dialogs) if (dialog.state === active) dialogs.delete(key);
         active = undefined;
         commands.length = 0;

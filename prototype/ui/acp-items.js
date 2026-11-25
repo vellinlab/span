@@ -20,7 +20,7 @@ export function acpOperation(tool = {}, cwd) {
   return { kind: 'permissions', cwd };
 }
 
-export function acpTurn(id, notify, { childSession, consoleFences } = {}) {
+export function acpTurn(id, notify, { childSession, consoleFences, projectTask } = {}) {
   const reply = new Map();
   const tools = new Map();
   const members = new Map();
@@ -37,6 +37,12 @@ export function acpTurn(id, notify, { childSession, consoleFences } = {}) {
     const text = content || current.rawOutput?.output || current.rawOutput?.error;
     const toolStatus = status[current.status] ?? 'unknown';
     const final = toolStatus === 'completed' || toolStatus === 'failed';
+    const task = projectTask?.(current, toolStatus, text);
+    if (task) {
+      item({ ...task, id: key }, final);
+      if (final) tools.delete(key);
+      return;
+    }
     const command = current.rawInput?.command;
     const path = current.locations?.[0]?.path;
     const child = childSession?.(current);

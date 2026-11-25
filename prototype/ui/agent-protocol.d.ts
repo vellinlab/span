@@ -9,6 +9,9 @@ export type Session = {
 };
 export type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 export type Run = { id: string; status: RunStatus; error?: string };
+export type AgentTranscript = {
+  rows: TimelineItem[]; run?: Run; cursor?: string | null; loadOlder?: () => void; loading?: boolean; error?: string;
+};
 export type Choice = { id: string; label: string; description?: string };
 export type Input =
   | { kind: 'text'; text: string }
@@ -192,7 +195,7 @@ export interface AgentAdapter {
     teamActions?: TeamAction['kind'][];
     /** Complete lists for the session. Events received during a request take precedence. */
     members?(ref: SessionRef): Promise<AgentMember[]>;
-    watchTranscript?(ref: SessionRef, memberId: string, listener: (view: { rows: TimelineItem[]; run: Run }) => void): () => void;
+    watchTranscript?(ref: SessionRef, memberId: string, listener: (view: AgentTranscript) => void): () => void;
     teams?(ref: SessionRef): Promise<Team[]>;
     act?(ref: SessionRef, action: DelegationAction): Promise<AgentMember | void>;
     manageTeam?(ref: SessionRef, action: TeamAction): Promise<Team | void>;

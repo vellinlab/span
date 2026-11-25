@@ -47,8 +47,12 @@ else
 fi
 printf "span-acp-cwd %s\n" "$PWD"
 if [ -n "$2" ]; then
-    IFS= read -r KILO_SERVER_PASSWORD || exit 1
-    export KILO_SERVER_PASSWORD KILO_SERVER_USERNAME=span
+    IFS= read -r password || exit 1
+    if [ "$name" = opencode ]; then
+        export OPENCODE_SERVER_PASSWORD="$password" OPENCODE_SERVER_USERNAME=span
+    else
+        export KILO_SERVER_PASSWORD="$password" KILO_SERVER_USERNAME=span
+    fi
     exec "$cli" acp --hostname 127.0.0.1 --port "$2"
 fi
 if [ -n "$3" ]; then
@@ -57,13 +61,13 @@ fi
 exec "$cli"
 "#;
 
-struct KiloConnection {
+struct AcpHttpConnection {
     local_port: u16,
     remote_port: u16,
     password: String,
 }
 
-impl KiloConnection {
+impl AcpHttpConnection {
     fn from_request(params: &Value) -> Option<Self> {
         let local_port = u16::try_from(params["localPort"].as_u64()?).ok()?;
         let remote_port = u16::try_from(params["remotePort"].as_u64()?).ok()?;
@@ -168,8 +172,8 @@ impl Agent {
         } else {
             Location::Local(process_directory(params)?)
         };
-        let kilo = (backend == Backend::Acp(KILO))
-            .then(|| KiloConnection::from_request(&params["kilo"]))
+        let acp_http = matches!(backend, Backend::Acp(OPENCODE | KILO))
+            .then(|| AcpHttpConnection::from_request(&params["acpHttp"]))
             .flatten();
         let (outgoing, requests) = mpsc::channel(32);
         let (stop, stopped) = oneshot::channel();
@@ -183,7 +187,7 @@ impl Agent {
                 runtime.block_on(async {
                     tokio::select! {
                         _ = stopped => {}
-                        result = serve(backend, location, kilo, requests, &output, generation) => {
+                        result = serve(backend, location, acp_http, requests, &output, generation) => {
                             let reason = result.err().map(|error| error.to_string());
                             let _ = event(&output, "agent-closed", generation, json!(reason));
                         }
@@ -250,15 +254,15 @@ fn ssh(target: &str) -> Command {
     ssh_with_forward(target, None)
 }
 
-fn ssh_with_forward(target: &str, kilo: Option<&KiloConnection>) -> Command {
+fn ssh_with_forward(target: &str, connection: Option<&AcpHttpConnection>) -> Command {
     let mut command = Command::new("ssh");
     command.args(["-T", "-x", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]);
-    if let Some(kilo) = kilo {
+    if let Some(connection) = connection {
         command
             .args(["-o", "ExitOnForwardFailure=yes", "-L"])
             .arg(format!(
                 "127.0.0.1:{}:127.0.0.1:{}",
-                kilo.local_port, kilo.remote_port
+                connection.local_port, connection.remote_port
             ));
     }
     command.args(["--", target]);
@@ -484,7 +488,7 @@ async fn remote_route(process: &mut Process) -> Result<bool> {
 async fn serve(
     backend: Backend,
     location: Location,
-    kilo: Option<KiloConnection>,
+    acp_http: Option<AcpHttpConnection>,
     requests: mpsc::Receiver<Value>,
     output: &Output,
     generation: u64,
@@ -512,16 +516,16 @@ async fn serve(
             stdio_process(process, requests, output, generation, route, Some(catalog)).await?;
         }
         (Backend::Acp(acp), Location::Ssh(target)) => {
-            let port = kilo
+            let port = acp_http
                 .as_ref()
                 .map(|connection| connection.remote_port.to_string())
                 .unwrap_or_default();
-            let mut process = spawn(ssh_with_forward(&target, kilo.as_ref()).arg(format!(
+            let mut process = spawn(ssh_with_forward(&target, acp_http.as_ref()).arg(format!(
                 "sh -c '{REMOTE_ACP}' span-acp {} '{port}' '{}'",
                 acp.name,
                 acp.subcommand.unwrap_or_default()
             )))?;
-            if let Some(connection) = &kilo {
+            if let Some(connection) = &acp_http {
                 process
                     .input
                     .write_all(connection.password.as_bytes())
@@ -568,12 +572,17 @@ async fn serve(
             let launch = |program| {
                 let mut command = Command::new(program);
                 command.args(acp.subcommand).current_dir(&cwd);
-                if let Some(connection) = &kilo {
+                if let Some(connection) = &acp_http {
+                    let (user, password) = if acp == OPENCODE {
+                        ("OPENCODE_SERVER_USERNAME", "OPENCODE_SERVER_PASSWORD")
+                    } else {
+                        ("KILO_SERVER_USERNAME", "KILO_SERVER_PASSWORD")
+                    };
                     command
                         .args(["--hostname", "127.0.0.1", "--port"])
                         .arg(connection.local_port.to_string())
-                        .env("KILO_SERVER_USERNAME", "span")
-                        .env("KILO_SERVER_PASSWORD", &connection.password);
+                        .env(user, "span")
+                        .env(password, &connection.password);
                 }
                 spawn(&mut command)
             };

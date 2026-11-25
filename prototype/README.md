@@ -37,6 +37,8 @@ Kilo 使用 PATH 中的 CLI，本机可用 `SPAN_KILO_PATH` 指定可执行文�
 
 Kilo Goal 的状态与结果保存在 Kilo 的会话中。Span 从同一 ACP 进程的本机认证接口读写，SSH 会话沿用该连接的本地转发。重新打开会话时，目标卡片从后端恢复。 [Kilo Session Goals](https://kilo.ai/docs/code-with-ai/agents/goals)
 
+OpenCode 和 Kilo 的原生委派显示为子代理卡片。后端提供子会话 ID 后，可查看已保存的任务、推理、工具和答复。打开详情时才通过同一 ACP 进程的认证接口读取记录，按需向上分页；SSH 沿用同一个本地转发。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/) · [Kilo 会话历史](https://kilo.ai/docs/code-with-ai/agents/session-history)
+
 工作台启动时恢复上次成功连接的 Agent、主机和本地工作区。每个连接保留自己最后打开的会话，点击「新会话」后会记住空白状态。无法连接时，可以重试或从连接设置选择其他后端、主机和本地目录。首次启动默认连接本机 Codex。
 
 推理卡片读取后端提供的摘要。命令、补丁、任务计划、子代理、工具调用和用户交互使用专用条目。实时增量按接收顺序刷新，历史向上分页，折叠的详情在展开时渲染。

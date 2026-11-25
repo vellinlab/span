@@ -394,11 +394,17 @@ function SubagentTranscript({ panel, delegation, openTrace, openArtifact, openIm
     try { return delegation.watchTranscript(session, member.id, setView); }
     catch (error) { setError(error.message); }
   }, [delegation, member.id, session]);
-  if (error || !view?.rows.length) return <p className="subagent-empty" role="status">{error || '子代理还没有可显示的记录。'}</p>;
-  return <Transcript rows={view.rows} viewKey={sessionKey(member.session)} scroll={scroll} jumpToLatest={jumpToLatest}
-    label="子代理会话记录" testId="subagent-transcript" activeTurnId={view.run.status === 'running' ? view.run.id : undefined}
-    showLatest={readingHistory} onScrollPosition={setReadingHistory} openTrace={openTrace}
-    openArtifact={openArtifact} openImage={openImage} />;
+  if (error || !view?.rows.length) return <p className="subagent-empty" role="status">
+    {error || view?.error || (!view || view.loading ? '正在读取子代理记录…' : '子代理还没有可显示的记录。')}
+  </p>;
+  return <>
+    {view.error && <p className="subagent-empty" role="status">{view.error}</p>}
+    <Transcript rows={view.rows} viewKey={sessionKey(member.session)} scroll={scroll} jumpToLatest={jumpToLatest}
+      label="子代理会话记录" testId="subagent-transcript" activeTurnId={view.run?.status === 'running' ? view.run.id : undefined}
+      cursor={view.cursor} loadOlder={view.loadOlder} loading={view.loading}
+      showLatest={readingHistory} onScrollPosition={setReadingHistory} openTrace={openTrace}
+      openArtifact={openArtifact} openImage={openImage} />
+  </>;
 }
 
 function DiffPanel({ panel }) {

@@ -3,13 +3,14 @@ const { spawn } = require('node:child_process');
 const { mkdir, mkdtemp, realpath, rm, writeFile } = require('node:fs/promises');
 const { createInterface } = require('node:readline');
 const path = require('node:path');
-const { prepareKilo, kiloGoal } = require('./kilo-goals.cjs');
+const { acpChildHistory, prepareAcpHttp } = require('./acp-http.cjs');
+const { kiloGoal } = require('./kilo-goals.cjs');
 
 const root = path.resolve(__dirname, '..');
 const binary = process.platform === 'win32' ? 'span-workbench-core.exe' : 'span-workbench-core';
 const demo = process.argv.includes('--demo');
 const allowed = new Set([
-  'agent.start', 'agent.send', 'agent.close', 'agent.kiloGoal',
+  'agent.start', 'agent.send', 'agent.close', 'agent.kiloGoal', 'agent.acpChildHistory',
   'terminal.start', 'terminal.write', 'terminal.resize', 'terminal.ack', 'terminal.close',
   'files.list', 'files.preview',
 ]);
@@ -22,13 +23,13 @@ const selectedImages = new Set();
 const stagedScreenshots = new Set();
 const screenshotSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 let screenshotNumber = 0;
-let kiloConnection;
+let acpHttpConnection;
 let agentStart;
 
-function closeKilo(generation) {
-  if (kiloConnection && (generation === undefined || kiloConnection.generation === generation)) {
-    kiloConnection.controller.abort();
-    kiloConnection = undefined;
+function closeAcpHttp(generation) {
+  if (acpHttpConnection && (generation === undefined || acpHttpConnection.generation === generation)) {
+    acpHttpConnection.controller.abort();
+    acpHttpConnection = undefined;
   }
 }
 
@@ -96,7 +97,7 @@ function finish(id, error, payload) {
 }
 
 function publish(packet) {
-  if (packet.event === 'agent-closed') closeKilo(packet.generation);
+  if (packet.event === 'agent-closed') closeAcpHttp(packet.generation);
   if (terminalEvents.has(packet.event) && packet.generation !== terminalGeneration) return;
   if (window && !window.isDestroyed()) window.webContents.send('span:event', packet);
 }
@@ -121,7 +122,7 @@ function spawnCore() {
   core.on('error', error => publish({ event: 'core-error', data: error.message }));
   core.on('close', () => {
     agentStart = undefined;
-    closeKilo();
+    closeAcpHttp();
     for (const id of pending.keys()) finish(id, 'Rust 服务已退出。');
     if (!closing) publish({ event: 'core-error', data: 'Rust 服务已退出。' });
     if (closing) app.quit();
@@ -145,26 +146,33 @@ ipcMain.handle('span:request', async (event, method, params) => {
   if (method === 'agent.start') {
     const start = { generation: params?.generation };
     agentStart = start;
-    closeKilo();
-    const kilo = !demo && params?.backend === 'kilo' ? await prepareKilo(params.ssh) : undefined;
+    closeAcpHttp();
+    const backend = params?.backend;
+    const acpHttp = !demo && (backend === 'kilo' || backend === 'opencode') ? await prepareAcpHttp(params.ssh) : undefined;
     if (start !== agentStart) throw new Error('Agent 连接已切换。');
-    if (kilo) {
+    if (acpHttp) {
       const controller = new AbortController();
-      kiloConnection = { ...kilo, generation: params.generation, controller, signal: controller.signal };
+      acpHttpConnection = { ...acpHttp, backend, generation: params.generation, controller, signal: controller.signal };
     }
-    try { return await request(method, { ...params, demo, kilo }); }
+    try { return await request(method, { ...params, demo, acpHttp }); }
     catch (error) {
-      closeKilo(params?.generation);
+      closeAcpHttp(params?.generation);
       throw error;
     }
   }
   if (method === 'agent.close' && Number.isSafeInteger(params?.generation)) {
     if (agentStart?.generation === params.generation) agentStart = undefined;
-    closeKilo(params.generation);
+    closeAcpHttp(params.generation);
   }
   if (method === 'agent.kiloGoal') {
-    if (!kiloConnection || kiloConnection.generation !== params?.generation) throw new Error('Kilo 连接已切换。');
-    return kiloGoal(kiloConnection, params);
+    if (acpHttpConnection?.backend !== 'kilo' || acpHttpConnection.generation !== params?.generation) {
+      throw new Error('Kilo 连接已切换。');
+    }
+    return kiloGoal(acpHttpConnection, params);
+  }
+  if (method === 'agent.acpChildHistory') {
+    if (!acpHttpConnection || acpHttpConnection.generation !== params?.generation) throw new Error('Agent 连接已切换。');
+    return acpChildHistory(acpHttpConnection, params);
   }
   if (method === 'terminal.start') {
     const generation = params?.generation;

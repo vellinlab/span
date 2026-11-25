@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { acpReplay } from '../ui/acp-items.js';
+import { createAcpTaskTraces } from '../ui/acp-task-traces.js';
+import acpHttp from '../desktop/acp-http.cjs';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
@@ -72,6 +74,74 @@ test('Claude commands remove only the bridge’s console wrapper from saved outp
   assert.equal(read({ consoleFences: true }, { content }), raw);
   assert.equal(read({ consoleFences: true }, { rawOutput: { output: fenced } }), fenced);
   assert.equal(read(undefined, { content }), fenced);
+});
+
+test('native Task records use structured child IDs, prepend older pages and ignore late results', async () => {
+  const root = { id: 'ses_root', entry: { cwd: '/workspace' } };
+  const ref = id => ({ id, backend: 'opencode', location: remote });
+  const pages = [];
+  const traces = createAcpTaskTraces(root, { ref, readHistory: (...args) => new Promise(resolve => pages.push({ args, resolve })) });
+  const tool = { kind: 'think', toolCallId: 'task-call', rawInput: { description: 'Verify the marker', subagent_type: 'explore', prompt: 'Verify' } };
+  assert.equal(traces.project(tool, 'running').members[0].attachedTranscript, undefined);
+  const finished = parentSessionId => ({ ...tool, rawOutput: { metadata: { sessionId: 'ses_child', parentSessionId } } });
+  assert.equal(traces.project(finished('ses_unrelated'), 'completed', 'ses_child').members[0].attachedTranscript, undefined);
+  const member = traces.project(finished(root.id), 'completed').members[0];
+  assert.deepEqual(member.parent, ref(root.id));
+  assert.deepEqual(member.session, ref('ses_child'));
+  assert.equal(member.attachedTranscript, true);
+  assert.equal(member.status, 'completed');
+  const views = [];
+  traces.watch(member.id, view => views.push(view));
+  const message = (role, id, parts, parentID) => ({ info: { role, id, parentID }, parts });
+  const part = (type, id, text, synthetic) => ({ type, id, text, synthetic });
+  assert.deepEqual(pages[0].args, ['ses_child', 'ses_root', '/workspace', undefined]);
+  pages[0].resolve({ cursor: 'older', items: [message('assistant', 'response', [
+    part('reasoning', 'summary', 'Check provenance'), part('text', 'result', 'Verified')], 'prompt')] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(views.at(-1).rows.map(row => row.kind), ['reasoning', 'message']);
+  const saved = views.at(-1).rows.at(-1);
+  views.at(-1).loadOlder();
+  views.at(-1).loadOlder();
+  assert.equal(pages.length, 2);
+  assert.deepEqual(pages[1].args, ['ses_child', 'ses_root', '/workspace', 'older']);
+  pages[1].resolve({ cursor: 'more', items: [message('user', 'prompt', [
+    part('text', 'private', 'Synthetic context', true), part('text', 'request', 'Check the marker')])] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(views.at(-1).rows[0].text, 'Check the marker');
+  assert.equal(views.at(-1).rows[0].turnId, saved.turnId);
+  assert.equal(views.at(-1).rows.at(-1), saved);
+  views.at(-1).loadOlder();
+  traces.close();
+  const received = views.length;
+  pages[2].resolve({ cursor: null, items: [] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(views.length, received);
+  assert.throws(() => traces.watch(member.id, () => {}), /没有这个子代理/);
+});
+
+test('the native history reader verifies the parent and passes the opaque page cursor', async t => {
+  const { acpChildHistory } = acpHttp;
+  const urls = [];
+  let parentID = 'ses_foreign';
+  const fetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetch; });
+  globalThis.fetch = async (url, options) => {
+    urls.push(url);
+    assert.equal(options.redirect, 'error');
+    assert.equal(url.hostname, '127.0.0.1');
+    assert.equal(options.headers.Authorization, 'Basic ' + Buffer.from('span:fixture').toString('base64'));
+    if (url.pathname.endsWith('/message')) return Response.json([], { headers: { 'X-Next-Cursor': 'opaque' } });
+    return Response.json({ parentID });
+  };
+  const connection = { localPort: 49153, password: 'fixture', signal: new AbortController().signal };
+  const params = { sessionId: 'ses_child', parentId: 'ses_parent', cwd: '/the workspace', cursor: 'A+/' };
+  await assert.rejects(acpChildHistory(connection, params), /不属于/);
+  assert.equal(urls.length, 1);
+  parentID = params.parentId;
+  assert.deepEqual(await acpChildHistory(connection, params), { items: [], cursor: 'opaque' });
+  assert.equal(urls[2].pathname, '/session/ses_child/message');
+  assert.equal(urls[2].searchParams.get('directory'), params.cwd);
+  assert.equal(urls[2].searchParams.get('before'), params.cursor);
 });
 
 test('command output indexes only new chunks and can jump to a replaced or compacted log', () => {

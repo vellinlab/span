@@ -1028,6 +1028,7 @@ p { margin-block: 0 12px; }
 .agent-panel-back { margin-inline-end: 4px; }
 .agent-panel[data-kind="subagent"] .agent-panel-content {
   display: flex;
+  flex-direction: column;
   flex: 1;
   padding: 0 6px;
   overflow: hidden;

@@ -28,12 +28,20 @@ const goalInstructionAnswer = '目标卡片位于输入框上方。';
 const goalResumedReasoning = '回到目标，继续核对暂停和恢复。';
 const goalReport = '已核对目标卡片和会话状态。';
 const goalAnswer = '原生目标已完成。';
+const delegate = '委派一个原生子代理核对目录标记。';
+const taskTitle = '检查委派验收标记';
+const childPrompt = '查找子代理专用的验收标记。';
+const childReasoning = '只查看指定的目录标记。';
+const childAnswer = '子代理已核对目录标记。';
+const delegateAnswer = '父会话已收到委派结果。';
+const marker = '.span-acp-child-trace-ci';
 let goalRequests = 0;
 let toolResult;
 let gatewayError;
 let releaseReasoning;
 let releaseTool;
 let releaseGoalStep;
+const { promise: childStep, resolve: releaseChild } = Promise.withResolvers();
 const gateway = createServer(async (request, response) => {
   try {
     assert.equal(request.url, '/v1/chat/completions');
@@ -50,6 +58,10 @@ const gateway = createServer(async (request, response) => {
         choices: [{ index: 0, delta, finish_reason }], usage }) + '\n\n');
     };
     emit({ role: 'assistant' });
+    const sendTool = (id, name, input) => {
+      emit({ tool_calls: [{ index: 0, id, type: 'function', function: { name, arguments: JSON.stringify(input) } }] });
+      emit({}, 'tool_calls', { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
+    };
     if (backend === 'kilo' && text.startsWith('Generate a title for this conversation:')) {
       emit({ content: 'Kilo 会话验证' });
       emit({}, 'stop', { prompt_tokens: 15, completion_tokens: 4, total_tokens: 19 });
@@ -76,6 +88,22 @@ const gateway = createServer(async (request, response) => {
           function: { name: 'goal_report', arguments: JSON.stringify({ status: 'complete', reason: goalReport }) } }] });
         emit({}, 'tool_calls', { prompt_tokens: 26, completion_tokens: 9, total_tokens: 35 });
       }
+    } else if (text.includes(childPrompt)) {
+      if (tool) {
+        assert.match(JSON.stringify(tool.content), /No files found/i);
+        emit({ content: childAnswer });
+        emit({}, 'stop', { prompt_tokens: 27, completion_tokens: 8, total_tokens: 35 });
+      } else {
+        emit({ reasoning_content: childReasoning });
+        await childStep;
+        sendTool('span-child-glob', 'glob', { pattern: marker });
+      }
+    } else if (text.includes(delegate)) {
+      if (tool) {
+        assert.match(JSON.stringify(tool.content), new RegExp(childAnswer));
+        emit({ content: delegateAnswer });
+        emit({}, 'stop', { prompt_tokens: 28, completion_tokens: 8, total_tokens: 36 });
+      } else sendTool('span-native-task', 'task', { description: taskTitle, prompt: childPrompt, subagent_type: 'explore' });
     } else if (text.includes(initial) && !tool) {
       emit({ reasoning_content: firstReasoning });
       await new Promise(done => { releaseReasoning = done; });
@@ -313,9 +341,38 @@ try {
     await goalPanel().getByRole('button', { name: '清除', exact: true }).press('Enter');
     await goalStrip().waitFor({ state: 'detached' });
     console.log(`Verified Kilo's native goal start, foreground instruction, pause, persisted state, resume, completion and clear on ${ssh ?? process.platform}`);
+    await send('/new');
   }
+  await page.getByPlaceholder('描述要完成的任务…').waitFor();
+  await narrow();
+  await send(delegate);
+  const conversation = () => page.getByTestId('transcript');
+  const card = () => conversation().locator('[data-card="delegation"]').filter({ hasText: taskTitle });
+  await card().getByText('进行中', { exact: true }).waitFor();
+  releaseChild();
+  await conversation().getByText(delegateAnswer, { exact: true }).waitFor();
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  assert.equal(await conversation().getByText(childAnswer, { exact: true }).count(), 0);
+  async function showTrace() {
+    await card().locator('summary').press('Enter');
+    await card().getByRole('button', { name: `查看 ${taskTitle} 的会话记录`, exact: true }).press('Enter');
+    const trace = page.getByTestId('subagent-transcript');
+    await trace.getByText(childPrompt, { exact: true }).waitFor();
+    await trace.getByText(childReasoning, { exact: true }).waitFor();
+    await trace.getByText(childAnswer, { exact: true }).waitFor();
+    const tool = trace.locator('[data-card="tool"]');
+    await tool.locator('summary').press('Enter');
+    assert.match(await tool.getByLabel('工具输出', { exact: true }).textContent(), /No files found/i);
+  }
+  await showTrace();
+  await app.close();
+  await open(false);
+  await narrow();
+  await conversation().getByText(delegateAnswer, { exact: true }).waitFor();
+  await showTrace();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent.png') });
   assert.equal(gatewayError, undefined);
-  console.log(`Verified ${label} ACP reasoning, permission, usage, persisted history and continuation on ${ssh ?? process.platform}`);
+  console.log(`Verified ${label} ACP reasoning, permission, usage, continuation and native child history on ${ssh ?? process.platform}`);
 } catch (error) {
   if (page) {
     console.error(await page.getByRole('alert').allTextContents().catch(() => []));
@@ -331,6 +388,7 @@ try {
   releaseReasoning?.();
   releaseTool?.();
   releaseGoalStep?.();
+  releaseChild();
   await app?.close().catch(() => {});
   gateway.closeAllConnections();
   gateway.close();
