@@ -284,12 +284,27 @@ try {
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await app.close();
   await open(false);
+  await narrow();
   await transcript().getByText(delegateAnswer, { exact: true }).waitFor();
   await childCard().locator('summary').click();
   await openChild().click();
   await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
   await childTranscript().locator('[data-card="command"]').filter({ hasText: childCommand }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot });
+  await childPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
+  await send('/agents');
+  const roster = page.getByRole('region', { name: '代理与团队', exact: true });
+  const rosterChild = roster.getByRole('button', { name: /^查看 .+ 的会话记录$/ });
+  await rosterChild.press('Enter');
+  await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
+  const backToRoster = childPanel.getByRole('button', { name: '返回代理与团队' });
+  assert.ok(await backToRoster.evaluate(button => button === button.ownerDocument.activeElement));
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent-roster.png') });
+  await backToRoster.press('Escape');
+  assert.ok(await rosterChild.evaluate(button => button === button.ownerDocument.activeElement));
+  await rosterChild.press('Escape');
+  await roster.waitFor({ state: 'hidden' });
+  assert.ok(await page.getByRole('textbox', { name: '消息' }).evaluate(box => box === box.ownerDocument.activeElement));
   assert.equal(failure, undefined);
   console.log(`Verified Claude Code ACP reasoning, approvals, usage, goals, and restored child transcripts on ${ssh ?? process.platform}`);
 } catch (error) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
 import { mergeAgentMember } from './delegation.js';
@@ -424,10 +424,19 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
   const close = useRef(null);
   const content = useRef(null);
   const extensionSearch = useRef(null);
-  const { id: panelId, focus, editGoal } = panel ?? {};
+  const { id: panelId, focus, editGoal, rosterPosition } = panel ?? {};
   useLayoutEffect(() => {
-    if (focus && !editGoal) (extensionSearch.current ?? close.current)?.focus({ preventScroll: true });
-  }, [panelId, focus, editGoal]);
+    if (!focus || editGoal) return;
+    let trigger;
+    const viewport = content.current;
+    if (rosterPosition && viewport) {
+      trigger = [...viewport.querySelectorAll('button[data-trace-member]')]
+        .find(button => button.dataset.traceMember === rosterPosition.memberId);
+      viewport.scrollTop = trigger ? viewport.scrollTop + trigger.getBoundingClientRect().top -
+        viewport.getBoundingClientRect().top - rosterPosition.offset : rosterPosition.scrollTop;
+    }
+    (trigger ?? extensionSearch.current ?? close.current)?.focus({ preventScroll: true });
+  }, [panelId, focus, editGoal, rosterPosition]);
   if (!panel) return null;
   const title = panel.title ?? titles[panel.kind];
   const reasoningPanel = panel.kind === 'reasoning';
@@ -447,14 +456,20 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       event.stopPropagation();
       onClose();
     }}>
-    <header><strong>{title}</strong>
+    <header>
+      {panel.returnTo && <button ref={close} className="icon-button agent-panel-back" type="button" aria-label="返回代理与团队" onClick={() => onClose()}>
+        <ArrowLeft size={15} />
+      </button>}
+      <strong>{title}</strong>
       {usage && <small className="panel-meta" title={usage}>{usage}</small>}
       {reasoningArchived && <small className="panel-meta">已归档</small>}
       {usagePanel && <button type="button" className="panel-link usage-refresh" aria-disabled={work.usageRefreshing}
         onClick={() => { if (!work.usageRefreshing) work.refreshUsage().catch(report); }}>
         {work.usageRefreshing ? '刷新中…' : '刷新用量'}
       </button>}
-      <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => onClose()}><X size={15} /></button>
+      {!panel.returnTo && <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => onClose()}>
+        <X size={15} />
+      </button>}
     </header>
     {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal} capability={work.api?.goal}
       action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}

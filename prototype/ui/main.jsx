@@ -309,7 +309,14 @@ function App() {
   }, [session?.cwd, config, report, readPreview]);
 
   function closePanel({ restoreFocus = true } = {}) {
-    panelScope.current++;
+    const id = ++panelScope.current;
+    const returnTo = panel?.returnTo;
+    if (restoreFocus && returnTo && connection === 'ready' && sessionKey(panel.session) === refKey) {
+      const { trigger, ...rosterPosition } = returnTo;
+      panelTrigger.current = trigger;
+      setPanel({ kind: 'agents', id, focus: true, rosterPosition });
+      return;
+    }
     const trigger = panelTrigger.current;
     panelTrigger.current = null;
     setPanel(null);
@@ -368,7 +375,11 @@ function App() {
 
   function openMemberTrace(member, trigger) {
     if (!session || loading || connection !== 'ready' || !api?.delegation?.watchTranscript) return;
-    showPanel('subagent', trigger, { member, session: session.ref, title: memberName(member) });
+    const roster = trigger?.closest('.agent-panel[data-kind="agents"] .agent-panel-content');
+    const returnTo = roster && { trigger: panelTrigger.current,
+      memberId: member.id, scrollTop: roster.scrollTop,
+      offset: trigger.getBoundingClientRect().top - roster.getBoundingClientRect().top };
+    showPanel('subagent', trigger, { member, session: session.ref, title: memberName(member), returnTo });
   }
 
   async function forkConversation() {

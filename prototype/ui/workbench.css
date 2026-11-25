@@ -1024,7 +1024,8 @@ p { margin-block: 0 12px; }
 }
 .agent-panel[data-kind="reasoning"] { --panel-height: 320px; }
 .agent-panel[data-kind="subagent"] { height: 310px; }
-.agent-panel[data-kind="subagent"] > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-panel[data-kind="subagent"] > header strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-panel-back { margin-inline-end: 4px; }
 .agent-panel[data-kind="subagent"] .agent-panel-content {
   display: flex;
   flex: 1;

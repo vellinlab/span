@@ -27,7 +27,7 @@ export const AgentMemberList = memo(function AgentMemberList({ members, parentNa
     const metadata = [role, member.model, parent && `父代理 ${parent}`].filter(Boolean).join(' · ');
     const label = <span className="agent-member-label">{name}</span>;
     return <li key={member.id} className="agent-member-row">
-      {member.attachedTranscript && openTrace ? <button className="agent-member-name" type="button"
+      {member.attachedTranscript && openTrace ? <button className="agent-member-name" type="button" data-trace-member={member.id}
         aria-label={`查看 ${name} 的会话记录`} onClick={event => openTrace(member, event.currentTarget)}>
         {label}<ArrowUpRight size={13} aria-hidden="true" />
       </button> : member.session && sessionKey(member.session) !== currentKey ? <button className="agent-member-name" type="button"
