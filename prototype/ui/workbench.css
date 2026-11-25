@@ -1066,6 +1066,14 @@ p { margin-block: 0 12px; }
 .settings-grid { grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px; row-gap: 6px; }
 .agent-setting { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
 .agent-setting select { min-height: 32px; padding-block: 3px; }
+@container (max-width: 570px) {
+  .agent-panel[data-kind="settings"] { width: 100%; }
+}
+@container (max-height: 400px) {
+  .agent-panel[data-kind="settings"] .agent-panel-content { padding-block: 8px; }
+  .settings-grid { row-gap: 4px; }
+  .agent-setting select { min-height: 28px; padding-block: 2px; }
+}
 .agent-setting span, .panel-output, .panel-link { color: var(--muted); }
 .panel-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .panel-link { text-align: left; font-size: 12px; }

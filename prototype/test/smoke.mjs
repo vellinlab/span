@@ -567,16 +567,18 @@ try {
     const selects = [...body.querySelectorAll('select')].map(element => element.getBoundingClientRect());
     const composer = document.querySelector('.composer').getBoundingClientRect();
     const bounds = panel.getBoundingClientRect();
-    return selects.length >= 2 && selects.every(select => select.left === selects[0].left && select.right === selects[0].right)
-      && body.scrollWidth === body.clientWidth && bounds.left >= composer.left - 1
+    return selects.length === 5 && selects.every(select => select.left === selects[0].left && select.right === selects[0].right)
+      && body.scrollWidth === body.clientWidth && body.scrollHeight === body.clientHeight
+      && Math.abs(bounds.left - composer.left) <= 1
       && Math.abs(bounds.right - composer.right) <= 1 && bounds.bottom < composer.top;
-  }), 'Settings should align to the composer and give all values a shared column');
+  }), 'The compact settings should align with the composer and show all five settings without scrolling');
   if (screenshot) {
     const previousSpacing = await page.addStyleTag({ content: `
+      .agent-panel[data-kind="settings"] { width: min(100%, 420px); }
       .agent-panel[data-kind="settings"] .agent-panel-content { padding: 12px; }
       .agent-panel[data-kind="settings"] > header .icon-button { width: 30px; height: 30px; }
       .settings-grid { grid-template-columns: none; gap: 10px; }
-      .agent-setting { grid-template-columns: 92px minmax(0, 1fr); gap: 8px; }
+      .agent-setting { grid-column: auto; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; }
       .agent-setting select { min-height: 0; padding-block: 6px; }
     ` });
     await page.screenshot({ path: screenshot.replace(/\.png$/, '-agent-settings-before.png') });
