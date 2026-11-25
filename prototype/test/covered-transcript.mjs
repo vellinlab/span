@@ -16,6 +16,23 @@ async function rendererPss(pid) {
   return Number(sample.match(/^Pss:\s+(\d+) kB$/m)[1]);
 }
 
+function readPosition(transcript) {
+  return transcript.evaluate(element => {
+    const view = element.getBoundingClientRect();
+    const first = [...element.querySelectorAll('.message[data-empty="false"]')].find(row => {
+      const bounds = row.getBoundingClientRect();
+      return bounds.bottom > view.top && bounds.top < view.bottom;
+    });
+    return { text: first?.textContent, offset: first?.getBoundingClientRect().top - view.top };
+  });
+}
+
+async function assertReadingPosition(transcript, expected) {
+  const actual = await readPosition(transcript);
+  assert.equal(actual.text, expected.text);
+  assert.ok(Math.abs(actual.offset - expected.offset) <= 2, `Reading offset changed from ${expected.offset} to ${actual.offset}`);
+}
+
 async function check(binary, label, following, cover = 'preview') {
   const profile = await mkdtemp(join(tmpdir(), 'span-covered-'));
   let app;
@@ -44,13 +61,7 @@ async function check(binary, label, following, cover = 'preview') {
       await transcript.evaluate(element => { element.scrollTop = 300; });
       await latest.waitFor();
     }
-    const readPosition = () => transcript.evaluate(element => {
-      const top = element.getBoundingClientRect().top;
-      const first = [...element.querySelectorAll('.message[data-empty="false"]')]
-        .find(row => row.getBoundingClientRect().bottom > top);
-      return { text: first?.textContent, offset: first?.getBoundingClientRect().top - top };
-    });
-    const position = following ? null : await readPosition();
+    const position = following ? null : await readPosition(transcript);
     const preview = page.getByRole('complementary', { name: '文件预览' });
     if (cover === 'minimized') {
       await page.evaluate(() => {
@@ -103,9 +114,7 @@ async function check(binary, label, following, cover = 'preview') {
     }
     if (!following) {
       await latest.waitFor();
-      const restored = await readPosition();
-      assert.equal(restored.text, position.text);
-      assert.ok(Math.abs(restored.offset - position.offset) <= 2);
+      await assertReadingPosition(transcript, position);
       await latest.click();
     }
     await page.waitForFunction(tail => {
@@ -163,9 +172,25 @@ async function checkPreviewSwitch(binary) {
     await detail.getByText('保留两级缩进', { exact: true }).waitFor();
     await detail.focus();
     const detailTop = await detail.evaluate(element => { element.scrollTop = 180; return element.scrollTop; });
-    const transcriptTop = await transcript.evaluate(element => { element.scrollTop = 300; return element.scrollTop; });
-    assert.ok(detailTop > 0 && transcriptTop > 0);
+    await transcript.evaluate(element => { element.scrollTop = 300; });
     await page.getByRole('button', { name: '滚到最新消息' }).waitFor();
+    const transcriptTop = await transcript.evaluate(element => new Promise(resolve => {
+      let previous = -1;
+      let stableFrames = 0;
+      let frames = 0;
+      function sample() {
+        const top = element.scrollTop;
+        stableFrames = top === previous ? stableFrames + 1 : 0;
+        previous = top;
+        if (stableFrames >= 3) resolve(top);
+        else if (++frames >= 30) resolve(0);
+        else requestAnimationFrame(sample);
+      }
+      requestAnimationFrame(sample);
+    }));
+    assert.ok(detailTop > 0 && transcriptTop > 0);
+    const reading = await readPosition(transcript);
+    assert.ok(reading.text);
     const stripBounds = await strip.boundingBox();
     const readSummary = await strip.elementHandle();
     const initialSummary = await readSummary.textContent();
@@ -191,7 +216,7 @@ async function checkPreviewSwitch(binary) {
     await strip.getByText('步骤 072', { exact: false }).waitFor();
     assert.deepEqual(await strip.boundingBox(), stripBounds);
     assert.ok(await readSummary.evaluate(element => element.isConnected));
-    assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
+    await assertReadingPosition(transcript, reading);
     assert.equal(await detail.evaluate(element => element.scrollTop), detailTop);
     assert.ok(await detail.evaluate(element => element === document.activeElement));
     assert.deepEqual(await composer.evaluate(({ value, selectionStart, selectionEnd }) =>
@@ -201,7 +226,7 @@ async function checkPreviewSwitch(binary) {
     if (screenshot) await page.screenshot({ path: `${screenshot}-conversation.png` });
     await page.keyboard.press('PageDown');
     await page.waitForFunction(top => document.querySelector('#reasoning-panel .agent-panel-content').scrollTop > top, detailTop);
-    assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
+    await assertReadingPosition(transcript, reading);
 
     await page.getByRole('button', { name: '继续预览', exact: true }).press('Enter');
     await content.waitFor();
@@ -235,7 +260,7 @@ async function checkPreviewSwitch(binary) {
     await panel.getByText('已归档', { exact: true }).waitFor();
     assert.deepEqual(await readSelection(), selection);
     assert.ok(await detail.evaluate(element => element === document.activeElement));
-    assert.equal(await transcript.evaluate(element => element.scrollTop), transcriptTop);
+    await assertReadingPosition(transcript, reading);
     if (screenshot) await page.screenshot({ path: `${screenshot}-completed.png` });
     await detail.press('Escape');
     await panel.waitFor({ state: 'detached' });

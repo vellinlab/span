@@ -574,7 +574,7 @@ function App() {
         const kind = extensionCommands[command];
         if (kind && api.extensions?.kinds.includes(kind)) {
           const verbose = kind === 'mcp' && args === 'verbose';
-          if (args && !verbose) throw new Error(kind === 'mcp' ? '用法 /mcp 或 /mcp verbose' : `用法 ${command}`);
+          if (kind === 'mcp' && args && !verbose) throw new Error('用法 /mcp 或 /mcp verbose');
           if (!session) throw new Error('请先打开一个会话。');
           showPanel('extensions', resultTrigger(), { extension: kind, title: extensionTitles[kind], verbose,
             load: cursor => work.withSession((client, ref) => client.extensions.list(kind, ref, { cursor })) });
