@@ -46,7 +46,10 @@ const gateway = createServer(async (request, response) => {
         choices: [{ index: 0, delta, finish_reason }], usage }) + '\n\n');
     };
     emit({ role: 'assistant' });
-    if (text.includes(goalObjective)) {
+    if (backend === 'kilo' && text.startsWith('Generate a title for this conversation:')) {
+      emit({ content: 'Kilo 会话验证' });
+      emit({}, 'stop', { prompt_tokens: 15, completion_tokens: 4, total_tokens: 19 });
+    } else if (text.includes(goalObjective)) {
       if (tool) {
         assert.match(JSON.stringify(tool.content), /Report recorded/);
         emit({ content: goalAnswer });
@@ -261,7 +264,7 @@ try {
     await goalPanel().getByRole('button', { name: '继续', exact: true }).press('Enter');
     await goalStrip().getByText('已完成', { exact: true }).waitFor();
     await page.getByTestId('transcript').getByText(goalAnswer, { exact: true }).waitFor();
-    await goalPanel().getByText(goalReport, { exact: true }).waitFor();
+    await goalPanel().locator('.goal-reason').filter({ hasText: goalReport }).waitFor();
     await goalPanel().getByRole('button', { name: '清除', exact: true }).press('Enter');
     await goalStrip().waitFor({ state: 'detached' });
     console.log(`Verified Kilo's native goal start, pause, persisted state, resume, completion and clear on ${ssh ?? process.platform}`);
