@@ -1,6 +1,6 @@
 use crate::agent_selection::{LabelSlot, Part, TextSelection, scroll_vertical, vertical_delta};
+pub(crate) use crate::clipboard_markup::clipboard_html::web_url;
 use crate::clipboard_markup::rich_html;
-pub(crate) use crate::clipboard_markup::web_url;
 use crate::history_window::{prose_label, wrapped_lines};
 use crate::mermaid::Diagram;
 use crate::preview::{Artifact, Offer};

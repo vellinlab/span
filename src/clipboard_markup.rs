@@ -1,6 +1,6 @@
 #[path = "clipboard_html.rs"]
-mod clipboard_html;
-pub(crate) use clipboard_html::{rich_html, web_url};
+pub(crate) mod clipboard_html;
+pub(crate) use clipboard_html::rich_html;
 
 const MAX_HTML_BYTES: usize = 1024 * 1024;
 const MAX_MARKDOWN_BYTES: usize = 256 * 1024;
