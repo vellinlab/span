@@ -285,7 +285,8 @@ async function output(page) {
     ? `n=1; while [ "$n" -le 120 ]; do printf 'span-resource-%03d\\n' "$n"; n=$((n+1)); sleep .045; done; printf '%s_%s\\n' resources done`
     : `powershell -NoLogo -NoProfile -Command "for ($i=1; $i -le 120; $i++) { [Console]::WriteLine(('span-resource-' + $i)); Start-Sleep -Milliseconds 45 }; [Console]::WriteLine(('resources_'+'done'))"`;
   const rows = page.locator('.xterm-rows');
-  await rows.locator(':scope > div').first().click({ position: { x: 12, y: 5 } });
+  // xterm's visual rows ignore pointer events. The screen handles selection.
+  await page.locator('.xterm-screen').click({ position: { x: 12, y: 5 } });
   await settle(page);
   const rowUpdates = await countTerminalRowUpdates(rows, async () => {
     await terminalLine(page, command, 'resources_done');
