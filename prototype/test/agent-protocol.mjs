@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { acpReplay } from '../ui/acp-items.js';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
@@ -28,6 +29,23 @@ test('append-only readers reuse completed log lines and rebuild when the backend
   const replaced = '短输出\n';
   assert.deepEqual(indexText(replaced, undefined, continued), indexText(replaced));
   assert.deepEqual(readTextPage(replaced, undefined, undefined, undefined, last), readTextPage(replaced));
+});
+
+test('ACP history preserves user-visible content and turn boundaries while hiding assistant-only context', () => {
+  const replay = acpReplay(() => {});
+  const chunk = (sessionUpdate, messageId, text, audience) => replay.update({ sessionUpdate, messageId,
+    content: { type: 'text', text, annotations: audience && { audience } } });
+  chunk('user_message_chunk', 'user', 'A visible request.', ['user']);
+  chunk('agent_message_chunk', 'reply', 'First response.');
+  chunk('user_message_chunk', 'native-goal', 'Private instructions for the model.', ['assistant']);
+  chunk('agent_thought_chunk', 'goal-reasoning', 'A visible summary.');
+  chunk('agent_message_chunk', 'internal', 'Hidden response metadata.', ['assistant']);
+  chunk('agent_message_chunk', 'goal-reply', 'The goal is complete.');
+  const turns = replay.finish();
+  assert.deepEqual(turns.map(turn => turn.rows.map(row => row.text ?? row.sections?.join('\n'))), [
+    ['A visible request.', 'First response.'],
+    ['A visible summary.', 'The goal is complete.'],
+  ]);
 });
 
 test('command output indexes only new chunks and can jump to a replaced or compacted log', () => {

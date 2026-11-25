@@ -5,6 +5,7 @@ export const acpTurnId = index => 'acp-turn:' + index;
 const status = { pending: 'pending', in_progress: 'running', completed: 'completed', failed: 'failed' };
 const planStatus = { pending: 'pending', in_progress: 'running', completed: 'completed' };
 const textOf = block => block?.type === 'text' && typeof block.text === 'string' ? block.text : '';
+const visibleToUser = block => !block?.annotations?.audience?.length || block.annotations.audience.includes('user');
 
 export function acpOperation(tool = {}, cwd) {
   const input = tool.rawInput;
@@ -59,6 +60,7 @@ export function acpTurn(id, notify, childSession) {
   }
 
   function update(update) {
+    if (!visibleToUser(update.content)) return;
     const key = update.messageId ?? 'current';
     const text = textOf(update.content);
     switch (update.sessionUpdate) {
@@ -128,11 +130,13 @@ export function acpReplay(childSession) {
   let id;
   function publishUser() {
     if (!user) return;
-    const parsed = parseFileReferences(user.chunks.join(''));
-    const attachments = [...(parsed.attachments ?? []), ...user.attachments];
-    events.push({ kind: 'item', final: true, item: {
-      kind: 'user', id: 'user', turnId: id, text: parsed.text, attachments,
-    } });
+    if (user.chunks.length || user.attachments.length) {
+      const parsed = parseFileReferences(user.chunks.join(''));
+      const attachments = [...(parsed.attachments ?? []), ...user.attachments];
+      events.push({ kind: 'item', final: true, item: {
+        kind: 'user', id: 'user', turnId: id, text: parsed.text, attachments,
+      } });
+    }
     user = undefined;
   }
   function saveTurn() {
@@ -140,7 +144,7 @@ export function acpReplay(childSession) {
     publishUser();
     projection.finish();
     const rows = applyTimeline([], events).map(row => row.itemKey ? { ...row, id: row.key } : row);
-    turns.push({ id, run: { id, status: 'completed' }, rows });
+    if (rows.length) turns.push({ id, run: { id, status: 'completed' }, rows });
     events = [];
   }
   function beginTurn() {
@@ -154,6 +158,7 @@ export function acpReplay(childSession) {
         if (!projection || !user || user.id !== update.messageId) beginTurn();
         user ??= { id: update.messageId, chunks: [], attachments: [] };
         const block = update.content;
+        if (!visibleToUser(block)) return;
         if (block?.type === 'resource_link' && block.uri?.startsWith('file:')) {
           user.attachments.push({ kind: 'file', id: block.uri, name: block.name, path: filePath(block.uri), reference: true });
         } else if (block?.type === 'image') {

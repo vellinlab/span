@@ -150,9 +150,13 @@ try {
     await connected.waitFor({ timeout: 30_000 });
   }
 
+  async function narrow() {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+    await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  }
+
   await open(true);
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
-  await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  await narrow();
   const send = async text => {
     const composer = page.getByRole('textbox', { name: '消息' });
     await composer.fill(text);
@@ -235,8 +239,7 @@ try {
   await page.getByPlaceholder('描述要完成的任务…').waitFor();
   assert.equal(await model.count(), 0);
   if (backend === 'kilo') {
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
-    await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+    await narrow();
     const goalPanel = () => page.getByRole('region', { name: '会话目标', exact: true });
     const goalStrip = () => page.locator('.goal-strip').filter({ hasText: goalObjective });
     const closeGoal = () => goalPanel().getByRole('button', { name: '关闭面板' }).press('Escape');
@@ -259,12 +262,15 @@ try {
     await goalStrip().getByText('已暂停', { exact: true }).waitFor();
     await app.close();
     await open(false);
+    await narrow();
     await goalStrip().getByText('已暂停', { exact: true }).waitFor();
+    assert.equal(await page.getByTestId('transcript').getByText('Continue working toward this session goal:').count(), 0);
     await goalStrip().press('Enter');
     await goalPanel().getByRole('button', { name: '继续', exact: true }).press('Enter');
     await goalStrip().getByText('已完成', { exact: true }).waitFor();
     await page.getByTestId('transcript').getByText(goalAnswer, { exact: true }).waitFor();
     await goalPanel().locator('.goal-reason').filter({ hasText: goalReport }).waitFor();
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-complete.png') });
     await goalPanel().getByRole('button', { name: '清除', exact: true }).press('Enter');
     await goalStrip().waitFor({ state: 'detached' });
     console.log(`Verified Kilo's native goal start, pause, persisted state, resume, completion and clear on ${ssh ?? process.platform}`);
