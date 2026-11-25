@@ -111,8 +111,8 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     });
     update('start', { cwd: workspace, ssh, cols: terminal.cols, rows: terminal.rows });
     const input = terminal.onData(data => {
+      // Send input before parsing queued output. Its response can arrive in the same paint as that output.
       prioritizeInputUntil = performance.now() + INPUT_PRIORITY_MS;
-      flushOutput();
       update('write', { data });
     });
     const size = terminal.onResize(value => update('resize', value));
