@@ -292,7 +292,13 @@ try {
   const goalWindowSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
-  await composer.fill(Array(12).fill('保留长草稿，准备继续核对会话。').join('\n'));
+  const longDraft = Array.from({ length: 12 }, (_, index) =>
+    `草稿第 ${index + 1} 行，准备继续核对会话。`).join('\n');
+  const draftHeight = () => composer.evaluate(element => element.getBoundingClientRect().height);
+  await composer.fill(longDraft);
+  const originalDraftHeight = await draftHeight();
+  assert.ok(originalDraftHeight >= 80);
+  await composer.evaluate(element => element.setSelectionRange(12, 20));
   await goal.press('Enter');
   const editGoal = goalPanel.getByRole('button', { name: '编辑', exact: true });
   const saveGoal = goalPanel.getByRole('button', { name: '保存目标' });
@@ -329,6 +335,19 @@ try {
   assert.deepEqual(compactGoal, {
     fits: true, fillsColumn: true, scrolls: true, closeVisible: true, actionsVisible: true,
   });
+  assert.equal(await draftHeight(), 46);
+  const goalViewport = goalPanel.locator('.agent-panel-content');
+  const largerGoalViewport = await goalViewport.evaluate(element => element.clientHeight);
+  await composer.evaluate(element => { element.style.maxHeight = 'max(48px, min(156px, 25cqb))'; });
+  try {
+    assert.equal(await draftHeight(), originalDraftHeight);
+    const originalGoalViewport = await goalViewport.evaluate(element => element.clientHeight);
+    assert.ok(largerGoalViewport - originalGoalViewport >= 32);
+    console.log(`Goal reading height with the terminal open: ${originalGoalViewport} → ${largerGoalViewport} CSS px.`);
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact-before.png') });
+  } finally {
+    await composer.evaluate(element => element.style.removeProperty('max-height'));
+  }
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact.png') });
   await goalPanel.getByRole('button', { name: '继续', exact: true }).click();
   await goal.getByText('进行中', { exact: true }).waitFor();
@@ -387,6 +406,9 @@ try {
   await dismissGoal.press('Escape');
   await goalPanel.waitFor({ state: 'detached' });
   assert.ok(await goal.evaluate(button => button === document.activeElement));
+  assert.equal(await draftHeight(), originalDraftHeight);
+  assert.deepEqual(await composer.evaluate(element => [element.value, element.selectionStart, element.selectionEnd]),
+    [longDraft, 12, 20]);
   await composer.fill('/goal edit');
   await composer.press('Enter');
   assert.ok(await goalInput.evaluate(field => field === document.activeElement));
@@ -462,13 +484,42 @@ try {
   await reasoningBody.press('Escape');
   await reasoningPanel.waitFor({ state: 'detached' });
   assert.ok(await liveReasoning.evaluate(element => element === document.activeElement));
+  assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - reasoningAnchor) <= 2);
+
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
+  await composer.fill(longDraft);
+  assert.equal(await draftHeight(), originalDraftHeight);
+  await liveReasoning.press('Enter');
+  await reasoningBody.getByText('保留列表缩进', { exact: true }).waitFor();
+  assert.equal(await draftHeight(), 46);
+  assert.ok(await reasoningPanel.evaluate(panel => {
+    const strip = document.querySelector('.reasoning-strip');
+    const card = document.querySelector('.goal-strip');
+    const form = document.querySelector('.composer');
+    const box = element => element.getBoundingClientRect();
+    return box(panel).bottom <= box(strip).top && box(strip).bottom < box(card).top &&
+      box(card).bottom < box(form).top && box(panel).left === box(form).left;
+  }));
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-draft.png') });
+  await reasoningBody.press('Escape');
+  await reasoningPanel.waitFor({ state: 'detached' });
+  assert.equal(await draftHeight(), originalDraftHeight);
+  assert.equal(await composer.inputValue(), longDraft);
+  await composer.fill('');
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), goalWindowSize);
+  await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, goalWindowSize);
+  await reasoningJump.waitFor();
+  const restoredReasoningAnchor = await transcript.evaluate(element => new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(element.scrollTop)));
+  }));
   await liveReasoning.press('Enter');
   await page.getByRole('button', { name: '停止', exact: true }).evaluate(button => button.click());
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await liveReasoning.waitFor({ state: 'detached' });
   await reasoningPanel.waitFor({ state: 'detached' });
   assert.ok(await composer.evaluate(element => element === document.activeElement));
-  assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - reasoningAnchor) <= 2);
+  assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - restoredReasoningAnchor) <= 2);
   await reasoningJump.click();
   await transcript.getByText('流式输出已接通。', { exact: true }).waitFor();
   const earlyReasoning = archivedReasoning.filter({ hasText: '再确认工具结果和最终回复的前后顺序。' });
