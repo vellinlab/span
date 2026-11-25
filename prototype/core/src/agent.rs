@@ -783,6 +783,7 @@ async fn stdio_process(
             };
             let result = match identity {
                 Some(identity) => {
+                    let read_view = view_changes.clone();
                     let read = async {
                         if let Some(PiTranscriptRequest { member, offset }) = transcript {
                             pi::team_transcript(
@@ -795,7 +796,10 @@ async fn stdio_process(
                             )
                             .await
                         } else {
-                            pi::team_snapshot(catalog, &mut remote, &identity).await
+                            pi::team_snapshot(catalog, &mut remote, &identity, move || {
+                                read_view.has_changed().unwrap_or(true)
+                            })
+                            .await
                         }
                     };
                     tokio::select! {

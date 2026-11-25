@@ -257,7 +257,11 @@ fn session_team(config: &Value, session: &SessionIdentity) -> bool {
         && config["name"].as_str().is_some()
 }
 
-fn local_teams(root: &Path, session: &SessionIdentity) -> io::Result<Vec<Value>> {
+fn local_teams(
+    root: &Path,
+    session: &SessionIdentity,
+    cancelled: impl Fn() -> bool,
+) -> io::Result<Vec<Value>> {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -266,6 +270,9 @@ fn local_teams(root: &Path, session: &SessionIdentity) -> io::Result<Vec<Value>>
     let mut teams = Vec::new();
     let mut size = 0;
     for entry in entries {
+        if cancelled() {
+            return Ok(Vec::new());
+        }
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -495,13 +502,14 @@ pub(super) async fn team_snapshot(
     source: &Catalog,
     remote: &mut Option<Process>,
     session: &SessionIdentity,
+    cancelled: impl Fn() -> bool + Send + 'static,
 ) -> Result<Value> {
     let teams = match source {
         Catalog::Local => {
             let home = env::home_dir().ok_or("无法定位 Pi 团队目录。")?;
             let session = session.clone();
             tokio::task::spawn_blocking(move || {
-                local_teams(&home.join(".pi").join("teams"), &session)
+                local_teams(&home.join(".pi").join("teams"), &session, cancelled)
             })
             .await??
         }
