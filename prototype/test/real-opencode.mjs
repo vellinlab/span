@@ -62,7 +62,8 @@ gateway.listen(0, '127.0.0.1');
 await once(gateway, 'listening');
 
 const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-const remoteWrapper = '/home/span-preview-ci/.local/bin/opencode';
+const remoteBin = '/home/span-preview-ci/.opencode/bin';
+const remoteWrapper = join(remoteBin, 'opencode');
 const remoteLog = join(state, 'opencode-stderr.log');
 let app;
 let page;
@@ -86,7 +87,7 @@ try {
     ...Object.fromEntries(['DATA', 'CACHE', 'CONFIG', 'STATE'].map(name => ['XDG_' + name + '_HOME', join(state, name)])),
   };
   if (ssh) {
-    await mkdir('/home/span-preview-ci/.local/bin', { recursive: true });
+    await mkdir(remoteBin, { recursive: true });
     const exports = Object.entries(env).map(([key, value]) => key + '=' + shellQuote(value)).join(' ');
     await writeFile(remoteWrapper,
       `#!/bin/sh\nexec env ${exports} ${shellQuote(resolve(executable))} "$@" 2>>${shellQuote(remoteLog)}\n`,
@@ -94,7 +95,7 @@ try {
     execFileSync('chmod', ['0711', profile]);
     execFileSync('chown', ['-R', 'span-preview-ci:span-preview-ci', state]);
     const installed = execFileSync('ssh', ['-T', '-o', 'BatchMode=yes', '--', ssh,
-      'command -v opencode && opencode --version'], { encoding: 'utf8', timeout: 10_000 });
+      '"$HOME/.opencode/bin/opencode" --version'], { encoding: 'utf8', timeout: 10_000 });
     console.log('OpenCode on ' + ssh + ': ' + installed.trim().replace(/\n/g, ' '));
   }
   async function open(selectConnection) {

@@ -33,6 +33,20 @@ fi
 printf "span-codex-stdio\n"
 exec codex app-server
 '"#;
+const REMOTE_OPENCODE: &str = r#"
+if command -v opencode >/dev/null 2>&1; then
+    opencode_cli=opencode
+elif [ -x "$HOME/.opencode/bin/opencode" ]; then
+    opencode_cli="$HOME/.opencode/bin/opencode"
+elif [ -x "$HOME/.local/bin/opencode" ]; then
+    opencode_cli="$HOME/.local/bin/opencode"
+else
+    printf 'span-opencode-missing\n'
+    exit 127
+fi
+printf 'span-opencode-cwd %s\n' "$PWD"
+exec "$opencode_cli" acp
+"#;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Backend {
@@ -422,20 +436,24 @@ async fn serve(
             stdio_process(process, requests, output, generation, route, Some(catalog)).await?;
         }
         (Backend::OpenCode, Location::Ssh(target)) => {
-            let mut process = spawn(
-                ssh(&target).arg(r#"printf 'span-opencode-cwd %s\n' "$PWD"; exec opencode acp"#),
-            )?;
+            let mut process = spawn(ssh(&target).arg(REMOTE_OPENCODE))?;
             let directory = timeout(Duration::from_secs(12), async {
                 let mut line = Vec::new();
                 loop {
                     read_line(&mut process.output, &mut line).await?;
-                    if let Ok(line) = std::str::from_utf8(&line)
-                        && let Some(directory) = line.strip_prefix("span-opencode-cwd ")
+                    let line = std::str::from_utf8(&line)
+                        .unwrap_or_default()
+                        .trim_end_matches(['\r', '\n']);
+                    if line == "span-opencode-missing" {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "远端找不到 OpenCode。请安装 CLI 或将它加入 SSH 会话的 PATH。",
+                        ));
+                    }
+                    if let Some(directory) = line.strip_prefix("span-opencode-cwd ")
                         && directory.starts_with('/')
                     {
-                        return Ok::<_, io::Error>(
-                            directory.trim_end_matches(['\r', '\n']).to_owned(),
-                        );
+                        return Ok(directory.to_owned());
                     }
                 }
             })

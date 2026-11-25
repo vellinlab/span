@@ -28,7 +28,7 @@ Pi 可以使用 PATH 中的 CLI。本机也可用 `SPAN_PI_PATH` 指定可执行
 
 Codex 和 Pi 在 Agent 菜单中提供「技能」。在输入框用 `/skills` 也可以打开面板，并可在命令后附上搜索词。面板显示后端为当前工作区报告的技能，在第一条消息发出前也可以打开。
 
-OpenCode 使用 PATH 中的 CLI。本机也可用 `SPAN_OPENCODE_PATH` 指定可执行文件。SSH 新会话默认使用远端登录目录，已保存的会话从其原工作目录恢复。OpenCode 回放的历史由 Span 按需向上分页。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/)
+OpenCode 使用 PATH 中的 CLI。本机也可用 `SPAN_OPENCODE_PATH` 指定可执行文件。SSH 会按顺序查找远端的 PATH、`~/.opencode/bin` 和 `~/.local/bin`。新会话默认使用远端登录目录，已保存的会话从其原工作目录恢复。OpenCode 回放的历史由 Span 按需向上分页。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/)
 
 工作台启动时恢复上次成功连接的 Agent、主机和本地工作区。每个连接保留自己最后打开的会话，点击「新会话」后会记住空白状态。无法连接时，可以重试或从连接设置选择其他后端、主机和本地目录。首次启动默认连接本机 Codex。
 
