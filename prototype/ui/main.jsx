@@ -28,6 +28,7 @@ const routeLabels = { shared: '共享后台', stdio: '独立进程', fixture: '�
 const extensionCommands = { '/mcp': 'mcp', '/skills': 'skill', '/plugins': 'plugin', '/apps': 'connector', '/tools': 'tool' };
 const extensionTitles = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
 const previewOverlayQuery = window.matchMedia('(max-width: 1020px)');
+const windowsPath = /^[a-z]:[\\/]|^\\\\/i;
 
 function subscribePreviewOverlay(onChange) {
   previewOverlayQuery.addEventListener('change', onChange);
@@ -37,7 +38,7 @@ function subscribePreviewOverlay(onChange) {
 const isPreviewOverlay = () => previewOverlayQuery.matches;
 
 function workspaceRelativePath(cwd, filename) {
-  const windows = /^[a-z]:[\\/]|^\\\\/i.test(cwd);
+  const windows = windowsPath.test(cwd);
   const slashes = value => windows ? value.replaceAll('\\', '/') : value;
   const path = slashes(filename);
   if (!/^(?:\/|[a-z]:\/)/i.test(path)) return path;
@@ -83,6 +84,8 @@ function App() {
   const previewRegion = useRef(null);
   const previewTrigger = useRef(null);
   const previewFocus = useRef(null);
+  const directoryLabel = useRef(null);
+  const directoryFocus = useRef(false);
   const interactionRegion = useRef(null);
   const reasoningHadFocus = useRef(false);
   const panelScope = useRef(0);
@@ -158,6 +161,12 @@ function App() {
     return () => { active = false; };
   }, [tab, config, directory, report]);
 
+  useLayoutEffect(() => {
+    if (!directoryFocus.current) return;
+    directoryFocus.current = false;
+    directoryLabel.current?.focus({ preventScroll: true });
+  }, [directory]);
+
   useEffect(() => {
     setShowLatest(false);
     setCommandIndex(0);
@@ -208,7 +217,7 @@ function App() {
     }
   }, [preview, previewBlocked, readingOverlay]);
 
-  const loadPreview = useCallback(async (read, path, attachment = false) => {
+  const loadPreview = useCallback(async (read, path, attachment = false, root) => {
     const scope = ++previewScope.current;
     const trigger = document.activeElement === document.body ? null : document.activeElement;
     try {
@@ -216,7 +225,7 @@ function App() {
       if (result && scope === previewScope.current) {
         previewTrigger.current = trigger;
         if (attachment) previewFocus.current = 'content';
-        setPreview({ ...result, path, scope, attachment });
+        setPreview({ ...result, path, scope, attachment, root });
       }
     } catch (error) {
       if (scope === previewScope.current) report(error);
@@ -224,7 +233,7 @@ function App() {
   }, [report]);
 
   const readPreview = useCallback((cwd, path) =>
-    loadPreview(() => window.span.request('files.preview', { cwd, path }), path), [loadPreview]);
+    loadPreview(() => window.span.request('files.preview', { cwd, path }), path, false, cwd), [loadPreview]);
 
   const previewCwd = session?.cwd || config?.cwd;
   const openImage = useCallback(file => {
@@ -236,14 +245,10 @@ function App() {
   }, [previewCwd, loadPreview]);
   const previewImage = config?.ssh || !window.span.previewImage ? undefined : openImage;
 
-  function selectFile(entry) {
-    const path = [directory, entry.name].filter(Boolean).join('/');
-    if (entry.directory) {
-      setEntries([]);
-      setDirectory(path);
-    } else {
-      readPreview(config.cwd, path);
-    }
+  function openDirectory(path) {
+    directoryFocus.current = true;
+    setEntries([]);
+    setDirectory(path);
   }
 
   const openArtifact = useCallback(artifact => {
@@ -667,6 +672,15 @@ function App() {
   }
 
   const cwd = config?.cwd;
+  const directorySeparator = directory.lastIndexOf('/');
+  const directoryTitle = directory ? directory.slice(directorySeparator + 1) : directoryName(cwd);
+  const directoryPath = directory && cwd ? windowsPath.test(cwd)
+    ? `${cwd.replace(/[/\\]$/, '')}\\${directory.replaceAll('/', '\\')}`
+    : `${cwd.replace(/\/$/, '')}/${directory}` : cwd;
+  const parentDirectory = directory.slice(0, Math.max(0, directorySeparator));
+  const previewSeparator = preview?.path.lastIndexOf('/') ?? -1;
+  const previewName = preview?.path.slice(previewSeparator + 1);
+  const previewDirectory = previewSeparator >= 0 ? preview.path.slice(0, previewSeparator) : null;
   const host = config?.ssh || '本机';
   const backendName = agentBackends.find(item => item.id === config?.backend)?.label ?? 'Codex';
   const workspace = directoryName(session?.cwd) || (config?.ssh ? host : directoryName(cwd)) || '工作区';
@@ -760,14 +774,22 @@ function App() {
           <button className="primary" disabled={running || !config}>连接{target.trim() ? ' SSH' : '本机'}</button>
         </form>}
         {tab === 'files' && <>
-          <div className="path" title={config?.cwd}>{config?.ssh ? '预览支持本地文件' : config?.cwd}</div>
-          <div className="side-list">{directory && <button onClick={() => {
-            setEntries([]);
-            setDirectory(directory.split('/').slice(0, -1).join('/'));
-          }}><ChevronLeft size={15} /><span>上一级</span></button>}
-            {!config?.ssh && entries.map(entry => <button key={entry.name} onClick={() => selectFile(entry)}>
-              {entry.directory ? <Folder size={15} /> : <FileText size={15} />}<span>{entry.name}</span>
-            </button>)}
+          <div className="file-directory" ref={directoryLabel} tabIndex={-1} title={config?.ssh ? undefined : directoryPath}>
+            {config?.ssh ? '仅支持预览本地文件' : directoryTitle}
+          </div>
+          <div className="side-list file-list">
+            {directory && <button className="file-up" onClick={() => openDirectory(parentDirectory)}>
+              <ChevronLeft size={15} aria-hidden="true" /><span>上一级</span>
+            </button>}
+            {!config?.ssh && entries.map(entry => {
+              const path = directory ? `${directory}/${entry.name}` : entry.name;
+              const current = !preview?.parked && preview?.root === cwd && preview?.path === path;
+              return <button key={entry.name} aria-label={entry.name} aria-current={current || undefined} title={entry.name}
+                onClick={() => entry.directory ? openDirectory(path) : readPreview(cwd, path)}>
+                {entry.directory ? <><Folder size={15} aria-hidden="true" /><span>{entry.name}</span></>
+                  : <><FileText size={15} aria-hidden="true" /><FileReferenceName name={entry.name} path={entry.name} /></>}
+              </button>;
+            })}
           </div>
         </>}
         <nav className="sidebar-tools" aria-label="工作台面板">
@@ -878,10 +900,13 @@ function App() {
               closePreview();
             }
           }}>
-          <header>{preview.kind === 'image' ? <Image size={16} /> : <FileText size={16} />}<strong title={preview.path}>{preview.path}</strong>
+          <header>
+            {preview.kind === 'image' ? <Image size={16} aria-hidden="true" /> : <FileText size={16} aria-hidden="true" />}
+            <strong title={preview.path}><FileReferenceName name={previewName} path={preview.path} /></strong>
+            {previewDirectory && <span className="preview-directory" title={previewDirectory}>{previewDirectory}</span>}
             <button className="icon-button right preview-close" aria-label="关闭预览" title="关闭预览" onClick={closePreview}><X size={16} /></button>
           </header>
-          <div className="preview-content" data-kind={preview.kind} tabIndex={0}>
+          <div className="preview-content" key={preview.scope} data-kind={preview.kind} tabIndex={0}>
             {preview.kind === 'image' ? preview.imageError ? <p role="status">无法显示这张图片。</p>
               : <img alt={preview.path} src={`data:${preview.mime};base64,${preview.data}`} onError={() => {
                 setPreview(current => current?.scope === preview.scope ? { ...current, data: undefined, imageError: true } : current);

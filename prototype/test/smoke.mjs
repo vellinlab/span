@@ -1,6 +1,6 @@
 import { _electron as electron } from 'playwright';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -1098,6 +1098,77 @@ try {
     await captureReading(width === 740 ? 'narrow-end' : 'wide');
   }
   console.log('Verified the rich answer layout and long code overflow at two window sizes.');
+
+  const reviewWorkspace = join(profile, 'review-workspace');
+  const reviewDirectory = join(reviewWorkspace, 'workbench-guides', 'interface-review');
+  const reviewName = 'windows-and-el8-workbench-navigation-checklist.md';
+  const notesName = 'windows-and-el8-workbench-verification-notes.md';
+  await mkdir(reviewDirectory, { recursive: true });
+  await writeFile(join(reviewWorkspace, reviewName), '# 工作区索引');
+  const reviewSteps = Array.from({ length: 36 }, (_, index) =>
+    `${index + 1}. 确认文件名、目录与预览内容对应。`).join('\n');
+  await writeFile(join(reviewDirectory, reviewName), `# 窗口布局复核\n\n检查窄窗里的文件位置与阅读顺序。\n\n${reviewSteps}`);
+  await writeFile(join(reviewDirectory, notesName), `# 键盘操作记录\n\n通过键盘切换和关闭预览。\n\n${reviewSteps}`);
+  await app.evaluate(({ dialog }, workspace) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
+  }, reviewWorkspace);
+  await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: '文件', exact: true }).click();
+  await page.getByRole('button', { name: '选择本地工作区', exact: true }).click();
+  const location = sidebar.locator('.file-directory');
+  await page.waitForFunction(() => document.querySelector('.file-directory')?.textContent === 'review-workspace');
+  await sidebar.getByRole('button', { name: 'workbench-guides', exact: true }).press('Enter');
+  await sidebar.getByRole('button', { name: 'interface-review', exact: true }).press('Enter');
+  assert.equal(await location.textContent(), 'interface-review');
+  assert.equal(await location.getAttribute('title'), reviewDirectory);
+  assert.ok(await location.evaluate(element => element === document.activeElement));
+  const upDirectory = sidebar.getByRole('button', { name: '上一级', exact: true });
+  await page.keyboard.press('Tab');
+  assert.ok(await upDirectory.evaluate(element => element === document.activeElement));
+
+  const reviewFile = sidebar.getByRole('button', { name: reviewName, exact: true });
+  const notesFile = sidebar.getByRole('button', { name: notesName, exact: true });
+  await reviewFile.press('Enter');
+  const previewContent = preview.locator('.preview-content');
+  const previewTitle = preview.locator('header strong');
+  const previewFolder = preview.locator('.preview-directory');
+  await preview.getByRole('heading', { name: '窗口布局复核' }).waitFor();
+  assert.equal(await reviewFile.getAttribute('aria-current'), 'true');
+  assert.equal(await previewTitle.textContent(), reviewName);
+  assert.equal(await previewFolder.textContent(), 'workbench-guides/interface-review');
+  assert.ok(await reviewFile.evaluate(element => {
+    const name = element.querySelector('.file-reference-name');
+    const start = name.firstElementChild;
+    const range = document.createRange();
+    range.selectNode(name.lastChild);
+    return start.scrollWidth > start.clientWidth && name.textContent.endsWith('.md') &&
+      range.getBoundingClientRect().right <= element.getBoundingClientRect().right;
+  }), 'The side list clips the long filename stem while keeping its suffix visible');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-file-location-narrow.png') });
+
+  await previewContent.press('End');
+  await page.waitForFunction(() => document.querySelector('#file-preview .preview-content').scrollTop > 100);
+  await notesFile.press('Enter');
+  await preview.getByRole('heading', { name: '键盘操作记录' }).waitFor();
+  assert.equal(await previewContent.evaluate(element => element.scrollTop), 0);
+  assert.equal(await notesFile.getAttribute('aria-current'), 'true');
+  assert.equal(await reviewFile.getAttribute('aria-current'), null);
+  await previewContent.press('Escape');
+  assert.equal(await notesFile.getAttribute('aria-current'), null);
+  assert.ok(await notesFile.evaluate(element => element === document.activeElement));
+
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1240, 840));
+  await page.waitForFunction(() => innerWidth === 1240 && innerHeight === 840);
+  await reviewFile.press('Enter');
+  await preview.getByRole('heading', { name: '窗口布局复核' }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-file-location-wide.png') });
+  await upDirectory.press('Enter');
+  await upDirectory.press('Enter');
+  await reviewFile.waitFor();
+  assert.equal(await location.textContent(), 'review-workspace');
+  assert.equal(await reviewFile.getAttribute('aria-current'), null);
+  assert.equal(await previewTitle.textContent(), reviewName);
+  console.log('Verified folder context, current-file styling, filename suffix, scroll reset, and keyboard navigation in the file preview.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });
