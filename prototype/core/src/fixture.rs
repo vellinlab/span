@@ -818,6 +818,12 @@ pub fn run() -> Result<()> {
                     continue;
                 }
                 if params["input"][0]["text"] == "验证审批与表单。" {
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning",
+                            "id":format!("{turn}-approval-summary"),"summary":["已核对待执行命令和工作目录。"]}}),
+                    )?;
                     reviewed = false;
                     review = Some((turn, false));
                     continue;

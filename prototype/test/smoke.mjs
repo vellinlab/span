@@ -795,6 +795,10 @@ try {
   await composer.press('Enter');
   await transcript.getByText('验证审批与表单。', { exact: true }).waitFor();
   await page.locator('.send.stop:enabled').waitFor();
+  const approvalSummary = '已核对待执行命令和工作目录。';
+  await liveReasoning.getByText(approvalSummary, { exact: true }).waitFor();
+  const approvalContext = archivedReasoning.filter({ hasText: approvalSummary });
+  assert.equal(await approvalContext.count(), 0);
   await transcript.evaluate(element => { element.scrollTop = 300; });
   const latest = page.getByRole('button', { name: '滚到最新消息' });
   await latest.waitFor();
@@ -818,6 +822,15 @@ try {
   assert.deepEqual(layout, { scrolls: true, canAnswer: true, popoverAbove: true });
   await composer.press('Escape');
   await usage.waitFor({ state: 'detached' });
+  await liveReasoning.waitFor({ state: 'detached' });
+  await latest.press('Enter');
+  const contextTitle = approvalContext.locator('summary');
+  await contextTitle.press('Enter');
+  await approvalContext.locator('.card-body').getByText(approvalSummary, { exact: true }).waitFor();
+  assert.ok(await approval.isVisible());
+  await contextTitle.press('Enter');
+  await transcript.evaluate((element, top) => { element.scrollTop = top; }, anchor);
+  await latest.waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
   const windowSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
   const terminalToggle = page.getByRole('button', { name: '切换终端' });
@@ -867,7 +880,8 @@ try {
     const hit = document.elementFromPoint(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2);
     return rect('.timeline').height >= 44 && rect('.approval-context').bottom <= body.bottom &&
       commandStart.top >= body.top && commandStart.bottom <= body.bottom + 1 &&
-      rect('.approval-actions').bottom <= rect('.composer').top && rect('.terminal-canvas').height >= 70 &&
+      rect('.approval').bottom < rect('.goal-strip').top && rect('.goal-strip').bottom < rect('.composer').top &&
+      rect('.terminal-canvas').height >= 70 &&
       rect('.composer').bottom <= rect('.terminal-panel').top && Boolean(hit?.closest('.approval-actions button'));
   }), 'History, approval scope, the first command line, actions, the long draft and terminal fit at the minimum window size');
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval-compact.png') });
@@ -896,6 +910,7 @@ try {
   assert.ok(await composer.evaluate(element => document.activeElement === element));
   await latest.click();
   await page.getByText('审批回复：拒绝，已收到回答。', { exact: true }).waitFor();
+  assert.equal(await approvalContext.count(), 1);
   if (fileContent) {
     await restorePreview.click();
     await preview.getByText('README.md', { exact: true }).waitFor();
