@@ -557,6 +557,11 @@ pub fn run() -> Result<()> {
     let grouped = env::var_os("SPAN_PREVIEW_STREAM_GATE")
         .is_some_and(|path| PathBuf::from(path).join("grouped-history").is_file());
     let history = history(grouped);
+    let child_turn = json!({"id":"child-turn","status":"completed","items":[
+        {"type":"userMessage","id":"child-task","content":[{"type":"text","text":"复核工作台键盘导航。"}]},
+        {"type":"reasoning","id":"child-reasoning","summary":["检查窄窗口与返回焦点。"]},
+        {"type":"agentMessage","id":"child-result","phase":"final_answer","text":"子代理的会话记录。"}
+    ]});
     let background = Arc::new(AtomicBool::new(false));
     let mut turn_count = 0;
     let mut new_thread_count = 0;
@@ -650,9 +655,7 @@ pub fn run() -> Result<()> {
             }
             "thread/resume" if params["threadId"] == "fixture-subagent" => json!({
                 "thread":{"id":"fixture-subagent","name":REVIEW_AGENT,"cwd":cwd},
-                "initialTurnsPage":{"data":[{"id":"child-turn","status":"completed","items":[
-                    {"type":"agentMessage","id":"child-result","phase":"final_answer","text":"子代理的会话记录。"}
-                ]}],"nextCursor":null},"cwd":cwd,"model":"fixture"
+                "initialTurnsPage":{"data":[child_turn],"nextCursor":null},"cwd":cwd,"model":"fixture"
             }),
             "thread/resume" => {
                 let turns = if params["excludeTurns"] == true {
@@ -681,6 +684,15 @@ pub fn run() -> Result<()> {
                 json!({"thread":{"id":thread,"name":name,"cwd":directory,"turns":turns},
                     "initialTurnsPage":{"data":page,"nextCursor":(history.len()-20).to_string()},
                     "cwd":directory,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
+            }
+            "thread/turns/list" if params["threadId"] == "fixture-subagent" => {
+                if params["cursor"] == "older-child" {
+                    json!({"data":[{"id":"child-first","status":"completed","items":[
+                        {"type":"agentMessage","id":"child-first-reply","phase":"final_answer","text":"已记录首轮检查。"}
+                    ]}],"nextCursor":null})
+                } else {
+                    json!({"data":[child_turn],"nextCursor":"older-child"})
+                }
             }
             "thread/turns/list" => {
                 let end = params["cursor"]

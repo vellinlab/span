@@ -573,6 +573,43 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.deepEqual(JSON.parse(card.text), { message: 'Missing file' });
     assert.ok(!JSON.stringify(card).includes('unrelated argument'));
 
+    publish('agent', { method: 'item/completed', params: { ...scope, item: {
+      type: 'collabAgentToolCall', id: 'spawn', tool: 'spawnAgent', senderThreadId: ref.id,
+      receiverThreadIds: ['child'], status: 'completed', agentsStates: { child: { status: 'completed' } },
+    } } });
+    const [child] = events.at(-1).item.members;
+    assert.deepEqual(child.session, { ...ref, id: 'child' });
+    assert.equal(child.attachedTranscript, true);
+    assert.equal(agent.delegation.resumeMemberSession, true);
+    assert.throws(() => agent.delegation.watchTranscript(copy.session.ref, child.id, () => {}), /没有这个 Codex 子代理/);
+    assert.throws(() => agent.delegation.watchTranscript({ ...ref, location: { kind: 'local' } }, child.id, () => {}), /没有这个 Codex 子代理/);
+    responses['thread/turns/list'] = params => {
+      assert.equal(params.threadId, child.id);
+      assert.equal(params.limit, 20);
+      assert.equal(params.sortDirection, 'desc');
+      assert.equal(params.itemsView, 'full');
+      const older = params.cursor === 'older-child';
+      return { data: [{ id: older ? 'early' : 'late', status: 'completed', items: [
+        { type: 'agentMessage', id: older ? 'first-result' : 'last-result', text: older ? 'First result' : 'Latest result' },
+      ] }], nextCursor: 'older-child' };
+    };
+    const views = [];
+    const reading = requests.length;
+    const closeChild = agent.delegation.watchTranscript(ref, child.id, view => views.push(view));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(views[0].loading, true);
+    assert.deepEqual(views.at(-1).rows.map(row => row.text), ['Latest result']);
+    views.at(-1).loadOlder();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(views.at(-1).rows.map(row => row.text), ['First result', 'Latest result']);
+    assert.equal(views.at(-1).cursor, null);
+    assert.deepEqual(requests.slice(reading).map(([, { packet }]) => packet.method), ['thread/turns/list', 'thread/turns/list']);
+    closeChild();
+    const closed = [];
+    agent.delegation.watchTranscript(ref, child.id, view => closed.push(view))();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(closed.length, 1);
+
     const mark = { type: 'enteredReviewMode', id: 'mark', review: 'current changes' };
     const prompt = { type: 'userMessage', id: 'prompt', content: [{ type: 'text', text: 'Review all changes' }] };
     const raw = { type: 'agentMessage', id: 'raw', text: '{"findings":[]}' };

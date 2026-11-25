@@ -20,6 +20,9 @@ FIRST_REPLY = "Fixture file created."
 SECOND_REPLY = "Fixture session continued."
 REVIEW_PROMPT = "Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings."
 REVIEW_REPLY = "The modified heading no longer matches the documented section."
+DELEGATE_PROMPT = "Check the preview child conversation."
+CHILD_PROMPT = "Verify the keyboard navigation marker."
+CHILD_REPLY = "The child verified the keyboard navigation marker."
 
 
 class Responses(BaseHTTPRequestHandler):
@@ -36,19 +39,24 @@ class Responses(BaseHTTPRequestHandler):
 
     def events(self, request):
         inputs = request["input"]
-        latest_prompt = next(
+        user_text = [
             text["text"]
             for item in reversed(inputs)
             if item.get("role") == "user"
             for text in item["content"]
             if text.get("type") == "input_text"
-        )
+        ]
+        latest_prompt = user_text[0] if user_text else ""
         expected_models = (MODEL, IMAGE_MODEL) if latest_prompt == REVIEW_PROMPT else (
             (IMAGE_MODEL,) if latest_prompt == IMAGE_PROMPT else (MODEL,)
         )
         if request.get("model") not in expected_models:
             raise ValueError("Unexpected model in request")
-        if latest_prompt == SECOND_PROMPT:
+        if CHILD_PROMPT in user_text:
+            item = self.message("preview-child-reply", CHILD_REPLY)
+        elif DELEGATE_PROMPT in user_text:
+            item = self.delegation(request)
+        elif latest_prompt == SECOND_PROMPT:
             if not any(
                 item.get("role") == "assistant"
                 and any(text.get("text") == FIRST_REPLY for text in item["content"])
@@ -116,11 +124,29 @@ class Responses(BaseHTTPRequestHandler):
         ]
 
     @staticmethod
-    def tool_call(call_id, arguments):
+    def delegation(request):
+        outputs = {item["call_id"]: item["output"] for item in request["input"]
+                   if item.get("type") == "function_call_output"}
+        if "span-spawn" not in outputs:
+            if not any(tool.get("name") == "multi_agent_v1" and any(
+                member.get("name") == "spawn_agent" for member in tool.get("tools", [])
+            ) for tool in request.get("tools", [])):
+                raise ValueError("Codex did not offer its native spawn_agent tool")
+            return Responses.tool_call("span-spawn", {"message": CHILD_PROMPT}, "spawn_agent", "multi_agent_v1")
+        agent_id = json.loads(outputs["span-spawn"])["agent_id"]
+        if "span-wait" not in outputs:
+            return Responses.tool_call("span-wait", {"targets": [agent_id], "timeout_ms": 10000}, "wait_agent", "multi_agent_v1")
+        if CHILD_REPLY not in outputs["span-wait"]:
+            raise ValueError("The native wait did not return the child's answer")
+        return Responses.message("preview-parent-reply", "The parent received the delegated result.")
+
+    @staticmethod
+    def tool_call(call_id, arguments, name="exec_command", namespace=None):
         return {
             "type": "function_call",
             "call_id": call_id,
-            "name": "exec_command",
+            "name": name,
+            **({"namespace": namespace} if namespace else {}),
             "arguments": json.dumps(arguments),
         }
 

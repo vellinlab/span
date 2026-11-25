@@ -57,7 +57,7 @@ rm "$socket"
 "$backend" app-server --listen unix:// >"$fixture/local-shared.log" 2>&1 &
 local_shared=$!
 ready_socket "$socket" "$local_shared" "$fixture/local-shared.log"
-/artifacts/node prototype/test/real-agent.mjs "$binary" shared --skills
+/artifacts/node prototype/test/real-agent.mjs "$binary" shared --skills --agents
 kill -0 "$local_shared"
 
 if [[ -n ${SPAN_TEST_SSH_ALIAS:-} ]]; then
@@ -72,6 +72,6 @@ if [[ -n ${SPAN_TEST_SSH_ALIAS:-} ]]; then
         env CODEX_HOME="$remote_state" "$backend" app-server --listen unix:// >"$fixture/remote-shared.log" 2>&1 &
     remote_shared=$!
     ready_socket "$remote_state/app-server-control/app-server-control.sock" "$remote_shared" "$fixture/remote-shared.log"
-    /artifacts/node prototype/test/real-agent.mjs "$binary" shared "$SPAN_TEST_SSH_ALIAS"
+    /artifacts/node prototype/test/real-agent.mjs "$binary" shared "$SPAN_TEST_SSH_ALIAS" --agents
     kill -0 "$remote_shared"
 fi

@@ -568,7 +568,7 @@ export const Transcript = memo(function Transcript({
     };
   }, [scroll, virtual]);
 
-  function onScroll() {
+  function onScroll(event) {
     if (restore) return;
     const element = scroll.current;
     const height = element.clientHeight;
@@ -578,7 +578,7 @@ export const Transcript = memo(function Transcript({
     following.current = atBottom;
     if (atBottom && inspectedCard) setInspectedCard(null);
     onScrollPosition(!atBottom);
-    if (!atBottom && element.scrollTop < 160 && cursor && !loading) loadOlder();
+    if ((!atBottom || event.type === 'wheel') && element.scrollTop < 160 && cursor && !loading) loadOlder();
   }
 
   return <div className="timeline" ref={scroll} role="log" aria-label={label} aria-live="off" tabIndex={-1} data-testid={testId}
@@ -587,7 +587,7 @@ export const Transcript = memo(function Transcript({
     onWheel={event => {
       releaseGroupAnchor();
       if (event.deltaY < 0 && scroll.current.scrollTop < 160 &&
-        !event.target.closest('.text-scroll, .output-scroll, .command-text, .plan-list')) onScroll();
+        !event.target.closest('.text-scroll, .output-scroll, .command-text, .plan-list')) onScroll(event);
     }}>
     {rows.length ? <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
       {virtualRows.map(item => {

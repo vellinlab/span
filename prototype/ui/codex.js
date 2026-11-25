@@ -1,6 +1,8 @@
 import { connectRpc } from './agent-rpc.js';
+import { sessionKey } from './agent.js';
 import { normalizeItem, normalizeLimits, normalizeRun, normalizeUsage, patches, planSteps } from './codex-items.js';
 import { fileReferencePreview, fileReferenceText } from './file-references.js';
+import { historyRows, mergeHistory } from './timeline.js';
 
 const featureBackend = 'codex';
 const permissions = [
@@ -125,6 +127,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   const native = backend === featureBackend;
   const pending = new Map();
   const active = new Set();
+  const childThreads = new Map();
   const reviews = new Map();
   const reviewPageEdges = new Map();
   const ref = id => ({ backend, location, id });
@@ -132,16 +135,30 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     ref: ref(thread.id), cwd: thread.cwd ?? overrides.cwd, title: thread.name,
     preview: fileReferencePreview(thread.preview), branch: thread.gitInfo?.branch, updatedAt: thread.updatedAt,
   });
-  function normalizeTurn(turn, review, final = true) {
+  function projectItem(item, turnId, threadId) {
+    const row = normalizeItem(item, turnId, ref);
+    if (row?.kind === 'delegation' && native && active.has(threadId)) {
+      let registered = childThreads.get(threadId);
+      for (const member of row.members) {
+        if (!member.session?.id || member.id === threadId || member.parent && member.parent.id !== threadId) continue;
+        if (!registered) childThreads.set(threadId, registered = new Set());
+        registered.add(member.id);
+        member.attachedTranscript = true;
+      }
+    }
+    return row;
+  }
+
+  function normalizeTurn(turn, threadId, review, final = true) {
     const turnId = review?.id ?? turn.id;
     const items = (turn.items ?? []).map(item => reviewItem(item, review, final)).filter(Boolean);
     const fallback = final && reviewFallback(review);
     if (fallback) items.push(fallback);
     return { id: turnId, run: normalizeRun({ ...turn, id: turnId }),
-      rows: items.map(item => normalizeItem(item, turnId, ref)).filter(Boolean) };
+      rows: items.map(item => projectItem(item, turnId, threadId)).filter(Boolean) };
   }
 
-  function normalizePage(page, threadId, cursor) {
+  function normalizePage(page, threadId, cursor, observeMembers = true) {
     const turns = [...(page.data ?? [])].reverse();
     const reviewIds = new Set();
     for (const turn of turns) {
@@ -150,15 +167,17 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       }
     }
     // The server can split the review's request turn from its result across pages.
-    const edge = reviewPageEdges.get(threadId);
+    const edge = observeMembers && reviewPageEdges.get(threadId);
     if (edge && edge.cursor === cursor) reviewIds.add(edge.id);
     const oldest = turns[0]?.rootTurnId || turns[0]?.id;
-    if (page.nextCursor && reviewIds.has(oldest) && active.has(threadId)) {
-      reviewPageEdges.set(threadId, { cursor: page.nextCursor, id: oldest });
-    } else reviewPageEdges.delete(threadId);
+    if (observeMembers) {
+      if (page.nextCursor && reviewIds.has(oldest) && active.has(threadId)) {
+        reviewPageEdges.set(threadId, { cursor: page.nextCursor, id: oldest });
+      } else reviewPageEdges.delete(threadId);
+    }
     return { items: turns.map(turn => {
       const id = turn.rootTurnId || turn.id;
-      return normalizeTurn(turn, reviewIds.has(id) ? { id } : undefined);
+      return normalizeTurn(turn, observeMembers ? threadId : undefined, reviewIds.has(id) ? { id } : undefined);
     }), cursor: page.nextCursor ?? null };
   }
   const opened = response => ({
@@ -174,6 +193,49 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     error => onEvent({ kind: 'disconnected', error }));
   const request = rpc.request;
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
+
+  function watchChildTranscript(parent, id, listener) {
+    const registered = childThreads.get(parent.id);
+    if (sessionKey(parent) !== sessionKey(ref(parent.id)) || !registered?.has(id)) {
+      throw new Error('当前会话没有这个 Codex 子代理。');
+    }
+    let subscribed = true;
+    let view = { rows: [], cursor: null, loading: false, loadOlder: () => { if (view.cursor) void load(view.cursor); } };
+    const seen = new Set();
+    const current = () => subscribed && childThreads.get(parent.id) === registered;
+    function publish(changes) {
+      view = { ...view, ...changes };
+      listener(view);
+    }
+    async function load(cursor) {
+      if (!current() || view.loading) return;
+      publish({ loading: true, error: undefined });
+      try {
+        let run = view.run;
+        do {
+          const response = await request('thread/turns/list', { threadId: id, ...pageRequest(20), cursor });
+          if (!current()) return;
+          const page = normalizePage(response, id, cursor, false);
+          const rows = historyRows(page.items);
+          run ??= page.items.at(-1)?.run;
+          seen.add(cursor);
+          cursor = seen.has(page.cursor) ? null : page.cursor;
+          if (rows.length || !cursor) {
+            publish({ rows: mergeHistory(view.rows, rows), run, cursor, loading: false });
+            return;
+          }
+        } while (current());
+      } catch (error) {
+        if (current()) publish({ loading: false, error: error.message });
+      }
+    }
+    void load();
+    return () => {
+      subscribed = false;
+      seen.clear();
+      view = { rows: [], cursor: null, loading: false };
+    };
+  }
 
   async function workspaceDiff(cwd) {
     const limit = 256 * 1024;
@@ -240,7 +302,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         }
         const final = method === 'item/completed';
         const selected = reviewItem(params.item, scope, final);
-        const item = selected && normalizeItem(selected, scope?.id ?? turnId, ref);
+        const item = selected && projectItem(selected, scope?.id ?? turnId, threadId);
         if (item) notify(threadId, { kind: 'item', item, final });
         break;
       }
@@ -270,7 +332,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         const { turn } = params;
         const scope = review && (turn.id === review.id || turn.rootTurnId === review.id) ? review : undefined;
         if (!final && scope && turn.id !== scope.id) scope.transportId = turn.id;
-        const { rows, run } = normalizeTurn(turn, scope, final);
+        const { rows, run } = normalizeTurn(turn, threadId, scope, final);
         for (const item of rows) {
           notify(threadId, { kind: 'item', item, final });
         }
@@ -381,6 +443,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       await rpc.send({ method: 'initialized' });
     },
     close() {
+      childThreads.clear();
       rpc.close();
       window.span.request('agent.close', { generation }).catch(() => {});
     },
@@ -401,6 +464,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
           return opened(response);
         } catch (error) {
           active.delete(thread.id);
+          childThreads.delete(thread.id);
           throw error;
         }
       },
@@ -411,6 +475,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       ...(native && {
         async release(thread) {
           active.delete(thread.id);
+          childThreads.delete(thread.id);
           reviews.delete(thread.id);
           reviewPageEdges.delete(thread.id);
           for (const [key, entry] of pending) {
@@ -525,7 +590,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       async usage() {
         return { limits: normalizeLimits(await request('account/rateLimits/read', null)) };
       },
-      delegation: { observe: true },
+      delegation: { observe: true, watchTranscript: watchChildTranscript, resumeMemberSession: true },
     }),
   };
 }

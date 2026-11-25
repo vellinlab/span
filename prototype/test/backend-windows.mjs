@@ -99,7 +99,7 @@ stream_max_retries = 0
 
   shared = start(codex, ['app-server', '--listen', 'unix://']);
   await ready(socket, shared);
-  await check('shared', { ...env, SPAN_CODEX_PATH: codex }, '--skills');
+  await check('shared', { ...env, SPAN_CODEX_PATH: codex }, '--skills', '--agents');
   assert.equal(shared.child.exitCode, null, 'Closing Span must keep the shared backend alive.');
   await stop(shared);
   shared = undefined;

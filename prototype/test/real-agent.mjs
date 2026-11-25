@@ -12,6 +12,7 @@ const imageTest = args.includes('--image');
 const diffTest = args.includes('--diff');
 const reviewTest = args.includes('--review');
 const skillsTest = args.includes('--skills');
+const agentTest = args.includes('--agents');
 const expected = imageTest ? 'Span preview sent two images.' : 'Span preview is connected.';
 const reviewResult = 'The modified heading no longer matches the documented section.';
 const imageName = '会话验收.png';
@@ -22,6 +23,23 @@ const open = () => electron.launch({
   args: ['--no-sandbox', '--disable-gpu'],
   env: { ...process.env, SPAN_PREVIEW_PROFILE: profile },
 });
+async function checkChildTranscript(page) {
+  const composer = page.getByRole('textbox', { name: '消息' });
+  await composer.fill('/agents');
+  await composer.press('Enter');
+  const roster = page.getByRole('region', { name: '代理与团队', exact: true });
+  const member = roster.getByRole('button', { name: /^查看 .+ 的会话记录$/ });
+  await member.press('Enter');
+  const trace = page.getByTestId('subagent-transcript');
+  await trace.getByText('The child verified the keyboard navigation marker.', { exact: true }).waitFor();
+  assert.equal(await page.getByTestId('transcript').locator('.agent-reply').getByText(
+    'The child verified the keyboard navigation marker.', { exact: true }).count(), 0);
+  await page.keyboard.press('Escape');
+  await member.waitFor();
+  assert.ok(await member.evaluate(element => element === document.activeElement));
+  await page.keyboard.press('Escape');
+  await roster.waitFor({ state: 'detached' });
+}
 let app;
 try {
   app = await open();
@@ -98,6 +116,15 @@ try {
   assert.equal(await alert.count(), 0);
   const title = `Span CI Search ${process.pid}`;
   const composer = page.getByRole('textbox', { name: '消息' });
+  if (agentTest) {
+    await composer.fill('Check the preview child conversation.');
+    await composer.press('Enter');
+    const parentReply = page.getByTestId('transcript').getByText('The parent received the delegated result.', { exact: true });
+    await parentReply.or(alert).first().waitFor();
+    if (await alert.isVisible()) throw new Error(await alert.innerText());
+    await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+    await checkChildTranscript(page);
+  }
   if (diffTest) {
     await composer.fill('/diff');
     await composer.press('Enter');
@@ -148,6 +175,10 @@ try {
     .filter({ hasText: ssh ?? '本机' }).waitFor({ timeout: 30_000 });
   await resumed.locator('.breadcrumb strong').getByText(title, { exact: true }).waitFor();
   await resumed.getByTestId('transcript').getByText(expected, { exact: true }).waitFor();
+  if (agentTest) {
+    await checkChildTranscript(resumed);
+    console.log('Verified the real Codex App Server delegates and reads the saved child from the parent, including after restart.');
+  }
   if (reviewTest) {
     const transcript = resumed.getByTestId('transcript');
     const finding = transcript.locator('.agent-reply li').filter({ hasText: '[P2] Keep the documented heading' });

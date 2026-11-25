@@ -200,6 +200,8 @@ export interface AgentAdapter {
     /** Complete lists for the session. Events received during a request take precedence. */
     members?(ref: SessionRef): Promise<AgentMember[]>;
     watchTranscript?(ref: SessionRef, memberId: string, listener: (view: AgentTranscript) => void): () => void;
+    /** The member's conversation can also be opened for direct interaction. */
+    resumeMemberSession?: boolean;
     teams?(ref: SessionRef): Promise<Team[]>;
     /** Optional refresh cadence while a visible roster is observing an active team or turn. */
     teamRefreshMs?: number;

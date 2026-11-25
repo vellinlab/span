@@ -14,7 +14,7 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 
 | 后端 | 适配方式与能力 |
 | --- | --- |
-| Codex | 已注册。本机或 SSH 接入 App Server。使用原生目标、用量、规划、审批、模型和速度档位。时间线显示子代理活动，成员可打开对应会话。 |
+| Codex | 已注册。本机或 SSH 接入 App Server。使用原生目标、用量、规划、审批、模型和速度档位。可以在父会话查看已保存的子代理记录，也可以打开子会话继续交流。 |
 | Clue | 已注册。本机或 SSH 使用现有的 `clue app-server` 兼容路径。使用基础会话和回合操作。 |
 | Claude Code | 本机和 SSH 通过 Claude Agent SDK 的 ACP 适配器。使用 Claude 原生会话，接收流式推理、回复、工具活动、审批和用量。支持子代理会话记录和审批归属。适配器公开 Goal 时，可以设置、替换和清除目标。 |
 | Pi Agent | 已注册。本机和 SSH 启动 `pi --mode rpc`，使用 Pi 自己保存的会话。支持模型和思考级别、`steer`、`follow_up`、会话统计、扩展命令及交互。 |
