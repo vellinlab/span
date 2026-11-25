@@ -541,9 +541,8 @@ export const Transcript = memo(function Transcript({
 
   useLayoutEffect(() => {
     const element = scroll.current;
-    const window = element.ownerDocument.defaultView;
     const columnWidth = () => element.firstElementChild?.getBoundingClientRect().width;
-    viewportSize.current = { height: element.clientHeight, windowWidth: window.innerWidth };
+    viewportSize.current = { height: element.clientHeight, width: element.clientWidth };
     let readingWidth = columnWidth();
     let anchor;
     const rememberPosition = () => {
@@ -553,10 +552,9 @@ export const Transcript = memo(function Transcript({
     const observer = new ResizeObserver(() => {
       const previous = viewportSize.current;
       const height = element.clientHeight;
-      const windowWidth = window.innerWidth;
-      viewportSize.current = { height, windowWidth };
+      viewportSize.current = { height, width: element.clientWidth };
       const width = columnWidth();
-      const rewrap = windowWidth !== previous.windowWidth && width !== readingWidth;
+      const rewrap = width !== readingWidth;
       readingWidth = width;
       if (following.current && virtual.options.count && (height !== previous.height || rewrap)) virtual.scrollToEnd();
       if (!rewrap || following.current || latest.current?.restore || !anchor ||
@@ -581,9 +579,9 @@ export const Transcript = memo(function Transcript({
   function onScroll(event) {
     if (restore) return;
     const element = scroll.current;
-    const height = element.clientHeight;
     // A resize can scroll the list before its observer has restored the viewport.
-    if (height !== viewportSize.current?.height || element.ownerDocument.defaultView.innerWidth !== viewportSize.current.windowWidth) return;
+    const size = viewportSize.current;
+    if (element.clientHeight !== size?.height || element.clientWidth !== size.width) return;
     const atBottom = transcriptIsAtEnd(element);
     following.current = atBottom;
     if (atBottom && inspectedCard) setInspectedCard(null);

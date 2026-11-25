@@ -169,6 +169,36 @@ async function checkWindowReflow(app, page, transcript, latest, tailInView) {
     const viewport = element.closest('.timeline').getBoundingClientRect();
     return text.top >= viewport.top && text.bottom <= viewport.bottom;
   }), 'Resizing the window while following should keep the final text visible.');
+
+  await setWidth(1120);
+  await placeInTimeline(passage, 8);
+  await latest.waitFor();
+  const beforePreview = await measure();
+  await page.getByRole('button', { name: '文件', exact: true }).click();
+  const openPreview = () => page.getByRole('button', { name: 'README.md', exact: true }).click();
+  const preview = page.getByRole('complementary', { name: '文件预览' });
+  const closePreview = () => preview.getByRole('button', { name: '关闭预览' }).click();
+  await openPreview();
+  await preview.getByText('Span 工作台预览', { exact: true }).waitFor();
+  await settleFrame(page);
+  const besidePreview = await measure();
+  assert.ok(besidePreview.width < beforePreview.width && besidePreview.height > beforePreview.height,
+    'The split preview must cause the conversation text to wrap.');
+  assert.ok(Math.abs(besidePreview.top - beforePreview.top) <= 2,
+    `The paragraph moved beside the file preview: ${beforePreview.top} -> ${besidePreview.top}.`);
+  console.log(`Split preview reflow at a fixed window width: ${beforePreview.width} → ${besidePreview.width} CSS px.`);
+  if (screenshot) await page.screenshot({ path: `${screenshot}-split-preview-reading.png` });
+  await closePreview();
+  await settleFrame(page);
+  assert.ok(Math.abs((await measure()).top - beforePreview.top) <= 2, 'Closing the preview must restore the reading width without a jump.');
+  await latest.click();
+  await tailInView();
+  await openPreview();
+  await preview.waitFor();
+  await tailInView();
+  await closePreview();
+  await tailInView();
+  await page.getByRole('button', { name: '会话', exact: true }).click();
   return { reflow, centered };
 }
 
