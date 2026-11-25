@@ -1085,6 +1085,10 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
         switching = packet;
         emit({ type: 'extension_ui_request', method: 'confirm', id: 'switch', title: '打开已保存会话' });
       } else if (packet.type === 'extension_ui_response') {
+        if (packet.id === 'open-prompt' || packet.id === 'released-prompt') {
+          assert.equal(packet.cancelled, true);
+          return;
+        }
         assert.equal(packet.id, 'switch');
         assert.equal(packet.confirmed, true);
         branch = true;
@@ -1244,6 +1248,21 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.ok(sent.filter(packet => !['extension_ui_response', 'span_pi_release_team_view'].includes(packet.type))
     .every(packet => typeof packet.id === 'string'));
 
+  await agent.sessions.release({ ...ref, location: { kind: 'ssh', host: 'elsewhere' } });
+  assert.equal((await agent.usage(ref)).tokens.total, 17);
+  emit({ type: 'extension_ui_request', method: 'confirm', id: 'open-prompt' });
+  assert.equal(events.at(-1).request.id, 'open-prompt');
+  await agent.sessions.release(ref);
+  assert.equal(events.at(-1).id, 'open-prompt');
+  assert.deepEqual(sent.at(-1), { type: 'extension_ui_response', id: 'open-prompt', cancelled: true });
+  const releasedAt = events.length;
+  emit({ type: 'agent_start' });
+  emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'late answer' } });
+  emit({ type: 'extension_ui_request', method: 'confirm', id: 'released-prompt' });
+  assert.equal(events.length, releasedAt);
+  assert.deepEqual(sent.at(-1), { type: 'extension_ui_response', id: 'released-prompt', cancelled: true });
+  await assert.rejects(agent.sessions.history(ref, { limit: 1 }), /会话已切换/);
+
   const reopening = agent.sessions.resume(ref, 1);
   await Promise.resolve();
   await agent.interactions.respond('switch', { choice: 'yes' });
@@ -1251,7 +1270,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.ok(history.cursor);
   receive({ event: 'agent-closed', generation: source, data: 'Pi connection closed' });
   assert.equal(events.at(-1).kind, 'disconnected');
-  assert.deepEqual(await agent.sessions.history(ref, { cursor: history.cursor, limit: 1 }), { items: [], cursor: null });
+  await assert.rejects(agent.sessions.history(ref, { cursor: history.cursor, limit: 1 }), /会话已切换/);
 });
 
 ['opencode', 'kilo'].forEach(backend => test(`${backend} ACP scopes history, prompts and approvals to the active session`, async t => {

@@ -24,13 +24,13 @@ export function createPi({ generation, cwd, location, onEvent }) {
   const pending = [];
   const dialogs = new Map();
   const commands = [];
+  const tools = new Map();
   let current;
   let snapshot;
   let run;
   let turnCount = 0;
   let messageIndex = 0;
-  let tools = new Map();
-  let finalReply;
+  let finalStatus;
   let hasUser = false;
   let models = [];
   let state;
@@ -45,19 +45,34 @@ export function createPi({ generation, cwd, location, onEvent }) {
   const ref = id => ({ backend: 'pi', location, id });
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }),
     error => {
-      closeTeamTrace?.();
-      closeDialogs();
-      snapshot = null;
+      clearSessionView();
       onEvent({ kind: 'disconnected', error });
     }, wire);
   const request = rpc.request;
 
-  function closeDialogs() {
+  function closeDialogs(cancel = false) {
     for (const [id, dialog] of dialogs) {
       clearTimeout(dialog.timer);
+      if (cancel) rpc.send({ type: 'extension_ui_response', id, cancelled: true }).catch(() => {});
       resolveDialog(id, dialog);
     }
     dialogs.clear();
+  }
+
+  function clearTurnOutput() {
+    tools.clear();
+    finalStatus = undefined;
+  }
+
+  function clearSessionView(cancelDialogs = false) {
+    closeTeamTrace?.();
+    closeDialogs(cancelDialogs);
+    current = undefined;
+    snapshot = null;
+    run = undefined;
+    pending.length = 0;
+    teamMembers.clear();
+    clearTurnOutput();
   }
 
   function resolveDialog(id, dialog) {
@@ -80,8 +95,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
   function beginTurn(announce = true) {
     const id = piTurnId(turnCount++);
     messageIndex = 0;
-    tools = new Map();
-    finalReply = undefined;
+    clearTurnOutput();
     hasUser = false;
     const turn = { id, status: 'running' };
     if (announce) setRun(turn);
@@ -98,7 +112,9 @@ export function createPi({ generation, cwd, location, onEvent }) {
     if (!run) return;
     closeDialogs();
     pending.splice(0).forEach(input => inputStatus(input, 'cancelled'));
-    setRun({ id: run.id, ...(aborted ? { status: 'cancelled' } : piRunStatus(finalReply)) });
+    const status = aborted ? { status: 'cancelled' } : finalStatus ?? piRunStatus();
+    clearTurnOutput();
+    setRun({ id: run.id, ...status });
     updateUsage();
   }
 
@@ -176,7 +192,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
         if (index >= 0) [submitted] = pending.splice(index, 1);
         inputStatus(submitted, 'delivered');
       }
-      if (message.role === 'assistant') finalReply = message;
+      if (message.role === 'assistant') finalStatus = piRunStatus(message);
       for (const value of piMessage(run.id, messageIndex++, message, tools, submitted?.clientId)) {
         item(value, value.status !== 'running');
       }
@@ -222,7 +238,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
     try {
       const result = await request(type, params);
       if (result.cancelled) throw new Error('Pi 扩展取消了会话切换。');
-      closeTeamTrace?.();
+      clearSessionView();
     } finally {
       replacingSession = false;
       closeDialogs();
@@ -235,10 +251,6 @@ export function createPi({ generation, cwd, location, onEvent }) {
     if (typeof id !== 'string' || !id) throw new Error('Pi 未提供会话 ID。');
     if (state.sessionFile) searchPaths.set(id, state.sessionFile);
     current = { ref: ref(id), title: state.sessionName, cwd: sessionCwd };
-    teamMembers.clear();
-    snapshot = null;
-    run = undefined;
-    pending.length = 0;
     turnCount = 0;
     const result = { session: current, options: { model: modelId(state.model), effort: state.thinkingLevel } };
     if (limit !== undefined) {
@@ -372,9 +384,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
         .map(command => ({ id: command.name, label: command.name, description: command.description })));
     },
     close() {
-      closeTeamTrace?.();
-      closeDialogs();
-      snapshot = null;
+      clearSessionView();
       rpc.close();
       window.span.request('agent.close', { generation }).catch(() => {});
     },
@@ -397,10 +407,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
         return historyPage(limit, cursor);
       },
       async release(session) {
-        if (current?.ref.id === session.id) {
-          closeDialogs();
-          snapshot = null;
-        }
+        if (current && sessionKey(current.ref) === sessionKey(session)) clearSessionView(true);
       },
       async rename(session, title) {
         requireSession(session);
