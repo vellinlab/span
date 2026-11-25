@@ -27,23 +27,26 @@ const settleFrame = page => page.evaluate(async () => {
   await new Promise(requestAnimationFrame);
 });
 
-function placeInTimeline(locator, top) {
-  return locator.evaluate(async (element, top) => {
+function placeInTimeline(locator, inset, edge = 'top') {
+  return locator.evaluate(async (element, { inset, edge }) => {
     const timeline = element.closest('.timeline');
     // Nearby rows can mount and replace their estimated heights after the first scroll.
     let stableFrames = 0;
     for (let frame = 0; frame < 30; frame++) {
-      const offset = element.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
-      if (Math.abs(offset - top) <= 2) {
+      const row = element.getBoundingClientRect();
+      const viewport = timeline.getBoundingClientRect();
+      const offset = edge === 'bottom' ? viewport.bottom - row.bottom : row.top - viewport.top;
+      const delta = offset - inset;
+      if (Math.abs(delta) <= 2) {
         if (++stableFrames === 3) return;
       } else {
         stableFrames = 0;
-        timeline.scrollTop += offset - top;
+        timeline.scrollTop += edge === 'bottom' ? -delta : delta;
       }
       await new Promise(requestAnimationFrame);
     }
-    throw new Error('Could not settle the initial reading position.');
-  }, top);
+    throw new Error(`Could not position the row ${inset}px from the ${edge} of the timeline.`);
+  }, { inset, edge });
 }
 
 async function checkSidebarReflow(app, page, transcript, latest, tailInView) {
@@ -591,14 +594,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-archive.png` });
       await header.press('Enter');
       await startOfSummary.waitFor({ state: 'detached' });
-      await header.evaluate(element => {
-        const viewport = element.closest('.timeline');
-        viewport.scrollTop += element.getBoundingClientRect().bottom - viewport.getBoundingClientRect().bottom + 3;
-      });
-      await settleFrame(page);
+      await placeInTimeline(header, 3, 'bottom');
       const edge = await header.evaluate(element =>
         element.closest('.timeline').getBoundingClientRect().bottom - element.getBoundingClientRect().bottom);
-      assert.ok(edge >= 0 && edge <= 5, 'The closed title should be at the lower edge of the viewport.');
+      assert.ok(edge >= 0 && edge <= 5, `The closed title is ${edge}px from the lower edge of the viewport.`);
       const atEdge = await header.boundingBox();
       await header.press('Enter');
       await startOfSummary.waitFor();
