@@ -96,7 +96,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     cancelAnimationFrame(frame.current);
     frame.current = 0;
     queue.current = { events: [], characters: 0 };
-    updateRows(() => []);
+    // A covered view may defer streaming updates, but it must release the previous session.
+    const empty = [];
+    bufferedRows.current = empty;
+    publishRows(empty);
     setCursor(null);
     setHistoryPages(0);
     setSession(null);
@@ -147,6 +150,11 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     if (event.kind === 'disconnected') {
       if (queue.current.events.length) updateRows();
       changeRun(null);
+      if (pendingPage.current) {
+        pendingPage.current = null;
+        setLoading(false);
+      }
+      setCursor(null);
       rosterRefresh.current = null;
       usageRefresh.current = null;
       setUsageRefreshing(false);
@@ -391,18 +399,17 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     const client = agent.current;
     const ref = active.current?.ref;
     if (!cursor || !client || !ref || pendingPage.current) return;
-    const scope = layer.current;
     const request = client.sessions.history(ref, { limit: PAGE_SIZE, cursor });
     pendingPage.current = request;
     setLoading(true);
     try {
       const history = await request;
-      if (scope !== layer.current) return;
+      if (pendingPage.current !== request) return;
       updateRows(previous => mergeHistory(previous, historyRows(history.items)));
       setCursor(history.cursor);
       setHistoryPages(previous => previous + 1);
     } catch (error) {
-      if (scope === layer.current) report(error);
+      if (pendingPage.current === request) report(error);
     } finally {
       if (pendingPage.current === request) {
         pendingPage.current = null;

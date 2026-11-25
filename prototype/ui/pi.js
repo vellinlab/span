@@ -47,6 +47,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
     error => {
       closeTeamTrace?.();
       closeDialogs();
+      snapshot = null;
       onEvent({ kind: 'disconnected', error });
     }, wire);
   const request = rpc.request;
@@ -373,6 +374,7 @@ export function createPi({ generation, cwd, location, onEvent }) {
     close() {
       closeTeamTrace?.();
       closeDialogs();
+      snapshot = null;
       rpc.close();
       window.span.request('agent.close', { generation }).catch(() => {});
     },

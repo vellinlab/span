@@ -308,8 +308,37 @@ async function checkPreviewSwitch(binary) {
     await detail.press('Escape');
     await panel.waitFor({ state: 'detached' });
     assert.ok(await composer.evaluate(element => element === document.activeElement));
+
+    await file.press('Enter');
+    await content.waitFor();
+    assert.ok(await page.locator('main[inert]').count());
+    const readReplacement = await transcript.evaluateHandle(previous => {
+      let previousRows = 0;
+      const collect = records => {
+        for (const { target, oldValue } of records) {
+          if (target !== previous && target.matches('[data-testid="transcript"]')) {
+            previousRows = Math.max(previousRows, Number(oldValue));
+          }
+        }
+      };
+      const observer = new MutationObserver(collect);
+      observer.observe(previous.parentElement, {
+        subtree: true, attributes: true, attributeFilter: ['data-items'], attributeOldValue: true,
+      });
+      return () => {
+        collect(observer.takeRecords());
+        observer.disconnect();
+        return { previousRows, previousMounted: previous.isConnected };
+      };
+    });
+    await page.getByRole('button', { name: /^新会话/ }).click();
+    await page.getByRole('heading', { name: '开始新会话' }).waitFor();
+    const replacement = await readReplacement.evaluate(read => read());
+    await readReplacement.dispose();
+    assert.deepEqual(replacement, { previousRows: 0, previousMounted: false });
     return { fileTop, transcriptTop, detailTop,
-      reasoningObservers: { opened: openedObservers, closed: closedObservers, reopened: reopenedObservers, archived: archivedObservers } };
+      reasoningObservers: { opened: openedObservers, closed: closedObservers, reopened: reopenedObservers, archived: archivedObservers },
+      replacement };
   } finally {
     await app?.close();
     if (filename) await rm(filename, { force: true });

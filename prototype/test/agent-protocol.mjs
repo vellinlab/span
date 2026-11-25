@@ -1225,6 +1225,15 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.equal(events.filter(event => event.session).every(event => sessionKey(event.session) === sessionKey(ref)), true);
   assert.ok(sent.filter(packet => !['extension_ui_response', 'span_pi_release_team_view'].includes(packet.type))
     .every(packet => typeof packet.id === 'string'));
+
+  const reopening = agent.sessions.resume(ref, 1);
+  await Promise.resolve();
+  await agent.interactions.respond('switch', { choice: 'yes' });
+  const { history } = await reopening;
+  assert.ok(history.cursor);
+  receive({ event: 'agent-closed', generation: source, data: 'Pi connection closed' });
+  assert.equal(events.at(-1).kind, 'disconnected');
+  assert.deepEqual(await agent.sessions.history(ref, { cursor: history.cursor, limit: 1 }), { items: [], cursor: null });
 });
 
 ['opencode', 'kilo'].forEach(backend => test(`${backend} ACP scopes history, prompts and approvals to the active session`, async t => {
