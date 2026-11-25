@@ -212,7 +212,7 @@ function quotaWindow(minutes) {
 function tokenStats(tokens) {
   return [
     ['总计', tokens?.total], ['输入', tokens?.input], ['输出', tokens?.output],
-    ['缓存输入', tokens?.cached], ['推理输出', tokens?.reasoning],
+    ['缓存输入', tokens?.cached], ['缓存写入', tokens?.cacheWrite], ['推理输出', tokens?.reasoning],
   ].filter(([, value]) => Number.isFinite(value)).map(([label, value]) => [label, number.format(value)]);
 }
 

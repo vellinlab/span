@@ -49,7 +49,8 @@ const gateway = createServer(async (request, response) => {
     for await (const chunk of request) data += chunk;
     const body = JSON.parse(data);
     const message = { id: `msg_span_${++messages}`, type: 'message', role: 'assistant', content: [],
-      model: body.model, stop_reason: null, stop_sequence: null, usage: { input_tokens: 32, output_tokens: 0 } };
+      model: body.model, stop_reason: null, stop_sequence: null,
+      usage: { input_tokens: 32, output_tokens: 0, cache_read_input_tokens: 7, cache_creation_input_tokens: 3 } };
     if (!body.stream) {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ ...message, stop_reason: 'end_turn',
@@ -187,7 +188,9 @@ try {
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await send('/usage');
   const usage = page.getByRole('region', { name: '用量', exact: true });
-  await usage.getByRole('region', { name: '最近一次用量' }).getByText('总计', { exact: true }).waitFor();
+  const recentUsage = usage.getByRole('region', { name: '最近一次用量' });
+  await recentUsage.getByText('总计', { exact: true }).waitFor();
+  await recentUsage.getByText('缓存写入', { exact: true }).waitFor();
   await usage.getByRole('button', { name: '关闭面板' }).press('Escape');
   await app.close();
 

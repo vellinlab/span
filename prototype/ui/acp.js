@@ -136,19 +136,29 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   }
 
   function updateUsage(state, update) {
-    const tokens = { ...state.usage.tokens };
-    if (Number.isFinite(update.used)) tokens.contextUsed = update.used;
-    if (Number.isFinite(update.size)) tokens.contextLimit = update.size;
-    state.usage = { ...state.usage, tokens, ...(update.cost && { cost: update.cost }) };
-    notify(state.id, { kind: 'usage', usage: state.usage });
+    const previous = state.usage;
+    const usedChanged = Number.isFinite(update.used) && update.used !== previous.tokens?.contextUsed;
+    const limitChanged = Number.isFinite(update.size) && update.size !== previous.tokens?.contextLimit;
+    const cost = update.cost && (update.cost.amount !== previous.cost?.amount || update.cost.currency !== previous.cost?.currency)
+      ? update.cost : undefined;
+    if (!usedChanged && !limitChanged && !cost) return;
+    const usage = {
+      ...((usedChanged || limitChanged) && { tokens: { ...previous.tokens,
+        ...(usedChanged && { contextUsed: update.used }), ...(limitChanged && { contextLimit: update.size }) } }),
+      ...(cost && { cost }),
+    };
+    state.usage = { ...previous, ...usage };
+    notify(state.id, { kind: 'usage', usage });
   }
 
   function promptUsage(state, report) {
-    const { totalTokens, inputTokens, outputTokens, cachedReadTokens, thoughtTokens } = report;
-    state.usage = { ...state.usage, recentTokens: {
+    const { totalTokens, inputTokens, outputTokens, cachedReadTokens, cachedWriteTokens, thoughtTokens } = report;
+    const recentTokens = {
       total: totalTokens, input: inputTokens, output: outputTokens, cached: cachedReadTokens, reasoning: thoughtTokens,
-    } };
-    notify(state.id, { kind: 'usage', usage: state.usage });
+      ...(cachedWriteTokens > 0 && { cacheWrite: cachedWriteTokens }),
+    };
+    state.usage = { ...state.usage, recentTokens };
+    notify(state.id, { kind: 'usage', usage: { recentTokens } });
   }
 
   function updateGoalSnapshot(state, snapshot) {

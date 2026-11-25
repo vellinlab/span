@@ -1036,13 +1036,21 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(events.findLast(event => event.kind === 'run').run.status, 'cancelled');
   await agent.turns.start(session, [{ kind: 'text', text: 'Second request' }], {}, 'second');
-  update('new', { sessionUpdate: 'usage_update', used: 900, size: 32768, cost: { amount: 0.001, currency: 'USD' } });
-  packet({ id: ongoing.id, result: { stopReason: 'end_turn', usage: { totalTokens: 40, inputTokens: 35, outputTokens: 5 } } });
+  const report = { sessionUpdate: 'usage_update', used: 900, size: 32768, cost: { amount: 0.001, currency: 'USD' } };
+  update('new', report);
+  const count = events.length;
+  update('new', { ...report, cost: { ...report.cost } });
+  assert.equal(events.length, count);
+  packet({ id: ongoing.id, result: { stopReason: 'end_turn', usage: {
+    totalTokens: 40, inputTokens: 30, cachedReadTokens: 2, cachedWriteTokens: 3, outputTokens: 5,
+  } } });
   await new Promise(resolve => setImmediate(resolve));
   const usage = await agent.usage(session);
   assert.deepEqual(usage.tokens, { contextUsed: 900, contextLimit: 32768 });
   assert.equal(usage.recentTokens.total, 40);
+  assert.equal(usage.recentTokens.cacheWrite, 3);
   assert.equal(usage.cost.amount, 0.001);
+  assert.deepEqual(events.findLast(event => event.kind === 'usage').usage, { recentTokens: usage.recentTokens });
   if (backend === 'kilo') {
     const goal = await agent.goal.update(session, { kind: 'set', objective: 'Review the state' }, { mode: 'plan' });
     assert.equal(goal.status, 'active');

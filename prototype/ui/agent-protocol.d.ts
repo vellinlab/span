@@ -34,7 +34,7 @@ export type GoalAction =
   | { kind: 'set'; objective: string; budget?: number }
   | { kind: 'edit'; objective: string; budget: number | null }
   | { kind: 'pause' | 'resume' | 'clear' };
-type TokenCounts = { total?: number; input?: number; output?: number; cached?: number; reasoning?: number };
+type TokenCounts = { total?: number; input?: number; output?: number; cached?: number; cacheWrite?: number; reasoning?: number };
 /** Each provided field replaces its group. Omitted fields leave their groups unchanged. */
 export type Usage = {
   tokens?: TokenCounts & { contextUsed?: number; contextLimit?: number };
