@@ -40,7 +40,7 @@ function observeTailInViewport(root, tail, setNear) {
   };
 }
 
-export function StreamingMarkdown({ text, streaming, following, scroll }) {
+export const StreamingMarkdown = memo(function StreamingMarkdown({ text, streaming, following, scroll }) {
   const tail = useRef(null);
   const committed = useRef({ text, time: -Infinity });
   const wasVisible = useRef(true);
@@ -77,4 +77,4 @@ export function StreamingMarkdown({ text, streaming, following, scroll }) {
     <Markdown text={displayed} streaming={streaming} />
     {observeTail && <span aria-hidden="true" className="message-tail" ref={tail} />}
   </>;
-}
+});
