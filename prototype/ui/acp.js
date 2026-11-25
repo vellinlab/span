@@ -15,7 +15,7 @@ const configChoices = item => (item?.options ?? []).flatMap(option => option.opt
 const configCategories = { model: 'model', effort: 'thought_level', mode: 'mode' };
 const pageSize = 40;
 
-export function createOpenCode({ generation, cwd, location, onEvent }) {
+export function createAcp({ id: backend, label, childSessionKey }, { generation, cwd, location, onEvent }) {
   const sessions = new Map();
   const dialogs = new Map();
   const commands = [];
@@ -26,7 +26,8 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
   let active;
   let loading;
 
-  const ref = id => ({ backend: 'opencode', location, id });
+  const ref = id => ({ backend, location, id });
+  const childSession = tool => childSessionKey ? tool._meta?.[childSessionKey] : undefined;
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }), error => {
     active = loading = undefined;
@@ -58,7 +59,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
       cursor = page.cursor;
     }
     const entry = sessions.get(id);
-    if (!entry) throw new Error('找不到这个 OpenCode 会话或它的工作目录。');
+    if (!entry) throw new Error(`找不到这个 ${label} 会话或它的工作目录。`);
     return entry;
   }
 
@@ -118,9 +119,9 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
   }
 
   function requireActive(session) {
-    if (!session || session.id !== active?.id || session.backend !== 'opencode'
+    if (!session || session.id !== active?.id || session.backend !== backend
       || session.location.kind !== location.kind || session.location.host !== location.host) {
-      throw new Error('OpenCode 会话已切换，请在当前会话重试。');
+      throw new Error(`${label} 会话已切换，请在当前会话重试。`);
     }
     return active;
   }
@@ -182,7 +183,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
   function permission(id, params) {
     const state = active;
     const tool = params.toolCall ?? {};
-    const parent = tool._meta?.['opencode/child-session']?.parentID;
+    const parent = childSession(tool)?.parentID;
     const choices = (params.options ?? []).flatMap(option => {
       const normalized = approvalOptions.get(option.kind);
       return normalized && typeof option.optionId === 'string' ? [{ id: option.optionId, ...normalized }] : [];
@@ -195,7 +196,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     dialogs.set(key, { id, state, choices });
     const operation = acpOperation(tool, state.entry.cwd);
     const title = operation.command && tool.title?.trim() === operation.command.trim()
-      ? '执行命令' : tool.title || 'OpenCode 请求权限';
+      ? '执行命令' : tool.title || `${label} 请求权限`;
     notify(state.id, { kind: 'interaction', request: {
       kind: 'approval', id: key, title,
       choices, operation, cancel: true, turnId: state.turn.run.id,
@@ -244,7 +245,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     const blocks = text ? [{ type: 'text', text }] : [];
     for (const image of images) {
       if (!local || !capabilities?.promptCapabilities?.image || !image.path) {
-        throw new Error('当前 OpenCode 会话无法发送图片。');
+        throw new Error(`当前 ${label} 会话无法发送图片。`);
       }
       const content = await window.span.previewImage(image.path);
       if (!content?.data) throw new Error('无法读取图片附件。');
@@ -259,7 +260,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
   }
 
   async function replay(entry, limit) {
-    const state = { id: entry.sessionId, usage: {}, replay: acpReplay() };
+    const state = { id: entry.sessionId, usage: {}, replay: acpReplay(childSession) };
     loading = state;
     try {
       const response = await request('session/load', sessionParams(entry));
@@ -282,12 +283,12 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     commands, modes, localFileReferences: local, sessionModels: true,
     get localImageInputs() { return Boolean(local && capabilities?.promptCapabilities?.image); },
     async open() {
-      await window.span.request('agent.start', { generation, cwd, backend: 'opencode', ssh: location.host });
+      await window.span.request('agent.start', { generation, cwd, backend, ssh: location.host });
       await rpc.ready();
       const initialized = await request('initialize', { protocolVersion: 1, clientCapabilities: {},
         clientInfo: { name: 'span', version: '0.1.0' } });
-      if (initialized.protocolVersion !== 1) throw new Error('当前 OpenCode 使用了不兼容的 ACP 版本。');
-      if (!workspace) throw new Error('无法确认 OpenCode 的工作目录。');
+      if (initialized.protocolVersion !== 1) throw new Error(`当前 ${label} 使用了不兼容的 ACP 版本。`);
+      if (!workspace) throw new Error(`无法确认 ${label} 的工作目录。`);
       capabilities = initialized.agentCapabilities;
       if (capabilities?.sessionCapabilities?.fork && capabilities.loadSession) {
         adapter.sessions.fork = async session => {
@@ -321,7 +322,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
         }
       },
       async resume(session, limit) {
-        if (!capabilities?.loadSession) throw new Error('当前 OpenCode 不支持恢复会话。');
+        if (!capabilities?.loadSession) throw new Error(`当前 ${label} 不支持恢复会话。`);
         return replay(await lookup(session.id), limit);
       },
       async history(session, { cursor, limit = pageSize }) {
@@ -338,11 +339,11 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
     turns: {
       async start(session, input, options = {}, clientId) {
         const state = requireActive(session);
-        if (state.turn) throw new Error('请等当前 OpenCode 回合结束。');
+        if (state.turn) throw new Error(`请等当前 ${label} 回合结束。`);
         const prompt = await promptInput(input);
         await configure(state, options);
         const run = { id: acpTurnId(state.nextTurn++), status: 'running' };
-        const turn = { run, projection: acpTurn(run.id, event => notify(state.id, event)) };
+        const turn = { run, projection: acpTurn(run.id, event => notify(state.id, event), childSession) };
         state.turn = turn;
         const { sent, response } = rpc.beginRequest('session/prompt', { sessionId: state.id, prompt }, null);
         const dispatched = sent.then(() => {
@@ -356,8 +357,8 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
           if (state !== active || state.turn !== turn) return;
           if (reply.usage) promptUsage(state, reply.usage);
           if (reply.stopReason === 'cancelled') finish(state, turn, 'cancelled');
-          else if (reply.stopReason === 'max_tokens') finish(state, turn, 'failed', 'OpenCode 达到本轮输出上限。');
-          else if (reply.stopReason === 'refusal') finish(state, turn, 'failed', 'OpenCode 拒绝了本轮请求。');
+          else if (reply.stopReason === 'max_tokens') finish(state, turn, 'failed', `${label} 达到本轮输出上限。`);
+          else if (reply.stopReason === 'refusal') finish(state, turn, 'failed', `${label} 拒绝了本轮请求。`);
           else finish(state, turn, 'completed');
         }, error => finish(state, turn, 'failed', error.message)), () => {});
         // Observe response failures even if transport dispatch itself rejects.
@@ -387,7 +388,7 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
         const dialog = dialogs.get(id);
         if (!dialog || dialog.state !== active) return;
         if (!reply.cancelled && !dialog.choices.some(option => option.id === reply.choice)) {
-          throw new Error('OpenCode 未提供这个审批选项。');
+          throw new Error(`${label} 未提供这个审批选项。`);
         }
         await result(dialog.id, { outcome: reply.cancelled ? { outcome: 'cancelled' }
           : { outcome: 'selected', optionId: reply.choice } });

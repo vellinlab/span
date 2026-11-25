@@ -198,9 +198,14 @@ jobs:
         run: node prototype/test/backend-windows.mjs "$PWD/verified-preview/preview/span-preview.exe"
       - name: Verify native OpenCode on Windows
         run: |
-          bash prototype/test/install-opencode.sh windows "$PWD/opencode-test"
-          node prototype/test/real-opencode.mjs "$PWD/verified-preview/preview/span-preview.exe" \
+          bash prototype/test/install-acp.sh opencode windows "$PWD/opencode-test"
+          node prototype/test/real-acp.mjs opencode "$PWD/verified-preview/preview/span-preview.exe" \
             "$PWD/opencode-test/opencode.exe" "$PWD/windows-workbench-opencode.png"
+      - name: Verify native Kilo on Windows
+        run: |
+          bash prototype/test/install-acp.sh kilo windows "$PWD/kilo-test"
+          node prototype/test/real-acp.mjs kilo "$PWD/verified-preview/preview/span-preview.exe" \
+            "$PWD/kilo-test/kilo.exe" "$PWD/windows-workbench-kilo.png"
       - name: Prepare the baseline renderers for terminal output and preview
         run: |
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE"; do

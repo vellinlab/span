@@ -77,11 +77,13 @@ for _ in {1..30}; do
 done
 
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 SPAN_TEST_SSH_ALIAS=span-ci-ssh
-bash prototype/test/install-opencode.sh linux /artifacts/opencode-test
-/artifacts/node prototype/test/real-opencode.mjs /artifacts/linux/span-preview \
-    /artifacts/opencode-test/opencode /artifacts/el8-opencode.png
-/artifacts/node prototype/test/real-opencode.mjs /artifacts/linux/span-preview \
-    /artifacts/opencode-test/opencode /artifacts/el8-opencode-ssh.png "$SPAN_TEST_SSH_ALIAS"
+for backend in opencode kilo; do
+    bash prototype/test/install-acp.sh "$backend" linux "/artifacts/$backend-test"
+    /artifacts/node prototype/test/real-acp.mjs "$backend" /artifacts/linux/span-preview \
+        "/artifacts/$backend-test/$backend" "/artifacts/el8-$backend.png"
+    /artifacts/node prototype/test/real-acp.mjs "$backend" /artifacts/linux/span-preview \
+        "/artifacts/$backend-test/$backend" "/artifacts/el8-$backend-ssh.png" "$SPAN_TEST_SSH_ALIAS"
+done
 pressure_cpu="$(python3.9 -c 'import os; print(min(os.sched_getaffinity(0)))')"
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/startup-loading.mjs \
     /artifacts/linux/span-preview /artifacts/startup-loading-baseline/span-preview /artifacts/el8-workbench-startup.png \

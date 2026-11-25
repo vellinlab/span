@@ -231,7 +231,7 @@ test('a delayed snapshot cannot recreate a closed team or bring back its old tas
 test('session identities are scoped by backend and host, and the factory rejects unknown backends', async () => {
   const refs = [session('codex', local), session('codex', remote), session('clue', remote)];
   assert.equal(new Set(refs.map(sessionKey)).size, refs.length);
-  assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi', 'opencode']);
+  assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi', 'opencode', 'kilo']);
   await assert.rejects(createAgent('missing', { location: local }), /不支持/);
 });
 
@@ -794,7 +794,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.ok(sent.filter(packet => packet.type !== 'extension_ui_response').every(packet => typeof packet.id === 'string'));
 });
 
-test('OpenCode ACP scopes directory, replay, long-running prompts and approvals to the active session', async t => {
+['opencode', 'kilo'].forEach(backend => test(`${backend} ACP scopes history, prompts and approvals to the active session`, async t => {
   const events = [];
   const packets = [];
   const source = 214;
@@ -823,6 +823,7 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
     async request(method, args) {
       if (method === 'agent.start') {
         assert.equal(args.ssh, 'dev');
+        assert.equal(args.backend, backend);
         emit('agent', { method: 'span/backendWorkspace', params: { cwd: '/remote home' } });
         emit('agent-route', 'stdio');
         return;
@@ -876,7 +877,7 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
       }
     },
   } };
-  const agent = await createAgent('opencode', { location: remote, cwd: 'C:\\irrelevant', generation: source,
+  const agent = await createAgent(backend, { location: remote, cwd: 'C:\\irrelevant', generation: source,
     onEvent: event => events.push(event) });
   t.after(() => { agent.close(); delete globalThis.window; });
   await agent.open();
@@ -891,6 +892,8 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   await agent.sessions.release(saved.session.ref);
   const fresh = await agent.sessions.start({});
   const session = fresh.session.ref;
+  const otherBackend = backend === 'opencode' ? 'kilo' : 'opencode';
+  await assert.rejects(agent.usage({ ...session, backend: otherBackend }), /切换/);
   assert.deepEqual(agent.commands.map(command => command.id), ['compact']);
   assert.deepEqual(agent.modes.map(mode => mode.id), ['build', 'plan']);
   const run = await agent.turns.start(session, [{ kind: 'text', text: 'New request' }], { effort: 'high', mode: 'plan' }, 'draft');
@@ -923,4 +926,4 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   assert.deepEqual(usage.tokens, { contextUsed: 900, contextLimit: 32768 });
   assert.equal(usage.recentTokens.total, 40);
   assert.equal(usage.cost.amount, 0.001);
-});
+}));

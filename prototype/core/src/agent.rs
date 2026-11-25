@@ -33,27 +33,49 @@ fi
 printf "span-codex-stdio\n"
 exec codex app-server
 '"#;
-const REMOTE_OPENCODE: &str = r#"
-if command -v opencode >/dev/null 2>&1; then
-    opencode_cli=opencode
-elif [ -x "$HOME/.opencode/bin/opencode" ]; then
-    opencode_cli="$HOME/.opencode/bin/opencode"
-elif [ -x "$HOME/.local/bin/opencode" ]; then
-    opencode_cli="$HOME/.local/bin/opencode"
+const REMOTE_ACP: &str = r#"
+name="$1"
+if command -v "$name" >/dev/null 2>&1; then
+    cli="$name"
+elif [ -x "$HOME/.$name/bin/$name" ]; then
+    cli="$HOME/.$name/bin/$name"
+elif [ -x "$HOME/.local/bin/$name" ]; then
+    cli="$HOME/.local/bin/$name"
 else
-    printf 'span-opencode-missing\n'
+    printf "span-acp-missing\n"
     exit 127
 fi
-printf 'span-opencode-cwd %s\n' "$PWD"
-exec "$opencode_cli" acp
+printf "span-acp-cwd %s\n" "$PWD"
+exec "$cli" acp
 "#;
+
+#[derive(Clone, Copy, PartialEq)]
+struct AcpBackend {
+    name: &'static str,
+    label: &'static str,
+    windows_executable: &'static str,
+    path_override: &'static str,
+}
+
+const OPENCODE: AcpBackend = AcpBackend {
+    name: "opencode",
+    label: "OpenCode",
+    windows_executable: "opencode.exe",
+    path_override: "SPAN_OPENCODE_PATH",
+};
+const KILO: AcpBackend = AcpBackend {
+    name: "kilo",
+    label: "Kilo",
+    windows_executable: "kilo.exe",
+    path_override: "SPAN_KILO_PATH",
+};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Backend {
     Codex,
     Clue,
     Pi,
-    OpenCode,
+    Acp(AcpBackend),
 }
 
 impl Backend {
@@ -65,8 +87,8 @@ impl Backend {
             (Self::Clue, false) => "clue",
             (Self::Pi, true) => "pi.exe",
             (Self::Pi, false) => "pi",
-            (Self::OpenCode, true) => "opencode.exe",
-            (Self::OpenCode, false) => "opencode",
+            (Self::Acp(acp), true) => acp.windows_executable,
+            (Self::Acp(acp), false) => acp.name,
         }
     }
 }
@@ -90,7 +112,8 @@ impl Agent {
             Some("codex") => Backend::Codex,
             Some("clue") => Backend::Clue,
             Some("pi") => Backend::Pi,
-            Some("opencode") => Backend::OpenCode,
+            Some("opencode") => Backend::Acp(OPENCODE),
+            Some("kilo") => Backend::Acp(KILO),
             _ => return Err("未知的 Agent 后端。".into()),
         };
         let location = if params["demo"] == true {
@@ -435,8 +458,9 @@ async fn serve(
             };
             stdio_process(process, requests, output, generation, route, Some(catalog)).await?;
         }
-        (Backend::OpenCode, Location::Ssh(target)) => {
-            let mut process = spawn(ssh(&target).arg(REMOTE_OPENCODE))?;
+        (Backend::Acp(acp), Location::Ssh(target)) => {
+            let mut process =
+                spawn(ssh(&target).arg(format!("sh -c '{REMOTE_ACP}' span-acp {}", acp.name)))?;
             let directory = timeout(Duration::from_secs(12), async {
                 let mut line = Vec::new();
                 loop {
@@ -444,13 +468,16 @@ async fn serve(
                     let line = std::str::from_utf8(&line)
                         .unwrap_or_default()
                         .trim_end_matches(['\r', '\n']);
-                    if line == "span-opencode-missing" {
+                    if line == "span-acp-missing" {
                         return Err(io::Error::new(
                             io::ErrorKind::NotFound,
-                            "远端找不到 OpenCode。请安装 CLI 或将它加入 SSH 会话的 PATH。",
+                            format!(
+                                "远端找不到 {}。请安装 CLI 或将它加入 SSH 会话的 PATH。",
+                                acp.label
+                            ),
                         ));
                     }
-                    if let Some(directory) = line.strip_prefix("span-opencode-cwd ")
+                    if let Some(directory) = line.strip_prefix("span-acp-cwd ")
                         && directory.starts_with('/')
                     {
                         return Ok(directory.to_owned());
@@ -458,7 +485,7 @@ async fn serve(
                 }
             })
             .await
-            .map_err(|_| "等待 SSH OpenCode 工作目录超时。")??;
+            .map_err(|_| format!("等待 SSH {} 工作目录超时。", acp.label))??;
             event(
                 output,
                 "agent",
@@ -467,13 +494,17 @@ async fn serve(
             )?;
             stdio(process, requests, output, generation, "stdio").await?;
         }
-        (Backend::OpenCode, Location::Local(cwd)) => {
-            let program = env::var_os("SPAN_OPENCODE_PATH")
+        (Backend::Acp(acp), Location::Local(cwd)) => {
+            let program = env::var_os(acp.path_override)
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| backend.binary().into());
-            let process = spawn(Command::new(program).arg("acp").current_dir(cwd)).map_err(|error| {
-                format!("无法启动 OpenCode。请检查 CLI 安装，或将 SPAN_OPENCODE_PATH 指向可执行文件。\n{error}")
-            })?;
+            let process =
+                spawn(Command::new(program).arg("acp").current_dir(cwd)).map_err(|error| {
+                    format!(
+                        "无法启动 {}。请检查 CLI 安装，或将 {} 指向可执行文件。\n{error}",
+                        acp.label, acp.path_override
+                    )
+                })?;
             stdio(process, requests, output, generation, "stdio").await?;
         }
         (_, Location::Fixture) => {

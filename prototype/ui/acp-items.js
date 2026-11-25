@@ -17,7 +17,7 @@ export function acpOperation(tool = {}, cwd) {
   return { kind: 'permissions', cwd };
 }
 
-export function acpTurn(id, notify) {
+export function acpTurn(id, notify, childSession) {
   const reply = new Map();
   const tools = new Map();
   const members = new Map();
@@ -36,7 +36,7 @@ export function acpTurn(id, notify) {
     const final = toolStatus === 'completed' || toolStatus === 'failed';
     const command = current.rawInput?.command;
     const path = current.locations?.[0]?.path;
-    const child = current._meta?.['opencode/child-session'];
+    const child = childSession(current);
     const actor = child?.id ? { id: child.id, name: child.title } : undefined;
     if (actor && !members.has(actor.id)) {
       members.set(actor.id, actor);
@@ -119,7 +119,7 @@ function filePath(uri) {
   }
 }
 
-export function acpReplay() {
+export function acpReplay(childSession) {
   const turns = [];
   let events = [];
   let projection;
@@ -145,7 +145,7 @@ export function acpReplay() {
   function beginTurn() {
     saveTurn();
     id = acpTurnId(turns.length);
-    projection = acpTurn(id, event => events.push(event));
+    projection = acpTurn(id, event => events.push(event), childSession);
   }
   return {
     update(update) {

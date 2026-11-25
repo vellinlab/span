@@ -7,15 +7,20 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron } from 'playwright';
 
-const [binary, executable, screenshot, ssh] = process.argv.slice(2);
-const profile = await mkdtemp(join(tmpdir(), 'span-oc-'));
-const workspace = join(profile, 'OpenCode 工作区');
+const [backend, binary, executable, screenshot, ssh] = process.argv.slice(2);
+const label = { opencode: 'OpenCode', kilo: 'Kilo' }[backend];
+assert.ok(label, 'Select opencode or kilo');
+const envPrefix = backend.toUpperCase();
+const workspaceName = `${label} 工作区`;
+const profile = await mkdtemp(join(tmpdir(), `span-${backend}-`));
+const workspace = join(profile, workspaceName);
 const state = join(profile, 'state');
-const command = 'echo span-opencode-tool';
-const initial = '核对 OpenCode 的推理、工具和审批。';
-const next = '继续已经保存的 OpenCode 会话。';
-const answer = 'OpenCode 已交付结果。';
-const continued = 'OpenCode 已继续原会话。';
+const command = 'echo span-acp-tool';
+const initial = `核对 ${label} 的推理、工具和审批。`;
+const next = `继续已经保存的 ${label} 会话。`;
+const answer = `${label} 已交付结果。`;
+const continued = `${label} 已继续原会话。`;
+const firstReasoning = `先核对 ${label}。`;
 let toolResult;
 let gatewayError;
 let releaseReasoning;
@@ -37,11 +42,11 @@ const gateway = createServer(async (request, response) => {
     };
     emit({ role: 'assistant' });
     if (text.includes(initial) && !tool) {
-      emit({ reasoning_content: '先核对 OpenCode。' });
+      emit({ reasoning_content: firstReasoning });
       await new Promise(done => { releaseReasoning = done; });
       emit({ reasoning_content: '\n再检查工具与审批。' });
       await new Promise(done => { releaseTool = done; });
-      emit({ tool_calls: [{ index: 0, id: 'span-opencode-call', type: 'function',
+      emit({ tool_calls: [{ index: 0, id: 'span-acp-call', type: 'function',
         function: { name: 'bash', arguments: JSON.stringify({ command, description: '输出验收标记' }) } }] });
       emit({}, 'tool_calls', { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 });
     } else {
@@ -55,22 +60,22 @@ const gateway = createServer(async (request, response) => {
   } catch (error) {
     gatewayError = error;
     if (!response.headersSent) response.writeHead(400);
-    response.end('OpenCode test gateway received an unexpected request.');
+    response.end('ACP test gateway received an unexpected request.');
   }
 });
 gateway.listen(0, '127.0.0.1');
 await once(gateway, 'listening');
 
 const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-const remoteBin = '/home/span-preview-ci/.opencode/bin';
-const remoteWrapper = join(remoteBin, 'opencode');
-const remoteLog = join(state, 'opencode-stderr.log');
+const remoteBin = `/home/span-preview-ci/.${backend}/bin`;
+const remoteWrapper = join(remoteBin, backend);
+const remoteLog = join(state, 'acp-stderr.log');
 let app;
 let page;
 try {
   await mkdir(workspace);
   await mkdir(state);
-  const configPath = join(state, 'opencode.json');
+  const configPath = join(state, `${backend}.json`);
   const config = {
     model: 'span/span-acp', enabled_providers: ['span'],
     provider: { span: {
@@ -82,8 +87,8 @@ try {
   };
   await writeFile(configPath, JSON.stringify(config));
   const env = {
-    OPENCODE_CONFIG: configPath, OPENCODE_TEST_HOME: state, OPENCODE_DISABLE_AUTOUPDATE: '1',
-    OPENCODE_DISABLE_MODELS_FETCH: '1',
+    [`${envPrefix}_CONFIG`]: configPath, [`${envPrefix}_TEST_HOME`]: state,
+    [`${envPrefix}_DISABLE_AUTOUPDATE`]: '1', [`${envPrefix}_DISABLE_MODELS_FETCH`]: '1',
     ...Object.fromEntries(['DATA', 'CACHE', 'CONFIG', 'STATE'].map(name => ['XDG_' + name + '_HOME', join(state, name)])),
   };
   if (ssh) {
@@ -95,13 +100,13 @@ try {
     execFileSync('chmod', ['0711', profile]);
     execFileSync('chown', ['-R', 'span-preview-ci:span-preview-ci', state]);
     const installed = execFileSync('ssh', ['-T', '-o', 'BatchMode=yes', '--', ssh,
-      '"$HOME/.opencode/bin/opencode" --version'], { encoding: 'utf8', timeout: 10_000 });
-    console.log('OpenCode on ' + ssh + ': ' + installed.trim().replace(/\n/g, ' '));
+      `"$HOME/.${backend}/bin/${backend}" --version`], { encoding: 'utf8', timeout: 10_000 });
+    console.log(label + ' on ' + ssh + ': ' + installed.trim().replace(/\n/g, ' '));
   }
   async function open(selectConnection) {
     app = await electron.launch({
       executablePath: binary, args: ['--no-sandbox', '--disable-gpu'],
-      env: { ...process.env, ...env, SPAN_PREVIEW_PROFILE: profile, SPAN_OPENCODE_PATH: resolve(executable) },
+      env: { ...process.env, ...env, SPAN_PREVIEW_PROFILE: profile, [`SPAN_${envPrefix}_PATH`]: resolve(executable) },
     });
     page = await app.firstWindow();
     if (selectConnection) {
@@ -112,13 +117,13 @@ try {
           dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] });
         }, workspace);
         await page.locator('.host-form').getByRole('button', { name: '选择本地工作区' }).click();
-        await page.locator('.host-form').getByText('OpenCode 工作区', { exact: true }).waitFor();
+        await page.locator('.host-form').getByText(workspaceName, { exact: true }).waitFor();
       }
-      await page.getByLabel('Agent 后端').selectOption('opencode');
+      await page.getByLabel('Agent 后端').selectOption(backend);
       await page.getByRole('button', { name: ssh ? '连接 SSH' : '连接本机', exact: true }).click();
     }
     const connected = page.locator('.connection[data-route="stdio"]').filter({
-      hasText: 'OpenCode · ' + (ssh ?? '本机'), has: page.locator('i.ready'),
+      hasText: label + ' · ' + (ssh ?? '本机'), has: page.locator('i.ready'),
     });
     await connected.waitFor({ timeout: 30_000 });
   }
@@ -134,7 +139,7 @@ try {
   await send(initial);
   const transcript = page.getByTestId('transcript');
   const reasoning = page.getByRole('button', { name: '实时推理摘要' });
-  await reasoning.getByText('先核对 OpenCode。', { exact: true }).waitFor();
+  await reasoning.getByText(firstReasoning, { exact: true }).waitFor();
   const position = await reasoning.boundingBox();
   releaseReasoning();
   await reasoning.getByText('再检查工具与审批。', { exact: true }).waitFor();
@@ -165,7 +170,7 @@ try {
   const activity = transcript.locator('[data-card="command"]').filter({ hasText: command });
   await activity.waitFor();
   await transcript.getByText(answer, { exact: true }).waitFor();
-  assert.ok(toolResult.includes('span-opencode-tool'));
+  assert.ok(toolResult.includes('span-acp-tool'));
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   await send('/usage');
   const usage = page.getByRole('region', { name: '用量', exact: true });
@@ -196,7 +201,7 @@ try {
   await send('/plan');
   await send('/model');
   await mode.waitFor();
-  assert.equal(await mode.inputValue(), 'build');
+  assert.equal(await mode.inputValue(), backend === 'kilo' ? 'code' : 'build');
   await settings.getByRole('button', { name: '关闭面板' }).press('Escape');
   await send(next);
   await reopened.getByText(continued, { exact: true }).waitFor();
@@ -208,7 +213,7 @@ try {
   await page.getByPlaceholder('描述要完成的任务…').waitFor();
   assert.equal(await model.count(), 0);
   assert.equal(gatewayError, undefined);
-  console.log('Verified OpenCode ACP reasoning, permission, usage, persisted history and continuation on ' + (ssh ?? process.platform));
+  console.log(`Verified ${label} ACP reasoning, permission, usage, persisted history and continuation on ${ssh ?? process.platform}`);
 } catch (error) {
   if (page) {
     console.error(await page.getByRole('alert').allTextContents().catch(() => []));
