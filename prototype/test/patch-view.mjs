@@ -26,18 +26,19 @@ async function checkReview(page, composer, profile, legacy, screenshot) {
   }
   if (screenshot && !legacy) await page.screenshot({ path: screenshot.replace(/\.png$/, '-running.png') });
   await writeFile(join(profile, 'finish-inline-review'), '');
-  const finding = page.locator('.agent-reply li').filter({ hasText: '[P2] 保留阅读位置' });
+  const findingSelector = '[data-kind="message"] li';
+  const finding = page.locator(findingSelector).filter({ hasText: '[P2] 保留阅读位置' });
   await finding.waitFor();
   await reasoning.waitFor({ state: 'detached' });
   const completion = page.getByText('代码审查完成', { exact: true });
   assert.equal(await completion.count(), Number(legacy));
   assert.equal(await finding.count(), 1);
-  await page.waitForFunction(() => {
-    const finding = [...document.querySelectorAll('.agent-reply li')]
+  await page.waitForFunction(selector => {
+    const finding = [...document.querySelectorAll(selector)]
       .find(item => item.textContent.includes('[P2] 保留阅读位置'))?.getBoundingClientRect();
     const viewport = document.querySelector('.timeline').getBoundingClientRect();
     return finding && finding.top >= viewport.top && finding.bottom <= viewport.bottom;
-  });
+  }, findingSelector);
   if (screenshot) await page.screenshot({ path: screenshot });
 }
 
