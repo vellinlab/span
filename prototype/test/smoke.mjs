@@ -1099,6 +1099,59 @@ try {
   }
   console.log('Verified the rich answer layout and long code overflow at two window sizes.');
 
+  await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
+  const readClipboard = () => app.evaluate(({ clipboard }) => ({
+    text: clipboard.readText().replaceAll('\r\n', '\n'), html: clipboard.readHTML(),
+  }));
+  const feedback = page.locator('.composer-status');
+  await composer.fill('/copy');
+  const formats = page.getByLabel('会话命令');
+  await formats.getByRole('button', { name: '/copy 复制 Markdown', exact: true }).waitFor();
+  await formats.getByRole('button', { name: '/copy rich 复制富文本', exact: true }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-copy-formats.png') });
+  await composer.press('ArrowDown');
+  await composer.press('Enter');
+  await feedback.filter({ hasText: /^已复制富文本$/ }).waitFor();
+  const richReply = await readClipboard();
+  assert.ok(richReply.text.startsWith('# 工作台会话验收\n') &&
+    richReply.text.endsWith('回放和继续会话均已验证。'));
+  const pasted = await page.evaluate(html => {
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    return {
+      heading: parsed.querySelector('h1')?.textContent,
+      nested: parsed.querySelector('ul ul li')?.textContent,
+      value: parsed.querySelector('tbody tr td:last-child')?.textContent,
+      alignment: parsed.querySelector('tbody tr td:last-child')?.style.textAlign,
+      command: parsed.querySelector('pre code')?.textContent?.trim(),
+      link: parsed.querySelector('a')?.getAttribute('href'),
+    };
+  }, richReply.html);
+  assert.deepEqual(pasted, {
+    heading: '工作台会话验收', nested: '审批出现后，仍可看到原先阅读的段落。',
+    value: '已通过', alignment: 'right',
+    command: 'git diff --check -- prototype/ui/transcript.jsx prototype/core/src/fixture.rs',
+    link: 'https://example.com/span',
+  });
+  assert.ok(await composer.evaluate(element => document.activeElement === element));
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-copy-feedback.png') });
+  await composer.fill('/copy markdown');
+  await composer.press('Enter');
+  await feedback.filter({ hasText: /^已复制 Markdown$/ }).waitFor();
+  assert.deepEqual(await readClipboard(), { text: richReply.text, html: '' });
+
+  const markup = '<script data-example>字面示例</script>\n\n' +
+    '[本地](file:///tmp/span-copy) ![图片](https://example.com/sample.png) [文档](https://example.com/guide)';
+  assert.ok(await page.evaluate(text => window.span.copyRich(text), markup));
+  const safe = await readClipboard();
+  assert.equal(safe.text, markup);
+  assert.match(safe.html, /&lt;script/);
+  assert.match(safe.html, /href="https:\/\/example\.com\/guide"/);
+  assert.doesNotMatch(safe.html, /<script|<img|href="file:/i);
+  await assert.rejects(page.evaluate(() => window.span.copyRich({ text: '无效' })), /无效的剪贴板文本/);
+  await assert.rejects(page.evaluate(() => window.span.copyRich('文'.repeat(350000))), /富文本超出长度限制/);
+  assert.deepEqual(await readClipboard(), safe);
+  console.log('Verified rich and Markdown copies through the native clipboard and kept untrusted markup inert.');
+
   const reviewWorkspace = join(profile, 'review-workspace');
   const reviewDirectory = join(reviewWorkspace, 'workbench-guides', 'interface-review');
   const reviewName = 'windows-and-el8-workbench-navigation-checklist.md';

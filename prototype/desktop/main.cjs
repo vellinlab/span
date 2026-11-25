@@ -14,6 +14,7 @@ const allowed = new Set([
 ]);
 const terminalEvents = new Set(['terminal', 'terminal-error', 'terminal-closed']);
 const maxClipboardLength = 64 * 1024 * 1024;
+const maxRichClipboardBytes = 1024 * 1024;
 const maxScreenshotBytes = 4 * 1024 * 1024;
 const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
 const selectedImages = new Set();
@@ -55,6 +56,7 @@ let core;
 let closing = false;
 let sequence = 0;
 let terminalGeneration = null;
+let clipboardRevision = 0;
 const pending = new Map();
 
 function request(method, params) {
@@ -231,7 +233,20 @@ ipcMain.handle('span:copy-text', (event, text) => {
   if (!trusted(event) || typeof text !== 'string' || text.length > maxClipboardLength) {
     throw new Error('无效的剪贴板文本。');
   }
-  return clipboard.writeText(text);
+  clipboardRevision++;
+  clipboard.writeText(text);
+});
+
+ipcMain.handle('span:copy-rich', async (event, markdown) => {
+  if (!trusted(event) || typeof markdown !== 'string') throw new Error('无效的剪贴板文本。');
+  if (Buffer.byteLength(markdown, 'utf8') > maxRichClipboardBytes) {
+    throw new Error('富文本超出长度限制，请使用 /copy markdown。');
+  }
+  const revision = ++clipboardRevision;
+  const html = await request('clipboard.rich', { markdown });
+  if (revision !== clipboardRevision || closing) return false;
+  clipboard.write({ text: markdown, html });
+  return true;
 });
 
 app.whenReady().then(() => {

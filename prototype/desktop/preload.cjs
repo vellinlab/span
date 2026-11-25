@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('span', {
   previewImage: file => ipcRenderer.invoke('span:preview-image', file),
   openLink: url => ipcRenderer.invoke('span:link', url),
   copyText: text => ipcRenderer.invoke('span:copy-text', text),
+  copyRich: markdown => ipcRenderer.invoke('span:copy-rich', markdown),
   onWindowHidden: listener => {
     visibilityListeners.add(listener);
     listener(windowHidden);

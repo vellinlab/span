@@ -1,4 +1,6 @@
 mod agent;
+#[path = "../../../src/clipboard_html.rs"]
+mod clipboard_html;
 mod fixture;
 
 use agent::Agent;
@@ -16,6 +18,7 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type Output = Arc<Mutex<BufWriter<io::Stdout>>>;
+const MAX_RICH_CLIPBOARD_BYTES: usize = 1024 * 1024;
 
 fn send(output: &Output, packet: Value) -> io::Result<()> {
     let mut output = output.lock().expect("stdout lock");
@@ -371,6 +374,13 @@ impl Service {
             }
             "files.list" => return files(params),
             "files.preview" => return preview(params),
+            "clipboard.rich" => {
+                let markdown = params["markdown"]
+                    .as_str()
+                    .filter(|text| text.len() <= MAX_RICH_CLIPBOARD_BYTES)
+                    .ok_or("富文本超出长度限制，请使用 /copy markdown。")?;
+                return Ok(json!(clipboard_html::rich_html(markdown)));
+            }
             _ => return Err("未知的工作台请求。".into()),
         }
         Ok(Value::Null)

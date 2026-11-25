@@ -21,7 +21,7 @@ export function commonAgentCommands(api, models, options) {
   const model = models.find(item => item.id === options.model) ?? models.find(item => item.isDefault);
   return [
     ['/new', '新建会话'], ['/resume', '打开会话或恢复指定 ID'], ['/status', '查看会话状态'],
-    ['/pwd', '查看工作目录'], ['/copy', '复制最近的完整回复'],
+    ['/pwd', '查看工作目录'], ['/copy', '复制 Markdown'], ['/copy rich', '复制富文本'],
     ...(api.goal ? [
       ['/goal', '查看或设置会话目标'], ['/goal status', '查看当前目标'], ['/goal edit', '编辑当前目标'],
       ['/goal pause', '暂停目标'], ['/goal resume', '继续目标'], ['/goal clear', '清除目标'],

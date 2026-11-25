@@ -54,6 +54,7 @@ function App() {
   const [connectionCwd, setConnectionCwd] = useState('');
   const [tab, setTab] = useState('sessions');
   const [error, setError] = useState('');
+  const [copyFeedback, setCopyFeedback] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -138,6 +139,12 @@ function App() {
   const commands = agentCommands(api, work.models, work.options);
   const suggestions = suggesting && !files.length && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
     ? commands.filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
+
+  useEffect(() => {
+    if (!copyFeedback) return;
+    const timer = setTimeout(() => setCopyFeedback(null), 3000);
+    return () => clearTimeout(timer);
+  }, [copyFeedback]);
 
   useEffect(() => {
     window.span.workspace(false).then(settings => {
@@ -447,10 +454,17 @@ function App() {
         output('工作目录', session?.cwd ?? (config.ssh ? host : config.cwd));
         return true;
       case '/copy': {
+        if (args && args !== 'markdown' && args !== 'rich') throw new Error('用法 /copy、/copy markdown 或 /copy rich');
         const final = rows.findLast(row => row.kind === 'message' && row.final && (!row.phase || row.phase === 'final'));
         if (!final) throw new Error('当前会话没有可复制的完整回复。');
         const parts = rows.filter(row => row.turnId === final.turnId && row.id === final.id && row.kind === 'message');
-        await window.span.copyText(parts.map(row => row.text).join(''));
+        const text = parts.map(row => row.text).join('');
+        const scope = work.timelineScope();
+        const rich = args === 'rich';
+        const copied = rich ? await window.span.copyRich(text) : await window.span.copyText(text);
+        if (copied !== false && scope === work.timelineScope()) {
+          setCopyFeedback({ scope, text: rich ? '已复制富文本' : '已复制 Markdown' });
+        }
         return true;
       }
       case '/goal': {
@@ -676,7 +690,7 @@ function App() {
         submit(draft, 'followUp');
         return;
       }
-      if (suggestions.length && !suggestions.some(([name]) => name === draft)) {
+      if (suggestions.length && (commandIndex || !suggestions.some(([name]) => name === draft))) {
         const name = suggestions[commandIndex % suggestions.length][0];
         submit(name);
       } else {
@@ -889,7 +903,8 @@ function App() {
                   </button>
                   <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel :
                     interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' :
-                      pastingScreenshot ? '正在添加截图' : running && !showReasoning ? '正在处理' : ''}</span>
+                      pastingScreenshot ? '正在添加截图' : running && !showReasoning ? '正在处理' :
+                        copyFeedback?.scope === work.timelineScope() ? copyFeedback.text : ''}</span>
                   {showLatest && rows.length > 0 && <button type="button" className="icon-button jump-latest" title="滚到最新消息" aria-label="滚到最新消息" onClick={() => {
                     scroll.current.scrollTop = scroll.current.scrollHeight;
                   }}><ArrowDown size={16} /></button>}
