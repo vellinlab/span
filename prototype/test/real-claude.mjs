@@ -143,7 +143,9 @@ let page;
 try {
   await mkdir(workspace);
   await mkdir(config);
-  await writeFile(join(config, 'settings.json'), JSON.stringify({ permissions: { ask: ['Bash'] } }));
+  await writeFile(join(config, 'settings.json'), JSON.stringify({ permissions: {
+    defaultMode: 'default', allow: ['Agent', 'Task'], ask: ['Bash'],
+  } }));
   const env = {
     CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'false', DISABLE_AUTOUPDATER: '1',
@@ -248,8 +250,11 @@ try {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal.png') });
   await goalPanel.getByRole('button', { name: '清除', exact: true }).click();
   await goal.waitFor({ state: 'hidden' });
-  await goalPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  // Goal can leave its Claude session in Auto mode. Start the approval case
+  // in a fresh session that uses the fixture's interactive permission mode.
+  await send('/new');
+  await page.getByPlaceholder('描述要完成的任务…').waitFor();
   await send(delegate);
   const childCard = () => transcript().locator('[data-card="delegation"]').last();
   const openChild = () => childCard().getByRole('button', { name: /^查看 .+ 的会话记录$/ });
