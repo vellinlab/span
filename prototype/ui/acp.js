@@ -297,7 +297,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       || !Array.isArray(support.actions) || !support.actions.includes('set')) return;
     const actions = ['set', 'edit', ...(support.actions.includes('clear') ? ['clear'] : [])];
     return {
-      actions, budget: false, startsOnSave: true,
+      actions, activeWithoutTurn: true, budget: false, startsOnSave: true,
       async read(session) { return requireActive(session).goal ?? null; },
       async update(session, { kind, objective }, options = {}) {
         const state = requireActive(session);

@@ -925,7 +925,7 @@ function App() {
                 toggle={event => reasoningExpanded ? closePanel() : showPanel('reasoning', event.currentTarget, {
                   sessionKey: refKey, turnId: liveReasoning.turnId,
                 })} />}
-              <GoalStrip goal={goal} expanded={panel?.kind === 'goal'}
+              <GoalStrip goal={goal} capability={api?.goal} expanded={panel?.kind === 'goal'}
                 toggle={event => panel?.kind === 'goal' ? closePanel() : showPanel('goal', event.currentTarget)} />
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
                 {files.length > 0 && <ul className="composer-files" aria-label="待发送的附件">

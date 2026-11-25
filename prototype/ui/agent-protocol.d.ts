@@ -173,6 +173,8 @@ export interface AgentAdapter {
   permissions?: Choice[];
   goal?: {
     actions?: GoalAction['kind'][];
+    /** An active objective remains enabled between turns. */
+    activeWithoutTurn?: boolean;
     budget?: boolean;
     startsOnSave?: boolean;
     canRestart?: boolean;

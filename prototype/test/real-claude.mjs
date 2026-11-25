@@ -207,6 +207,7 @@ try {
   const goal = page.locator('.goal-strip').filter({ hasText: objective });
   await goal.waitFor();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  await goal.getByText('已启用', { exact: true }).waitFor();
   assert.ok(await goal.evaluate(element => {
     const bounds = element.getBoundingClientRect();
     const composer = document.querySelector('.composer').getBoundingClientRect();
