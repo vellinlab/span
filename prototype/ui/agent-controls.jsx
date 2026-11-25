@@ -9,6 +9,7 @@ import { ReasoningText } from './reasoning.jsx';
 import { TextReader } from './text-reader.jsx';
 import { delegatedMembers } from './timeline.js';
 import { LatestMessageButton, Transcript } from './transcript.jsx';
+import { observeWindowHidden } from './window-visibility.js';
 
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', waiting: '等待中', limited: '达到用量上限', unknown: '状态未知',
@@ -350,43 +351,46 @@ function AgentTaskList({ tasks, members }) {
 const teamStatuses = { active: '运行中', closed: '已关闭', orphaned: '主会话已断开' };
 
 function AgentsPanel({ work, openSession, openTrace, report }) {
+  const [windowHidden, setWindowHidden] = useState(null);
+  const hiddenNow = useRef(true);
   const { teams, members: liveMembers } = work;
   const teamSession = work.session?.ref;
   const activeKey = sessionKey(teamSession);
   const delegation = work.api?.delegation;
   const cadence = delegation?.teamRefreshMs;
   const ready = Boolean(activeKey && work.connection === 'ready' && !work.loading);
-  const running = Boolean(cadence && work.run);
+  const running = Boolean(cadence && work.run?.status === 'running');
   const observing = running || teams.some(team => team.status === 'active');
   const refresh = useEffectEvent(async reportError => {
     try { await work.refreshDelegation(); }
     catch (error) { if (reportError) report(error); }
   });
   useEffect(() => {
-    if (ready && !document.hidden) refresh(true);
-  }, [activeKey, ready, running]);
-  useEffect(() => {
-    if (!ready || !cadence) return;
-    const release = () => delegation.releaseTeamView?.(teamSession);
-    function changedVisibility() {
-      if (document.hidden) release();
-      else refresh(false);
-    }
-    document.addEventListener('visibilitychange', changedVisibility);
+    if (!ready) return;
+    const release = () => cadence && delegation.releaseTeamView?.(teamSession);
+    const stop = observeWindowHidden(hidden => {
+      hiddenNow.current = hidden;
+      setWindowHidden(hidden);
+      if (hidden) release();
+    });
     return () => {
-      document.removeEventListener('visibilitychange', changedVisibility);
+      stop();
       release();
     };
   }, [ready, cadence, delegation, teamSession]);
   useEffect(() => {
-    if (!ready || !cadence || !observing) return;
+    if (ready && windowHidden === false && !hiddenNow.current) refresh(true);
+  }, [activeKey, ready, running, windowHidden]);
+  useEffect(() => {
+    if (!ready || !cadence || !observing || windowHidden !== false) return;
     let disposed = false;
     let inFlight = false;
     let timer;
     function schedule() {
       clearTimeout(timer);
-      if (disposed || document.hidden || inFlight) return;
+      if (disposed || hiddenNow.current || inFlight) return;
       timer = setTimeout(async () => {
+        if (hiddenNow.current) return;
         inFlight = true;
         await refresh(false);
         inFlight = false;
@@ -394,13 +398,11 @@ function AgentsPanel({ work, openSession, openTrace, report }) {
       }, cadence);
     }
     schedule();
-    document.addEventListener('visibilitychange', schedule);
     return () => {
       disposed = true;
       clearTimeout(timer);
-      document.removeEventListener('visibilitychange', schedule);
     };
-  }, [activeKey, ready, cadence, observing]);
+  }, [activeKey, ready, cadence, observing, windowHidden]);
   const recordedMembers = delegatedMembers(work.rows);
   const { members, entries, groups, parents } = useMemo(() => {
     const members = new Map(recordedMembers);

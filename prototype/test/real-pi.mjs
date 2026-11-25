@@ -58,6 +58,16 @@ async function remoteTeamReaders(kind = 'bash') {
   return readers.filter(Boolean);
 }
 
+async function waitForRemoteTeamReaderCount(count, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  let readers = await remoteTeamReaders();
+  while (readers.length !== count && Date.now() < deadline) {
+    await delay(250);
+    readers = await remoteTeamReaders();
+  }
+  return readers;
+}
+
 let releaseReasoning;
 let releaseTool;
 let releaseAnswer;
@@ -447,6 +457,16 @@ export default function (pi) {
     return roster;
   }
   if (nativeTeams) {
+    if (ssh) {
+      await send('/agents');
+      const emptyRoster = page.getByRole('region', { name: '代理与团队', exact: true });
+      await emptyRoster.getByText('当前会话还没有代理活动。', { exact: true }).waitFor();
+      assert.equal((await waitForRemoteTeamReaderCount(1)).length, 1, 'Opening a roster must request a snapshot');
+      assert.deepEqual(await waitForRemoteTeamReaderCount(0, 16_000), [],
+        'An open roster with a completed turn and no active team should let the reader go idle');
+      await page.keyboard.press('Escape');
+      await emptyRoster.waitFor({ state: 'detached' });
+    }
     await send('/span-team-fixture');
     await transcript.getByText('原生任务板已就绪。', { exact: true }).waitFor();
     const roster = await openTeam(page);
@@ -479,13 +499,7 @@ export default function (pi) {
     await page.keyboard.press('Escape');
     await roster.waitFor({ state: 'detached' });
     if (ssh) {
-      const deadline = Date.now() + 5000;
-      let readers = await remoteTeamReaders();
-      while (readers.length && Date.now() < deadline) {
-        await delay(100);
-        readers = await remoteTeamReaders();
-      }
-      assert.deepEqual(readers, [], 'The remote team reader did not exit after closing the roster');
+      assert.deepEqual(await waitForRemoteTeamReaderCount(0), [], 'The remote team reader did not exit after closing the roster');
       console.log('Verified Pi Teams refreshes reused one SSH process and closing the roster released it.');
     }
   }
@@ -546,13 +560,30 @@ export default function (pi) {
     const waitForItems = count => resumed.page.waitForFunction(expected =>
       document.querySelector('[data-testid="subagent-transcript"]')?.dataset.items === String(expected), count);
     const workerCommand = 'printf span-pi-worker';
-    await appendWorker(
-      { id: 'live-request', parentId: 'result-23', message: { role: 'user', content: '补充核对发布说明。' } },
-      { id: 'live-tool', parentId: 'live-request', message: { role: 'assistant', stopReason: 'toolUse', content: [
-        { type: 'thinking', thinking: '正在核对补充说明。' },
-        { type: 'toolCall', id: 'worker-command', name: 'bash', arguments: { command: workerCommand } },
-      ] } },
-    );
+    await resumed.page.evaluate(() => {
+      window.span.onWindowHidden(hidden => { window.testWindowHidden = hidden; });
+    });
+    const waitForWindowHidden = hidden => resumed.page.waitForFunction(expected => window.testWindowHidden === expected,
+      hidden, { polling: 50 });
+    if (ssh) assert.equal((await remoteTeamReaders()).length, 1, 'The member view must have an active SSH reader');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
+    try {
+      await waitForWindowHidden(true);
+      await appendWorker(
+        { id: 'live-request', parentId: 'result-23', message: { role: 'user', content: '补充核对发布说明。' } },
+        { id: 'live-tool', parentId: 'live-request', message: { role: 'assistant', stopReason: 'toolUse', content: [
+          { type: 'thinking', thinking: '正在核对补充说明。' },
+          { type: 'toolCall', id: 'worker-command', name: 'bash', arguments: { command: workerCommand } },
+        ] } },
+      );
+      if (ssh) {
+        assert.deepEqual(await waitForRemoteTeamReaderCount(0, 16_000), [], 'An idle SSH history reader should exit while minimized');
+      } else await delay(2700);
+      assert.equal(await trace.getAttribute('data-items'), '40');
+    } finally {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
+    }
+    await waitForWindowHidden(false);
     await waitForItems(43);
     const liveCommand = trace.locator('[data-card="command"]').filter({ hasText: workerCommand });
     await liveCommand.waitFor();
@@ -603,7 +634,7 @@ export default function (pi) {
     await liveCommand.locator('summary').press('Enter');
     assert.equal((await liveCommand.getByLabel('工具输出', { exact: true }).textContent()).trim(), 'span-pi-worker');
     assert.equal(await liveCommand.count(), 1);
-    console.log('Verified a Pi member transcript larger than 16 MiB appends new activity, keeps older pages and their reading anchor, and returns to the latest reply.');
+    console.log('Verified a Pi member transcript larger than 16 MiB pauses while minimized, appends activity on restore, retains older pages and their reading anchor, and returns to the latest reply.');
     await resumed.page.keyboard.press('Escape');
     await member.waitFor();
     assert.ok(await member.evaluate(element => element === document.activeElement));

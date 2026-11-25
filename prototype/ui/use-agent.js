@@ -4,6 +4,7 @@ import { reconcileRoster, recordRosterUpdate, updateRoster } from './delegation.
 import { attachmentArtifacts } from './file-references.js';
 import { rememberWorkspace, savedSession } from './recent-workspaces.js';
 import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
+import { observeWindowHidden } from './window-visibility.js';
 
 const PAGE_SIZE = 20;
 const HIDDEN_DELTA_LIMIT = 128;
@@ -78,11 +79,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       // Commit the previous batch. Revealing the conversation also publishes it.
       updateRows();
     }
-    if (window.span.onWindowHidden) return window.span.onWindowHidden(syncPublication);
-    const onVisibilityChange = () => syncPublication(document.hidden);
-    onVisibilityChange();
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    return observeWindowHidden(syncPublication);
   }, [covered, updateRows]);
 
   function clearTimeline() {

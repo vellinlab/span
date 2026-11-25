@@ -1,5 +1,6 @@
 import { piBranchTurns } from './pi-items.js';
 import { historyRows, mergeHistory } from './timeline.js';
+import { observeWindowHidden } from './window-visibility.js';
 
 const memberStatuses = new Map([
   ['running', 'running'], ['completed', 'completed'], ['failed', 'failed'],
@@ -46,23 +47,48 @@ export function watchPiTeamTranscript(read, listener, refreshMs) {
   let timer;
   let nextRefresh = refreshMs;
   let reading = false;
+  let hidden = true;
+  let started = false;
+  let refreshOnReveal = false;
   let olderRequested = false;
   let continuation = {};
+  let published;
   let view = { rows: [], cursor: null, loading: false, loadOlder };
+
+  function showView() {
+    if (hidden || view === published) return;
+    published = view;
+    listener(view);
+  }
 
   function publish(changes) {
     view = { ...view, ...changes };
-    listener(view);
+    showView();
   }
 
   function loadOlder() {
     if (!subscribed || !view.cursor || view.loading) return;
-    if (reading) olderRequested = true;
+    if (hidden || reading) olderRequested = true;
     else void load({ cursor: view.cursor });
+  }
+
+  function schedule() {
+    clearTimeout(timer);
+    if (!subscribed || hidden || reading) return;
+    const loadQueuedPage = olderRequested && view.cursor;
+    olderRequested = false;
+    if (loadQueuedPage) loadOlder();
+    else if (refreshOnReveal) {
+      refreshOnReveal = false;
+      void load({ refresh: started });
+    } else {
+      timer = setTimeout(() => void load({ refresh: true }), nextRefresh);
+    }
   }
 
   async function load({ cursor, refresh = false } = {}) {
     clearTimeout(timer);
+    started = true;
     reading = true;
     if (!refresh) publish({ loading: true, error: undefined });
     try {
@@ -82,19 +108,25 @@ export function watchPiTeamTranscript(read, listener, refreshMs) {
       if (subscribed && (view.loading || view.error !== error.message)) publish({ error: error.message, loading: false });
     } finally {
       reading = false;
-      if (subscribed) {
-        const loadQueuedPage = olderRequested && view.cursor;
-        olderRequested = false;
-        if (loadQueuedPage) loadOlder();
-        else timer = setTimeout(() => void load({ refresh: true }), nextRefresh);
-      }
+      schedule();
     }
   }
-  void load();
+
+  const stopVisibility = observeWindowHidden(nextHidden => {
+    if (hidden === nextHidden) return;
+    hidden = nextHidden;
+    if (!hidden) {
+      if (started) showView();
+      refreshOnReveal = true;
+    }
+    schedule();
+  });
   return () => {
     subscribed = false;
+    stopVisibility();
     clearTimeout(timer);
     continuation = {};
+    published = undefined;
     view = { rows: [], cursor: null, loading: false };
   };
 }

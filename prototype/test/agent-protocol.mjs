@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { acpReplay } from '../ui/acp-items.js';
 import { createAcpTaskTraces } from '../ui/acp-task-traces.js';
 import acpHttp from '../desktop/acp-http.cjs';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
+import { watchPiTeamTranscript } from '../ui/pi-teams.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
 import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
@@ -962,6 +964,52 @@ test('Claude ACP isolates child output and approval and restores the final child
   assert.deepEqual(view.rows.map(row => [row.kind, row.text]),
     [['notice', 'Look at the saved fixture.'], ['message', 'Saved child result.']]);
   cleanup();
+});
+
+test('a hidden Pi member viewer pauses requests, retains an in-flight result, and refreshes on restore', async t => {
+  let hidden = true;
+  const listeners = new Set();
+  const setHidden = value => {
+    hidden = value;
+    for (const listener of listeners) listener(value);
+  };
+  globalThis.window = { span: { onWindowHidden(listener) {
+    listeners.add(listener);
+    listener(hidden);
+    return () => listeners.delete(listener);
+  } } };
+  t.after(() => { delete globalThis.window; });
+  const requests = [];
+  const updates = [];
+  const entry = (id, text) => ({ type: 'message', id, message: { role: 'user', content: text } });
+  let refreshStarted;
+  const firstRefresh = new Promise(resolve => { refreshStarted = resolve; });
+  const stop = watchPiTeamTranscript(({ cursor, refresh }) => {
+    requests.push(cursor ?? (refresh ? 'refresh' : 'latest'));
+    if (cursor) return { entries: [entry('earlier', 'Earlier task')], cursor: null };
+    if (!refresh) return { entries: [entry('current', 'Current task')], cursor: 'older' };
+    if (requests.length === 2) return new Promise(resolve => { refreshStarted(resolve); });
+    return null;
+  }, view => updates.push(view), 10);
+  t.after(stop);
+  assert.deepEqual(requests, []);
+  setHidden(false);
+  const finishRefresh = await firstRefresh;
+  assert.equal(updates.at(-1).rows.at(-1).text, 'Current task');
+  setHidden(true);
+  finishRefresh({ append: true, entries: [entry('new', 'Next task')] });
+  await delay(40);
+  assert.deepEqual(requests, ['latest', 'refresh']);
+  assert.equal(updates.at(-1).rows.at(-1).text, 'Current task');
+  setHidden(false);
+  assert.deepEqual(requests, ['latest', 'refresh', 'refresh']);
+  assert.equal(updates.at(-1).rows.at(-1).text, 'Next task');
+  updates.at(-1).loadOlder();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(requests, ['latest', 'refresh', 'refresh', 'older']);
+  assert.deepEqual(updates.at(-1).rows.map(row => row.text), ['Earlier task', 'Current task', 'Next task']);
+  stop();
+  assert.equal(listeners.size, 0);
 });
 
 test('Pi reconnects to its stored branch and keeps queue, tool and dialog events on the active host', async t => {
