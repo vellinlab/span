@@ -194,6 +194,8 @@ jobs:
           '
           cmp preview/span-preview.exe verified-preview/preview/span-preview.exe
           diff -qr preview/resources/app verified-preview/preview/resources/app
+      - name: Verify native Codex on Windows
+        run: node prototype/test/backend-windows.mjs "$PWD/verified-preview/preview/span-preview.exe"
       - name: Prepare the baseline renderers for terminal output and preview
         run: |
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE"; do

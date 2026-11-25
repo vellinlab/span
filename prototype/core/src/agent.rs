@@ -350,6 +350,25 @@ fn spawn_local(
         })
 }
 
+async fn connect_local_proxy(
+    local: &LocalCodex,
+    socket: &Path,
+    candidates: &[PathBuf],
+    budget: Duration,
+) -> std::result::Result<Option<ProxySocket>, tokio::time::error::Elapsed> {
+    timeout(budget, async {
+        for executable in candidates {
+            if let Ok(process) = local.spawn_at(executable, Some(socket))
+                && let Ok(connection) = websocket(process).await
+            {
+                return Some(connection);
+            }
+        }
+        None
+    })
+    .await
+}
+
 async fn remote_route(process: &mut Process) -> Result<bool> {
     timeout(Duration::from_secs(12), async {
         let mut line = Vec::new();
@@ -419,30 +438,27 @@ async fn serve(
         (Backend::Codex, Location::Local(cwd)) => {
             let local = LocalCodex::new(cwd);
             #[cfg(windows)]
-            let package_paths = if local.socket.is_some() {
-                appx_codex_paths().await
-            } else {
-                Vec::new()
-            };
+            let mut package_paths = None;
 
             if let Some(socket) = &local.socket {
                 #[cfg(windows)]
-                let candidates = local.candidates.iter().chain(&package_paths);
-                #[cfg(not(windows))]
-                let candidates = local.candidates.iter();
-                let connection = timeout(HANDSHAKE_TIMEOUT, async {
-                    for executable in candidates {
-                        if let Ok(process) = local.spawn_at(executable, Some(socket))
-                            && let Ok(connection) = websocket(process).await
-                        {
-                            return Some(connection);
-                        }
+                let started_at = tokio::time::Instant::now();
+                let connection =
+                    connect_local_proxy(&local, socket, &local.candidates, HANDSHAKE_TIMEOUT).await;
+                if let Ok(Some(proxy)) = connection {
+                    return shared_rpc(proxy, requests, output, generation).await;
+                }
+                #[cfg(windows)]
+                if matches!(connection, Ok(None)) {
+                    let remaining = HANDSHAKE_TIMEOUT.saturating_sub(started_at.elapsed());
+                    let paths = appx_codex_paths().await;
+                    if !remaining.is_zero()
+                        && let Ok(Some(proxy)) =
+                            connect_local_proxy(&local, socket, &paths, remaining).await
+                    {
+                        return shared_rpc(proxy, requests, output, generation).await;
                     }
-                    None
-                })
-                .await;
-                if let Ok(Some(socket)) = connection {
-                    return shared_rpc(socket, requests, output, generation).await;
+                    package_paths = Some(paths);
                 }
             }
 
@@ -452,10 +468,9 @@ async fn serve(
             let started = match started {
                 Some(process) => Some(process),
                 None => {
-                    let paths = if local.socket.is_some() {
-                        package_paths
-                    } else {
-                        appx_codex_paths().await
+                    let paths = match package_paths {
+                        Some(paths) => paths,
+                        None => appx_codex_paths().await,
                     };
                     spawn_local(&local, &paths, &mut errors)
                 }
