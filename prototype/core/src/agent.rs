@@ -720,7 +720,7 @@ async fn stdio_process(
 ) -> io::Result<()> {
     event(output, "agent-route", generation, json!(route))?;
     let pi_session_file = OnceCell::new();
-    let pi_session = RefCell::new(None::<String>);
+    let pi_session = RefCell::new(None::<pi::SessionIdentity>);
     let (team_requests, mut team_queue) = mpsc::channel::<PiTeamRequest>(2);
     let teams = async {
         let Some(catalog) = &pi_catalog else {
@@ -752,15 +752,21 @@ async fn stdio_process(
                 }
                 None => return Ok(()),
             };
-            let result = if pi_session.borrow().as_deref() == Some(session.as_str()) {
-                pi::team_snapshot(catalog, &mut remote, &session).await
-            } else {
-                Err("Pi 会话已切换。".into())
-            };
-            let result = if pi_session.borrow().as_deref() == Some(session.as_str()) {
-                result
-            } else {
-                Err("Pi 会话已切换。".into())
+            let identity = pi_session
+                .borrow()
+                .as_ref()
+                .filter(|active| active.id == session)
+                .cloned();
+            let result = match identity {
+                Some(identity) => {
+                    let result = pi::team_snapshot(catalog, &mut remote, &identity).await;
+                    if pi_session.borrow().as_ref() == Some(&identity) {
+                        result
+                    } else {
+                        Err("Pi 会话已切换。".into())
+                    }
+                }
+                None => Err("Pi 会话已切换。".into()),
             };
             event(output, "agent", generation, pi_response(&id, result))?;
         }
@@ -774,12 +780,18 @@ async fn stdio_process(
                     && value["type"] == "response"
                     && value["command"] == "get_state"
                 {
-                    if let Some(file) = value["data"]["sessionFile"].as_str()
-                        && !file.is_empty()
-                    {
+                    let file = value["data"]["sessionFile"]
+                        .as_str()
+                        .filter(|file| !file.is_empty());
+                    if let Some(file) = file {
                         let _ = pi_session_file.set(file.to_owned());
                     }
-                    pi_session.replace(value["data"]["sessionId"].as_str().map(str::to_owned));
+                    pi_session.replace(value["data"]["sessionId"].as_str().map(|id| {
+                        pi::SessionIdentity {
+                            id: id.to_owned(),
+                            file: file.map(str::to_owned),
+                        }
+                    }));
                 } else if pi_catalog.is_some()
                     && value["type"] == "response"
                     && matches!(
@@ -827,7 +839,10 @@ async fn stdio_process(
                             && session
                                 .bytes()
                                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                            && pi_session.borrow().as_deref() == Some(session) =>
+                            && pi_session
+                                .borrow()
+                                .as_ref()
+                                .is_some_and(|active| active.id == session) =>
                     {
                         if team_requests
                             .try_send(PiTeamRequest::Snapshot {

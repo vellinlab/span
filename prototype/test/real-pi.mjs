@@ -185,7 +185,7 @@ export default function (pi) {
     description: '为桌面验收创建原生 Pi Teams 共享任务。',
     handler(_args, ctx) {
       const registry = { resolve() {} };
-      const manager = new TeamManager({ registry, getCurrentSessionId: () => ctx.sessionManager.getSessionId() });
+      const manager = new TeamManager({ registry, getCurrentSessionId: () => ctx.sessionManager.getSessionFile() });
       const board = manager.createTeam({ team_name: 'span-release-review', description: '复核发布前的交接。' });
       manager.registerTeammate(board.name, {
         name: 'reviewer', agentId: 'span-reviewer', agentType: 'worker', model: 'span-preview/span-pi',
@@ -195,7 +195,7 @@ export default function (pi) {
       const checklist = store.createTask('核对原始清单', '复核已收集的结果。');
       const report = store.createTask('整理交接说明', '将结论写成可交付的说明。');
       store.updateTask(report.id, { owner: 'reviewer', dependsOn: [checklist.id] }, report.version);
-      const other = new TeamManager({ registry, getCurrentSessionId: () => 'span-unrelated-session' });
+      const other = new TeamManager({ registry, getCurrentSessionId: () => ctx.sessionManager.getSessionFile() + '.other' });
       other.createTeam({ team_name: 'span-unrelated-team', description: '其他会话的团队' });
       const timer = setInterval(() => {
         if (!existsSync(${JSON.stringify(teamSignal)})) return;

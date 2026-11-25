@@ -239,11 +239,21 @@ fn team_file(path: &Path, limit: u64) -> Option<(Value, u64)> {
     Some((serde_json::from_slice(&bytes).ok()?, length))
 }
 
-fn session_team(config: &Value, session: &str) -> bool {
-    config["leadSessionId"] == session && config["name"].as_str().is_some()
+#[derive(Clone, PartialEq)]
+pub(super) struct SessionIdentity {
+    pub(super) id: String,
+    pub(super) file: Option<String>,
 }
 
-fn local_teams(root: &Path, session: &str) -> io::Result<Vec<Value>> {
+fn session_team(config: &Value, session: &SessionIdentity) -> bool {
+    let Some(owner) = config["leadSessionId"].as_str() else {
+        return false;
+    };
+    (owner == session.id || session.file.as_deref() == Some(owner))
+        && config["name"].as_str().is_some()
+}
+
+fn local_teams(root: &Path, session: &SessionIdentity) -> io::Result<Vec<Value>> {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -279,22 +289,23 @@ pub(super) struct RemoteTeamReader {
 }
 
 fn start_remote_team_reader(host: &str, session: &str) -> Result<RemoteTeamReader> {
-    // Each request is a session ID and each response ends with an empty config record.
+    // Each request supplies the JSON-encoded lead references as two NUL-delimited fields.
+    // Each response ends with an empty config record.
     // The local reader checks ownership again after decoding the remote data.
     const SCRIPT: &str = r#"
 shopt -s nullglob dotglob
 export LC_ALL=C
 config_limit=$(($1 + 1))
 tasks_limit=$(($2 + 1))
-while IFS= read -r session; do
-  [[ $session =~ ^[[:alnum:]-]{1,128}$ ]] || exit 2
-  owner='"leadSessionId"[[:space:]]*:[[:space:]]*"'"$session"'"'
+owner_field='"leadSessionId"[[:space:]]*:[[:space:]]*'
+while IFS= read -r -d '' owner_id && IFS= read -r -d '' owner_file; do
   for directory in "$HOME/.pi/teams/"*; do
     config="$directory/config.json"
     tasks="$directory/tasks.json"
     [[ -d "$directory" && ! -L "$directory" && -f "$config" && ! -L "$config" ]] || continue
     IFS= read -r -d '' -n "$config_limit" config_json < "$config"
-    [[ ${#config_json} -lt $config_limit && $config_json =~ $owner ]] || continue
+    [[ ${#config_json} -lt $config_limit ]] || continue
+    [[ $config_json =~ $owner_field"$owner_id" || ( -n "$owner_file" && $config_json =~ $owner_field"$owner_file" ) ]] || continue
     task_json=''
     if [[ -f "$tasks" && ! -L "$tasks" ]]; then
       IFS= read -r -d '' -n "$tasks_limit" task_json < "$tasks"
@@ -335,12 +346,20 @@ async fn read_team_field(
     Ok(())
 }
 
-async fn remote_teams(reader: &mut RemoteTeamReader, session: &str) -> Result<Vec<Value>> {
-    reader.session = session.to_owned();
+async fn remote_teams(
+    reader: &mut RemoteTeamReader,
+    session: &SessionIdentity,
+) -> Result<Vec<Value>> {
+    reader.session.clone_from(&session.id);
+    let mut owners = serde_json::to_vec(&session.id)?;
+    owners.push(0);
+    if let Some(file) = &session.file {
+        serde_json::to_writer(&mut owners, file)?;
+    }
+    owners.push(0);
     let process = &mut reader.process;
     let teams = timeout(Duration::from_secs(10), async {
-        process.input.write_all(session.as_bytes()).await?;
-        process.input.write_all(b"\n").await?;
+        process.input.write_all(&owners).await?;
         process.input.flush().await?;
         let mut teams = Vec::new();
         let mut remaining = TEAM_SNAPSHOT_LIMIT;
@@ -368,12 +387,12 @@ async fn remote_teams(reader: &mut RemoteTeamReader, session: &str) -> Result<Ve
 pub(super) async fn team_snapshot(
     source: &Catalog,
     remote: &mut Option<RemoteTeamReader>,
-    session: &str,
+    session: &SessionIdentity,
 ) -> Result<Value> {
     let teams = match source {
         Catalog::Local => {
             let home = env::home_dir().ok_or("无法定位 Pi 团队目录。")?;
-            let session = session.to_owned();
+            let session = session.clone();
             tokio::task::spawn_blocking(move || {
                 local_teams(&home.join(".pi").join("teams"), &session)
             })
@@ -381,7 +400,7 @@ pub(super) async fn team_snapshot(
         }
         Catalog::Ssh(host) => {
             if remote.is_none() {
-                *remote = Some(start_remote_team_reader(host, session)?);
+                *remote = Some(start_remote_team_reader(host, &session.id)?);
             }
             let result =
                 remote_teams(remote.as_mut().expect("opened remote team reader"), session).await;
