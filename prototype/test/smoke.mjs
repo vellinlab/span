@@ -1028,6 +1028,9 @@ try {
       box(button).right < box(status).left && box(model).top >= box(button).bottom && view.scrollWidth === view.clientWidth;
   }), 'Long member names and model IDs should wrap with the status on the first line');
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-agents-panel.png') });
+  assert.ok(await failedAgent.evaluate(detail => detail.getBoundingClientRect().bottom <=
+    detail.closest('.agent-panel-content').getBoundingClientRect().bottom + 1),
+    'Both lines of the failure detail should be visible in the narrow roster');
   const agentDetails = agents.getByRole('group', { name: '代理与团队明细' });
   await agents.getByRole('button', { name: '关闭面板' }).press('Tab');
   assert.ok(await agentDetails.evaluate(element => element === document.activeElement));

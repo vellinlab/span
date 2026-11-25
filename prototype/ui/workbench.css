@@ -983,6 +983,8 @@ p { margin-block: 0 12px; }
   padding: 10px 13px 12px;
   scrollbar-color: #697477 transparent;
 }
+.agent-panel[data-kind="agents"] .agent-panel-content { padding-block: 8px; }
+.agent-panel[data-kind="agents"] .agent-member-row { padding-block: 4px; }
 .agent-panel-content[tabindex]:focus-visible { outline-offset: -2px; }
 .agent-panel[data-kind="reasoning"] .reasoning-sections + .reasoning-sections {
   padding-block-start: 12px;
@@ -998,7 +1000,7 @@ p { margin-block: 0 12px; }
   font-variant-numeric: tabular-nums;
 }
 .goal-panel-main { display: flex; flex-direction: column; min-height: 0; }
-.agent-panel:is([data-kind="goal"], [data-kind="reasoning"], [data-kind="usage"]) header .icon-button { width: 26px; height: 26px; }
+.agent-panel:is([data-kind="goal"], [data-kind="reasoning"], [data-kind="usage"], [data-kind="agents"]) header .icon-button { width: 26px; height: 26px; }
 .goal-panel-main > .agent-panel-content { padding-block: 8px; }
 .goal-objective { margin: 0; line-height: 21px; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
 .goal-actions { flex: none; align-items: center; padding: 4px 8px; border-top: 1px solid var(--line); justify-content: flex-end; }
