@@ -507,9 +507,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   async function send(text, selectedOptions, delivery = 'steer', { onDispatch, files = [], followLatest = true } = {}) {
     const client = agent.current;
     const steering = currentRun.current;
+    const steer = client?.turns.steer;
     if (!client || connection !== 'ready' || loading || busy.current || (files.length && !client.localFileReferences) ||
       (!client.localImageInputs && files.some(file => file.kind === 'image')) ||
-      (steering && !(delivery === 'followUp' ? client.turns.followUp : client.turns.steer))) return false;
+      (steering && !(delivery === 'followUp' ? client.turns.followUp : steer))) return false;
     const scope = layer.current;
     clearError();
     busy.current = true;
@@ -533,7 +534,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       if (steering && delivery === 'followUp') {
         await client.turns.followUp(ref, input, clientId);
       } else if (steering) {
-        await client.turns.steer(ref, steering.id, input, clientId);
+        await steer.call(client.turns, ref, steering.id, input, clientId);
       } else {
         const runVersion = callbacks.current.run;
         const result = await client.turns.start(ref, input, selectedOptions, clientId);

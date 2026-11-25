@@ -955,6 +955,7 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   assert.deepEqual(packets.filter(packet => packet.method === 'session/set_config_option').map(packet => packet.params.configId),
     ['reasoning-level', 'mode']);
   assert.equal(run.status, 'running');
+  assert.equal(agent.turns.steer, undefined);
   assert.equal(events.findLast(event => event.kind === 'item').item.clientId, 'draft');
   const permission = (id, sessionId) => packet({ id, method: 'session/request_permission', params: {
     sessionId, toolCall: { toolCallId: 'active-tool', kind: 'execute', title: 'echo open', rawInput: { command: 'echo open' } },
@@ -987,9 +988,20 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
     assert.equal(events.findLast(event => event.kind === 'delta').delta.text, 'Verify the objective.');
     const activeGoalRun = events.findLast(event => event.kind === 'run').run;
     assert.equal(activeGoalRun.status, 'running');
+    const sendDuringGoal = agent.turns.steer;
+    const response = sendDuringGoal(session, activeGoalRun.id, [{ kind: 'text', text: 'Check the card first.' }], 'goal-input');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(ongoing.params.prompt, [{ type: 'text', text: 'Check the card first.' }]);
+    chunk('new', 'agent_message_chunk', 'goal-input-reply', 'The card is above the composer.');
+    packet({ id: ongoing.id, result: { stopReason: 'end_turn' } });
+    await response;
+    assert.equal(events.findLast(event => event.kind === 'item').item.clientId, 'goal-input');
+    assert.equal(events.findLast(event => event.kind === 'run').run.status, 'running');
     await agent.turns.stop(session, activeGoalRun.id);
     assert.equal(events.findLast(event => event.kind === 'goal').goal.status, 'paused');
     assert.equal(events.findLast(event => event.kind === 'run').run.status, 'cancelled');
+    assert.equal(agent.turns.steer, undefined);
+    await assert.rejects(sendDuringGoal(session, activeGoalRun.id, [{ kind: 'text', text: 'Late request.' }], 'late'), /目标已结束/);
   } else {
     assert.equal(agent.goal, undefined);
   }

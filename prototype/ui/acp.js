@@ -248,7 +248,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   function synchronizeGoal(state, goal) {
     if (goal?.status === 'active') {
       if (!state.turn) startTurn(state, true);
-    } else if (state.turn?.goal) {
+    } else if (state.turn?.goal && !state.turn.foreground) {
       const status = goal?.status === 'blocked' ? 'failed' : ['complete', 'waiting'].includes(goal?.status) ? 'completed' : 'cancelled';
       finish(state, state.turn, status);
     }
@@ -278,6 +278,41 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       blocks.push({ type: 'image', data: content.data, mimeType: content.mime });
     }
     return blocks;
+  }
+
+  function dispatchPrompt(state, turn, input, prompt, clientId, id = 'user') {
+    const { sent, response } = rpc.beginRequest('session/prompt', { sessionId: state.id, prompt }, null);
+    const dispatched = sent.then(() => {
+      const text = input.filter(part => part.kind === 'text').map(part => part.text).join('\n');
+      const files = input.filter(part => part.kind === 'file' || part.kind === 'image')
+        .map(part => ({ ...part, name: part.name ?? attachmentName(part.path) }));
+      notify(state.id, { kind: 'item', final: true,
+        item: { kind: 'user', id, turnId: turn.run.id, text, attachments: attachmentArtifacts(files), clientId } });
+    });
+    // The response can reject before transport dispatch has settled.
+    response.catch(() => {});
+    return { dispatched, response };
+  }
+
+  async function steerGoal(session, runId, input, clientId) {
+    const state = requireActive(session);
+    const turn = state.turn;
+    const prompt = await promptInput(input);
+    if (state !== active || state.turn !== turn || !turn?.goal || turn.run.id !== runId) {
+      throw new Error('当前目标已结束或切换，请重新发送。');
+    }
+    turn.foreground = (turn.foreground ?? 0) + 1;
+    try {
+      const { dispatched, response } = dispatchPrompt(state, turn, input, prompt, clientId, 'user:' + clientId);
+      await dispatched;
+      const reply = await response;
+      if (state === active && reply.usage) promptUsage(state, reply.usage);
+      if (reply.stopReason === 'max_tokens') throw new Error(`${label} 达到本轮输出上限。`);
+      if (reply.stopReason === 'refusal') throw new Error(`${label} 拒绝了本轮请求。`);
+    } finally {
+      turn.foreground--;
+      goals?.watch(state, 0);
+    }
   }
 
   function sessionParams(entry) {
@@ -370,6 +405,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       },
     },
     turns: {
+      get steer() { return active?.turn?.goal ? steerGoal : undefined; },
       async start(session, input, options = {}, clientId) {
         const state = requireActive(session);
         if (state.turn) throw new Error(`请等当前 ${label} 回合结束。`);
@@ -378,14 +414,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
         const turn = startTurn(state);
         const { run } = turn;
         goals?.watch(state);
-        const { sent, response } = rpc.beginRequest('session/prompt', { sessionId: state.id, prompt }, null);
-        const dispatched = sent.then(() => {
-          const text = input.filter(part => part.kind === 'text').map(part => part.text).join('\n');
-          const files = input.filter(part => part.kind === 'file' || part.kind === 'image')
-            .map(part => ({ ...part, name: part.name ?? attachmentName(part.path) }));
-          notify(state.id, { kind: 'item', final: true,
-            item: { kind: 'user', id: 'user', turnId: run.id, text, attachments: attachmentArtifacts(files), clientId } });
-        });
+        const { dispatched, response } = dispatchPrompt(state, turn, input, prompt, clientId);
         dispatched.then(() => response.then(reply => {
           if (state !== active || state.turn !== turn) return;
           if (reply.usage) promptUsage(state, reply.usage);
@@ -394,8 +423,6 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
           else if (reply.stopReason === 'refusal') finish(state, turn, 'failed', `${label} 拒绝了本轮请求。`);
           else finish(state, turn, 'completed');
         }, error => finish(state, turn, 'failed', error.message)), () => {});
-        // Observe response failures even if transport dispatch itself rejects.
-        response.catch(() => {});
         try {
           await dispatched;
         } catch (error) {
@@ -410,7 +437,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       async stop(session, id) {
         const state = requireActive(session);
         if (state.turn?.run.id !== id) return;
-        if (state.turn.goal && goals) {
+        if (state.turn.goal && !state.turn.foreground && goals) {
           await goals.capability.update(session, { kind: 'pause' });
           return;
         }

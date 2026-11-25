@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -23,6 +23,9 @@ const continued = `${label} 已继续原会话。`;
 const firstReasoning = `先核对 ${label}。`;
 const goalObjective = '核对目标卡片和实际任务状态。';
 const goalReasoning = '检查原生目标的暂停与恢复。';
+const goalInstruction = '请先说明卡片的当前位置。';
+const goalInstructionAnswer = '目标卡片位于输入框上方。';
+const goalResumedReasoning = '回到目标，继续核对暂停和恢复。';
 const goalReport = '已核对目标卡片和会话状态。';
 const goalAnswer = '原生目标已完成。';
 let goalRequests = 0;
@@ -49,13 +52,16 @@ const gateway = createServer(async (request, response) => {
     if (backend === 'kilo' && text.startsWith('Generate a title for this conversation:')) {
       emit({ content: 'Kilo 会话验证' });
       emit({}, 'stop', { prompt_tokens: 15, completion_tokens: 4, total_tokens: 19 });
+    } else if (text.includes(goalInstruction)) {
+      emit({ content: goalInstructionAnswer });
+      emit({}, 'stop', { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
     } else if (text.includes(goalObjective)) {
       if (tool) {
         assert.match(JSON.stringify(tool.content), /Report recorded/);
         emit({ content: goalAnswer });
         emit({}, 'stop', { prompt_tokens: 28, completion_tokens: 10, total_tokens: 38 });
-      } else if (++goalRequests === 1) {
-        emit({ reasoning_content: goalReasoning });
+      } else if (goalRequests < 2) {
+        emit({ reasoning_content: goalRequests++ ? goalResumedReasoning : goalReasoning });
         await once(response, 'close');
         return;
       } else {
@@ -163,6 +169,7 @@ try {
     })));
     assert.equal(rendered.length, 1, JSON.stringify(rendered));
     assert.equal(rendered[0].sessions, 2, JSON.stringify(rendered));
+    if (process.platform === 'win32') assert.equal(rendered[0].path, await realpath(workspace));
   }
 
   await open(true);
@@ -268,6 +275,14 @@ try {
     }));
     if (!ssh) await verifyWorkspaceGroup();
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal.png') });
+    const goalProgress = page.getByRole('button', { name: '实时推理摘要' });
+    const goalPosition = await goalProgress.boundingBox();
+    await page.getByPlaceholder('追加指令…').waitFor();
+    await send(goalInstruction);
+    await page.getByTestId('transcript').getByText(goalInstructionAnswer, { exact: true }).waitFor();
+    await goalProgress.getByText(goalResumedReasoning, { exact: true }).waitFor();
+    assert.deepEqual(await goalProgress.boundingBox(), goalPosition);
+    await goalStrip().getByText('进行中', { exact: true }).waitFor();
     await goalStrip().press('Enter');
     await goalPanel().getByRole('button', { name: '暂停', exact: true }).press('Enter');
     await goalStrip().getByText('已暂停', { exact: true }).waitFor();
@@ -276,6 +291,7 @@ try {
     await narrow();
     await goalStrip().getByText('已暂停', { exact: true }).waitFor();
     assert.equal(await page.getByTestId('transcript').getByText('Continue working toward this session goal:').count(), 0);
+    await page.getByTestId('transcript').getByText(goalInstructionAnswer, { exact: true }).waitFor();
     if (!ssh) await verifyWorkspaceGroup();
     await goalStrip().press('Enter');
     await goalPanel().getByRole('button', { name: '继续', exact: true }).press('Enter');
@@ -285,7 +301,7 @@ try {
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-complete.png') });
     await goalPanel().getByRole('button', { name: '清除', exact: true }).press('Enter');
     await goalStrip().waitFor({ state: 'detached' });
-    console.log(`Verified Kilo's native goal start, pause, persisted state, resume, completion and clear on ${ssh ?? process.platform}`);
+    console.log(`Verified Kilo's native goal start, foreground instruction, pause, persisted state, resume, completion and clear on ${ssh ?? process.platform}`);
   }
   assert.equal(gatewayError, undefined);
   console.log(`Verified ${label} ACP reasoning, permission, usage, persisted history and continuation on ${ssh ?? process.platform}`);
