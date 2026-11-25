@@ -22,6 +22,7 @@ CORE = "/artifacts/linux/resources/app/bin/span-workbench-core"
 WIDGET_SOCKET, OUTPUT = sys.argv[1:]
 BASE = ("baseline", "/usr/bin/span")
 NEXT = ("prototype", PREVIEW)
+WHEEL_BURST_INTERVAL_MS = 36
 
 
 def xdo(*args):
@@ -158,19 +159,27 @@ def trace_scroll(app, browser, chromium_roles, area):
         mouse(button, False)
         screen.flush()
 
-    def observe_wheel(direction, target):
+    def observe_wheel(direction, target, count=1):
         before = pixels()
         while screen.pending_events():
             screen.next_event()
-        sent = clock()
-        sent_monotonic = time.monotonic()
-        roll(direction)
-        deadline = sent_monotonic + .55
+        sent = []
+        next_wheel = deadline = time.monotonic()
         first_pixel = exact_pixel = None
-        captures = 0
-        while exact_pixel is None and time.monotonic() < deadline:
+        captures = changes = 0
+        previous = before
+        while exact_pixel is None:
+            now = time.monotonic()
+            if len(sent) < count and now >= next_wheel:
+                sent.append((now, clock()))
+                roll(direction)
+                next_wheel = now + WHEEL_BURST_INTERVAL_MS / 1000
+                deadline = now + .55
+            if now >= deadline:
+                break
             if not screen.pending_events():
-                select([screen], [], [], max(0, deadline - time.monotonic()))
+                wake = min(deadline, next_wheel) if len(sent) < count else deadline
+                select([screen], [], [], max(0, wake - time.monotonic()))
                 continue
             event = screen.next_event()
             if event.type != screen.extension_event.DamageNotify:
@@ -181,12 +190,16 @@ def trace_scroll(app, browser, chromium_roles, area):
             rendered = pixels()
             captured = clock()
             captures += 1
+            if rendered != previous:
+                changes += 1
+                previous = rendered
             if first_pixel is None and rendered != before:
-                first_pixel = captured - sent
-            if rendered == target and rendered != before:
-                exact_pixel = captured - sent
-        return sent_monotonic, {"sent_at": sent, "direction": direction, "first_pixel_ms": first_pixel,
-                                "expected_pixel_ms": exact_pixel, "captures": captures}
+                first_pixel = captured - sent[0][1]
+            if len(sent) == count and rendered == target and rendered != before:
+                exact_pixel = captured - sent[-1][1]
+        return sent[0][0], {"sent_at": sent[0][1], "direction": direction, "first_pixel_ms": first_pixel,
+                            "expected_pixel_ms": exact_pixel, "captures": captures, "pixel_changes": changes,
+                            "dispatch_offsets_ms": [round((timestamp - sent[0][0]) * 1000, 2) for timestamp, _ in sent]}
 
     directions = [-1] * 6 + [1] * 6
     directions *= 3
@@ -218,6 +231,7 @@ def trace_scroll(app, browser, chromium_roles, area):
     watched = root.damage_create(damage.DamageReportRawRectangles)
     screen.sync()
     samples = []
+    bursts = []
     # Keep identical wheel and terminal workloads when the animation changes.
     intervals = (254, 293, 331)
     try:
@@ -233,12 +247,26 @@ def trace_scroll(app, browser, chromium_roles, area):
             sent_monotonic, observed = observe_wheel(direction, target)
             samples.append({**observed, "wheel_interval_ms": gap})
             time.sleep(max(0, sent_monotonic + gap / 1000 - time.monotonic()))
+        elapsed = (time.monotonic() - started) * 1000
+        end_display = process_cpu_ms(display_pid)
+        end = stats(app.pid, chromium_roles)
+        final_state = browser_trace("finish")
+        for _ in range(2):
+            top = browser_trace("start")["top"]
+            time.sleep(.18)
+            assert pixels() == initial, "The wheel burst must start on the calibrated pixels."
+            for direction, target, target_top in ((-1, reference[2], offsets[2]), (1, initial, calibration_top)):
+                _, observed = observe_wheel(direction, target, count=3)
+                state = browser_trace("finish")
+                delivered = state["events"][-3:]
+                assert [entry["direction"] for entry in delivered] == [direction] * 3
+                assert (state["top"] - top) * direction > 0 and observed["pixel_changes"] > 0
+                bursts.append({**observed, "scroll_top": state["top"], "expected_scroll_top": target_top,
+                               "correct_offset": abs(state["top"] - target_top) <= 1,
+                               "correct_pixels": pixels() == target})
+                top = state["top"]
     finally:
         screen.damage_destroy(watched)
-    elapsed = (time.monotonic() - started) * 1000
-    end_display = process_cpu_ms(display_pid)
-    end = stats(app.pid, chromium_roles)
-    final_state = browser_trace("finish")
     terminal_lines = final_state["terminalLine"] - initial_state["terminalLine"]
     assert terminal_lines > 0, "The terminal must continue writing during the scroll benchmark"
     recorded = final_state["events"]
@@ -262,7 +290,7 @@ def trace_scroll(app, browser, chromium_roles, area):
             "app_cpu_ms": end["tree_cpu_ms"] - start["tree_cpu_ms"], "xvfb_cpu_ms": end_display - start_display,
             "renderer_pss_kib": end["by_role"]["renderer"]["Pss"], "matched": len(verified),
             "terminal_lines": terminal_lines, "elapsed_ms": elapsed, "initial_scroll_top": initial_state["top"],
-            "captures": sum(entry["captures"] for entry in samples), "samples": samples}
+            "captures": sum(entry["captures"] for entry in samples), "samples": samples, "bursts": bursts}
 
 
 def benchmark(name, binary, scroll_trace=False, animate_scroll=True):
@@ -501,6 +529,7 @@ report = {"runner": "AlmaLinux 8 / Xvfb 1440×960 / Openbox / one constrained CP
           "runs": []}
 if WIDGET_SOCKET == "--scroll-trace":
     report["comparison"] = "Same Electron binary, default or --disable-smooth-scrolling"
+    report["wheel_burst_interval_ms"] = WHEEL_BURST_INTERVAL_MS
     os.sched_setaffinity(0, {max(os.sched_getaffinity(0))})
     for animate in (True, False, False, True):
         name = "default" if animate else "animation-disabled"

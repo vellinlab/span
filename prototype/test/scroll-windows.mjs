@@ -147,12 +147,14 @@ async function trial(disableAnimation) {
       const target = reference[direction < 0 ? 2 : 5];
       const startingOffset = await scrollTop();
       const result = await driver.request(`observe ${target.frame} ${direction} 3 ${burstIntervalMs}`);
-      const offset = await scrollTop();
-      assert.ok((offset - startingOffset) * direction > 0 && result.changed > 0, 'A wheel burst must move the transcript.');
-      bursts.push({ direction, ...result, startingOffset, offset, expectedOffset: target.top });
-      // Reuse the same starting point after a full sweep, even if Chromium coalesced the burst differently.
-      if (direction === 1 && Math.abs(offset - target.top) > 1) await restoreReference();
       await delay(Math.max(0, dispatchIntervalMs - (result.expected ?? dispatchIntervalMs)));
+      const offset = await scrollTop();
+      const settledFrame = await driver.request('frame');
+      assert.ok((offset - startingOffset) * direction > 0 && result.changed > 0, 'A wheel burst must move the transcript.');
+      const exact = Math.abs(offset - target.top) <= 1 && settledFrame === target.frame;
+      bursts.push({ direction, ...result, startingOffset, offset, expectedOffset: target.top, settledFrame, exact });
+      // Reuse the same starting point after a full sweep, even if Chromium coalesced the burst differently.
+      if (direction === 1 && !exact) await restoreReference();
     }
     const trace = await timeline.evaluate(element => element.spanWheelTrace);
     assert.deepEqual(trace.map(item => item.direction), [...directions, ...directions, ...directions, ...directions]);

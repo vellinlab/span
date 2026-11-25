@@ -34,8 +34,9 @@ try {
     });
     console.log(JSON.stringify({ top, terminalLine: await terminalLine() }));
   } else if (command === '--trace-scroll-finish') {
-    const events = await page.getByTestId('transcript').evaluate(timeline => timeline.spanScrollTrace);
-    console.log(JSON.stringify({ events, terminalLine: await terminalLine() }));
+    const state = await page.getByTestId('transcript').evaluate(timeline =>
+      ({ events: timeline.spanScrollTrace, top: timeline.scrollTop }));
+    console.log(JSON.stringify({ ...state, terminalLine: await terminalLine() }));
   } else if (command === '--close-terminal') {
     await page.getByRole('button', { name: '关闭终端' }).click();
     await page.getByRole('region', { name: '终端' }).waitFor({ state: 'detached' });

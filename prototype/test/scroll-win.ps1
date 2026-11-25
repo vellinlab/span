@@ -20,6 +20,8 @@ public sealed class SpanScroll : IDisposable {
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint x, uint y, int data, UIntPtr extra);
+    [DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint milliseconds);
+    [DllImport("winmm.dll")] private static extern uint timeEndPeriod(uint milliseconds);
 
     private readonly IntPtr window;
     private readonly Point origin;
@@ -97,24 +99,50 @@ public sealed class SpanScroll : IDisposable {
         double? first = null, expected = null;
         var sent = new double[count];
         var clock = Stopwatch.StartNew();
-        while (issued < count || clock.Elapsed.TotalMilliseconds - sent[count - 1] < 700) {
-            if (issued == 0 || (issued < count && clock.Elapsed.TotalMilliseconds - sent[issued - 1] >= interval)) {
-                sent[issued++] = clock.Elapsed.TotalMilliseconds;
-                Wheel(direction);
+        Action<int> dispatch = index => {
+            sent[index] = clock.Elapsed.TotalMilliseconds;
+            Wheel(direction);
+            Volatile.Write(ref issued, index + 1);
+        };
+        Thread input = null;
+        bool highResolution = count > 1 && timeBeginPeriod(1) == 0;
+        try {
+            if (count == 1) {
+                dispatch(0);
+            } else {
+                // Desktop capture can block on composition. Keep it off the wheel's dispatch path.
+                input = new Thread(() => {
+                    dispatch(0);
+                    for (int index = 1; index < count; index++) {
+                        double due = sent[0] + index * interval;
+                        while (clock.Elapsed.TotalMilliseconds < due) Thread.Sleep(1);
+                        dispatch(index);
+                    }
+                });
+                input.Start();
             }
-            string frame = Frame();
-            double captured = clock.Elapsed.TotalMilliseconds;
-            captures++;
-            if (frame != previous) {
-                changed++;
-                previous = frame;
+            while (true) {
+                string frame = Frame();
+                double captured = clock.Elapsed.TotalMilliseconds;
+                captures++;
+                if (frame != previous) {
+                    changed++;
+                    previous = frame;
+                }
+                int delivered = Volatile.Read(ref issued);
+                if (delivered > 0 && captured >= sent[0] && frame != start && !first.HasValue) first = captured - sent[0];
+                if (delivered == count && captured >= sent[count - 1]) {
+                    if (frame == target) {
+                        expected = captured - sent[count - 1];
+                        break;
+                    }
+                    if (captured - sent[count - 1] >= 700) break;
+                }
+                Thread.Sleep(5);
             }
-            if (frame != start && !first.HasValue) first = captured - sent[0];
-            if (issued == count && frame == target) {
-                expected = captured - sent[count - 1];
-                break;
-            }
-            Thread.Sleep(5);
+        } finally {
+            if (input != null) input.Join();
+            if (highResolution) timeEndPeriod(1);
         }
         return new { first, expected, captures, changed, sent, frame = previous };
     }
