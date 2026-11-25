@@ -403,7 +403,7 @@ function App() {
     composerKey, draft, visibleDraft, files, canAttach, canSendImages };
   // Keep memoized controls bound to the conversation represented by the committed DOM.
   useLayoutEffect(() => {
-    composerActions.current = { setDraft, textareaKey, pasteScreenshot, toggleReasoningPanel, toggleGoalPanel };
+    composerActions.current = { setDraft, textareaKey, pasteScreenshot, toggleReasoningPanel, toggleGoalPanel, showPanel, showExtensions };
   });
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openTrace = useCallback((member, trigger) => latestWork.current.openMemberTrace(member, trigger), []);
@@ -417,6 +417,11 @@ function App() {
   const onDraftPaste = useCallback(event => composerActions.current.pasteScreenshot(event), []);
   const onReasoningToggle = useCallback(event => composerActions.current.toggleReasoningPanel(event.currentTarget), []);
   const onGoalToggle = useCallback(event => composerActions.current.toggleGoalPanel(event.currentTarget), []);
+  const onAgentMenuSelect = useCallback((kind, trigger) => {
+    const { showPanel, showExtensions } = composerActions.current;
+    if (kind === 'skill') showExtensions('skill', trigger);
+    else showPanel(kind, trigger);
+  }, []);
   const loadCatalogPage = useCallback(() => {
     const { list, archived, catalogSearch } = latestWork.current;
     if (catalogSearch) catalogSearch.load?.();
@@ -1004,8 +1009,8 @@ function App() {
                         running && !showReasoning ? '正在处理' : ''}</span>
                   {showLatest && rows.length > 0 && <LatestMessageButton scroll={scroll} className="composer-control"
                     onJump={() => { if (reasoningArchived) closePanel({ restoreFocus: false }); }} />}
-                  {connection === 'ready' && <AgentMenu work={work} onSelect={(kind, trigger) =>
-                    kind === 'skill' ? showExtensions(kind, trigger) : showPanel(kind, trigger)} />}
+                  {connection === 'ready' && <AgentMenu api={api} hasGoal={Boolean(goal)} models={work.models}
+                    modelId={work.options.model} modeId={work.options.mode} onSelect={onAgentMenuSelect} />}
                   {running && api?.turns.stop && <button ref={stopButton} type="button" className="send stop" aria-label="停止"
                     aria-disabled={work.stopping || undefined} disabled={!run.id} title={work.stopping ? '正在停止…' : undefined}
                     onClick={() => work.stop().catch(report)}><Square size={13} fill="currentColor" /></button>}

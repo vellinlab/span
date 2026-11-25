@@ -675,7 +675,7 @@ function ExtensionList({ panel, search }) {
   </>;
 }
 
-export function AgentMenu({ work, onSelect }) {
+export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId, modeId, onSelect }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef(null);
   useEffect(() => {
@@ -686,17 +686,17 @@ export function AgentMenu({ work, onSelect }) {
     window.addEventListener('pointerdown', dismiss);
     return () => window.removeEventListener('pointerdown', dismiss);
   }, [open]);
-  const { api, goal, models, options } = work;
   const entries = [
     ...(models.length || api?.modes?.length || api?.permissions?.length ? [['settings', SlidersHorizontal]] : []),
-    ...(api?.goal && !goal ? [['goal', Goal]] : []),
+    ...(api?.goal && !hasGoal ? [['goal', Goal]] : []),
     ...(api?.usage ? [['usage', ChartNoAxesColumnIncreasing]] : []),
     ...(api?.delegation ? [['agents', Users]] : []),
     ...(api?.extensions?.kinds.includes('skill') ? [['skill', BookOpen]] : []),
   ];
   if (!entries.length) return null;
-  const selectedModel = models.find(model => model.id === options.model);
-  const label = [selectedModel?.label, api?.modes?.find(mode => mode.id === options.mode && mode.id !== 'default')?.label].filter(Boolean).join(' · ');
+  const selectedModel = models.find(model => model.id === modelId);
+  const modeLabel = modeId === 'default' ? undefined : api?.modes?.find(mode => mode.id === modeId)?.label;
+  const label = [selectedModel?.label, modeLabel].filter(Boolean).join(' · ');
   return <div className="agent-menu"
     onBlur={event => {
       if (open && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
@@ -719,7 +719,7 @@ export function AgentMenu({ work, onSelect }) {
       }}><Icon size={15} />{kind === 'skill' ? extensionLabels.skill : titles[kind]}</button>)}
     </div>}
   </div>;
-}
+});
 
 export const GoalStrip = memo(function GoalStrip({ objective, status, activeWithoutTurn, expanded, toggle }) {
   const label = status === 'active' && activeWithoutTurn ? '已启用' : statuses[status];
