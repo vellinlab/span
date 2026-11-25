@@ -165,16 +165,20 @@ def trace_scroll(app, browser, chromium_roles, area):
     for direction in directions:
         roll(direction)
         time.sleep(.09)
-    browser_trace("start")
+    calibration_top = browser_trace("start")["top"]
     time.sleep(.18)
     initial = pixels()
     reference = []
     for direction in directions:
         roll(direction)
-        time.sleep(.18)
+        # Chromium's wheel animation can still be moving after 180 ms.
+        time.sleep(.45)
         reference.append(pixels())
     calibration = browser_trace("finish")["events"]
     assert [entry["direction"] for entry in calibration] == directions
+    offsets = [entry["top"] for entry in calibration]
+    assert all((right - left) * direction > 0 for left, right, direction in
+               zip([calibration_top, *offsets], offsets, directions)), "Scroll calibration must reach each next offset"
     assert all(left != right for left, right in zip([initial, *reference], reference)), "Scroll calibration must move visible text"
 
     initial_state = browser_trace("start")
@@ -194,7 +198,7 @@ def trace_scroll(app, browser, chromium_roles, area):
                 screen.next_event()
             sent = clock()
             roll(direction)
-            end = time.monotonic() + .35
+            end = time.monotonic() + .55
             first_pixel = exact_pixel = None
             captures = 0
             while exact_pixel is None and time.monotonic() < end:
