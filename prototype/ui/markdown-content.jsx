@@ -24,17 +24,28 @@ const components = {
 };
 
 const plugins = [remarkGfm];
+const references = new Set(['definition', 'footnoteDefinition', 'linkReference', 'imageReference', 'footnoteReference']);
+
+function hasReference(node) {
+  if (references.has(node.type)) return true;
+  // A text node can contain a reference that a later definition resolves.
+  if (node.type === 'text' && node.value.includes('[')) return true;
+  return node.children?.some(hasReference);
+}
 
 function stablePrefixEnd(tree, text) {
-  const boundary = tree.children.at(-2);
-  const preceding = tree.children.at(-3);
-  const end = boundary?.position?.start.offset ?? 0;
+  let end;
+  let preceding;
   // Keep two blocks in the suffix so a partial final line cannot join the prefix.
-  if (end < 4096 || boundary?.type !== 'paragraph' || preceding?.type !== 'paragraph') return;
-  const gap = text.slice(preceding.position.end.offset, end);
-  if (!/^(?:\r?\n)[ \t\r\n]*\n[ \t]*$/.test(gap)) return;
-  // Reference definitions and footnotes can change an earlier block.
-  if (text.slice(0, end).includes('[')) return;
+  for (const block of tree.children.slice(0, -1)) {
+    if (block.type === 'paragraph' && preceding?.type === 'paragraph') {
+      const start = block.position.start.offset;
+      if (start >= 4096 && /^(?:\r?\n)[ \t\r\n]*\n[ \t]*$/.test(text.slice(preceding.position.end.offset, start))) end = start;
+    }
+    // Keep definitions and anything they may resolve in a single parse.
+    if (hasReference(block)) break;
+    preceding = block;
+  }
   return end;
 }
 
@@ -42,11 +53,11 @@ const MarkdownPart = memo(function MarkdownPart({ text, inspect }) {
   return <ReactMarkdown remarkPlugins={inspect ? [...plugins, inspect] : plugins} components={components}>{text}</ReactMarkdown>;
 });
 
-export const MarkdownContent = memo(function MarkdownContent({ text, reusePrefix }) {
+export const MarkdownContent = memo(function MarkdownContent({ text, streaming }) {
   const prepared = useRef(null);
-  const prefix = reusePrefix && prepared.current && text.startsWith(prepared.current.source)
+  const prefix = prepared.current && text.startsWith(prepared.current.source)
     ? prepared.current.prefix : '';
-  const reading = !prefix && reusePrefix && text.length >= 4096 ? {} : null;
+  const reading = !prefix && streaming && text.length >= 4096 ? {} : null;
   const inspect = reading && (() => tree => { reading.end = stablePrefixEnd(tree, text); });
   useLayoutEffect(() => {
     if (!prefix) prepared.current = reading?.end ? { source: text, prefix: text.slice(0, reading.end) } : null;

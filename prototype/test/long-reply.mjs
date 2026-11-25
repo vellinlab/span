@@ -721,6 +721,8 @@ async function check(binary, label, trial) {
       position = await headingOffset();
       assert.ok(Math.abs(position - 28) <= 2, `Expected to start reading the reply at 28 pixels, observed ${position}.`);
     }
+    const firstLink = following ? await transcript.getByRole('link', { name: '复核链接' }).elementHandle() : undefined;
+    if (following) await transcript.getByText('查看[后补引用][later]的链接。', { exact: true }).waitFor();
 
     const observation = await heading.evaluateHandle(element => {
       const parent = element.closest('.prose');
@@ -802,6 +804,8 @@ async function check(binary, label, trial) {
       await tailInView();
       assert.equal(await transcript.getByRole('link', { name: '后补引用' }).getAttribute('href'),
         'https://example.com/span/reference');
+      assert.ok(await firstLink.evaluate(element => element.isConnected));
+      await firstLink.dispose();
     }
     let windowResize;
     if (!following && !grouped && label === 'candidate' && trial === 0) {
@@ -828,7 +832,7 @@ async function check(binary, label, trial) {
 }
 
 const trials = [];
-const alternate = grouped || toolOutput || streamedReasoning;
+const alternate = following || grouped || toolOutput || streamedReasoning;
 for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
   if (baseline && (!alternate || trial === 0)) trials.push(await check(baseline, 'baseline', trial));
   trials.push(await check(candidate, 'candidate', trial));

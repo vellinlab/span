@@ -9,6 +9,7 @@ permissions:
   contents: read
 
 env:
+  FOLLOWING_REPLY_BASELINE: 28b8963cefc13f084686e0d29127ee4232f4f824
   TERMINAL_RENDERER_BASELINE: 7b6b7c8dbde37521cf565afc3c4b05966adb96a9
   TERMINAL_COVER_BASELINE: 1f708fcb93da896f425cdc292ad07adddc1204e6
 
@@ -100,7 +101,7 @@ jobs:
           artifacts=/tmp/span-workbench-artifacts
           for spec in \
             long-reply:3b8abac80eb31c73f4360a0721bb5c8823ab575e \
-            following-reply:ed7985bab09e6eb610298d73200028aa93028b9c \
+            following-reply:"$FOLLOWING_REPLY_BASELINE" \
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
             startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af \
             streaming-output:72576f01c969e452c5f8cc66940ce110f4fb7693 \
@@ -220,7 +221,7 @@ jobs:
             "$PWD/verified-preview/preview/span-preview.exe" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
       - name: Prepare the baseline renderers for terminal output and preview
         run: |
-          for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE"; do
+          for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" following-reply:"$FOLLOWING_REPLY_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
             source_dir=$(mktemp -d)
@@ -241,7 +242,7 @@ jobs:
           node prototype/test/catalog.mjs "$binary" "$PWD/windows-workbench-catalog.png"
           node prototype/test/covered-transcript.mjs "$binary" "" "" "$PWD/windows-workbench-preview-switch"
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-long-reply"
-          node prototype/test/long-reply.mjs "$binary" --following
+          node prototype/test/long-reply.mjs "$binary" "$PWD/following-reply-baseline/span-preview.exe" --following | tee windows-workbench-following-reply.json
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-grouped-history" --grouped-history
           node prototype/test/long-reply.mjs "$binary" --tool-output
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-stream" --reasoning
@@ -264,4 +265,5 @@ jobs:
             windows-workbench*.png
             windows-workbench-startup.json
             windows-workbench-resource-isolation.json
+            windows-workbench-following-reply.json
           if-no-files-found: warn

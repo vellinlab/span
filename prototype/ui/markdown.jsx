@@ -7,9 +7,9 @@ export function prepareMarkdown() {
 
 const MarkdownContent = lazy(prepareMarkdown);
 
-export const Markdown = memo(function Markdown({ text, reusePrefix = false }) {
+export const Markdown = memo(function Markdown({ text, streaming = false }) {
   return <Suspense fallback={<div className="prose markdown-pending" aria-busy="true" />}>
-    <MarkdownContent text={text} reusePrefix={reusePrefix} />
+    <MarkdownContent text={text} streaming={streaming} />
   </Suspense>;
 });
 
@@ -40,7 +40,7 @@ function observeTailInViewport(root, tail, setNear) {
   };
 }
 
-export function StreamingMarkdown({ text, streaming, following, scroll, reusePrefix }) {
+export function StreamingMarkdown({ text, streaming, following, scroll }) {
   const tail = useRef(null);
   const committed = useRef({ text, time: -Infinity });
   const wasVisible = useRef(true);
@@ -74,7 +74,7 @@ export function StreamingMarkdown({ text, streaming, following, scroll, reusePre
   }, [observeTail, scroll]);
 
   return <>
-    <Markdown text={displayed} reusePrefix={reusePrefix} />
+    <Markdown text={displayed} streaming={streaming} />
     {observeTail && <span aria-hidden="true" className="message-tail" ref={tail} />}
   </>;
 }
