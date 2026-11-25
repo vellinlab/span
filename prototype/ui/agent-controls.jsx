@@ -23,7 +23,7 @@ export function commonAgentCommands(api, models, options) {
       ['/goal', '查看或设置会话目标'], ['/goal status', '查看当前目标'], ['/goal edit', '编辑当前目标'],
       ['/goal pause', '暂停目标'], ['/goal resume', '继续目标'], ['/goal clear', '清除目标'],
     ] : []),
-    ...(api.usage ? [['/usage', '查看上下文与账号额度']] : []),
+    ...(api.usage ? [['/usage', '查看 Agent 用量']] : []),
     ...(api.delegation ? [['/agents', '查看子代理与团队']] : []),
     ...(models.length ? [['/model', '选择下一轮的模型']] : []),
     ...(model?.efforts.length ? [['/reasoning', '选择思考强度']] : []),
@@ -178,27 +178,61 @@ function GoalPanel({ goal, action, report, editOnOpen }) {
   </form>;
 }
 
-function UsagePanel({ usage, refresh, report }) {
+function UsageMeter({ label, amount, value, max, children }) {
+  const showMeter = value !== undefined && max !== undefined;
+  return <div className="quota" data-near-limit={showMeter && value >= max * 0.9}>
+    <div className="quota-heading"><span>{label}</span><span className="usage-value">{amount}</span></div>
+    {showMeter && <progress aria-label={label} value={value} max={max} />}
+    {children}
+  </div>;
+}
+
+function quotaWindow(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '';
+  if (minutes % 1440 === 0) return ` · ${minutes / 1440} 天`;
+  if (minutes % 60 === 0) return ` · ${minutes / 60} 小时`;
+  return ` · ${minutes} 分钟`;
+}
+
+function UsagePanel({ usage, refreshing, refresh, report }) {
   const { tokens, limits, cost } = usage;
+  const contextUsed = Number.isFinite(tokens?.contextUsed) && tokens.contextUsed >= 0 ? tokens.contextUsed : undefined;
+  const contextLimit = Number.isFinite(tokens?.contextLimit) && tokens.contextLimit > 0 ? tokens.contextLimit : undefined;
+  const hasContext = contextUsed !== undefined || contextLimit !== undefined;
+  const contextAmount = !hasContext ? '' : contextUsed === undefined ? `上限 ${number.format(contextLimit)}`
+    : contextLimit === undefined ? `已用 ${number.format(contextUsed)}` : `${number.format(contextUsed)} / ${number.format(contextLimit)}`;
   const stats = [
     ['总计', tokens?.total], ['输入', tokens?.input], ['输出', tokens?.output],
     ['缓存输入', tokens?.cached], ['推理输出', tokens?.reasoning],
-  ].filter(([, value]) => Number.isFinite(value));
+  ].filter(([, value]) => Number.isFinite(value)).map(([label, value]) => [label, number.format(value)]);
+  if (Number.isFinite(cost?.amount) && cost.currency) {
+    const amount = cost.amount > 0 && cost.amount < 0.000001 ? '<0.000001'
+      : cost.amount.toLocaleString('zh-CN', { maximumFractionDigits: 6 });
+    stats.push(['费用', `${amount} ${cost.currency}`]);
+  }
   return <div className="usage-panel">
-    {!stats.length && !limits?.length && !cost && <p>当前没有可显示的用量。</p>}
-    {tokens?.contextLimit > 0 && <label className="quota">
-      <span>上下文 <small>{number.format(tokens.contextUsed ?? 0)} / {number.format(tokens.contextLimit)}</small></span>
-      <progress value={tokens.contextUsed ?? 0} max={tokens.contextLimit} />
-    </label>}
-    {stats.length > 0 && <dl>{stats.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{number.format(value)}</dd></div>)}</dl>}
-    {limits?.map(limit => <label className="quota" key={limit.id}>
-      <span>{limit.label}{limit.windowMinutes && ` · ${limit.windowMinutes >= 60 && limit.windowMinutes % 60 === 0
-        ? `${limit.windowMinutes / 60} 小时` : `${limit.windowMinutes} 分钟`}`}<small>已用 {number.format(limit.used)}%</small></span>
-      <progress value={limit.used} max={100} />
-      {limit.resetsAt && <small>{new Date(limit.resetsAt * 1000).toLocaleString('zh-CN')} 重置</small>}
-    </label>)}
-    {cost && <p>费用 {number.format(cost.amount)} {cost.currency}</p>}
-    <button type="button" className="panel-link" onClick={() => refresh().catch(report)}>刷新额度</button>
+    {(hasContext || stats.length > 0) && <section className="usage-group" aria-label="会话用量">
+      <h3>会话用量</h3>
+      {hasContext && <UsageMeter label="上下文" amount={contextAmount} value={contextUsed} max={contextLimit} />}
+      {stats.length > 0 && <dl>{stats.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+    </section>}
+    {limits?.length > 0 && <section className="usage-group" aria-label="账号额度">
+      <h3>账号额度</h3>
+      {limits.map(limit => {
+        const reset = Number.isFinite(limit.resetsAt) ? new Date(limit.resetsAt * 1000) : null;
+        return <UsageMeter key={limit.id} label={limit.label + quotaWindow(limit.windowMinutes)}
+          amount={`已用 ${number.format(limit.used)}%`} value={limit.used} max={100}>
+          {reset && Number.isFinite(reset.valueOf()) && <time dateTime={reset.toISOString()} title={reset.toLocaleString('zh-CN')}>
+            {reset.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })} 重置
+          </time>}
+        </UsageMeter>;
+      })}
+    </section>}
+    {!hasContext && !stats.length && !limits?.length && <p role="status">
+      {refreshing ? '正在读取用量…' : '当前没有可显示的用量。'}
+    </p>}
+    <button type="button" className="panel-link usage-refresh" aria-disabled={refreshing}
+      onClick={() => { if (!refreshing) refresh().catch(report); }}>{refreshing ? '刷新中…' : '刷新用量'}</button>
   </div>;
 }
 
@@ -349,7 +383,8 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
       aria-label={reasoningPanel ? '推理摘要正文' : undefined}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} />}
-      {panel.kind === 'usage' && <UsagePanel usage={work.usage} refresh={work.refreshUsage} report={report} />}
+      {panel.kind === 'usage' && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing}
+        refresh={work.refreshUsage} report={report} />}
       {panel.kind === 'agents' && <AgentsPanel work={work} openSession={openSession} report={report} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
       {panel.kind === 'extensions' && (panel.items?.length

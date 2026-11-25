@@ -241,8 +241,10 @@ export default function (pi) {
   await tool.locator('summary').click();
   await tool.getByText('pi tool result', { exact: true }).waitFor();
   await send('/usage');
-  const usage = page.getByRole('region', { name: '用量' });
-  await usage.getByText('总计', { exact: true }).waitFor();
+  const usage = page.getByRole('region', { name: '用量', exact: true });
+  await usage.getByRole('region', { name: '会话用量' }).getByText('总计', { exact: true }).waitFor();
+  assert.equal(await usage.getByRole('region', { name: '账号额度' }).count(), 0);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-usage.png') });
   await usage.getByRole('button', { name: '关闭面板' }).click();
   await send('/span-form');
   const confirm = page.getByRole('region', { name: '核对 Pi 操作' });

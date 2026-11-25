@@ -483,8 +483,44 @@ try {
   console.log('Verified the fixed reasoning strip, history scroll position, nested details, and archived summary.');
   await composer.fill('/usage');
   await composer.press('Enter');
-  await page.getByRole('region', { name: '用量' }).getByText('已用 24%', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '关闭面板' }).click();
+  const usage = page.getByRole('region', { name: '用量', exact: true });
+  const sessionUsage = usage.getByRole('region', { name: '会话用量' });
+  const accountUsage = usage.getByRole('region', { name: '账号额度' });
+  await sessionUsage.getByText('140 / 512', { exact: true }).waitFor();
+  await accountUsage.getByText('已用 24%', { exact: true }).waitFor();
+  const weekly = accountUsage.getByRole('progressbar', { name: /项目共享额度与连续交付窗口 · 7 天$/ });
+  await weekly.waitFor();
+  const usageSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  assert.ok(await weekly.evaluate(meter => {
+    const quota = meter.closest('.quota');
+    const [name, percent] = quota.querySelector('.quota-heading').children;
+    const outer = quota.closest('.agent-panel-content');
+    const nameBox = name.getBoundingClientRect(), valueBox = percent.getBoundingClientRect();
+    return quota.dataset.nearLimit === 'true' && valueBox.left > nameBox.right && nameBox.height > valueBox.height
+      && outer.scrollWidth === outer.clientWidth && meter.value === 92;
+  }), 'Long quota labels wrap while the percentage and meter remain intact');
+  assert.equal(await accountUsage.locator('time').getAttribute('datetime'), new Date(1795670400000).toISOString());
+  if (screenshot) {
+    await weekly.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-usage-compact.png') });
+  }
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), usageSize);
+  await page.waitForFunction(([width, height]) => Math.abs(innerWidth - width) <= 2 && Math.abs(innerHeight - height) <= 2, usageSize);
+  await writeFile(join(profile, 'usage-context-only'), '');
+  const refreshUsage = usage.getByRole('button', { name: '刷新用量' });
+  await refreshUsage.click();
+  await usage.getByRole('button', { name: '刷新中…' }).waitFor();
+  await writeFile(join(profile, 'usage-reply'), '');
+  await sessionUsage.getByText('上限 512', { exact: true }).waitFor();
+  await accountUsage.waitFor({ state: 'detached' });
+  assert.equal(await usage.getByRole('progressbar').count(), 0);
+  assert.equal(await usage.getByText('当前没有可显示的用量。').count(), 0);
+  await refreshUsage.waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-usage-context-only.png') });
+  await rm(join(profile, 'usage-context-only'));
+  await usage.getByRole('button', { name: '关闭面板' }).click();
   await composer.fill('/agents');
   await composer.press('Enter');
   await page.getByRole('region', { name: '代理与团队' }).getByText('fixture-subagent', { exact: true }).waitFor();
@@ -525,7 +561,7 @@ try {
   });
   assert.deepEqual(layout, { scrolls: true, canAnswer: true, popoverAbove: true });
   await composer.press('Escape');
-  await page.getByRole('region', { name: '用量' }).waitFor({ state: 'detached' });
+  await usage.waitFor({ state: 'detached' });
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
   const windowSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
   const terminalToggle = page.getByRole('button', { name: '切换终端' });

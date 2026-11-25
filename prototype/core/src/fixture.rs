@@ -1091,8 +1091,29 @@ pub fn run() -> Result<()> {
                         *prompted = true;
                     }
                 }
-                json!({"rateLimits":{"limitId":"codex","limitName":"Codex",
-                "primary":{"usedPercent":24,"windowDurationMins":300}}})
+                if let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                    && gate.join("usage-context-only").is_file()
+                {
+                    if !wait_for_stream_gate(&gate.join("usage-reply"), &AtomicBool::new(true)) {
+                        send(
+                            &output,
+                            json!({"id":id,"error":{"code":-32603,"message":"用量验收超时。"}}),
+                        )?;
+                        continue;
+                    }
+                    notice(
+                        &output,
+                        "thread/tokenUsage/updated",
+                        json!({"threadId":THREAD,"tokenUsage":{"modelContextWindow":512}}),
+                    )?;
+                    json!({})
+                } else {
+                    json!({"rateLimits":{"limitId":"codex","limitName":"Codex",
+                        "primary":{"usedPercent":24,"windowDurationMins":300}},
+                        "rateLimitsByLimitId":{"workbench-review":{"limitId":"workbench-review",
+                            "limitName":"工作区批量处理与多轮长输出审阅的项目共享额度与连续交付窗口",
+                            "secondary":{"usedPercent":92,"windowDurationMins":10080,"resetsAt":1795670400}}}})
+                }
             }
             "app/list" | "skills/list" => json!({"data":[],"nextCursor":null}),
             _ => json!({}),

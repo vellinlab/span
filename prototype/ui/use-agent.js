@@ -26,6 +26,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const [requests, setRequests] = useState([]);
   const [goal, setGoal] = useState(null);
   const [usage, setUsage] = useState({});
+  const [usageRefreshing, setUsageRefreshing] = useState(false);
   const [teams, setTeams] = useState([]);
   const [members, setMembers] = useState([]);
   const [models, setModels] = useState([]);
@@ -42,6 +43,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const requestedArchiveView = useRef(false);
   const pendingPage = useRef(null);
   const pendingSend = useRef(null);
+  const usageRefresh = useRef(null);
   const rosterRefresh = useRef(null);
   const queue = useRef({ events: [], characters: 0 });
   const frame = useRef(0);
@@ -88,6 +90,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     busy.current = false;
     pendingPage.current = null;
     pendingSend.current = null;
+    usageRefresh.current = null;
     rosterRefresh.current = null;
     jumpToLatest.current = true;
     cancelAnimationFrame(frame.current);
@@ -100,6 +103,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     setRequests([]);
     setGoal(null);
     setUsage(previous => ({ limits: previous.limits }));
+    setUsageRefreshing(false);
     setTeams([]);
     setMembers([]);
     setRun(null);
@@ -130,6 +134,8 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       if (queue.current.events.length) updateRows();
       changeRun(null);
       rosterRefresh.current = null;
+      usageRefresh.current = null;
+      setUsageRefreshing(false);
       busy.current = false;
       setRequests([]);
       setConnection('offline');
@@ -558,9 +564,22 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   async function refreshUsage() {
     const client = agent.current;
-    if (!client?.usage) return;
-    const value = await client.usage(active.current?.ref);
-    if (client === agent.current) setUsage(previous => ({ ...previous, ...value }));
+    if (!client?.usage || usageRefresh.current) return;
+    const request = client.usage(active.current?.ref);
+    usageRefresh.current = request;
+    const current = () => client === agent.current && usageRefresh.current === request;
+    setUsageRefreshing(true);
+    try {
+      const value = await request;
+      if (current()) setUsage(previous => ({ ...previous, ...value }));
+    } catch (error) {
+      if (current()) throw error;
+    } finally {
+      if (usageRefresh.current === request) {
+        usageRefresh.current = null;
+        setUsageRefreshing(false);
+      }
+    }
   }
 
   async function refreshDelegation() {
@@ -618,7 +637,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   return {
     api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyPages, loading, run, requests,
-    goal, usage, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
+    goal, usage, usageRefreshing, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
     prepareConnection, timelineScope: () => layer.current,
     refreshDelegation, delegate, manageTeam,
     list: (showArchived = archived, more = false) => list(agent.current, showArchived, more ? sessionCursor : null),
