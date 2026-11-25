@@ -1100,8 +1100,8 @@ try {
   console.log('Verified the rich answer layout and long code overflow at two window sizes.');
 
   await page.getByRole('button', { name: '停止', exact: true }).waitFor({ state: 'detached' });
-  const readClipboard = () => app.evaluate(({ clipboard }) => ({
-    text: clipboard.readText().replaceAll('\r\n', '\n'), html: clipboard.readHTML(),
+  const readClipboard = () => app.evaluate(async ({ clipboard }) => ({
+    text: (await clipboard.readText()).replaceAll('\r\n', '\n'), html: await clipboard.readHTML(),
   }));
   const feedback = page.locator('.composer-status');
   await composer.fill('/copy');

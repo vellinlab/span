@@ -234,7 +234,7 @@ ipcMain.handle('span:copy-text', (event, text) => {
     throw new Error('无效的剪贴板文本。');
   }
   clipboardRevision++;
-  clipboard.writeText(text);
+  return clipboard.writeText(text);
 });
 
 ipcMain.handle('span:copy-rich', async (event, markdown) => {
@@ -245,8 +245,8 @@ ipcMain.handle('span:copy-rich', async (event, markdown) => {
   const revision = ++clipboardRevision;
   const html = await request('clipboard.rich', { markdown });
   if (revision !== clipboardRevision || closing) return false;
-  clipboard.write({ text: markdown, html });
-  return true;
+  await clipboard.write({ text: markdown, html });
+  return revision === clipboardRevision;
 });
 
 app.whenReady().then(() => {
