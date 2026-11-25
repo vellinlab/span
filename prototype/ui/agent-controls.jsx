@@ -441,8 +441,9 @@ function McpServerRow({ item, verbose }) {
   const [toolLimit, setToolLimit] = useState(mcpToolPageSize);
   const authentication = mcpAuthentication[item.authentication];
   const connection = mcpConnections[item.connection];
+  const showAuthentication = connection && authentication && !(item.connection === 'auth-required' && item.authentication === 'required');
   const catalog = item.toolError ? '工具读取失败' : item.tools ? `${number.format(item.tools.length)} 个工具` : '工具列表不可用';
-  const hasDetails = Boolean(item.tools?.length || item.toolError || (connection && authentication));
+  const hasDetails = Boolean(item.tools?.length || item.toolError || showAuthentication);
   const summary = <>
     <strong>{item.label}</strong><small>{[connection ?? authentication, catalog].filter(Boolean).join(' · ')}</small>
   </>;
@@ -450,7 +451,7 @@ function McpServerRow({ item, verbose }) {
     {hasDetails ? <details open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary className="extension-heading"><ChevronDown size={13} aria-hidden="true" />{summary}</summary>
       {expanded && <div className="extension-details">
-        {connection && authentication && <small>{authentication}</small>}
+        {showAuthentication && <small>{authentication}</small>}
         {item.toolError && <p className="extension-error">{item.toolError}</p>}
         {item.tools?.length > 0 && <ul className="extension-tools" aria-label={`${item.label} 的工具`}>
           {item.tools.slice(0, toolLimit).map(name => <li key={name}><code>{name}</code></li>)}

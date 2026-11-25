@@ -720,7 +720,13 @@ try {
   await failedServer.getByText('需要登录 · 工具读取失败', { exact: true }).waitFor();
   await failedServer.press('Enter');
   await inventory.getByText('登录已过期，请重新授权后读取工具。', { exact: true }).waitFor();
+  assert.equal(await inventory.getByText('未登录', { exact: true }).count(), 0);
   assert.ok(await inventoryBody.evaluate(element => element.scrollWidth === element.clientWidth));
+  assert.ok(await inventory.evaluate(element => {
+    const panel = element.getBoundingClientRect();
+    const input = document.querySelector('form.composer').getBoundingClientRect();
+    return panel.left === input.left && panel.right === input.right;
+  }));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-mcp-compact.png') });
   await writeFile(join(profile, 'mcp-next-error'), '');
   await inventory.getByRole('button', { name: '加载更多' }).press('Enter');
