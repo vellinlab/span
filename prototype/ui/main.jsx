@@ -527,7 +527,10 @@ function App() {
       }
       case '/plan': {
         if (args && running) throw new Error('请先结束当前任务，再用规划模式发送。');
-        const mode = !args && work.options.mode === 'plan' ? 'default' : 'plan';
+        const modes = work.api?.modes ?? [];
+        if (!modes.some(mode => mode.id === 'plan')) throw new Error('当前后端没有提供规划模式。');
+        const executionMode = modes.find(mode => mode.id === 'default') ?? modes.find(mode => mode.id !== 'plan');
+        const mode = !args && work.options.mode === 'plan' && executionMode ? executionMode.id : 'plan';
         work.setOptions(options => ({ ...options, mode }));
         return args ? work.send(args, effectiveOptions({ mode })) : true;
       }

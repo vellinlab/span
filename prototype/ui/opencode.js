@@ -12,6 +12,7 @@ const approvalOptions = new Map([
 const choice = ({ value, name, description }) => ({ id: value, label: name || value, description });
 const configChoices = item => (item?.options ?? []).flatMap(option => option.options ?? [option])
   .filter(option => typeof option.value === 'string').map(choice);
+const configCategories = { model: 'model', effort: 'thought_level', mode: 'mode' };
 const pageSize = 40;
 
 export function createOpenCode({ generation, cwd, location, onEvent }) {
@@ -64,17 +65,25 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
   function useConfig(state, config) {
     if (!config) return;
     state.config = config;
-    const byId = Object.fromEntries(config.map(item => [item.id, item]));
-    state.options = Object.fromEntries(['model', 'effort', 'mode']
-      .filter(id => typeof byId[id]?.currentValue === 'string').map(id => [id, byId[id].currentValue]));
-    state.models = configChoices(byId.model).map(model => ({
-      ...model, isDefault: model.id === state.options.model,
-      inputs: capabilities?.promptCapabilities?.image ? ['text', 'image'] : ['text'],
-      efforts: model.id === state.options.model ? configChoices(byId.effort) : [],
-      defaultEffort: model.id === state.options.model ? state.options.effort : undefined, tiers: [],
-    }));
+    const selectors = config.filter(item => (item.type === 'select' || !item.type) && typeof item.currentValue === 'string');
+    state.controls = Object.fromEntries(Object.entries(configCategories).map(([key, category]) => [key,
+      selectors.find(item => item.category === category) ?? selectors.find(item => item.id === key && !item.category),
+    ]));
+    state.options = Object.fromEntries(Object.entries(state.controls)
+      .filter(([, item]) => item).map(([key, item]) => [key, item.currentValue]));
+    const { model: modelControl, effort, mode } = state.controls;
+    state.models = configChoices(modelControl).map(model => {
+      const separator = model.label.indexOf('/');
+      const provider = model.label.slice(0, separator);
+      const label = separator > 0 && provider === model.label.slice(separator + 1) ? provider : model.label;
+      const selected = model.id === state.options.model;
+      return { ...model, label, isDefault: selected,
+        inputs: capabilities?.promptCapabilities?.image ? ['text', 'image'] : ['text'],
+        efforts: selected ? configChoices(effort) : [],
+        defaultEffort: selected ? state.options.effort : undefined, tiers: [] };
+    });
     if (state === active) {
-      modes.splice(0, modes.length, ...configChoices(byId.mode));
+      modes.splice(0, modes.length, ...configChoices(mode));
       notify(state.id, { kind: 'models', models: state.models });
     }
   }
@@ -219,12 +228,12 @@ export function createOpenCode({ generation, cwd, location, onEvent }) {
   }
 
   async function configure(state, options) {
-    for (const id of ['model', 'effort', 'mode']) {
-      const selected = options[id];
-      if (!selected || selected === state.options[id]) continue;
-      const config = state.config.find(item => item.id === id);
+    for (const key of Object.keys(configCategories)) {
+      const selected = options[key];
+      if (!selected || selected === state.options[key]) continue;
+      const config = state.controls[key];
       if (!configChoices(config).some(option => option.id === selected)) continue;
-      const response = await request('session/set_config_option', { sessionId: state.id, configId: id, value: selected });
+      const response = await request('session/set_config_option', { sessionId: state.id, configId: config.id, value: selected });
       useConfig(state, response.configOptions);
     }
   }

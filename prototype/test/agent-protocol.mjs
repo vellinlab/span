@@ -801,9 +801,12 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   const listeners = new Set();
   const catalogEntry = { sessionId: 'saved', cwd: '/remote/work', title: 'Saved session' };
   const configOptions = [
-    { id: 'model', currentValue: 'span/test', options: [{ value: 'span/test', name: 'Test' }] },
-    { id: 'effort', currentValue: 'low', options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }] },
-    { id: 'mode', currentValue: 'build', options: [{ value: 'build', name: 'Build' }] },
+    { id: 'provider-model', category: 'model', type: 'select', currentValue: 'span/test',
+      options: [{ name: 'Span', options: [{ value: 'span/test', name: 'Test/Test' }] }] },
+    { id: 'reasoning-level', category: 'thought_level', type: 'select', currentValue: 'low',
+      options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }] },
+    { id: 'mode', currentValue: 'build', options: [{ value: 'build', name: 'Build' }, { value: 'plan', name: 'Plan' }] },
+    { id: 'irrelevant', category: 'thought_level', type: 'boolean', currentValue: false, options: [] },
   ];
   const emit = (event, data) => listeners.forEach(listener => listener({ event, generation: source, data }));
   const packet = data => emit('agent', { jsonrpc: '2.0', ...data });
@@ -811,6 +814,7 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   const chunk = (sessionId, sessionUpdate, messageId, text) =>
     update(sessionId, { sessionUpdate, messageId, content: { type: 'text', text } });
   let ongoing;
+  let sessionConfig = configOptions;
   globalThis.window = { span: {
     onEvent(listener) {
       listeners.add(listener);
@@ -860,9 +864,11 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
           packet({ id: ongoing.id, result: { stopReason: 'cancelled' } });
           break;
         case 'session/set_config_option':
-          assert.equal(sent.params.configId, 'effort');
-          assert.equal(sent.params.value, 'high');
-          answer({ configOptions });
+          assert.ok((sent.params.configId === 'reasoning-level' && sent.params.value === 'high')
+            || (sent.params.configId === 'mode' && sent.params.value === 'plan'));
+          sessionConfig = sessionConfig.map(option => option.id === sent.params.configId
+            ? { ...option, currentValue: sent.params.value } : option);
+          answer({ configOptions: sessionConfig });
           break;
         case 'session/close':
           answer({});
@@ -886,7 +892,10 @@ test('OpenCode ACP scopes directory, replay, long-running prompts and approvals 
   const fresh = await agent.sessions.start({});
   const session = fresh.session.ref;
   assert.deepEqual(agent.commands.map(command => command.id), ['compact']);
-  const run = await agent.turns.start(session, [{ kind: 'text', text: 'New request' }], { effort: 'high' }, 'draft');
+  assert.deepEqual(agent.modes.map(mode => mode.id), ['build', 'plan']);
+  const run = await agent.turns.start(session, [{ kind: 'text', text: 'New request' }], { effort: 'high', mode: 'plan' }, 'draft');
+  assert.deepEqual(packets.filter(packet => packet.method === 'session/set_config_option').map(packet => packet.params.configId),
+    ['reasoning-level', 'mode']);
   assert.equal(run.status, 'running');
   assert.equal(events.findLast(event => event.kind === 'item').item.clientId, 'draft');
   const permission = (id, sessionId) => packet({ id, method: 'session/request_permission', params: {

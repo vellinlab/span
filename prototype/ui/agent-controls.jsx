@@ -33,7 +33,7 @@ export function commonAgentCommands(api, models, options) {
     ...(models.length ? [['/model', '选择下一轮的模型']] : []),
     ...(model?.efforts.length ? [['/reasoning', '选择思考强度']] : []),
     ...(model?.tiers.length ? [['/fast', '切换速度档位']] : []),
-    ...(api.modes?.some(mode => mode.id === 'plan') && models.length ? [['/plan', '切换规划模式，可附带任务']] : []),
+    ...(api.modes?.some(mode => mode.id === 'plan') ? [['/plan', '切换规划模式，可附带任务']] : []),
     ...(api.permissions?.length ? [['/permissions', '选择会话权限']] : []),
     ...(api.turns.compact ? [['/compact', '压缩上下文']] : []),
     ...(api.turns.review ? [['/review', '审查代码变更']] : []),
@@ -80,7 +80,7 @@ function RuntimeSettings({ api, models, options, setOptions }) {
     {model?.tiers.length > 0 && <Selector label="速度" choices={[{ id: 'default', label: '标准' },
       ...model.tiers.filter(tier => tier.id !== 'default')]} value={options.tier} blank="模型默认"
       onChange={value => select('tier', value)} />}
-    {api?.modes?.length > 0 && model && <Selector label="模式" choices={api.modes} value={options.mode}
+    {api?.modes?.length > 0 && <Selector label="模式" choices={api.modes} value={options.mode}
       blank="跟随会话" onChange={value => select('mode', value)} />}
     {api?.permissions?.length > 0 && <Selector label="权限" choices={api.permissions} value={options.permissions}
       blank="跟随会话" onChange={value => select('permissions', value)} />}
@@ -563,7 +563,7 @@ export function AgentMenu({ work, onSelect }) {
   }, [open]);
   const { api, goal, models, options } = work;
   const entries = [
-    ...(models.length || api?.permissions?.length ? [['settings', SlidersHorizontal]] : []),
+    ...(models.length || api?.modes?.length || api?.permissions?.length ? [['settings', SlidersHorizontal]] : []),
     ...(api?.goal && !goal ? [['goal', Goal]] : []),
     ...(api?.usage ? [['usage', ChartNoAxesColumnIncreasing]] : []),
     ...(api?.delegation ? [['agents', Users]] : []),
