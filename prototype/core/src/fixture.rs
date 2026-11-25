@@ -401,7 +401,15 @@ fn stream_reasoning(
         if !wait_for_stream_gate(&gate.join("follow-detail"), running) {
             return Ok(());
         }
-        delta("\r\n- 收尾复核完成。步骤 073")?;
+        if following {
+            delta("\r\n\r\n1. ")?;
+            if !wait_for_stream_gate(&gate.join("follow-detail-content"), running) {
+                return Ok(());
+            }
+            delta("收尾复核完成。步骤 073")?;
+        } else {
+            delta("\r\n- 收尾复核完成。步骤 073")?;
+        }
     }
     if following {
         if !wait_for_stream_gate(&gate.join("reference-prefix"), running) {

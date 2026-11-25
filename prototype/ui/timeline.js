@@ -227,7 +227,15 @@ function summaryTail(previous, fragment) {
   const trimmed = fragment.trimEnd();
   if (!trimmed) return { tail, preview: previous?.preview };
   const content = trimmed === fragment ? tail : summarySuffix(previous?.tail, trimmed);
-  return { tail, preview: content.split(/\r?\n/).at(-1).trim().replace(/^(?:[-*+] |#{1,6} )/, '') };
+  const lines = content.split('\n');
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index].trim().replace(/^(?:>[ \t]*)+/, '');
+    if (/^([-*_])(?:[ \t]*\1){2,}$|^(?:`{3,}[^`]*|~{3,}[^~]*)$/.test(line)) continue;
+    const preview = line.replace(/^(?:[-*+]|#{1,6}|\d{1,9}[.)])(?:[ \t]+|$)/, '');
+    if (preview) return { tail, preview };
+  }
+  // A chunk can end at an empty Markdown block before its words arrive.
+  return { tail, preview: previous?.preview };
 }
 
 function addReasoning({ rows, positions, write }, data, final, delta) {

@@ -511,7 +511,17 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       }
       if (deferredDetails) await revealBottom();
       await writeFile(join(profile, 'follow-detail'), '');
+      if (reasoningFollowing) {
+        if (label === 'candidate') {
+          await panel.locator('ol > li').filter({ hasText: /^\s*$/ }).waitFor({ state: 'attached' });
+          await strip.getByText(lastBatch, { exact: false }).waitFor();
+          assert.deepEqual(await strip.boundingBox(), geometry);
+          assert.equal(await position(), before);
+        }
+        await writeFile(join(profile, 'follow-detail-content'), '');
+      }
       await panel.getByText('步骤 073', { exact: false }).waitFor();
+      if (label === 'candidate') await strip.getByText('收尾复核完成。步骤 073', { exact: true }).waitFor();
       if (deferredDetails) await revealBottom();
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-tail.png` });
     }

@@ -789,7 +789,9 @@ test('streamed reasoning keeps a bounded preview and preserves the full summary'
   assert.ok(turnReasoning(rows, 't').preview.endsWith('最终检查'));
 
   const unicodeBoundary = '😀' + '新'.repeat(239);
-  const updated = applyTimeline(rows, [delta(0, '- '), delta(0, unicodeBoundary)]);
+  const marker = applyTimeline(rows, [delta(0, '- ')]);
+  assert.equal(turnReasoning(marker, 't').preview, turnReasoning(rows, 't').preview);
+  const updated = applyTimeline(marker, [delta(0, unicodeBoundary)]);
   const preview = turnReasoning(updated, 't');
   assert.equal(preview.preview, '新'.repeat(239));
   assert.deepEqual(preview.sections, [summary + whitespace + '- ' + unicodeBoundary, '## 覆核']);
@@ -802,6 +804,22 @@ test('streamed reasoning keeps a bounded preview and preserves the full summary'
   } }]);
   assert.equal(turnReasoning(completed, 't').preview, '最终摘要');
   assert.equal(turnReasoning(completed, 't').sections[0], preview.sections[0]);
+});
+
+test('a live reasoning preview waits for text in the next Markdown block', () => {
+  const delta = text => ({ kind: 'delta', delta: { kind: 'reasoning', id: 'r', turnId: 't', text } });
+  const preview = rows => turnReasoning(rows, 't')?.preview;
+  const start = applyTimeline([], [delta('## 检查会话\r\n')]);
+  const markers = ['- ', '1. ', '9) ', '> ', '> ### ', '```text', '~~~', '---'];
+  for (const marker of markers) {
+    assert.equal(preview(applyTimeline([], [delta(marker)])), undefined);
+    assert.equal(preview(applyTimeline(start, [delta(marker)])), '检查会话');
+    assert.equal(preview(applyTimeline([], [delta('## 检查会话\r\n' + marker)])), '检查会话');
+  }
+  const next = applyTimeline(start, [delta('> 1. '), delta('读取最新状态')]);
+  assert.equal(preview(next), '读取最新状态');
+  assert.equal(next[0].sections[0], '## 检查会话\r\n> 1. 读取最新状态');
+  assert.equal(preview(applyTimeline(start, [delta('2.0 已加载')])), '2.0 已加载');
 });
 
 test('the server user echo merges into the optimistic row without moving it', () => {
