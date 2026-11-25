@@ -275,12 +275,13 @@ function App() {
     readPreview(cwd, absolute ? path.slice(root.length) : path);
   }, [session?.cwd, config, report, readPreview]);
 
-  function closePanel() {
+  function closePanel({ restoreFocus = true } = {}) {
     panelScope.current++;
+    const trigger = panelTrigger.current;
+    panelTrigger.current = null;
     setPanel(null);
-    if (panelTrigger.current || document.activeElement?.closest('.agent-panel')) {
-      (panelTrigger.current?.isConnected ? panelTrigger.current : input.current)?.focus({ preventScroll: true });
-      panelTrigger.current = null;
+    if (restoreFocus && (trigger || document.activeElement?.closest('.agent-panel'))) {
+      (trigger?.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
     }
   }
 
@@ -293,7 +294,7 @@ function App() {
     dismissPreview();
     setEntries([]);
     setDirectory('');
-    closePanel();
+    closePanel({ restoreFocus: false });
     work.prepareConnection();
     setConfig(next);
   }
@@ -313,7 +314,7 @@ function App() {
 
   function newSession() {
     if (!work.reset()) return false;
-    closePanel();
+    closePanel({ restoreFocus: false });
     setTab('sessions');
     if (readingOverlay || preview?.attachment) dismissPreview('composer');
     else {
@@ -326,7 +327,7 @@ function App() {
   function openSession(entry) {
     const key = sessionKey(entry.ref);
     if (loading || running || connection !== 'ready' || key === refKey) return;
-    closePanel();
+    closePanel({ restoreFocus: false });
     if (readingOverlay || preview?.attachment) dismissPreview();
     else previewScope.current++;
     work.open(entry, readingViews.current.get(key));
@@ -334,7 +335,7 @@ function App() {
 
   async function forkConversation() {
     if (!await work.fork()) return false;
-    closePanel();
+    closePanel({ restoreFocus: false });
     if (readingOverlay || preview?.attachment) dismissPreview('composer');
     else {
       previewScope.current++;
@@ -345,7 +346,7 @@ function App() {
 
   const latestWork = useRef();
   latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch,
-    composerKey, draft, files, canAttach, canSendImages };
+    composerKey, draft, visibleDraft, files, canAttach, canSendImages };
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
   const loadCatalogPage = useCallback(() => {
@@ -369,19 +370,13 @@ function App() {
     return () => window.removeEventListener('keydown', onShortcut);
   }, []);
 
-  function showPanel(kind, trigger = null, options = {}) {
+  function showPanel(kind, trigger = input.current, options = {}) {
     const id = ++panelScope.current;
     panelTrigger.current = trigger;
     setPanel({ kind, id, focus: Boolean(trigger), ...options });
     setSuggesting(false);
     if (kind === 'usage') work.refreshUsage().catch(report);
     if (kind === 'agents') work.refreshDelegation().catch(report);
-  }
-
-  function output(title, text) {
-    panelScope.current++;
-    panelTrigger.current = null;
-    setPanel({ kind: 'output', title, text });
   }
 
   function chooseWorkspace() {
@@ -432,7 +427,7 @@ function App() {
     return options;
   }
 
-  async function runCommand(command, args) {
+  async function runCommand(command, args, submitted) {
     switch (command) {
       case '/new':
         if (!newSession()) throw new Error('请先结束当前任务。');
@@ -447,11 +442,14 @@ function App() {
         }
         return true;
       case '/status':
-        output('会话状态', [sessionTitle(session), host, backendName, connectionLabel, routeLabels[route],
-          session?.cwd, work.options.model, run?.id].filter(Boolean).join('\n'));
+        showPanel('output', input.current, {
+          title: '会话状态',
+          text: [sessionTitle(session), host, backendName, connectionLabel, routeLabels[route],
+            session?.cwd, work.options.model, run?.id].filter(Boolean).join('\n'),
+        });
         return true;
       case '/pwd':
-        output('工作目录', session?.cwd ?? (config.ssh ? host : config.cwd));
+        showPanel('output', input.current, { title: '工作目录', text: session?.cwd ?? (config.ssh ? host : config.cwd) });
         return true;
       case '/copy': {
         if (args && args !== 'markdown' && args !== 'rich') throw new Error('用法 /copy、/copy markdown 或 /copy rich');
@@ -550,17 +548,21 @@ function App() {
         return true;
       }
       default: {
+        const resultTrigger = () => input.current === document.activeElement && latestWork.current.visibleDraft === submitted
+          ? input.current : null;
         const kind = extensionCommands[command];
         if (kind && api.extensions?.kinds.includes(kind)) {
           const scope = ++panelScope.current;
           const items = await work.withSession((client, ref) => client.extensions.list(kind, ref));
-          if (items && scope === panelScope.current) setPanel({ kind: 'extensions', extension: kind, title: extensionTitles[kind], items });
+          if (items && scope === panelScope.current) {
+            showPanel('extensions', resultTrigger(), { extension: kind, title: extensionTitles[kind], items });
+          }
           return true;
         }
         if (api.execute && api.commands?.some(item => '/' + item.id === command)) {
           const scope = ++panelScope.current;
           const result = await api.execute(command.slice(1), session?.ref ?? null, args);
-          if (result && scope === panelScope.current) output(result.title, result.text);
+          if (result && scope === panelScope.current) showPanel('output', resultTrigger(), { title: result.title, text: result.text });
           return true;
         }
         return false;
@@ -586,7 +588,7 @@ function App() {
       const nativePrompt = known && !api.execute && api.commands?.some(item => '/' + item.id === command[1])
         && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
       if (!known || nativePrompt) prepareMarkdown().catch(() => {});
-      const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '')
+      const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '', submitted)
         : await work.send(text, effectiveOptions(), delivery, () => {
           const screenshots = files.filter(file => file.screenshot).map(file => file.path);
           if (screenshots.length) window.span.retainScreenshots(screenshots);
@@ -670,7 +672,7 @@ function App() {
     if (event.nativeEvent.isComposing) return;
     if (event.key === 'Escape') {
       setSuggesting(false);
-      closePanel();
+      closePanel({ restoreFocus: false });
       return;
     }
     if (suggestions.length && ['ArrowDown', 'ArrowUp', 'Tab'].includes(event.key)) {
@@ -720,7 +722,7 @@ function App() {
 
   async function archiveFromTitle() {
     if (!await work.archive()) return;
-    closePanel();
+    closePanel({ restoreFocus: false });
     if (readingOverlay || preview?.attachment) dismissPreview(archiveTrigger.current ? null : 'composer');
     if (archiveTrigger.current) archiveTrigger.current.focus();
     else if (!readingOverlay && !preview?.attachment) input.current?.focus();
@@ -855,7 +857,7 @@ function App() {
               <div className="composer-overlay-anchor" aria-hidden="true" />
               <div className="composer-overlay">
                 <AgentPanel panel={panel} work={work} reasoning={reasoningDetails}
-                  setPanel={value => value ? setPanel(value) : closePanel()} report={report} openSession={openRef} />
+                  onClose={closePanel} report={report} openSession={openRef} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}
                     ref={index === commandIndex % suggestions.length ? commandSelection : undefined}

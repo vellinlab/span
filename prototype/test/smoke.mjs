@@ -532,6 +532,90 @@ try {
   await earlyReasoning.locator('summary').click();
   assert.equal(await page.getByRole('alert').count(), 0);
   console.log('Verified the fixed reasoning strip, history scroll position, nested details, and archived summary.');
+
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  const agentToggle = page.getByRole('button', { name: 'Agent 控件' });
+  const settingsEntry = page.getByRole('button', { name: '运行设置' });
+  const settings = page.getByRole('region', { name: '运行设置' });
+  const closeSettings = settings.getByRole('button', { name: '关闭面板' });
+  const modelSetting = settings.getByRole('combobox', { name: '模型', exact: true });
+  const settingsDraft = '检查设置关闭后，原草稿和选区都保留。';
+  await composer.fill(settingsDraft);
+  await composer.evaluate(element => element.setSelectionRange(2, 6));
+  await agentToggle.press('Enter');
+  await page.keyboard.press('Tab');
+  assert.ok(await settingsEntry.evaluate(element => document.activeElement === element));
+  assert.ok(await settingsEntry.evaluate(element => {
+    const menu = element.closest('.agent-menu-entries').getBoundingClientRect();
+    const trigger = element.closest('.agent-menu').querySelector('.composer-control').getBoundingClientRect();
+    return Math.abs(menu.right - trigger.right) <= 1 && menu.bottom < trigger.top;
+  }), 'Agent menu should align with its trigger');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-agent-menu.png') });
+  await page.keyboard.press('Escape');
+  await settingsEntry.waitFor({ state: 'detached' });
+  assert.ok(await agentToggle.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  await closeSettings.waitFor();
+  assert.ok(await closeSettings.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Tab');
+  assert.ok(await modelSetting.evaluate(element => document.activeElement === element));
+  assert.ok(await settings.evaluate(panel => {
+    const body = panel.querySelector('.agent-panel-content');
+    const selects = [...body.querySelectorAll('select')].map(element => element.getBoundingClientRect());
+    const composer = document.querySelector('.composer').getBoundingClientRect();
+    const bounds = panel.getBoundingClientRect();
+    return selects.length >= 2 && selects.every(select => select.left === selects[0].left && select.right === selects[0].right)
+      && body.scrollWidth === body.clientWidth && bounds.left >= composer.left - 1
+      && Math.abs(bounds.right - composer.right) <= 1 && bounds.bottom < composer.top;
+  }), 'Settings should align to the composer and give all values a shared column');
+  if (screenshot) {
+    const previousSpacing = await page.addStyleTag({ content: `
+      .agent-panel[data-kind="settings"] .agent-panel-content { padding: 12px; }
+      .agent-panel[data-kind="settings"] > header .icon-button { width: 30px; height: 30px; }
+      .settings-grid { grid-template-columns: none; gap: 10px; }
+      .agent-setting { grid-template-columns: 92px minmax(0, 1fr); gap: 8px; }
+      .agent-setting select { min-height: 0; padding-block: 6px; }
+    ` });
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-agent-settings-before.png') });
+    await previousSpacing.evaluate(element => element.remove());
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-agent-settings.png') });
+  }
+  await modelSetting.dispatchEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true });
+  assert.ok(await settings.isVisible(), 'Cancelling IME composition should keep the panel open');
+  await page.keyboard.press('Escape');
+  await settings.waitFor({ state: 'detached' });
+  assert.ok(await agentToggle.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Shift+Tab');
+  await settingsEntry.waitFor({ state: 'detached' });
+  assert.equal(await composer.inputValue(), settingsDraft);
+  assert.deepEqual(await composer.evaluate(element => [element.selectionStart, element.selectionEnd]), [2, 6]);
+
+  await composer.fill('/model');
+  await composer.press('Enter');
+  await closeSettings.waitFor();
+  assert.ok(await closeSettings.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Escape');
+  await settings.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => document.activeElement === element));
+  await composer.fill('/pwd');
+  await composer.press('Enter');
+  const directoryPanel = page.getByRole('region', { name: '工作目录', exact: true });
+  const directoryDetails = directoryPanel.getByRole('group', { name: '工作目录正文' });
+  await directoryPanel.waitFor();
+  assert.ok(await directoryPanel.getByRole('button', { name: '关闭面板' }).evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Tab');
+  assert.ok(await directoryDetails.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Escape');
+  await directoryPanel.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => document.activeElement === element));
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), goalWindowSize);
+  await page.waitForFunction(([width, height]) => Math.abs(innerWidth - width) <= 2 && Math.abs(innerHeight - height) <= 2, goalWindowSize);
+  console.log('Verified Agent menu and settings keyboard paths, compact alignment, and preserved draft selection.');
+
   await composer.fill('/usage');
   await composer.press('Enter');
   const usage = page.getByRole('region', { name: '用量', exact: true });

@@ -377,7 +377,7 @@ function DiffPanel({ panel }) {
   </div>;
 }
 
-export function AgentPanel({ panel, work, reasoning, setPanel, report, openSession }) {
+export function AgentPanel({ panel, work, reasoning, onClose, report, openSession }) {
   const close = useRef(null);
   const content = useRef(null);
   const { id: panelId, focus, editGoal } = panel ?? {};
@@ -390,14 +390,18 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
   const usagePanel = panel.kind === 'usage';
   const agentsPanel = panel.kind === 'agents';
   const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : agentsPanel ? '代理与团队明细'
-    : panel.kind === 'diff' ? '差异明细' : undefined;
+    : panel.kind === 'diff' ? '差异明细'
+      : panel.kind === 'output' || panel.kind === 'extensions' ? `${title}正文` : undefined;
   const id = panel.kind === 'goal' || reasoningPanel ? `${panel.kind}-panel` : undefined;
   const goal = panel.kind === 'goal' ? work.goal : undefined;
   const usage = goal?.tokens == null ? '' : [goal.tokens, goal.budget].filter(value => value != null)
     .map(value => number.format(value)).join(' / ') + ' tokens';
   return <section className="agent-panel popup-surface" id={id} data-kind={panel.kind}
     aria-label={title} onKeyDown={event => {
-      if (event.key === 'Escape' && (panel.focus || usagePanel || agentsPanel)) setPanel(null);
+      if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
     }}>
     <header><strong>{title}</strong>
       {usage && <small className="goal-usage" title={usage}>{usage}</small>}
@@ -405,7 +409,7 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
         onClick={() => { if (!work.usageRefreshing) work.refreshUsage().catch(report); }}>
         {work.usageRefreshing ? '刷新中…' : '刷新用量'}
       </button>}
-      <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => setPanel(null)}><X size={15} /></button>
+      <button ref={close} className="icon-button" type="button" aria-label="关闭面板" onClick={() => onClose()}><X size={15} /></button>
     </header>
     {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal}
       action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}
@@ -427,17 +431,14 @@ export function AgentPanel({ panel, work, reasoning, setPanel, report, openSessi
 
 export function AgentMenu({ work, onSelect }) {
   const [open, setOpen] = useState(false);
+  const trigger = useRef(null);
   useEffect(() => {
     if (!open) return;
     const dismiss = event => {
-      if (event.key === 'Escape' || (event.type === 'pointerdown' && !event.target.closest('.agent-menu'))) setOpen(false);
+      if (!trigger.current?.parentElement.contains(event.target)) setOpen(false);
     };
-    window.addEventListener('keydown', dismiss);
     window.addEventListener('pointerdown', dismiss);
-    return () => {
-      window.removeEventListener('keydown', dismiss);
-      window.removeEventListener('pointerdown', dismiss);
-    };
+    return () => window.removeEventListener('pointerdown', dismiss);
   }, [open]);
   const { api, goal, models, options } = work;
   const entries = [
@@ -449,15 +450,25 @@ export function AgentMenu({ work, onSelect }) {
   if (!entries.length) return null;
   const selectedModel = models.find(model => model.id === options.model);
   const label = [selectedModel?.label, api?.modes?.find(mode => mode.id === options.mode && mode.id !== 'default')?.label].filter(Boolean).join(' · ');
-  return <div className="agent-menu">
-    <button className="composer-control" type="button" aria-label="Agent 控件" aria-expanded={open}
+  return <div className="agent-menu"
+    onBlur={event => {
+      if (open && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}
+    onKeyDown={event => {
+      if (!open || event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      trigger.current?.focus({ preventScroll: true });
+      setOpen(false);
+    }}>
+    <button ref={trigger} className="composer-control" type="button" aria-label="Agent 控件" aria-expanded={open}
       onClick={() => setOpen(value => !value)}>
-      {label ? <><span>{label}</span><ChevronDown size={12} /></> : <Ellipsis size={17} />}
+      {label ? <><span>{label}</span><ChevronDown className="agent-menu-chevron" size={12} /></> : <Ellipsis size={17} />}
     </button>
     {open && <div className="agent-menu-entries popup-surface" aria-label="Agent 控件">
       {entries.map(([kind, Icon]) => <button key={kind} type="button" onClick={() => {
         setOpen(false);
-        onSelect(kind);
+        onSelect(kind, trigger.current);
       }}><Icon size={15} />{titles[kind]}</button>)}
     </div>}
   </div>;
