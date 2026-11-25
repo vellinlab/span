@@ -310,7 +310,25 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   /** @type {NonNullable<import('./agent-protocol').AgentAdapter['extensions']>} */
   const extensions = {
     kinds: ['mcp', 'skill', 'plugin', 'connector'],
-    async list(kind, thread, { cursor } = {}) {
+    async list(kind, thread, { cursor, cwd: workspace } = {}) {
+      if (kind === 'skill') {
+        const directory = workspace || (location.kind === 'local' ? cwd : undefined);
+        const { data } = await request('skills/list', directory ? { cwds: [directory] } : {});
+        const items = new Map();
+        for (const group of data ?? []) {
+          for (const item of group.skills ?? []) {
+            if (!item.path || !item.name) continue;
+            items.set(item.path, {
+              kind, id: item.path, path: item.path, label: item.interface?.displayName || item.name,
+              description: item.interface?.shortDescription || item.shortDescription || item.description,
+              scope: { repo: 'workspace', user: 'user', system: 'system', admin: 'managed' }[item.scope],
+              enabled: item.enabled,
+            });
+          }
+        }
+        return { items: [...items.values()], cursor: null };
+      }
+      if (!thread) throw new Error('请先打开一个会话。');
       if (kind === 'mcp') {
         const { data, nextCursor } = await request('mcpServerStatus/list', {
           threadId: thread.id, cursor, limit: 20, detail: 'toolsAndAuthOnly',
@@ -323,14 +341,6 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
           toolError: item.toolsError || undefined,
         }));
         return { items, cursor: nextCursor ?? null };
-      }
-      if (kind === 'skill') {
-        const { data } = await request('skills/list', {});
-        const items = (data ?? []).flatMap(group => (group.skills ?? []).map(item => ({
-          kind, id: item.path, label: item.name, description: item.shortDescription ?? item.description,
-          enabled: item.enabled, source: group.cwd,
-        })));
-        return { items, cursor: null };
       }
       if (kind === 'plugin') {
         const { marketplaces } = await request('plugin/list', {});

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
+import { BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
 import { mergeAgentMember } from './delegation.js';
@@ -19,6 +19,8 @@ const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件
 export function commonAgentCommands(api, models, options) {
   if (!api) return [];
   const model = models.find(item => item.id === options.model) ?? models.find(item => item.isDefault);
+  const extensionKinds = api.extensions?.kinds ?? [];
+  const nativeSkills = api.commands?.some(command => command.id === 'skills');
   return [
     ['/new', '新建会话'], ['/resume', '打开会话或恢复指定 ID'], ['/status', '查看会话状态'],
     ['/pwd', '查看工作目录'], ['/copy', '复制 Markdown'], ['/copy rich', '复制富文本'],
@@ -39,7 +41,7 @@ export function commonAgentCommands(api, models, options) {
     ...(api.sessions.fork ? [['/fork', '复制当前会话']] : []),
     ...(api.sessions.rename ? [['/rename', '重命名当前会话']] : []),
     ...(api.sessions.archive ? [['/archive', '归档或恢复当前会话']] : []),
-    ...(api.extensions?.kinds ?? []).map(kind => [
+    ...extensionKinds.filter(kind => kind !== 'skill' || !nativeSkills).map(kind => [
       { mcp: '/mcp', skill: '/skills', plugin: '/plugins', connector: '/apps', tool: '/tools' }[kind],
       `查看${extensionLabels[kind]}`,
     ]),
@@ -435,6 +437,8 @@ const mcpConnections = {
   failed: '连接失败', cancelled: '已取消', disabled: '已停用',
 };
 const mcpToolPageSize = 40;
+const skillPageSize = 30;
+const skillScopes = { workspace: '工作区', user: '用户', system: '系统', managed: '管理员', temporary: '当前进程' };
 
 function McpServerRow({ item, verbose }) {
   const [expanded, setExpanded] = useState(verbose);
@@ -469,6 +473,8 @@ function McpServerRow({ item, verbose }) {
 
 function ExtensionList({ panel }) {
   const [listing, setListing] = useState({ items: [], cursor: null, loading: true, error: '' });
+  const [query, setQuery] = useState(panel.query ?? '');
+  const [skillLimit, setSkillLimit] = useState(skillPageSize);
   const pending = useRef(null);
   const loadPage = useCallback(async (cursor = null) => {
     if (pending.current) return;
@@ -498,17 +504,33 @@ function ExtensionList({ panel }) {
       if (button === document.activeElement) button.closest('.agent-panel-content')?.focus({ preventScroll: true });
     };
   }, []);
+  const skills = panel.extension === 'skill';
+  const term = query.trim().toLocaleLowerCase();
+  const matches = skills && term ? listing.items.filter(item =>
+    [item.label, item.description].some(text => text?.toLocaleLowerCase().includes(term))) : listing.items;
+  const visible = skills ? matches.slice(0, skillLimit) : matches;
+  const moreSkills = skills && matches.length > skillLimit;
   return <>
-    {listing.items.length > 0 && <ul className="extensions">{listing.items.map(item => item.kind === 'mcp'
-      ? <McpServerRow key={item.id} item={item} verbose={panel.verbose} /> : <li key={item.id}>
+    {skills && (listing.items.length > 8 || query) && <input type="search" className="skill-search" aria-label="搜索技能"
+      placeholder="搜索技能" value={query} onChange={event => { setQuery(event.target.value); setSkillLimit(skillPageSize); }} />}
+    {visible.length > 0 && <ul className="extensions">{visible.map(item => item.kind === 'mcp'
+      ? <McpServerRow key={item.id} item={item} verbose={panel.verbose} /> : item.kind === 'skill'
+        ? <li key={item.id} className="extension-skill">
+          <div className="extension-heading"><strong title={item.path}>{item.label}</strong>
+            <small>{[skillScopes[item.scope], item.enabled === false ? '已停用' : undefined].filter(Boolean).join(' · ')}</small>
+          </div>
+          {item.description && <p>{item.description}</p>}
+        </li> : <li key={item.id}>
         <strong>{item.label}</strong><small>{item.status ?? (item.enabled == null ? item.source : item.enabled ? '已启用' : '已停用')}</small>
         {item.description && <p>{item.description}</p>}
       </li>)}</ul>}
     {listing.loading && <p className="extension-note" role="status">正在读取…</p>}
     {listing.error && !listing.loading && <p className="extension-note extension-error" role="alert">{listing.error}</p>}
     {!listing.items.length && !listing.loading && !listing.error && <p className="extension-note">没有可显示的{extensionLabels[panel.extension]}。</p>}
-    {(listing.cursor !== null || listing.error) && <button ref={pageButton} type="button" className="panel-link extension-more"
-      aria-disabled={listing.loading || undefined} onClick={() => loadPage(listing.cursor)}>
+    {term && listing.items.length > 0 && !visible.length && <p role="status" className="extension-note">没有匹配的技能。</p>}
+    {(moreSkills || listing.cursor !== null || listing.error) && <button ref={pageButton} type="button" className="panel-link extension-more"
+      aria-disabled={listing.loading || undefined}
+      onClick={() => moreSkills && !listing.error ? setSkillLimit(limit => limit + skillPageSize) : loadPage(listing.cursor)}>
       {listing.error ? '重试' : '加载更多'}
     </button>}
   </>;
@@ -531,6 +553,7 @@ export function AgentMenu({ work, onSelect }) {
     ...(api?.goal && !goal ? [['goal', Goal]] : []),
     ...(api?.usage ? [['usage', ChartNoAxesColumnIncreasing]] : []),
     ...(api?.delegation ? [['agents', Users]] : []),
+    ...(api?.extensions?.kinds.includes('skill') ? [['skill', BookOpen]] : []),
   ];
   if (!entries.length) return null;
   const selectedModel = models.find(model => model.id === options.model);
@@ -554,7 +577,7 @@ export function AgentMenu({ work, onSelect }) {
       {entries.map(([kind, Icon]) => <button key={kind} type="button" onClick={() => {
         setOpen(false);
         onSelect(kind, trigger.current);
-      }}><Icon size={15} />{titles[kind]}</button>)}
+      }}><Icon size={15} />{kind === 'skill' ? extensionLabels.skill : titles[kind]}</button>)}
     </div>}
   </div>;
 }

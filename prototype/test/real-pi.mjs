@@ -100,6 +100,11 @@ gateway.listen(0, '127.0.0.1');
 await once(gateway, 'listening');
 try {
   await mkdir(join(state, 'extensions'), { recursive: true });
+  const skillsDirectory = join(state, 'skills', 'span-checklist');
+  await mkdir(skillsDirectory, { recursive: true });
+  await writeFile(join(skillsDirectory, 'SKILL.md'), [
+    '---', 'name: span-checklist', 'description: 读取工作台交接清单并核对项目。', '---', '', '核对清单。',
+  ].join('\n'));
   await writeFile(join(state, 'settings.json'), JSON.stringify({
     defaultProvider: 'span-preview', defaultModel: 'span-pi', defaultThinkingLevel: 'medium',
   }));
@@ -164,6 +169,25 @@ export default function (pi) {
   const composer = page.getByRole('textbox', { name: '消息' });
   const send = async text => { await composer.fill(text); await composer.press('Enter'); };
   const transcript = page.getByTestId('transcript');
+  await send('/skills 交接清单');
+  const skillPanel = page.getByRole('region', { name: '技能', exact: true });
+  await skillPanel.getByText('span-checklist', { exact: true }).waitFor();
+  await skillPanel.getByText('用户', { exact: true }).waitFor();
+  await skillPanel.getByText('读取工作台交接清单并核对项目。', { exact: true }).waitFor();
+  assert.equal(await skillPanel.getByText('span-form', { exact: true }).count(), 0);
+  assert.equal(prompts.length, 0);
+  await skillPanel.getByRole('searchbox', { name: '搜索技能' }).press('Escape');
+  await skillPanel.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => element === document.activeElement));
+  await composer.fill('保留技能目录旁的草稿。');
+  const agentMenu = page.getByRole('button', { name: 'Agent 控件', exact: true });
+  await agentMenu.press('Enter');
+  await page.getByRole('button', { name: '技能', exact: true }).press('Enter');
+  await skillPanel.getByText('span-checklist', { exact: true }).waitFor();
+  await skillPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
+  await skillPanel.waitFor({ state: 'detached' });
+  assert.ok(await agentMenu.evaluate(element => element === document.activeElement));
+  assert.equal(await composer.inputValue(), '保留技能目录旁的草稿。');
   const attach = page.getByRole('button', { name: '添加本机文件', exact: true });
   if (ssh) assert.equal(await attach.count(), 0);
   else {

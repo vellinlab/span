@@ -11,6 +11,7 @@ const [binary, route = 'stdio', ssh] = args.filter(arg => !arg.startsWith('--'))
 const imageTest = args.includes('--image');
 const diffTest = args.includes('--diff');
 const reviewTest = args.includes('--review');
+const skillsTest = args.includes('--skills');
 const expected = imageTest ? 'Span preview sent two images.' : 'Span preview is connected.';
 const reviewResult = 'The modified heading no longer matches the documented section.';
 const imageName = '会话验收.png';
@@ -34,22 +35,40 @@ try {
     await page.getByRole('button', { name: '连接 SSH' }).click();
   }
   await (ssh ? ready.filter({ hasText: ssh }) : ready).waitFor({ timeout: 30_000 });
-  if (diffTest) {
+  if (diffTest || skillsTest) {
     const workspace = join(profile, 'git workspace');
     await mkdir(workspace);
     const git = (...args) => execFileSync('git', args, { cwd: workspace, encoding: 'utf8' });
     git('init', '-q');
-    await writeFile(join(workspace, 'README.md'), 'Committed text\n');
-    git('add', 'README.md');
-    git('-c', 'user.name=Span CI', '-c', 'user.email=ci@example.test', 'commit', '-qm', 'Workspace diff fixture');
-    await writeFile(join(workspace, 'README.md'), 'Current working tree\n');
-    await writeFile(join(workspace, 'Untracked notes.md'), 'Local notes\n');
+    if (diffTest) {
+      await writeFile(join(workspace, 'README.md'), 'Committed text\n');
+      git('add', 'README.md');
+      git('-c', 'user.name=Span CI', '-c', 'user.email=ci@example.test', 'commit', '-qm', 'Workspace diff fixture');
+      await writeFile(join(workspace, 'README.md'), 'Current working tree\n');
+      await writeFile(join(workspace, 'Untracked notes.md'), 'Local notes\n');
+    }
+    if (skillsTest) {
+      const skillDirectory = join(workspace, '.agents', 'skills', 'span-project-skill');
+      await mkdir(skillDirectory, { recursive: true });
+      await writeFile(join(skillDirectory, 'SKILL.md'), '---\nname: span-project-skill\ndescription: Check the Span project.\n---\n\nCheck the worktree.\n');
+    }
     await app.evaluate(({ dialog }, workspace) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
     }, workspace);
     await page.getByRole('button', { name: '选择本地工作区', exact: true }).click();
     await page.locator('.breadcrumb-workspace').getByText('git workspace', { exact: true }).waitFor();
     await ready.waitFor({ timeout: 30_000 });
+    if (skillsTest) {
+      const composer = page.getByRole('textbox', { name: '消息' });
+      await composer.fill('/skills span-project-skill');
+      await composer.press('Enter');
+      const panel = page.getByRole('region', { name: '技能', exact: true });
+      await panel.getByText('span-project-skill', { exact: true }).waitFor();
+      await panel.getByText('工作区', { exact: true }).waitFor();
+      await panel.getByRole('searchbox', { name: '搜索技能' }).press('Escape');
+      await panel.waitFor({ state: 'detached' });
+      console.log('Verified shared Codex lists skills from the selected workspace before the first turn.');
+    }
   }
   if (imageTest) {
     await page.getByRole('button', { name: 'Agent 控件', exact: true }).click();

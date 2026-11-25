@@ -302,6 +302,21 @@ export function createPi({ generation, cwd, location, onEvent }) {
 
   return {
     commands,
+    extensions: {
+      kinds: ['skill'],
+      async list(kind, session) {
+        if (session) requireSession(session);
+        if (kind !== 'skill') return { items: [], cursor: null };
+        const { commands } = await request('get_commands');
+        const items = commands.filter(command => command.source === 'skill' && command.name?.startsWith('skill:'))
+          .map(command => ({
+            kind, id: command.name, label: command.name.slice('skill:'.length), description: command.description,
+            path: command.sourceInfo?.path,
+            scope: { project: 'workspace', user: 'user', temporary: 'temporary' }[command.sourceInfo?.scope],
+          }));
+        return { items, cursor: null };
+      },
+    },
     localFileReferences: location.kind === 'local',
     async open() {
       await window.span.request('agent.start', { generation, cwd, backend: 'pi', ssh: location.host });

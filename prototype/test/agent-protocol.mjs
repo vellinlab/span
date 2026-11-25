@@ -370,7 +370,16 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     const emptyTools = await agent.extensions.list('mcp', ref, { cursor: extensions.cursor });
     assert.equal(emptyTools.cursor, null);
     assert.deepEqual(emptyTools.items[0].tools, []);
-    assert.deepEqual(await agent.extensions.list('skill', ref), { items: [], cursor: null });
+    responses['skills/list'] = params => {
+      assert.deepEqual(params, { cwds: ['/remote workspace'] });
+      const item = { name: 'review', path: '/remote workspace/skills/review/SKILL.md', scope: 'repo', enabled: false,
+        description: 'Original description', interface: { displayName: '复核', shortDescription: '界面说明' } };
+      return { data: [{ cwd: '/remote workspace', skills: [item, item], errors: [] }] };
+    };
+    assert.deepEqual(await agent.extensions.list('skill', ref, { cwd: '/remote workspace' }), { items: [{
+      kind: 'skill', id: '/remote workspace/skills/review/SKILL.md', path: '/remote workspace/skills/review/SKILL.md',
+      label: '复核', description: '界面说明', scope: 'workspace', enabled: false,
+    }], cursor: null });
     const diffReplies = [
       { exitCode: 128, stdout: '', stderr: 'no commits yet' },
       { exitCode: 1, stdout: '', stderr: '' },
@@ -716,6 +725,12 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
         respond(packet);
       } else if (packet.type === 'get_session_stats') {
         respond(packet, { tokens: { total: 17 }, contextUsage: { tokens: 10, contextWindow: 100 } });
+      } else if (packet.type === 'get_commands') {
+        respond(packet, { commands: [
+          { name: 'skill:review', source: 'skill', description: 'Project review',
+            sourceInfo: { path: '/remote/work/.agents/skills/review/SKILL.md', scope: 'project' } },
+          { name: 'span-form', source: 'extension', description: 'Open the form' },
+        ] });
       } else {
         respond(packet, { commands: [] });
       }
@@ -725,6 +740,11 @@ test('Pi reconnects to its stored branch and keeps queue, tool and dialog events
   t.after(() => { agent.close(); delete globalThis.window; });
   await agent.open();
   assert.equal(events[0].route, 'stdio');
+  assert.deepEqual(await agent.extensions.list('skill', null), { items: [{
+    kind: 'skill', id: 'skill:review', label: 'review', description: 'Project review',
+    path: '/remote/work/.agents/skills/review/SKILL.md', scope: 'workspace',
+  }], cursor: null });
+  assert.deepEqual(agent.commands.map(command => command.id), ['skill:review', 'span-form']);
   const catalog = await agent.sessions.list({});
   const ref = catalog.items[0].ref;
   assert.equal(sessionKey(ref), sessionKey({ backend: 'pi', location: remote, id: 'saved' }));

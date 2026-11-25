@@ -63,7 +63,7 @@ async function stop(process) {
   await process.finished;
 }
 
-const check = (route, environment) => run(process.execPath, ['prototype/test/real-agent.mjs', binary, route], environment);
+const check = (route, environment, ...flags) => run(process.execPath, ['prototype/test/real-agent.mjs', binary, route, ...flags], environment);
 let gateway, shared;
 try {
   await mkdir(installDir, { recursive: true });
@@ -99,7 +99,7 @@ stream_max_retries = 0
 
   shared = start(codex, ['app-server', '--listen', 'unix://']);
   await ready(socket, shared);
-  await check('shared', { ...env, SPAN_CODEX_PATH: codex });
+  await check('shared', { ...env, SPAN_CODEX_PATH: codex }, '--skills');
   assert.equal(shared.child.exitCode, null, 'Closing Span must keep the shared backend alive.');
   await stop(shared);
   shared = undefined;

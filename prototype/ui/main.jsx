@@ -400,6 +400,12 @@ function App() {
     if (kind === 'agents') work.refreshDelegation().catch(report);
   }
 
+  function showExtensions(kind, trigger, options = {}) {
+    showPanel('extensions', trigger, { extension: kind, title: extensionTitles[kind], ...options,
+      load: cursor => work.withSession((client, ref) => client.extensions.list(kind, ref, { cursor, cwd: session?.cwd }),
+        { allowEmpty: kind === 'skill' }) });
+  }
+
   function chooseWorkspace() {
     window.span.workspace(true).then(cwd => {
       if (cwd) applyConfig({ ...config, cwd, ssh: '' });
@@ -575,9 +581,8 @@ function App() {
         if (kind && api.extensions?.kinds.includes(kind)) {
           const verbose = kind === 'mcp' && args === 'verbose';
           if (kind === 'mcp' && args && !verbose) throw new Error('用法 /mcp 或 /mcp verbose');
-          if (!session) throw new Error('请先打开一个会话。');
-          showPanel('extensions', resultTrigger(), { extension: kind, title: extensionTitles[kind], verbose,
-            load: cursor => work.withSession((client, ref) => client.extensions.list(kind, ref, { cursor })) });
+          if (!session && kind !== 'skill') throw new Error('请先打开一个会话。');
+          showExtensions(kind, resultTrigger(), { verbose, query: kind === 'skill' ? args.trim() : '' });
           return true;
         }
         if (api.execute && api.commands?.some(item => '/' + item.id === command)) {
@@ -949,7 +954,8 @@ function App() {
                       timeline.scrollTop = timeline.scrollHeight;
                       timeline.focus({ preventScroll: true });
                     }}><ArrowDown size={15} aria-hidden="true" /><span>最新消息</span></button>}
-                  {connection === 'ready' && <AgentMenu work={work} onSelect={showPanel} />}
+                  {connection === 'ready' && <AgentMenu work={work} onSelect={(kind, trigger) =>
+                    kind === 'skill' ? showExtensions(kind, trigger) : showPanel(kind, trigger)} />}
                   {running && api?.turns.stop && <button ref={stopButton} type="button" className="send stop" aria-label="停止"
                     aria-disabled={work.stopping || undefined} disabled={!run.id} title={work.stopping ? '正在停止…' : undefined}
                     onClick={() => work.stop().catch(report)}><Square size={13} fill="currentColor" /></button>}

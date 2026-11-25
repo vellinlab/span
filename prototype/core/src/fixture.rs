@@ -1303,6 +1303,25 @@ pub fn run() -> Result<()> {
                     ],"nextCursor":"mcp-next"})
                 }
             }
+            "skills/list" if params["cwds"] == json!([cwd]) => {
+                let mut skills = vec![
+                    json!({
+                        "name":"workspace-review", "path":cwd.join(".agents/skills/workspace-review/SKILL.md"),
+                        "description":"核对改动与测试证据。", "scope":"repo", "enabled":true,
+                        "interface":{"displayName":"工作区复核", "shortDescription":"核对改动、测试证据和交付记录。"}
+                    }),
+                    json!({
+                        "name":"offline-handbook", "path":cwd.join(".agents/skills/offline-handbook/SKILL.md"),
+                        "description":"已停用的交接说明。", "scope":"user", "enabled":false
+                    }),
+                ];
+                skills.extend((1..=32).map(|index| json!({
+                    "name":format!("workspace-checklist-{index:02}"),
+                    "path":cwd.join(format!(".agents/skills/checklist-{index:02}/SKILL.md")),
+                    "description":format!("核对交接清单 {index:02} 的记录。"), "scope":"repo", "enabled":true
+                })));
+                json!({"data":[{"cwd":cwd,"skills":skills,"errors":[]}]})
+            }
             "app/list" | "skills/list" => json!({"data":[],"nextCursor":null}),
             "command/exec" if params["cwd"] == json!(cwd) => {
                 let command = params["command"].as_array().expect("command arguments");

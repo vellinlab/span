@@ -1156,6 +1156,11 @@ p { margin-block: 0 12px; }
 }
 .extensions small { color: var(--muted); }
 .extensions p { width: 100%; margin: 0; overflow-wrap: anywhere; }
+.skill-search { width: 100%; margin-bottom: 5px; padding: 4px 8px; background: var(--canvas); }
+.extensions > li.extension-skill { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; padding: 7px 0; }
+.extension-skill .extension-heading { padding: 0; }
+.extension-skill .extension-heading small { font-size: 11px; }
+.extension-skill > p { color: #c8ced0; line-height: 19px; }
 .extensions > li.extension-server { display: block; padding: 0; }
 .extension-heading { display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: baseline; padding: 6px 2px; }
 summary.extension-heading { cursor: pointer; }

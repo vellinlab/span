@@ -100,7 +100,8 @@ export type Extension = Choice & { status?: string; enabled?: boolean; source?: 
   | { kind: 'mcp'; tools?: string[]; toolError?: string;
       authentication?: 'unknown' | 'unsupported' | 'required' | 'token' | 'oauth';
       connection?: 'idle' | 'connecting' | 'ready' | 'auth-required' | 'failed' | 'cancelled' | 'disabled' }
-  | { kind: Exclude<ExtensionKind, 'mcp'> }
+  | { kind: 'skill'; path?: string; scope?: 'workspace' | 'user' | 'system' | 'managed' | 'temporary' }
+  | { kind: Exclude<ExtensionKind, 'mcp' | 'skill'> }
 );
 export type ExtensionAction = 'enable' | 'disable' | 'install' | 'uninstall' | 'authorize' | 'refresh';
 export type WorkspaceDiff = { patch: string; untracked: string[]; mayBeTruncated: boolean };
@@ -183,7 +184,7 @@ export interface AgentAdapter {
   };
   extensions?: {
     kinds: ExtensionKind[];
-    list(kind: ExtensionKind, ref: SessionRef, options?: { cursor?: string }): Promise<Page<Extension>>;
+    list(kind: ExtensionKind, ref: SessionRef | null, options?: { cursor?: string; cwd?: string }): Promise<Page<Extension>>;
     act?(kind: ExtensionKind, ref: SessionRef, id: string, action: ExtensionAction): Promise<void>;
   };
   repository?: { diff(cwd: string): Promise<WorkspaceDiff> };

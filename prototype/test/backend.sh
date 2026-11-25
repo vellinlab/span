@@ -57,7 +57,7 @@ rm "$socket"
 "$backend" app-server --listen unix:// >"$fixture/local-shared.log" 2>&1 &
 local_shared=$!
 ready_socket "$socket" "$local_shared" "$fixture/local-shared.log"
-/artifacts/node prototype/test/real-agent.mjs "$binary" shared
+/artifacts/node prototype/test/real-agent.mjs "$binary" shared --skills
 kill -0 "$local_shared"
 
 if [[ -n ${SPAN_TEST_SSH_ALIAS:-} ]]; then

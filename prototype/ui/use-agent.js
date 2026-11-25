@@ -548,18 +548,18 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     }
   }
 
-  async function withSession(action, { create = false, idle = false, title = '' } = {}) {
+  async function withSession(action, { create = false, idle = false, title = '', allowEmpty = false } = {}) {
     const client = agent.current;
     if (!client || connection !== 'ready' || loading || (idle && (currentRun.current || busy.current))) {
       throw new Error('请等当前任务或连接完成。');
     }
     const scope = layer.current;
-    if (!active.current && !create) throw new Error('请先打开一个会话。');
+    if (!active.current && !create && !allowEmpty) throw new Error('请先打开一个会话。');
     if (!active.current && busy.current) throw new Error('请等当前会话启动完成。');
-    if (!active.current) busy.current = true;
+    if (!active.current && create) busy.current = true;
     try {
-      const ref = create ? await ensureSession(client, title, scope) : active.current.ref;
-      if (!ref || scope !== layer.current) return;
+      const ref = create ? await ensureSession(client, title, scope) : active.current?.ref ?? null;
+      if ((!ref && !allowEmpty) || scope !== layer.current) return;
       const result = await action(client, ref);
       if (scope === layer.current) {
         if (create) rememberWorkspace(config, ref.id);
