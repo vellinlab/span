@@ -16,9 +16,8 @@ use std::{
 
 const THREAD: &str = "workspace-review";
 const TITLE: &str = "工作台架构评审";
-const REVIEW_AGENT: &str = "键盘导航与窄窗口布局复核，核对 Windows 和 EL8 下的状态、结果与会话归属";
-const REVIEW_MODEL: &str =
-    "fixture-review-workbench-layout-keyboard-navigation-window-rendering-delegated-agent";
+const REVIEW_AGENT: &str = "键盘导航与窄窗口布局复核，核对 Windows 和 EL8 下的状态、结果与会话归属，并逐项检查审批、文件预览和历史恢复";
+const REVIEW_MODEL: &str = "fixture-review-workbench-layout-keyboard-navigation-window-rendering-delegated-agent-long-model-identifier";
 const READING_REVIEW: &str = r#"# 工作台会话验收
 
 已确认会话可以继续。当前回合的文件、终端和执行记录均归属正确。

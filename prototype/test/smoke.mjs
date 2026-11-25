@@ -1330,8 +1330,8 @@ try {
   await composer.fill('验证子代理导航。');
   await composer.press('Enter');
   await transcript.getByText('代理导航验收完成。', { exact: true }).waitFor();
-  const agentName = '键盘导航与窄窗口布局复核，核对 Windows 和 EL8 下的状态、结果与会话归属';
-  const agentModel = 'fixture-review-workbench-layout-keyboard-navigation-window-rendering-delegated-agent';
+  const agentName = '键盘导航与窄窗口布局复核，核对 Windows 和 EL8 下的状态、结果与会话归属，并逐项检查审批、文件预览和历史恢复';
+  const agentModel = 'fixture-review-workbench-layout-keyboard-navigation-window-rendering-delegated-agent-long-model-identifier';
   const openAgent = `查看 ${agentName} 的会话记录`;
   const agentCards = transcript.locator('[data-card="delegation"]');
   const spawnCard = agentCards.filter({ hasText: '启动子代理' });
@@ -1366,7 +1366,7 @@ try {
   await failedAgent.waitFor();
   assert.match(await failedAgent.textContent(), /截图校验失败。\n需要重新采样。/);
   assert.equal(await agents.getByText('已核对键盘焦点。', { exact: true }).count(), 0);
-  assert.ok(await rosterAgent.evaluate(button => {
+  const memberLayout = await rosterAgent.evaluate(button => {
     const row = button.closest('.agent-member-row');
     const name = button.querySelector('.agent-member-label');
     const model = row.querySelector('.agent-member-meta');
@@ -1374,9 +1374,16 @@ try {
     const view = row.closest('.agent-panel-content');
     const box = element => element.getBoundingClientRect();
     const wraps = element => box(element).height > 1.5 * Number.parseFloat(getComputedStyle(element).lineHeight);
-    return wraps(name) && wraps(model) && Math.abs(box(button).top - box(status).top) <= 2 &&
-      box(button).right < box(status).left && box(model).top >= box(button).bottom && view.scrollWidth === view.clientWidth;
-  }), 'Long member names and model IDs should wrap with the status on the first line');
+    return {
+      nameWraps: wraps(name), modelWraps: wraps(model),
+      statusOnFirstLine: Math.abs(box(button).top - box(status).top) <= 2 && box(button).right < box(status).left,
+      modelBelowName: box(model).top >= box(button).bottom,
+      fitsViewport: view.scrollWidth === view.clientWidth,
+    };
+  });
+  assert.deepEqual(memberLayout, {
+    nameWraps: true, modelWraps: true, statusOnFirstLine: true, modelBelowName: true, fitsViewport: true,
+  }, 'Long member names and model IDs should wrap with the status on the first line');
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-agents-panel.png') });
   assert.ok(await failedAgent.evaluate(detail => detail.getBoundingClientRect().bottom <=
     detail.closest('.agent-panel-content').getBoundingClientRect().bottom + 1),
