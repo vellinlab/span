@@ -49,6 +49,8 @@ export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canc
 export type AgentMember = {
   id: string; name?: string; role?: string; status?: AgentStatus; detail?: string;
   session?: SessionRef; parent?: SessionRef; teamId?: string; model?: string;
+  /** The adapter exposes this child transcript through its owning conversation. */
+  attachedTranscript?: boolean;
 };
 export type TeamTask = {
   id: string; title: string; detail?: string; status: AgentStatus; assigneeId?: string; blockedBy?: string[];
@@ -89,7 +91,7 @@ export type InteractionField = {
 };
 export type Interaction = {
   id: string; title: string; detail?: string; turnId?: string; itemId?: string; cancel?: boolean;
-  scope?: 'connection';
+  scope?: 'connection'; actor?: AgentMember;
 } & (
   | { kind: 'approval'; choices: (Choice & { effect?: 'allow' | 'deny'; remember?: boolean })[];
       operation?: { kind: 'command' | 'files' | 'network' | 'permissions'; command?: string; cwd?: string;
@@ -190,6 +192,7 @@ export interface AgentAdapter {
     teamActions?: TeamAction['kind'][];
     /** Complete lists for the session. Events received during a request take precedence. */
     members?(ref: SessionRef): Promise<AgentMember[]>;
+    watchTranscript?(ref: SessionRef, memberId: string, listener: (view: { rows: TimelineItem[]; run: Run }) => void): () => void;
     teams?(ref: SessionRef): Promise<Team[]>;
     act?(ref: SessionRef, action: DelegationAction): Promise<AgentMember | void>;
     manageTeam?(ref: SessionRef, action: TeamAction): Promise<Team | void>;

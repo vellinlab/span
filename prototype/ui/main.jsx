@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
+import { memberName } from './agent-members.jsx';
 import { FileReferenceName, ImageReference } from './file-reference-name.jsx';
 import { imageFileName, maxFileReferences } from './file-references.js';
 import { Interactions } from './interactions.jsx';
@@ -365,6 +366,11 @@ function App() {
     work.open(entry, readingViews.current.get(key));
   }
 
+  function openMemberTrace(member, trigger) {
+    if (!session || loading || connection !== 'ready' || !api?.delegation?.watchTranscript) return;
+    showPanel('subagent', trigger, { member, session: session.ref, title: memberName(member) });
+  }
+
   async function forkConversation() {
     if (!await work.fork()) return false;
     closePanel({ restoreFocus: false });
@@ -377,9 +383,10 @@ function App() {
   }
 
   const latestWork = useRef();
-  latestWork.current = { newSession, openSearch, openSession, list: work.list, archived: work.archived, catalogSearch,
+  latestWork.current = { newSession, openSearch, openSession, openMemberTrace, list: work.list, archived: work.archived, catalogSearch,
     composerKey, draft, visibleDraft, files, canAttach, canSendImages };
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
+  const openTrace = useCallback((member, trigger) => latestWork.current.openMemberTrace(member, trigger), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
   const loadCatalogPage = useCallback(() => {
     const { list, archived, catalogSearch } = latestWork.current;
@@ -887,7 +894,8 @@ function App() {
                 rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
                 liveReasoningTurn={liveReasoning?.turnId} activeTurnId={run?.id}
                 jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
-                openArtifact={openArtifact} openImage={previewImage} canOpenSession={!running && !loading && connection === 'ready'} />
+                openArtifact={openArtifact} openImage={previewImage} openTrace={openTrace}
+                canOpenSession={!running && !loading && connection === 'ready'} />
             </div>
             <div className="composer-wrap reading-column">
               {!rows.length && !session && !loading && !error && <div className="welcome"><h1>开始新会话</h1></div>}
@@ -909,7 +917,8 @@ function App() {
               <div className="composer-overlay-anchor" aria-hidden="true" />
               <div className="composer-overlay">
                 <AgentPanel panel={panel} work={work} reasoning={reasoningDetails} reasoningArchived={reasoningArchived}
-                  onClose={closePanel} report={report} openSession={openRef} />
+                  onClose={closePanel} report={report} openSession={openRef} openTrace={openTrace}
+                  openArtifact={openArtifact} openImage={previewImage} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}
                     ref={index === commandIndex % suggestions.length ? commandSelection : undefined}

@@ -1,5 +1,6 @@
 import { connectRpc, jsonRpc } from './agent-rpc.js';
 import { acpOperation, acpReplay, acpTurn, acpTurnId } from './acp-items.js';
+import { createAcpSubagents } from './acp-subagents.js';
 import { attachmentArtifacts, attachmentName, fileReferenceText } from './file-references.js';
 import { createKiloGoals } from './kilo-goals.js';
 
@@ -32,12 +33,15 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   let active;
   let loading;
   let goals;
+  let nativeSubagents;
 
   const ref = id => ({ backend, location, id });
   const childSession = tool => childSessionKey ? tool._meta?.[childSessionKey] : undefined;
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }), error => {
     goals?.close();
+    active?.subagents?.close();
+    loading?.subagents?.close();
     active = loading = undefined;
     dialogs.clear();
     onEvent({ kind: 'disconnected', error });
@@ -109,9 +113,11 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
 
   function activate(state, entry, config) {
     loading = undefined;
+    if (active !== state) active?.subagents?.close();
     active = state;
     state.id = entry.sessionId;
     state.entry = entry;
+    if (nativeSubagents && !state.subagents) state.subagents = createAcpSubagents(state, { ref, notify });
     goals?.attach(state);
     sessions.set(state.id, entry);
     commands.splice(0, commands.length, ...(state.commands ?? []));
@@ -172,7 +178,8 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   }
 
   function updateSession(id, update) {
-    const state = id === active?.id ? active : id === loading?.id ? loading : undefined;
+    const owns = state => state && (state.id === id || state.subagents?.has(id));
+    const state = owns(loading) ? loading : owns(active) ? active : undefined;
     if (!state && id && loading?.unconfirmed) {
       if (['available_commands_update', 'config_option_update', 'session_info_update'].includes(update.sessionUpdate)) {
         const staged = loading.unconfirmed.get(id) ?? {};
@@ -184,6 +191,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       return;
     }
     if (!state) return;
+    if (state.subagents?.update(id, update)) return;
     switch (update.sessionUpdate) {
       case 'available_commands_update':
         useCommands(state, update.availableCommands);
@@ -228,25 +236,27 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
   function permission(id, params) {
     const state = active;
     const tool = params.toolCall ?? {};
+    const member = state?.subagents?.member(params.sessionId);
     const parent = childSession(tool)?.parentID;
     const choices = (params.options ?? []).flatMap(option => {
       const normalized = approvalOptions.get(option.kind);
       return normalized && typeof option.optionId === 'string' ? [{ id: option.optionId, ...normalized }] : [];
     });
     if (params.sessionId === state?.id) goals?.activity(state);
-    if (!state?.turn || (params.sessionId !== state.id && parent !== state.id) || !choices.length) {
+    const owns = state && (member?.status === 'running' || (state.turn && (params.sessionId === state.id || parent === state.id)));
+    if (!owns || !choices.length) {
       result(id, { outcome: { outcome: 'cancelled' } }).catch(() => {});
       return;
     }
     const key = JSON.stringify(id);
-    dialogs.set(key, { id, state, choices });
-    const operation = acpOperation(tool, state.entry.cwd);
+    dialogs.set(key, { id, state, choices, member });
+    const operation = acpOperation(tool, member ? undefined : state.entry.cwd);
     const title = operation.command && tool.title?.trim() === operation.command.trim()
       ? '执行命令' : tool.title || `${label} 请求权限`;
     notify(state.id, { kind: 'interaction', request: {
       kind: 'approval', id: key, title,
-      choices, operation, cancel: true, turnId: state.turn.run.id,
-      itemId: tool.toolCallId ? 'tool:' + tool.toolCallId : undefined,
+      choices, operation, cancel: true, actor: member, turnId: state.turn?.run.id,
+      itemId: !member && tool.toolCallId ? 'tool:' + tool.toolCallId : undefined,
     } });
   }
 
@@ -257,6 +267,13 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       updateSession(params.sessionId, params.update);
     } else if (method === 'session/request_permission' && id != null) {
       permission(id, params);
+    } else if (method === '$/cancel_request' && params.requestId != null) {
+      const key = JSON.stringify(params.requestId);
+      const dialog = dialogs.get(key);
+      if (dialog) {
+        dialogs.delete(key);
+        notify(dialog.state.id, { kind: 'interactionResolved', id: key });
+      }
     } else if (id != null) {
       rpc.send({ jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not supported' } }).catch(() => {});
     }
@@ -266,7 +283,7 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     if (state !== active || state.turn !== turn) return;
     turn.projection.finish(status !== 'completed');
     for (const [id, dialog] of dialogs) {
-      if (dialog.state !== state) continue;
+      if (dialog.state !== state || dialog.member) continue;
       dialogs.delete(id);
       notify(state.id, { kind: 'interactionResolved', id });
     }
@@ -391,15 +408,18 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
 
   async function replay(entry, limit) {
     const state = { id: entry.sessionId, usage: {}, replay: acpReplay(childSession) };
+    if (nativeSubagents) state.subagents = createAcpSubagents(state, { ref, notify });
     loading = state;
     try {
       const response = await request('session/load', sessionParams(entry));
       state.history = state.replay.finish();
+      state.subagents?.restore(state.history);
       state.nextTurn = state.history.length;
       state.replay = undefined;
       const opened = activate(state, entry, response.configOptions);
       return { ...opened, history: historyPage(state, limit) };
     } finally {
+      if (state !== active) state.subagents?.close();
       if (loading === state) loading = undefined;
     }
   }
@@ -415,13 +435,21 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     async open() {
       await window.span.request('agent.start', { generation, cwd, backend, ssh: location.host });
       await rpc.ready();
-      const clientCapabilities = claude ? { _meta: { jetbrains: { air: { version: 1, capabilities: ['asyncTasks'] } } } } : {};
+      const clientCapabilities = claude ? { _meta: { jetbrains: { air: {
+        version: 1, capabilities: ['asyncTasks', 'nativeSubagentSessions'],
+      } } } } : {};
       const initialized = await request('initialize', { protocolVersion: 1, clientCapabilities,
         clientInfo: { name: 'span', version: '0.1.0' } });
       if (initialized.protocolVersion !== 1) throw new Error(`当前 ${label} 使用了不兼容的 ACP 版本。`);
       if (!workspace) throw new Error(`无法确认 ${label} 的工作目录。`);
       capabilities = initialized.agentCapabilities;
       if (claude) adapter.goal = createClaudeGoal(air(initialized)?.goal);
+      nativeSubagents = claude && Boolean(capabilities?.sessionCapabilities?.subagents);
+      if (nativeSubagents) adapter.delegation = {
+        observe: true,
+        async members(session) { return requireActive(session).subagents.members(); },
+        watchTranscript(session, memberId, listener) { return requireActive(session).subagents.watch(memberId, listener); },
+      };
       if (backend === 'kilo' && await window.span.request('agent.kiloGoal', { generation, probe: true, cwd: workspace }).catch(() => false)) {
         goals = createKiloGoals({ generation, requireActive, synchronize: synchronizeGoal,
           begin: state => startTurn(state, true), end: finish, notify });
@@ -439,6 +467,8 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
     },
     close() {
       goals?.close();
+      active?.subagents?.close();
+      loading?.subagents?.close();
       active = loading = undefined;
       dialogs.clear();
       sessions.clear();
@@ -469,6 +499,8 @@ export function createAcp({ id: backend, label, childSessionKey }, { generation,
       async release(session) {
         if (session.id !== active?.id) return;
         goals?.close();
+        active.subagents?.close();
+        for (const [key, dialog] of dialogs) if (dialog.state === active) dialogs.delete(key);
         active = undefined;
         commands.length = 0;
         modes.length = 0;

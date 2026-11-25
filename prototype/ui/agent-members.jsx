@@ -19,7 +19,7 @@ export function AgentStatus({ status, recorded }) {
   </span>;
 }
 
-export const AgentMemberList = memo(function AgentMemberList({ members, parentName, currentKey, openSession, canOpenSession, showDetail }) {
+export const AgentMemberList = memo(function AgentMemberList({ members, parentName, currentKey, openSession, canOpenSession, openTrace, showDetail }) {
   return <ul className="agent-member-list" aria-label="代理成员">{members.map(member => {
     const name = memberName(member);
     const parent = parentName?.(member.parent);
@@ -27,7 +27,10 @@ export const AgentMemberList = memo(function AgentMemberList({ members, parentNa
     const metadata = [role, member.model, parent && `父代理 ${parent}`].filter(Boolean).join(' · ');
     const label = <span className="agent-member-label">{name}</span>;
     return <li key={member.id} className="agent-member-row">
-      {member.session && sessionKey(member.session) !== currentKey ? <button className="agent-member-name" type="button"
+      {member.attachedTranscript && openTrace ? <button className="agent-member-name" type="button"
+        aria-label={`查看 ${name} 的会话记录`} onClick={event => openTrace(member, event.currentTarget)}>
+        {label}<ArrowUpRight size={13} aria-hidden="true" />
+      </button> : member.session && sessionKey(member.session) !== currentKey ? <button className="agent-member-name" type="button"
         aria-label={`打开 ${name} 的会话`}
         disabled={!canOpenSession} onClick={() => openSession(member.session)}>
         {label}<ArrowUpRight size={13} aria-hidden="true" />

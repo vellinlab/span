@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { CircleHelp, ShieldCheck } from 'lucide-react';
+import { memberName } from './agent-members.jsx';
 import { PathText } from './file-reference-name.jsx';
 
 function InteractionInput({ field }) {
@@ -28,7 +29,8 @@ function ApprovalDetails({ request, item }) {
   const files = operation?.kind === 'files' ? item?.files?.map(file => file.path).filter(Boolean) : undefined;
   const permissions = operation?.permissions;
   return <>
-    {(cwd || operation?.target || operation?.root) && <dl className="approval-context">
+    {(request.actor || cwd || operation?.target || operation?.root) && <dl className="approval-context">
+      {request.actor && <div><dt>子代理</dt><dd>{memberName(request.actor)}</dd></div>}
       {cwd && <div><dt>工作目录</dt><dd><PathText path={cwd} /></dd></div>}
       {operation?.target && <div><dt>目标</dt><dd>{[operation.protocol, operation.target].filter(Boolean).join(' · ')}</dd></div>}
       {operation?.root && <div><dt>写入范围</dt><dd><PathText path={operation.root} /></dd></div>}

@@ -711,7 +711,7 @@ test('Claude ACP separates the native Goal snapshot from the lifetime of its tur
       if (method !== 'agent.send') return;
       packets.push(packet);
       if (packet.method === 'initialize') {
-        assert.deepEqual(packet.params.clientCapabilities._meta.jetbrains.air.capabilities, ['asyncTasks']);
+        assert.deepEqual(packet.params.clientCapabilities._meta.jetbrains.air.capabilities, ['asyncTasks', 'nativeSubagentSessions']);
         reply(packet, { protocolVersion: 1, agentCapabilities: {}, _meta: { jetbrains: { air: {
           goal: { version: 1, actions: ['set', 'clear'], controlMethod: '_session/goal' },
         } } } });
@@ -754,6 +754,82 @@ test('Claude ACP separates the native Goal snapshot from the lifetime of its tur
   assert.deepEqual(packets.at(-1).params, { sessionId: ref.id, action: 'set', objective: 'Check a second time' });
   assert.equal(await agent.goal.update(ref, { kind: 'clear' }), null);
   assert.equal(events.filter(event => event.kind === 'goal').at(-1).goal, null);
+});
+
+test('Claude ACP isolates child output and approval and restores the final child state in history', async t => {
+  const generation = 48;
+  const events = [];
+  const packets = [];
+  let receive, prompt;
+  const emit = data => receive({ event: 'agent', generation, data });
+  const update = (sessionId, update) => emit({ method: 'session/update', params: { sessionId, update } });
+  const chunk = (id, kind, text) => update(id, { sessionUpdate: kind, content: { type: 'text', text } });
+  const spawn = id => update('root', { sessionUpdate: 'subagent_spawned', subagentSessionId: id,
+    name: 'Inspector', task: 'Read the result', prompt: 'Look at the fixture.' });
+  const settle = id => update('root', { sessionUpdate: 'subagent_state_update', subagentSessionId: id, state: 'completed' });
+  const reply = (packet, result) => emit({ id: packet.id, result });
+  globalThis.window = { span: {
+    onEvent(callback) { receive = callback; return () => {}; },
+    async request(method, { packet } = {}) {
+      if (method === 'agent.start') receive({ event: 'agent-route', generation, data: 'stdio' });
+      if (method !== 'agent.send') return;
+      packets.push(packet);
+      if (packet.method === 'initialize') reply(packet, { protocolVersion: 1,
+        agentCapabilities: { loadSession: true, sessionCapabilities: { subagents: {}, close: {} } } });
+      if (packet.method === 'session/new') reply(packet, { sessionId: 'root' });
+      if (packet.method === 'session/close') reply(packet, {});
+      if (packet.method === 'session/prompt') prompt = packet;
+      if (packet.method === 'session/load') {
+        chunk('root', 'user_message_chunk', 'Delegate');
+        spawn('saved-child');
+        chunk('saved-child', 'agent_message_chunk', 'Saved child result.');
+        chunk('root', 'agent_message_chunk', 'Root result.');
+        chunk('root', 'user_message_chunk', 'Later request');
+        settle('saved-child');
+        reply(packet, {});
+      }
+    },
+  } };
+  const agent = await createAgent('claude', { generation, location: { kind: 'local' }, cwd: '/work',
+    onEvent: event => events.push(event) });
+  t.after(() => { agent.close(); delete globalThis.window; });
+  await agent.open();
+  const { session: { ref } } = await agent.sessions.start();
+  await agent.turns.start(ref, [{ kind: 'text', text: 'Delegate' }], {}, 'delegate');
+  spawn('child');
+  let view;
+  const close = agent.delegation.watchTranscript(ref, 'child', snapshot => { view = snapshot; });
+  chunk('child', 'agent_message_chunk', 'Child result.');
+  const ask = (id, sessionId) => emit({ id, method: 'session/request_permission', params: {
+    sessionId, toolCall: { toolCallId: 'shell', kind: 'execute', rawInput: { command: 'echo fixture' } },
+    options: [{ optionId: 'once', kind: 'allow_once' }],
+  } });
+  ask('foreign', 'child-from-another-root');
+  assert.equal(packets.at(-1).result.outcome.outcome, 'cancelled');
+  ask('cancelled', 'child');
+  assert.equal(events.at(-1).request.actor.id, 'child');
+  emit({ method: '$/cancel_request', params: { requestId: 'cancelled' } });
+  assert.equal(events.at(-1).kind, 'interactionResolved');
+  ask('approval', 'child');
+  await agent.interactions.respond(events.at(-1).request.id, { choice: 'once' });
+  assert.equal(packets.at(-1).id, 'approval');
+  assert.equal(packets.at(-1).result.outcome.optionId, 'once');
+  settle('child');
+  assert.equal(view.run.status, 'completed');
+  assert.deepEqual(view.rows.map(row => row.text), ['Look at the fixture.', 'Child result.']);
+  assert.ok(events.every(event => event.delta?.text !== 'Child result.'));
+  close();
+  reply(prompt, { stopReason: 'end_turn' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  await agent.sessions.release(ref);
+  const reopened = await agent.sessions.resume(ref, 4);
+  const [first] = reopened.history.items;
+  assert.deepEqual(first.rows.map(row => row.kind), ['user', 'delegation', 'message']);
+  assert.equal(first.rows[1].members[0].status, 'completed');
+  const cleanup = agent.delegation.watchTranscript(ref, 'saved-child', snapshot => { view = snapshot; });
+  assert.equal(view.rows.at(-1).text, 'Saved child result.');
+  cleanup();
 });
 
 test('Pi reconnects to its stored branch and keeps queue, tool and dialog events on the active host', async t => {

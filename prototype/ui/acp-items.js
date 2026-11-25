@@ -153,6 +153,11 @@ export function acpReplay(childSession) {
     projection = acpTurn(id, event => events.push(event), childSession);
   }
   return {
+    append(item) {
+      if (!projection) beginTurn();
+      publishUser();
+      events.push({ kind: 'item', final: true, item: { ...item, turnId: id } });
+    },
     update(update) {
       if (update.sessionUpdate === 'user_message_chunk') {
         if (!projection || !user || user.id !== update.messageId) beginTurn();

@@ -1018,11 +1018,22 @@ p { margin-block: 0 12px; }
 .agent-menu-entries button:focus-visible { outline-width: 1px; outline-offset: -1px; }
 .agent-menu-entries button:focus-visible svg { color: var(--accent); }
 .agent-panel { display: flex; flex-direction: column; font-size: 13px; }
-.agent-panel:is([data-kind="goal"], [data-kind="reasoning"], [data-kind="diff"], [data-kind="extensions"]) {
+.agent-panel:is([data-kind="goal"], [data-kind="reasoning"], [data-kind="diff"], [data-kind="extensions"], [data-kind="subagent"]) {
   inset-inline: 0 auto;
   width: min(100%, 560px);
 }
 .agent-panel[data-kind="reasoning"] { --panel-height: 320px; }
+.agent-panel[data-kind="subagent"] { height: 310px; }
+.agent-panel[data-kind="subagent"] > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-panel[data-kind="subagent"] .agent-panel-content {
+  display: flex;
+  flex: 1;
+  padding: 0 6px;
+  overflow: hidden;
+}
+.agent-panel[data-kind="subagent"] .timeline { flex: 1; }
+.agent-panel[data-kind="subagent"] .reading-column { width: calc(100% - 12px); }
+.subagent-empty { color: var(--muted); padding-inline: 8px; }
 .agent-panel > header {
   display: flex;
   justify-content: space-between;

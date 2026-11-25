@@ -166,7 +166,7 @@ function delegationStatus(members) {
 }
 
 const TranscriptRow = memo(function TranscriptRow({
-  row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openArtifact, openImage, canOpenSession,
+  row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openTrace, openArtifact, openImage, canOpenSession,
   streaming, following, scroll,
 }) {
   if (row.kind === 'user') return <div className="user-message" data-attachment-only={(!row.text && !row.queued) || undefined}>
@@ -267,7 +267,7 @@ const TranscriptRow = memo(function TranscriptRow({
       if (members.length || row.text) detail = () => <>
         {row.text && <Markdown text={row.text} />}
         {members.length > 0 && <AgentMemberList members={members} currentKey={currentKey}
-          openSession={openSession} canOpenSession={canOpenSession} showDetail />}
+          openSession={openSession} canOpenSession={canOpenSession} openTrace={openTrace} showDetail />}
       </>;
       break;
     }
@@ -353,7 +353,8 @@ function anchorIndex(rows, layout, anchor, reasoningTurn) {
 
 export const Transcript = memo(function Transcript({
   rows, liveReasoningTurn, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
-  onScrollPosition, openSession, openArtifact, openImage, canOpenSession, showLatest,
+  onScrollPosition, openSession, openTrace, openArtifact, openImage, canOpenSession, showLatest,
+  label = '会话记录', testId = 'transcript',
 }) {
   const expanded = useRef(null);
   if (!expanded.current) expanded.current = new Map(remembered?.expansion);
@@ -488,7 +489,7 @@ export const Transcript = memo(function Transcript({
       const current = latest.current;
       if (!viewKey || current?.restore || !current?.rows.length) return;
       const anchor = readAnchor(element, current.rows, current.layout);
-      remember(viewKey, { anchor, pages: current.historyPages, expansion: Array.from(expanded.current).slice(-64),
+      remember?.(viewKey, { anchor, pages: current.historyPages, expansion: Array.from(expanded.current).slice(-64),
         openGroups: Array.from(current.openGroups).slice(-64),
         ungroupedTurns: anchor && ungroupedTurns.current.has(anchor.turnId) ? [anchor.turnId] : [] });
     };
@@ -574,7 +575,7 @@ export const Transcript = memo(function Transcript({
     if (!atBottom && element.scrollTop < 160 && cursor && !loading) loadOlder();
   }
 
-  return <div className="timeline" ref={scroll} role="log" aria-label="会话记录" aria-live="off" tabIndex={-1} data-testid="transcript"
+  return <div className="timeline" ref={scroll} role="log" aria-label={label} aria-live="off" tabIndex={-1} data-testid={testId}
     data-items={rows.length} data-reading-history={showLatest && !restore ? 'true' : undefined} onScroll={onScroll}
     onPointerDownCapture={releaseGroupAnchor} onKeyDownCapture={releaseGroupAnchor}
     onWheel={event => {
@@ -598,7 +599,8 @@ export const Transcript = memo(function Transcript({
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
               streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll}
               expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
-              toggle={toggle} openSession={openSession} openArtifact={openArtifact} openImage={openImage} canOpenSession={canOpenSession} />)}
+              toggle={toggle} openSession={openSession} openTrace={openTrace} openArtifact={openArtifact} openImage={openImage}
+              canOpenSession={canOpenSession} />)}
         </div>;
       })}
     </div> : null}

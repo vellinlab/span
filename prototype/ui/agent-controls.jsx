@@ -8,6 +8,7 @@ import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { TextReader } from './text-reader.jsx';
 import { delegatedMembers } from './timeline.js';
+import { Transcript } from './transcript.jsx';
 
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', waiting: '等待中', limited: '达到用量上限', unknown: '状态未知',
@@ -339,7 +340,7 @@ function AgentTaskList({ tasks, members }) {
   })}</ul>;
 }
 
-function AgentsPanel({ work, openSession, report }) {
+function AgentsPanel({ work, openSession, openTrace, report }) {
   const { teams, members: liveMembers } = work;
   const recordedMembers = delegatedMembers(work.rows);
   const { members, entries, groups, parents } = useMemo(() => {
@@ -372,7 +373,7 @@ function AgentsPanel({ work, openSession, report }) {
     {sections.map(({ id, name, tasks }) => <section key={id ?? 'subagents'} className="agent-group">
       <h3>{name}</h3>
       {groups.get(id).length > 0 && <AgentMemberList members={groups.get(id)} parentName={parentName}
-        currentKey={activeKey} openSession={openSession} canOpenSession={canOpenSession} />}
+        currentKey={activeKey} openSession={openSession} canOpenSession={canOpenSession} openTrace={openTrace} />}
       {tasks?.length > 0 && <div className="agent-task-group">
         <h4>任务</h4>
         <AgentTaskList tasks={tasks} members={members} />
@@ -380,6 +381,24 @@ function AgentsPanel({ work, openSession, report }) {
     </section>)}
     <DelegationControls key={activeKey} work={work} members={entries} report={report} />
   </div>;
+}
+
+function SubagentTranscript({ panel, delegation, openTrace, openArtifact, openImage }) {
+  const [view, setView] = useState();
+  const [error, setError] = useState('');
+  const [readingHistory, setReadingHistory] = useState(false);
+  const scroll = useRef(null);
+  const jumpToLatest = useRef(true);
+  const { member, session } = panel;
+  useEffect(() => {
+    try { return delegation.watchTranscript(session, member.id, setView); }
+    catch (error) { setError(error.message); }
+  }, [delegation, member.id, session]);
+  if (error || !view?.rows.length) return <p className="subagent-empty" role="status">{error || '子代理还没有可显示的记录。'}</p>;
+  return <Transcript rows={view.rows} viewKey={sessionKey(member.session)} scroll={scroll} jumpToLatest={jumpToLatest}
+    label="子代理会话记录" testId="subagent-transcript" activeTurnId={view.run.status === 'running' ? view.run.id : undefined}
+    showLatest={readingHistory} onScrollPosition={setReadingHistory} openTrace={openTrace}
+    openArtifact={openArtifact} openImage={openImage} />;
 }
 
 function DiffPanel({ panel }) {
@@ -401,7 +420,7 @@ function DiffPanel({ panel }) {
   </div>;
 }
 
-export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, report, openSession }) {
+export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, report, openSession, openTrace, openArtifact, openImage }) {
   const close = useRef(null);
   const content = useRef(null);
   const extensionSearch = useRef(null);
@@ -443,7 +462,9 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} />}
       {usagePanel && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing} />}
-      {agentsPanel && <AgentsPanel work={work} openSession={openSession} report={report} />}
+      {agentsPanel && <AgentsPanel work={work} openSession={openSession} openTrace={openTrace} report={report} />}
+      {panel.kind === 'subagent' && <SubagentTranscript key={panel.id} panel={panel} delegation={work.api?.delegation}
+        openTrace={openTrace} openArtifact={openArtifact} openImage={openImage} />}
       {panel.kind === 'diff' && <DiffPanel key={panel.id} panel={panel} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
       {panel.kind === 'extensions' && <ExtensionList key={panel.id} panel={panel} search={extensionSearch} />}

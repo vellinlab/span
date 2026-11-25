@@ -21,10 +21,18 @@ const command = 'echo span-claude-tool';
 const answer = '已完成 Claude 的首次检查。';
 const continued = 'Claude 已继续原会话。';
 const objective = '验收结束时保持工作目录不变。';
+const delegate = '委派子代理检查临时工作区。';
+const childPrompt = '执行给定的验收命令并报告结果。';
+const childAnswer = '子代理已核对验收标记。';
+const delegateAnswer = '父会话收到子代理结果。';
+const childCommand = 'echo span-claude-child';
 const toolId = 'toolu_span_claude_command';
+const delegateId = 'toolu_span_claude_delegate';
+const childToolId = 'toolu_span_claude_child_cmd';
 let releaseReasoning;
 let releaseTool;
 let toolResult;
+let childToolResult;
 let resumedWithHistory = false;
 let failure;
 let messages = 0;
@@ -61,7 +69,8 @@ const gateway = createServer(async (request, response) => {
     const last = users.at(-1)?.content;
     const lastText = typeof last === 'string' ? last : (last ?? [])
       .filter(part => part.type === 'text').map(part => part.text).join('\n');
-    const result = Array.isArray(last) ? last.find(part => part.type === 'tool_result' && part.tool_use_id === toolId) : null;
+    const results = new Map((Array.isArray(last) ? last : []).filter(part => part.type === 'tool_result')
+      .map(part => [part.tool_use_id, part.content]));
     response.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const emit = (type, value = {}) => response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`);
     const start = (index, content_block) => emit('content_block_start', { index, content_block });
@@ -72,11 +81,31 @@ const gateway = createServer(async (request, response) => {
       delta(0, { type: 'text_delta', text });
       stop(0);
     };
+    const tool = (index, id, name, input) => {
+      start(index, { type: 'tool_use', id, name, input: {} });
+      delta(index, { type: 'input_json_delta', partial_json: JSON.stringify(input) });
+      stop(index);
+    };
     emit('message_start', { message });
     let stopReason = 'end_turn';
-    if (result) {
-      toolResult = JSON.stringify(result.content);
+    if (results.has(childToolId)) {
+      childToolResult = JSON.stringify(results.get(childToolId));
+      reply(childAnswer);
+    } else if (results.has(delegateId)) {
+      reply(delegateAnswer);
+    } else if (results.has(toolId)) {
+      toolResult = JSON.stringify(results.get(toolId));
       reply(answer);
+    } else if (lastText.includes(childPrompt) && body.tools?.some(tool => tool.name === 'Bash')) {
+      tool(0, childToolId, 'Bash', { command: childCommand, description: '输出子代理验收标记' });
+      stopReason = 'tool_use';
+    } else if (lastText.includes(delegate) && body.tools?.length) {
+      const nativeAgent = body.tools.find(tool => ['Agent', 'Task'].includes(tool.name));
+      assert.ok(nativeAgent, 'Claude must advertise its native delegation tool');
+      tool(0, delegateId, nativeAgent.name, {
+        description: '核对验收标记', prompt: childPrompt, subagent_type: 'general-purpose',
+      });
+      stopReason = 'tool_use';
     } else if (lastText.includes(next) && JSON.stringify(users).includes(initial)) {
       resumedWithHistory = true;
       reply(continued);
@@ -88,9 +117,7 @@ const gateway = createServer(async (request, response) => {
       delta(0, { type: 'signature_delta', signature: 'span-fixture-thinking' });
       stop(0);
       await new Promise(done => { releaseTool = done; });
-      start(1, { type: 'tool_use', id: toolId, name: 'Bash', input: {} });
-      delta(1, { type: 'input_json_delta', partial_json: JSON.stringify({ command, description: '输出验收标记' }) });
-      stop(1);
+      tool(1, toolId, 'Bash', { command, description: '输出验收标记' });
       stopReason = 'tool_use';
     } else {
       reply('Claude 会话检查');
@@ -221,9 +248,43 @@ try {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal.png') });
   await goalPanel.getByRole('button', { name: '清除', exact: true }).click();
   await goal.waitFor({ state: 'hidden' });
+  await goalPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  await send(delegate);
+  const childCard = () => transcript().locator('[data-card="delegation"]').last();
+  const openChild = () => childCard().getByRole('button', { name: /^查看 .+ 的会话记录$/ });
+  await childCard().locator('summary').click();
+  await openChild().waitFor();
+  const pendingCommand = page.getByLabel('待执行命令');
+  await pendingCommand.waitFor();
+  assert.equal(await pendingCommand.textContent(), childCommand);
+  const approvalCard = page.getByRole('region', { name: '执行命令', exact: true });
+  await approvalCard.getByText('子代理', { exact: true }).waitFor();
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent-approval.png') });
+  await openChild().click();
+  const childTranscript = () => page.getByTestId('subagent-transcript');
+  await childTranscript().getByText(childPrompt, { exact: true }).waitFor();
+  await approval.press('Enter');
+  await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
+  assert.match(childToolResult ?? '', /span-claude-child/);
+  await transcript().getByText(delegateAnswer, { exact: true }).waitFor();
+  assert.equal(await transcript().getByText(childAnswer, { exact: true }).count(), 0);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-subagent.png') });
+  const childPanel = page.locator('.agent-panel[data-kind="subagent"]');
+  await childPanel.getByRole('button', { name: '关闭面板' }).press('Escape');
+  await childPanel.waitFor({ state: 'hidden' });
+  assert.ok(await openChild().evaluate(button => button === button.ownerDocument.activeElement));
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  await app.close();
+  await open(false);
+  await transcript().getByText(delegateAnswer, { exact: true }).waitFor();
+  await childCard().locator('summary').click();
+  await openChild().click();
+  await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
+  await childTranscript().locator('[data-card="command"]').filter({ hasText: childCommand }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot });
   assert.equal(failure, undefined);
-  console.log(`Verified Claude Code ACP reasoning, tool permission, usage, history, continuation and goal controls on ${ssh ?? process.platform}`);
+  console.log(`Verified Claude Code ACP reasoning, approvals, usage, goals, and restored child transcripts on ${ssh ?? process.platform}`);
 } catch (error) {
   if (page) {
     console.error(await page.getByRole('alert').allTextContents().catch(() => []));
