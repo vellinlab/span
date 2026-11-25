@@ -11,7 +11,8 @@ function acpAdapter(id, label, childSessionKey) {
 const definitions = [codexAdapter, clueAdapter, {
   id: 'pi', label: 'Pi', locations: ['local', 'ssh'],
   load: () => import('./pi.js').then(module => module.createPi),
-}, acpAdapter('opencode', 'OpenCode', 'opencode/child-session'), acpAdapter('kilo', 'Kilo')];
+}, acpAdapter('opencode', 'OpenCode', 'opencode/child-session'), acpAdapter('kilo', 'Kilo'),
+  acpAdapter('claude', 'Claude Code')];
 
 export const agentBackends = definitions.map(({ id, label, locations }) => ({ id, label, locations }));
 

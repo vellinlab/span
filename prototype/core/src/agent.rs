@@ -51,7 +51,10 @@ if [ -n "$2" ]; then
     export KILO_SERVER_PASSWORD KILO_SERVER_USERNAME=span
     exec "$cli" acp --hostname 127.0.0.1 --port "$2"
 fi
-exec "$cli" acp
+if [ -n "$3" ]; then
+    exec "$cli" "$3"
+fi
+exec "$cli"
 "#;
 
 struct KiloConnection {
@@ -86,6 +89,7 @@ struct AcpBackend {
     label: &'static str,
     windows_executable: &'static str,
     path_override: &'static str,
+    subcommand: Option<&'static str>,
 }
 
 const OPENCODE: AcpBackend = AcpBackend {
@@ -93,12 +97,21 @@ const OPENCODE: AcpBackend = AcpBackend {
     label: "OpenCode",
     windows_executable: "opencode.exe",
     path_override: "SPAN_OPENCODE_PATH",
+    subcommand: Some("acp"),
 };
 const KILO: AcpBackend = AcpBackend {
     name: "kilo",
     label: "Kilo",
     windows_executable: "kilo.exe",
     path_override: "SPAN_KILO_PATH",
+    subcommand: Some("acp"),
+};
+const CLAUDE: AcpBackend = AcpBackend {
+    name: "claude-agent-acp",
+    label: "Claude Code",
+    windows_executable: "claude-agent-acp.exe",
+    path_override: "SPAN_CLAUDE_ACP_PATH",
+    subcommand: None,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -145,6 +158,7 @@ impl Agent {
             Some("pi") => Backend::Pi,
             Some("opencode") => Backend::Acp(OPENCODE),
             Some("kilo") => Backend::Acp(KILO),
+            Some("claude") => Backend::Acp(CLAUDE),
             _ => return Err("未知的 Agent 后端。".into()),
         };
         let location = if params["demo"] == true {
@@ -503,8 +517,9 @@ async fn serve(
                 .map(|connection| connection.remote_port.to_string())
                 .unwrap_or_default();
             let mut process = spawn(ssh_with_forward(&target, kilo.as_ref()).arg(format!(
-                "sh -c '{REMOTE_ACP}' span-acp {} '{port}'",
-                acp.name
+                "sh -c '{REMOTE_ACP}' span-acp {} '{port}' '{}'",
+                acp.name,
+                acp.subcommand.unwrap_or_default()
             )))?;
             if let Some(connection) = &kilo {
                 process
@@ -548,24 +563,37 @@ async fn serve(
             stdio(process, requests, output, generation, "stdio").await?;
         }
         (Backend::Acp(acp), Location::Local(cwd)) => {
-            let program = env::var_os(acp.path_override)
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| backend.binary().into());
-            let mut command = Command::new(program);
-            command.arg("acp").current_dir(cwd);
-            if let Some(connection) = &kilo {
-                command
-                    .args(["--hostname", "127.0.0.1", "--port"])
-                    .arg(connection.local_port.to_string())
-                    .env("KILO_SERVER_USERNAME", "span")
-                    .env("KILO_SERVER_PASSWORD", &connection.password);
-            }
-            let process = spawn(&mut command).map_err(|error| {
-                format!(
-                    "无法启动 {}。请检查 CLI 安装，或将 {} 指向可执行文件。\n{error}",
-                    acp.label, acp.path_override
-                )
-            })?;
+            let program = env::var_os(acp.path_override).filter(|value| !value.is_empty());
+            let is_default = program.is_none();
+            let launch = |program| {
+                let mut command = Command::new(program);
+                command.args(acp.subcommand).current_dir(&cwd);
+                if let Some(connection) = &kilo {
+                    command
+                        .args(["--hostname", "127.0.0.1", "--port"])
+                        .arg(connection.local_port.to_string())
+                        .env("KILO_SERVER_USERNAME", "span")
+                        .env("KILO_SERVER_PASSWORD", &connection.password);
+                }
+                spawn(&mut command)
+            };
+            let process = launch(program.unwrap_or_else(|| backend.binary().into()))
+                .or_else(|error| {
+                    if cfg!(windows)
+                        && is_default
+                        && acp == CLAUDE
+                        && error.kind() == io::ErrorKind::NotFound
+                    {
+                        return launch("claude-agent-acp.cmd".into());
+                    }
+                    Err(error)
+                })
+                .map_err(|error| {
+                    format!(
+                        "无法启动 {}。请检查 CLI 安装，或将 {} 指向可执行文件。\n{error}",
+                        acp.label, acp.path_override
+                    )
+                })?;
             stdio(process, requests, output, generation, "stdio").await?;
         }
         (_, Location::Fixture) => {

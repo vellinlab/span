@@ -84,6 +84,11 @@ for backend in opencode kilo; do
     /artifacts/node prototype/test/real-acp.mjs "$backend" /artifacts/linux/span-preview \
         "/artifacts/$backend-test/$backend" "/artifacts/el8-$backend-ssh.png" "$SPAN_TEST_SSH_ALIAS"
 done
+bash prototype/test/install-acp.sh claude-agent-acp linux /artifacts/claude-test
+/artifacts/node prototype/test/real-claude.mjs /artifacts/linux/span-preview \
+    /artifacts/claude-test/claude-agent-acp /artifacts/el8-claude.png
+/artifacts/node prototype/test/real-claude.mjs /artifacts/linux/span-preview \
+    /artifacts/claude-test/claude-agent-acp /artifacts/el8-claude-ssh.png "$SPAN_TEST_SSH_ALIAS"
 pressure_cpu="$(python3.9 -c 'import os; print(min(os.sched_getaffinity(0)))')"
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/startup-loading.mjs \
     /artifacts/linux/span-preview /artifacts/startup-loading-baseline/span-preview /artifacts/el8-workbench-startup.png \

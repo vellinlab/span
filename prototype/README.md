@@ -16,7 +16,7 @@ Windows 本机依次尝试 `SPAN_CODEX_PATH`、`CODEX_CLI_PATH`、PATH、Codex �
 | --- | --- |
 | Codex | 已注册。本机或 SSH 接入 App Server。使用原生目标、用量、规划、审批、模型和速度档位。时间线显示子代理活动，成员可打开对应会话。 |
 | Clue | 已注册。本机或 SSH 使用现有的 `clue app-server` 兼容路径。使用基础会话和回合操作。 |
-| Claude Code | 协议可映射 SDK 的会话、流式内容、审批、检查点和子代理。Agent Teams 通过独立的成员、任务和团队操作表示，按可用性启用。 |
+| Claude Code | 本机和 SSH 通过 Claude Agent SDK 的 ACP 适配器。使用 Claude 原生会话，接收流式推理、回复、工具活动、审批和用量。 |
 | Pi Agent | 已注册。本机和 SSH 启动 `pi --mode rpc`，使用 Pi 自己保存的会话。支持模型和思考级别、`steer`、`follow_up`、会话统计、扩展命令及交互。 |
 | OpenCode | 本机和 SSH 通过 ACP 连接 `opencode acp`。使用 OpenCode 保存的会话，支持流式回复和推理、工具活动、审批、停止、用量，以及当前会话公开的模型和模式。 |
 | Kilo | 本机和 SSH 通过 ACP 连接 `kilo acp`。与 OpenCode 共用协议和界面，模型、模式与会话从 Kilo 原生进程读取。支持原生 Goal 的版本在输入框上方显示目标，可启动、暂停、继续并查看结果。 |
@@ -30,6 +30,8 @@ Pi 可以使用 PATH 中的 CLI。本机也可用 `SPAN_PI_PATH` 指定可执行
 Codex 和 Pi 在 Agent 菜单中提供「技能」。在输入框用 `/skills` 也可以打开面板，并可在命令后附上搜索词。面板显示后端为当前工作区报告的技能，在第一条消息发出前也可以打开。
 
 OpenCode 使用 PATH 中的 CLI。本机也可用 `SPAN_OPENCODE_PATH` 指定可执行文件。SSH 会按顺序查找远端的 PATH、`~/.opencode/bin` 和 `~/.local/bin`。新会话默认使用远端登录目录，已保存的会话从其原工作目录恢复。OpenCode 回放的历史由 Span 按需向上分页。 [OpenCode ACP 文档](https://opencode.ai/docs/cli/acp/)
+
+Claude Code 使用 PATH 中的 `claude-agent-acp`，本机可用 `SPAN_CLAUDE_ACP_PATH` 指定适配器。SSH 使用远端 PATH、`~/.claude-agent-acp/bin` 或 `~/.local/bin`。独立发行包内的适配器与 Claude CLI 放在同一目录。Claude 的认证和会话仍由该主机上的 Claude Code 管理。 [Claude Agent ACP](https://github.com/agentclientprotocol/claude-agent-acp)
 
 Kilo 使用 PATH 中的 CLI，本机可用 `SPAN_KILO_PATH` 指定可执行文件。SSH 使用远端 PATH、`~/.kilo/bin` 或 `~/.local/bin`。两种 ACP 后端各自管理会话，以后端、主机和原始会话 ID 区分读取和恢复。 [Kilo CLI 参考](https://kilo.ai/docs/code-with-ai/platforms/cli-reference#kilo-acp)
 
