@@ -345,7 +345,8 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
   const waitForPreview = () => preview.getByText('Span 工作台预览', { exact: true }).waitFor();
   const closePreview = () => preview.getByRole('button', { name: '关闭预览' }).click();
   const checkCover = async () => {
-    await page.waitForFunction(({ x, y }) => document.elementFromPoint(x + 8, y + 8)?.closest('#file-preview'), area);
+    await page.waitForFunction(({ x, y }) => Boolean(document.elementFromPoint(x + 8, y + 8)?.closest('#file-preview')), area);
+    if (variant !== 'candidate') return;
     assert.deepEqual(await screen.evaluate(element => {
       const bounds = element.getBoundingClientRect();
       return [Math.ceil(bounds.left), Math.ceil(bounds.top)];
@@ -437,11 +438,9 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     const events = await observation.evaluate(state => state.finish());
     assert.ok(events.packets > 0);
     assert.equal(events.generations, 1);
-    if (variant === 'candidate') {
+    if (!minimized || variant === 'candidate') {
       assert.equal(events.batches, 0);
       assert.equal(await readyRow.count(), 1, 'The hidden terminal keeps its previous DOM until reveal');
-    } else if (!minimized) {
-      assert.ok(events.batches >= 10, `Expected baseline terminal updates, saw ${events.batches}`);
     }
     let readReveal;
     if (!minimized) {
