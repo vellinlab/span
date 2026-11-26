@@ -1172,6 +1172,14 @@ p { margin-block: 0 12px; }
   .goal-editor { padding-block: 6px; }
   .goal-editor textarea { padding-block: 4px; }
 }
+@container (max-width: 600px) and (max-height: 400px) {
+  .composer-wrap:has(.composer-files):has(.goal-objective) {
+    /* Leave room above the panel when two lines of the objective can still fit. */
+    & .agent-panel[data-kind="goal"] { --panel-height: max(128px, calc(100% - 52px)); }
+    & .goal-panel-main > .agent-panel-content { padding-block: 4px; }
+    & > .composer:not(:focus-within) textarea { min-height: 24px; max-height: 24px; }
+  }
+}
 .settings-grid, .usage-panel, .agent-groups, .delegation-form { display: grid; gap: 10px; }
 .settings-grid { grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px; row-gap: 6px; }
 .agent-setting { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }

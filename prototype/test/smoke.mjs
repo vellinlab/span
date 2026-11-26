@@ -413,19 +413,45 @@ try {
     await dismissGoal.focus();
     const compact = await tray.evaluate(element => ({ height: element.clientHeight, scrollable: element.scrollHeight > element.clientHeight }));
     assert.deepEqual(compact, { height: 28, scrollable: true });
-    const readingHeight = await goalViewport.evaluate(element => element.clientHeight);
+    assert.equal(await draftHeight(), 24);
+    const readingSpace = () => goalViewport.evaluate(element => {
+      const panel = element.closest('.agent-panel');
+      const timeline = document.querySelector('.timeline');
+      const abovePanel = panel.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+      const style = getComputedStyle(element);
+      const objectiveHeight = element.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+      const objectiveLineHeight = parseFloat(getComputedStyle(element.querySelector('.goal-objective')).lineHeight);
+      return { abovePanel, objectiveHeight, objectiveLineHeight, scrolls: element.scrollHeight > element.clientHeight };
+    });
+    const compactReading = await readingSpace();
+    assert.ok(compactReading.scrolls && compactReading.objectiveHeight >= 2 * compactReading.objectiveLineHeight);
     await tray.evaluate(element => { element.style.maxHeight = '56px'; });
     try {
-      const fullTrayReadingHeight = await goalViewport.evaluate(element => element.clientHeight);
-      assert.ok(readingHeight - fullTrayReadingHeight >= 22, 'The compact attachment tray must make room for another line.');
-      console.log(`Goal reading height with attachments: ${fullTrayReadingHeight} → ${readingHeight} CSS px.`);
+      const fullTray = await readingSpace();
+      assert.ok(compactReading.abovePanel + compactReading.objectiveHeight - fullTray.abovePanel - fullTray.objectiveHeight >= 22,
+        'The compact attachment tray must make room for another line of the conversation or goal.');
     } finally {
       await tray.evaluate(element => { element.style.removeProperty('max-height'); });
+    }
+    const fullGoalLayout = await page.addStyleTag({ content: `
+      #goal-panel { --panel-height: 400px; }
+      #goal-panel .agent-panel-content { padding-block: 8px; }
+      .composer-wrap:has(#goal-panel) .composer textarea { min-height: 32px; max-height: 46px; }
+    ` });
+    try {
+      const fullPanel = await readingSpace();
+      assert.ok(compactReading.abovePanel - fullPanel.abovePanel >= 22,
+        'The conversation should keep at least one extra line above the expanded goal.');
+      console.log(`Conversation space above the goal: ${fullPanel.abovePanel} → ${compactReading.abovePanel} CSS px.`);
+      if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact-attachments-before.png') });
+    } finally {
+      await fullGoalLayout.evaluate(element => element.remove());
     }
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact-attachments.png') });
     const last = tray.getByRole('button', { name: '移除附件 · ' + names.at(-1), exact: true });
     await last.focus();
     assert.ok(await tray.evaluate(element => element.clientHeight > 28 && element.contains(document.activeElement)));
+    assert.equal(await draftHeight(), originalDraftHeight);
     for (const name of names) await tray.getByRole('button', { name: '移除附件 · ' + name, exact: true }).press('Enter');
     await tray.waitFor({ state: 'detached' });
     await dismissGoal.focus();
