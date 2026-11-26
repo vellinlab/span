@@ -185,6 +185,11 @@ test('command output indexes only new chunks and can jump to a replaced or compa
   const [final] = applyTimeline([log], [{ kind: 'item', item: { ...item, text: '最终输出' }, final: true }]);
   assert.equal(final.outputChunks, undefined);
   assert.equal(final.text, '最终输出');
+
+  const completion = { ...item, status: 'completed', text: undefined };
+  const [completed] = applyTimeline([log], [{ kind: 'item', item: completion, final: true }]);
+  assert.equal(completed.outputChunks, undefined);
+  assert.equal(completed.text, log.text);
 });
 
 test('file references round-trip with Windows and Linux paths and survive an echo without a client ID', () => {

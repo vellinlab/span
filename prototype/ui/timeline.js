@@ -379,8 +379,9 @@ function addItem(state, item, final) {
   if ((item.kind === 'command' || item.kind === 'tool') && !item.text && row.text) {
     updated.text = row.text;
   }
-  if (item.kind === 'command' && item.text) {
-    updated.outputChunks = final ? undefined : appendOutput(undefined, '', item.text);
+  if (item.kind === 'command') {
+    if (final) updated.outputChunks = undefined;
+    else if (item.text) updated.outputChunks = appendOutput(undefined, '', item.text);
   }
   write(first, updated);
 }
