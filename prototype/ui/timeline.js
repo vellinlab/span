@@ -270,12 +270,13 @@ function mergeSections(live, snapshot) {
   return sections;
 }
 
-function summarySuffix(prefix, text) {
+function summarySuffix(prefix, text, hasCode) {
   const source = text.length >= summaryPreviewLength ? text : (prefix ?? '') + text;
   let start = Math.max(0, source.length - summaryPreviewLength);
   // The preview must not begin in the middle of a UTF-16 surrogate pair.
   const first = source.charCodeAt(start);
   if (first >= 0xdc00 && first <= 0xdfff) start++;
+  if (hasCode && source[start - 1] === '`') while (source[start] === '`') start++;
   return source.slice(start);
 }
 
@@ -297,6 +298,23 @@ function skipSummaryDestination(source, offset, { depth, escaped } = { depth: 1 
   return { offset: source.length, destination: { depth } };
 }
 
+function summaryCodeAt(source, start, end, backticks = 0) {
+  const markers = /[\r\n]|`+/g;
+  markers.lastIndex = start;
+  for (let mark; (mark = markers.exec(source)) && mark.index < end;) {
+    if (mark[0][0] !== '`') backticks = 0;
+    else if (backticks === mark[0].length) backticks = 0;
+    else if (!backticks && source[mark.index - 1] !== '\\') backticks = mark[0].length;
+  }
+  return backticks;
+}
+
+function codeBeforeSummaryTail(prefix, fragment, tail, backticks) {
+  // Keep track of a code span if its opening backticks were clipped from the preview.
+  const omitted = prefix.length + fragment.length - tail.length;
+  return omitted ? summaryCodeAt(prefix + fragment, 0, omitted, backticks) : backticks;
+}
+
 function projectSummaryFragment(previous, fragment) {
   const prefix = previous?.tail ?? '';
   const carried = previous?.destination;
@@ -312,35 +330,67 @@ function projectSummaryFragment(previous, fragment) {
   const links = /(?<!\\)\[([^\[\]\r\n]{1,240})\]\(https?:\/\//gi;
   const first = links.exec(source);
   if (!first) return carried ? { prefix, fragment } : undefined;
-  const start = Math.min(prefix.length, first.index);
-  let offset = start;
+  let code = previous?.codePrefix ?? 0;
+  const hasCode = code > 0 || source.includes('`');
+  let start, offset;
+  let scanned = 0;
   let visible = '';
   let destination;
   for (let match = first; match; match = links.exec(source)) {
+    if (hasCode) {
+      code = summaryCodeAt(source, scanned, match.index, code);
+      scanned = match.index;
+      if (code) continue;
+    }
+    if (start === undefined) {
+      start = Math.min(prefix.length, match.index);
+      offset = start;
+    }
     visible += source.slice(offset, match.index) + match[1];
     ({ offset, destination } = skipSummaryDestination(source, links.lastIndex));
     if (destination) break;
+    if (hasCode) {
+      code = summaryCodeAt(source, match.index, links.lastIndex);
+      scanned = offset;
+    }
     links.lastIndex = offset;
   }
+  if (start === undefined) return carried ? { prefix, fragment } : undefined;
   return { prefix: source.slice(0, start), fragment: visible + source.slice(offset), destination };
 }
 
-function summaryLineText(text) {
+function summaryLineText(text, codePrefix) {
   if (!text.includes('**')) return text;
+  let start = 0;
+  if (codePrefix) {
+    for (const mark of text.matchAll(/`+/g)) {
+      if (mark[0].length !== codePrefix) continue;
+      start = mark.index + mark[0].length;
+      break;
+    }
+    if (!start) return text;
+  }
   // The line is bounded. Remove paired emphasis markers while keeping inline code literal.
   const codeOrStrong = /(?<![\\`])(`+)(?!`).*?(?:(?<!`)\1(?!`)|$)|(?<![\\*])\*\*([^*\s](?:[^*]*[^*\s])?)\*\*(?!\*)/g;
-  return text.replace(codeOrStrong, (source, _backticks, emphasized) => emphasized ?? source);
+  return text.slice(0, start) + text.slice(start).replace(codeOrStrong, (source, _backticks, emphasized) => emphasized ?? source);
 }
 
 function summaryTail(previous, fragment) {
   const projected = projectSummaryFragment(previous, fragment);
-  const prefix = projected?.prefix ?? previous?.tail;
+  const prefix = projected?.prefix ?? previous?.tail ?? '';
+  const earlierCode = previous?.codePrefix ?? 0;
   const destination = projected?.destination;
   fragment = projected?.fragment ?? fragment;
-  const tail = summarySuffix(prefix, fragment);
+  const hasCode = earlierCode > 0 || previous?.hasBackticks || fragment.includes('`');
+  const tail = summarySuffix(prefix, fragment, hasCode);
+  const summary = { tail, preview: previous?.preview, destination };
+  if (hasCode) {
+    summary.codePrefix = codeBeforeSummaryTail(prefix, fragment, tail, earlierCode);
+    summary.hasBackticks = tail.includes('`');
+  }
   const trimmed = fragment.trimEnd();
-  if (!trimmed) return { tail, preview: previous?.preview, destination };
-  const content = trimmed === fragment ? tail : summarySuffix(prefix, trimmed);
+  if (!trimmed) return summary;
+  const content = trimmed === fragment ? tail : summarySuffix(prefix, trimmed, hasCode);
   const fragmentStart = Math.max(0, content.length - trimmed.length);
   const lines = content.split('\n');
   let end = content.length;
@@ -350,13 +400,22 @@ function summaryTail(previous, fragment) {
     const newText = raw.slice(Math.max(0, fragmentStart - start)).trim();
     end = start - 1;
     if (!newText) continue;
-    const line = raw.trim().replace(/^(?:>[ \t]*)+/, '');
-    if (line === '**' || /^([-*_])(?:[ \t]*\1){2,}$|^(?:`{3,}[^`]*|~{3,}[^~]*)$/.test(line)) continue;
-    const text = line.replace(/^(?:[-*+]|#{1,6}|\d{1,9}[.)])(?:[ \t]+|$)/, '');
-    if (text) return { tail, preview: summaryLineText(text), advanced: true, destination };
+    const openCode = hasCode && start === 0 && (trimmed === fragment
+      ? summary.codePrefix : codeBeforeSummaryTail(prefix, trimmed, content, earlierCode));
+    let text = raw.trim();
+    if (!openCode) {
+      text = text.replace(/^(?:>[ \t]*)+/, '');
+      if (text === '**' || /^([-*_])(?:[ \t]*\1){2,}$|^(?:`{3,}[^`]*|~{3,}[^~]*)$/.test(text)) continue;
+      text = text.replace(/^(?:[-*+]|#{1,6}|\d{1,9}[.)])(?:[ \t]+|$)/, '');
+    }
+    if (text) {
+      summary.preview = summaryLineText(text, openCode);
+      summary.advanced = true;
+      return summary;
+    }
   }
   // A chunk can end at an empty Markdown block before its words arrive.
-  return { tail, preview: previous?.preview, destination };
+  return summary;
 }
 
 function snapshotSummary(text) {

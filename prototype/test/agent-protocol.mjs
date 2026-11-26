@@ -1010,6 +1010,31 @@ test('reasoning strips remove paired bold markers without changing code or the s
   assert.equal(restored[0].sections[0], raw);
 });
 
+test('reasoning previews keep Markdown syntax literal within inline code', () => {
+  const delta = text => ({ kind: 'delta', delta: { kind: 'reasoning', id: 'r', turnId: 't', text } });
+  const preview = rows => turnReasoning(rows, 't')?.preview;
+  const longCode = '打印 ``' + 'a'.repeat(255);
+  const first = applyTimeline([], [delta(longCode)]);
+  const code = ' [原样](https://example.test/code) **literal**';
+  const next = applyTimeline(first, [delta(code.slice(0, 18)), delta(code.slice(18))]);
+  assert.ok(preview(next).endsWith(code));
+  const closing = '`` 和 **[文档](https://example.test/manual)**';
+  const live = applyTimeline(next, [delta(closing)]);
+  assert.ok(preview(live).endsWith(code + '`` 和 文档'));
+  const raw = longCode + code + closing;
+  assert.equal(live[0].sections[0], raw);
+  const restored = historyRows([{ run: { status: 'completed' }, rows: [
+    { kind: 'reasoning', id: 'r', turnId: 't', sections: [raw] },
+  ] }]);
+  assert.equal(preview(restored), preview(live));
+  assert.equal(restored[0].sections[0], raw);
+  const short = '检查 `[原样](https://example.test/code)` 和 [文档](https://example.test/manual)';
+  for (let split = 1; split < short.length; split++) {
+    const streamed = applyTimeline([], [delta(short.slice(0, split)), delta(short.slice(split))]);
+    assert.equal(preview(streamed), '检查 `[原样](https://example.test/code)` 和 文档');
+  }
+});
+
 test('the visible transcript can reuse rows across consecutive updates to a hidden summary', () => {
   const reasoning = (turnId, text, id = 'summary') => ({ kind: 'delta', delta: { kind: 'reasoning', id, turnId, text } });
   const reply = text => ({ kind: 'delta', delta: { kind: 'message', id: 'reply', turnId: 'live', text } });
