@@ -1060,7 +1060,7 @@ function App() {
           </header>
           <div className="preview-content" key={preview.scope} data-kind={preview.kind} tabIndex={0}>
             {preview.kind === 'image' ? preview.imageError ? <p role="status">无法显示这张图片。</p>
-              : <PreviewImage name={preview.path} blob={preview.blob} onError={() => {
+              : !preview.parked && <PreviewImage name={preview.path} blob={preview.blob} onError={() => {
                 setPreview(current => current?.scope === preview.scope ? { ...current, blob: undefined, imageError: true } : current);
               }} />
               : preview.kind === 'markdown' ? <Markdown text={preview.data} /> : <pre>{preview.data}</pre>}

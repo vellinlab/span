@@ -1551,18 +1551,6 @@ try {
     await pick([reference, image, removed]);
     await draftFiles.getByTitle(removed, { exact: true }).waitFor();
     const draftImage = draftFiles.getByRole('button', { name: previewImageName, exact: true });
-    const imageReleases = await page.evaluateHandle(() => {
-      const revoke = URL.revokeObjectURL;
-      const released = [];
-      URL.revokeObjectURL = url => {
-        released.push(url);
-        revoke.call(URL, url);
-      };
-      return () => {
-        URL.revokeObjectURL = revoke;
-        return released;
-      };
-    });
     await draftImage.press('Enter');
     const closeImage = preview.getByRole('button', { name: '关闭预览' });
     await page.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
@@ -1571,8 +1559,6 @@ try {
     assert.ok(await closeImage.evaluate(element => document.activeElement === element));
     await closeImage.press('Escape');
     await preview.waitFor({ state: 'detached' });
-    assert.deepEqual(await imageReleases.evaluate(release => release()), [imageUrl]);
-    await imageReleases.dispose();
     assert.ok(await draftImage.evaluate(element => document.activeElement === element));
     await pick([reference]);
     assert.equal(await draftFiles.getByRole('listitem').count(), 3);
@@ -1629,11 +1615,43 @@ try {
     await page.waitForFunction(() => innerWidth <= 760 && innerHeight <= 540);
     await sentImage.focus();
     const readingTop = await transcript.evaluate(element => element.scrollTop);
+    const imageReleases = await page.evaluateHandle(() => {
+      const revoke = URL.revokeObjectURL;
+      const released = [];
+      URL.revokeObjectURL = url => {
+        released.push(url);
+        revoke.call(URL, url);
+      };
+      return {
+        released,
+        stop() { URL.revokeObjectURL = revoke; },
+      };
+    });
     await sentImage.press('Enter');
-    await page.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
+    const image = page.locator('#file-preview img');
+    const waitForImage = () => page.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
+    await waitForImage();
     assert.ok(await page.locator('main').evaluate(element => element.inert));
-    await preview.getByRole('button', { name: '关闭预览' }).press('Escape');
+    const originalUrl = await image.getAttribute('src');
+    assert.match(originalUrl, /^blob:/);
+    await page.getByRole('button', { name: '返回会话', exact: true }).click();
+    await image.waitFor({ state: 'detached' });
+    assert.deepEqual(await imageReleases.evaluate(state => state.released), [originalUrl]);
+    assert.equal(await transcript.evaluate(element => element.scrollTop), readingTop);
+    await restorePreview.click();
+    await waitForImage();
+    const resumedUrl = await image.getAttribute('src');
+    assert.match(resumedUrl, /^blob:/);
+    assert.notEqual(resumedUrl, originalUrl);
+    const closeImage = preview.getByRole('button', { name: '关闭预览' });
+    assert.ok(await closeImage.evaluate(element => element === document.activeElement));
+    await closeImage.press('Escape');
     await preview.waitFor({ state: 'detached' });
+    assert.deepEqual(await imageReleases.evaluate(state => {
+      state.stop();
+      return state.released;
+    }), [originalUrl, resumedUrl]);
+    await imageReleases.dispose();
     assert.ok(await sentImage.evaluate(element => document.activeElement === element));
     assert.equal(await transcript.evaluate(element => element.scrollTop), readingTop);
     await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), previousSize);
