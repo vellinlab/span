@@ -937,6 +937,30 @@ test('a live reasoning preview waits for text in the next Markdown block', () =>
   assert.equal(preview(applyTimeline(start, [delta('2.0 已加载')])), '2.0 已加载');
 });
 
+test('reasoning strips keep link labels while destinations stream or load from history', () => {
+  const delta = (section, text) => ({ kind: 'delta', delta: { kind: 'reasoning', id: 'r', turnId: 't', section, text } });
+  const length = 'reference/'.repeat(60);
+  const prefix = '    - 对照 [工作台验收]';
+  const open = applyTimeline([], [delta(0, prefix), delta(0, '(https:'), delta(0, '//example.test/')]);
+  assert.equal(turnReasoning(open, 't').preview, '对照 工作台验收');
+  const reading = applyTimeline(open, [delta(1, '按原定顺序复核')]);
+  const path = applyTimeline(reading, [delta(0, length + '(v2)\\'), delta(0, ')/index)')]);
+  assert.equal(turnReasoning(path, 't').preview, '按原定顺序复核');
+  const ending = '，然后检查 [结果](http://example.test/a(b)c) 和 `git status`。';
+  const completed = applyTimeline(path, [delta(0, ending)]);
+  assert.equal(turnReasoning(completed, 't').preview, '对照 工作台验收，然后检查 结果 和 `git status`。');
+  assert.equal(completed[0].sections[0], prefix + '(https://example.test/' + length + '(v2)\\)/index)' + ending);
+
+  const snapshot = applyTimeline([], [{ kind: 'item', final: true, item: {
+    kind: 'reasoning', id: 'r', turnId: 't', sections: [completed[0].sections[0]],
+  } }]);
+  assert.equal(turnReasoning(snapshot, 't').preview, turnReasoning(completed, 't').preview);
+  assert.equal(snapshot[0].sections[0], completed[0].sections[0]);
+  const interrupted = applyTimeline(open, [delta(0, length), delta(0, '\n  - 进入下一项')]);
+  assert.equal(turnReasoning(interrupted, 't').preview, '进入下一项');
+  assert.equal(turnReasoning(applyTimeline([], [delta(0, '`config[key](options)`')]), 't').preview, '`config[key](options)`');
+});
+
 test('the visible transcript can reuse rows across consecutive updates to a hidden summary', () => {
   const reasoning = (turnId, text, id = 'summary') => ({ kind: 'delta', delta: { kind: 'reasoning', id, turnId, text } });
   const reply = text => ({ kind: 'delta', delta: { kind: 'message', id: 'reply', turnId: 'live', text } });

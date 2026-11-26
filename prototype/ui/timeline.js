@@ -270,11 +270,61 @@ function summarySuffix(prefix, text) {
   return source.slice(start);
 }
 
+function skipSummaryDestination(source, offset, { depth, escaped } = { depth: 1 }) {
+  const punctuation = /[\\()\r\n]/g;
+  if (escaped && offset < source.length && !/[\r\n]/.test(source[offset])) offset++;
+  punctuation.lastIndex = offset;
+  for (let match; (match = punctuation.exec(source));) {
+    const character = match[0];
+    if (character === '\r' || character === '\n') return { offset: match.index };
+    if (character === '(') depth++;
+    if (character === ')' && --depth === 0) return { offset: punctuation.lastIndex };
+    if (character === '\\') {
+      const next = source[punctuation.lastIndex];
+      if (!next) return { offset: source.length, destination: { depth, escaped: true } };
+      if (next !== '\r' && next !== '\n') punctuation.lastIndex++;
+    }
+  }
+  return { offset: source.length, destination: { depth } };
+}
+
+function projectSummaryFragment(previous, fragment) {
+  const prefix = previous?.tail ?? '';
+  const carried = previous?.destination;
+  if (carried) {
+    const { offset, destination } = skipSummaryDestination(fragment, 0, carried);
+    if (destination) return { prefix, fragment: '', destination };
+    fragment = fragment.slice(offset);
+    if (!fragment.includes('](')) return { prefix, fragment };
+  } else if (!fragment.includes('](') && !prefix.includes('](') && !prefix.endsWith(']')) return;
+
+  // The fixed line keeps a link's label. The separate detail still renders the full Markdown.
+  const source = prefix + fragment;
+  const links = /(?<!\\)\[([^\[\]\r\n]{1,240})\]\(https?:\/\//gi;
+  const first = links.exec(source);
+  if (!first) return carried ? { prefix, fragment } : undefined;
+  const start = Math.min(prefix.length, first.index);
+  let offset = start;
+  let visible = '';
+  let destination;
+  for (let match = first; match; match = links.exec(source)) {
+    visible += source.slice(offset, match.index) + match[1];
+    ({ offset, destination } = skipSummaryDestination(source, links.lastIndex));
+    if (destination) break;
+    links.lastIndex = offset;
+  }
+  return { prefix: source.slice(0, start), fragment: visible + source.slice(offset), destination };
+}
+
 function summaryTail(previous, fragment) {
-  const tail = summarySuffix(previous?.tail, fragment);
+  const projected = projectSummaryFragment(previous, fragment);
+  const prefix = projected?.prefix ?? previous?.tail;
+  const destination = projected?.destination;
+  fragment = projected?.fragment ?? fragment;
+  const tail = summarySuffix(prefix, fragment);
   const trimmed = fragment.trimEnd();
-  if (!trimmed) return { tail, preview: previous?.preview };
-  const content = trimmed === fragment ? tail : summarySuffix(previous?.tail, trimmed);
+  if (!trimmed) return { tail, preview: previous?.preview, destination };
+  const content = trimmed === fragment ? tail : summarySuffix(prefix, trimmed);
   const fragmentStart = Math.max(0, content.length - trimmed.length);
   const lines = content.split('\n');
   let end = content.length;
@@ -287,10 +337,10 @@ function summaryTail(previous, fragment) {
     const line = raw.trim().replace(/^(?:>[ \t]*)+/, '');
     if (/^([-*_])(?:[ \t]*\1){2,}$|^(?:`{3,}[^`]*|~{3,}[^~]*)$/.test(line)) continue;
     const preview = line.replace(/^(?:[-*+]|#{1,6}|\d{1,9}[.)])(?:[ \t]+|$)/, '');
-    if (preview) return { tail, preview, advanced: true };
+    if (preview) return { tail, preview, advanced: true, destination };
   }
   // A chunk can end at an empty Markdown block before its words arrive.
-  return { tail, preview: previous?.preview };
+  return { tail, preview: previous?.preview, destination };
 }
 
 function addReasoning({ rows, positions, write }, data, final, delta) {
