@@ -224,6 +224,29 @@ test('timeline layout survives streaming text and changes when rows become visib
   assert.equal(timelineLayout(mixed).estimateSize(1), 34);
 });
 
+test('appended reasoning uses the loaded history metrics and preserves the previous layout', () => {
+  const history = { kind: 'message', id: 'saved', turnId: 'history', text: 'Earlier answer.' };
+  const summary = { kind: 'reasoning', id: 'summary', turnId: 'live', sections: ['Checking…'] };
+  const rows = applyTimeline([], [{ kind: 'item', item: history, final: true }]);
+  const historyKey = rows[0].key;
+  let keyReads = 0;
+  Object.defineProperty(rows[0], 'key', { get() { keyReads++; return historyKey; } });
+  const previous = timelineLayout(rows);
+  keyReads = 0;
+
+  const current = applyTimeline(rows, [{ kind: 'item', item: summary, final: false }]);
+  const layout = timelineLayout(current);
+  assert.equal(keyReads, 0);
+  assert.equal(previous.count, 1);
+  assert.equal(previous.getItemKey(1), undefined);
+  assert.equal(layout.count, 2);
+  assert.equal(layout.getItemKey(0), historyKey);
+  assert.equal(layout.getItemKey(1), current[1].key);
+  assert.equal(layout.estimateSize(0, 'live'), 92);
+  assert.equal(layout.estimateSize(1), 34);
+  assert.equal(layout.estimateSize(1, 'live'), 0);
+});
+
 test('only finished failures with short plain-text output add a diagnostic line', () => {
   const item = { id: 'check', turnId: 'turn', kind: 'command', text: '  检查文件失败。\r\n' };
   const running = applyTimeline([], [{ kind: 'item', item: { ...item, status: 'running' }, final: false }]);

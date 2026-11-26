@@ -115,12 +115,19 @@ function refreshActivityGroups(groups, rows, changed) {
   return keep === groups.length && !updates.length ? groups : [...groups.slice(0, keep), ...updates];
 }
 
+function createTimelineLayout(keys, sizes, reasoningTurns, groups) {
+  return { count: keys.length, keys, sizes, reasoningTurns, groups, getItemKey: index => keys[index],
+    estimateSize: (index, hiddenTurn) => hiddenTurn && reasoningTurns.get(index) === hiddenTurn ? 0 : sizes[index],
+    rowAt: (items, index) => items[index] };
+}
+
 export function timelineLayout(rows) {
   let layout = layoutByRows.get(rows);
   if (!layout) {
-    const keys = rows.map(row => row.key);
+    const keys = new Array(rows.length);
     const reasoningTurns = new Map();
     const sizes = rows.map((row, index) => {
+      keys[index] = row.key;
       if (row.kind === 'reasoning') reasoningTurns.set(index, row.turnId);
       return estimateRow(row);
     });
@@ -129,12 +136,28 @@ export function timelineLayout(rows) {
       groups = activityGroups(rows);
       groupsByRows.set(rows, groups);
     }
-    layout = { count: rows.length, groups, getItemKey: index => keys[index],
-      estimateSize: (index, hiddenTurn) => hiddenTurn && reasoningTurns.get(index) === hiddenTurn ? 0 : sizes[index],
-      rowAt: (items, index) => items[index] };
+    layout = createTimelineLayout(keys, sizes, reasoningTurns, groups);
     layoutByRows.set(rows, layout);
   }
   return layout;
+}
+
+function updateTimelineLayout(layout, changes, groups) {
+  if (!changes?.size) {
+    return groups === layout.groups ? layout : createTimelineLayout(layout.keys, layout.sizes, layout.reasoningTurns, groups);
+  }
+  const keys = layout.keys.slice();
+  const sizes = layout.sizes.slice();
+  let { reasoningTurns } = layout;
+  for (const [position, { key, size, reasoningTurn }] of changes) {
+    keys[position] = key;
+    sizes[position] = size;
+    if (reasoningTurn === reasoningTurns.get(position)) continue;
+    if (reasoningTurns === layout.reasoningTurns) reasoningTurns = new Map(reasoningTurns);
+    if (reasoningTurn === undefined) reasoningTurns.delete(position);
+    else reasoningTurns.set(position, reasoningTurn);
+  }
+  return createTimelineLayout(keys, sizes, reasoningTurns, groups);
 }
 
 export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
@@ -416,7 +439,8 @@ export function applyTimeline(previous, events) {
       index.set(key, indexes);
     },
   };
-  let layout = layoutByRows.get(previous);
+  const layout = layoutByRows.get(previous);
+  let layoutChanges;
   let members = membersByRows.get(previous);
   let reasoningView = reasoningViewByRows.get(previous);
   const groups = groupsByRows.get(previous);
@@ -435,10 +459,12 @@ export function applyTimeline(previous, events) {
         (activity && (row.key !== earlier.key || !sameActivityScope(row, earlier)));
       if (groups && groupingChanged) groupingChangedAt = Math.min(groupingChangedAt, position);
       if (layout) {
-        if (layout.getItemKey(position) !== row.key || layout.estimateSize(position) !== estimateRow(row) ||
-          groupingChanged) {
-          layout = undefined;
-        }
+        const size = estimateRow(row);
+        const reasoningTurn = row.kind === 'reasoning' ? row.turnId : undefined;
+        if (layout.keys[position] !== row.key || layout.sizes[position] !== size ||
+          layout.reasoningTurns.get(position) !== reasoningTurn) {
+          (layoutChanges ??= new Map()).set(position, { key: row.key, size, reasoningTurn });
+        } else layoutChanges?.delete(position);
       }
       // A batch of late fragments can be discarded without publishing a new
       // transcript or copying the loaded history.
@@ -453,9 +479,10 @@ export function applyTimeline(previous, events) {
   positionsByRows.set(rows, index);
   if (rows === previous) return previous;
   if (reasoningView) reasoningViewByRows.set(rows, reasoningView);
-  // Stable callbacks let the virtualizer retain measured offsets during text-only updates.
-  if (layout) layoutByRows.set(rows, layout);
-  if (groups) groupsByRows.set(rows, groupingChangedAt === Infinity ? groups : refreshActivityGroups(groups, rows, groupingChangedAt));
+  const mergedGroups = groupingChangedAt === Infinity ? groups : refreshActivityGroups(groups, rows, groupingChangedAt);
+  if (mergedGroups) groupsByRows.set(rows, mergedGroups);
+  // Reuse unchanged measurements and derive only new or changed row metadata.
+  if (layout) layoutByRows.set(rows, updateTimelineLayout(layout, layoutChanges, mergedGroups));
   if (members) membersByRows.set(rows, members);
   return rows;
 }
