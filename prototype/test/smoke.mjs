@@ -630,13 +630,16 @@ try {
       foreground: style.color, background: style.backgroundColor,
       colorAdjust: style.forcedColorAdjust,
       uniform: [...element.querySelectorAll('span, small, svg')].every(child => getComputedStyle(child).color === style.color),
+      iconsMatchText: [...element.querySelectorAll('svg')].every(icon => getComputedStyle(icon).stroke === style.color),
     };
   });
   await page.emulateMedia({ forcedColors: 'active' });
   try {
     const openReasoning = await stripColors(liveReasoning);
     assert.ok(openReasoning.expanded && openReasoning.uniform && openReasoning.colorAdjust === 'none');
-    assert.notEqual(openReasoning.background, (await stripColors(goal)).background);
+    const closedGoal = await stripColors(goal);
+    assert.ok(closedGoal.iconsMatchText);
+    assert.notEqual(openReasoning.background, closedGoal.background);
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-forced-colors.png') });
     await reasoningBody.press('Escape');
     await reasoningPanel.waitFor({ state: 'detached' });
@@ -644,7 +647,9 @@ try {
     await goal.press('Enter');
     await goalPanel.waitFor();
     assert.deepEqual(await stripColors(goal), openReasoning);
-    assert.notEqual((await stripColors(liveReasoning)).background, openReasoning.background);
+    const closedReasoning = await stripColors(liveReasoning);
+    assert.ok(closedReasoning.iconsMatchText);
+    assert.notEqual(closedReasoning.background, openReasoning.background);
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-forced-colors.png') });
     await dismissGoal.press('Escape');
     await goalPanel.waitFor({ state: 'detached' });

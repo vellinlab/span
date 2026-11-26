@@ -938,6 +938,10 @@ p { margin-block: 0 12px; }
 .goal-strip[data-status="blocked"] small { color: #efb8ad; }
 @media (forced-colors: active) {
   .goal-strip { border-color: ButtonText; }
+  :is(.reasoning-strip, .goal-strip)[aria-expanded="false"] > svg {
+    forced-color-adjust: none;
+    color: ButtonText;
+  }
   .composer-wrap :is(.reasoning-strip, .goal-strip)[aria-expanded="true"] {
     /* Use the system selection pair without separate backplates behind the text. */
     forced-color-adjust: none;
