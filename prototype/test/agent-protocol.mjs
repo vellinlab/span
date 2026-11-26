@@ -952,6 +952,12 @@ test('restored reasoning keeps readable sections before trailing Markdown marker
   assert.deepEqual(sections.map((_, index) => hasReasoningSection(restored[0], index)), [true, false, false]);
   assert.equal(turnReasoning(saved([...sections, '## 最新正文', '# ']), 't').preview, '最新正文');
   assert.deepEqual(saved(['## ', separators]), []);
+
+  const source = '[旧段链接](https://example.test/earlier)\n'.repeat(100) +
+    '- 核对 [最新链接](https://example.test/' + 'long/'.repeat(100) + ')\n' + separators;
+  const linked = turnReasoning(saved([source]), 't');
+  assert.equal(linked.preview, '核对 最新链接');
+  assert.deepEqual(linked.sections, [source]);
 });
 
 test('reasoning strips keep link labels while destinations stream or load from history', () => {

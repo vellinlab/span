@@ -350,11 +350,14 @@ function summaryTail(previous, fragment) {
 }
 
 function snapshotSummary(text) {
-  const latest = summaryTail(undefined, text);
-  if (latest.preview || text.length <= summaryPreviewLength) return latest;
-  // A saved section can end with enough empty Markdown blocks to fill the preview window.
-  const cutoff = Math.max(0, text.trimEnd().length - summaryPreviewLength);
+  if (text.length <= summaryPreviewLength) return summaryTail(undefined, text);
+  // Start at a complete line near the end so links in earlier lines need no projection.
+  const cutoff = text.length - summaryPreviewLength;
   let end = text.indexOf('\n', cutoff);
+  const latest = summaryTail(undefined, end < 0 ? text : text.slice(end + 1));
+  if (latest.preview) return latest;
+  // A saved section can end with enough empty Markdown blocks to fill the preview window.
+  if (end < 0) end = text.indexOf('\n', Math.max(0, text.trimEnd().length - summaryPreviewLength));
   while (end > 0) {
     const start = text.lastIndexOf('\n', end - 1) + 1;
     const { preview } = summaryTail(undefined, text.slice(start, end));
