@@ -10,7 +10,7 @@ import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFile
 import { watchPiTeamTranscript } from '../ui/pi-teams.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
-import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
+import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, sameTranscriptRows, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
 import { workspacePathKey } from '../ui/workspace-path.js';
 
 const local = { kind: 'local' };
@@ -898,6 +898,34 @@ test('a live reasoning preview waits for text in the next Markdown block', () =>
   assert.equal(preview(next), '读取最新状态');
   assert.equal(next[0].sections[0], '## 检查会话\r\n> 1. 读取最新状态');
   assert.equal(preview(applyTimeline(start, [delta('2.0 已加载')])), '2.0 已加载');
+});
+
+test('the visible transcript can reuse rows across consecutive updates to a hidden summary', () => {
+  const reasoning = (turnId, text, id = 'summary') => ({ kind: 'delta', delta: { kind: 'reasoning', id, turnId, text } });
+  const reply = text => ({ kind: 'delta', delta: { kind: 'message', id: 'reply', turnId: 'live', text } });
+  const original = applyTimeline([], [reasoning('past', 'Earlier details'), reasoning('live', 'Current progress'), reply('Answer: ')]);
+  const layout = timelineLayout(original);
+  const first = applyTimeline(original, [reasoning('live', '. Step one')]);
+  const second = applyTimeline(first, [reasoning('live', '. Step two')]);
+  const otherBranch = applyTimeline(original, [reasoning('live', '. Alternative')]);
+
+  assert.equal(timelineLayout(second), layout);
+  assert.equal(turnReasoning(second, 'live').preview, 'Current progress. Step one. Step two');
+  assert.ok(sameTranscriptRows(original, second, 'live'));
+  assert.ok(sameTranscriptRows(otherBranch, second, 'live'));
+  assert.equal(sameTranscriptRows(original, second, undefined), false);
+  assert.equal(sameTranscriptRows(original, second, 'past'), false);
+
+  const olderUpdate = applyTimeline(second, [reasoning('past', '. New detail')]);
+  const newerUpdate = applyTimeline(olderUpdate, [reasoning('live', '. Step three')]);
+  assert.equal(sameTranscriptRows(second, newerUpdate, 'live'), false);
+  assert.ok(sameTranscriptRows(olderUpdate, newerUpdate, 'live'));
+
+  const withNewRow = applyTimeline(second, [reasoning('live', 'Another summary', 'extra')]);
+  assert.equal(sameTranscriptRows(second, withNewRow, 'live'), false);
+  const withMessage = applyTimeline(second, [reasoning('live', '. Step three'), reply('the answer is visible.')]);
+  assert.equal(timelineLayout(withMessage), layout);
+  assert.equal(sameTranscriptRows(second, withMessage, 'live'), false);
 });
 
 test('the server user echo merges into the optimistic row without moving it', () => {

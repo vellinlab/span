@@ -11,6 +11,7 @@ const membersByRows = new WeakMap();
 const groupsByRows = new WeakMap();
 const groupedPrefixByExpansion = new WeakMap();
 const summaryTailsByRow = new WeakMap();
+const summaryRevisionsByRows = new WeakMap();
 const summaryPreviewLength = 240;
 
 export function delegatedMembers(rows) {
@@ -42,6 +43,14 @@ export function turnReasoningRows(rows, turnId) {
     : rows.filter(row => row.turnId === turnId && row.kind === 'reasoning' && row.preview);
   reasoningViewByRows.set(rows, { turnId, details });
   return details;
+}
+
+export function sameTranscriptRows(previous, next, hiddenTurn) {
+  if (previous === next) return true;
+  const revision = summaryRevisionsByRows.get(next);
+  if (!hiddenTurn || revision?.turnId !== hiddenTurn) return false;
+  const earlier = summaryRevisionsByRows.get(previous);
+  return revision.base === (earlier?.turnId === hiddenTurn ? earlier.base : earlier?.id);
 }
 
 export function hasReasoningSection(row, index) {
@@ -499,7 +508,23 @@ export function applyTimeline(previous, events) {
   const mergedGroups = groupingChangedAt === Infinity ? groups : refreshActivityGroups(groups, rows, groupingChangedAt);
   if (mergedGroups) groupsByRows.set(rows, mergedGroups);
   // Reuse unchanged measurements and derive only new or changed row metadata.
-  if (layout) layoutByRows.set(rows, updateTimelineLayout(layout, layoutChanges, mergedGroups));
+  if (layout) {
+    const nextLayout = updateTimelineLayout(layout, layoutChanges, mergedGroups);
+    layoutByRows.set(rows, nextLayout);
+    const { delta } = events[0];
+    const turnId = delta?.kind === 'reasoning' && delta.turnId;
+    if (layout === nextLayout && turnId && events.every(event =>
+      event.kind === 'delta' && event.delta.kind === 'reasoning' && event.delta.turnId === turnId)) {
+      // Matching revisions differ only in the hidden reasoning of this turn.
+      // Symbols preserve the relationship without retaining earlier row arrays.
+      let earlier = summaryRevisionsByRows.get(previous);
+      if (!earlier) {
+        earlier = { id: Symbol() };
+        summaryRevisionsByRows.set(previous, earlier);
+      }
+      summaryRevisionsByRows.set(rows, { id: Symbol(), turnId, base: earlier.turnId === turnId ? earlier.base : earlier.id });
+    }
+  }
   if (members) membersByRows.set(rows, members);
   return rows;
 }

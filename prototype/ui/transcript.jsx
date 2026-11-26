@@ -12,7 +12,7 @@ import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, readTextPosition, TextReader } from './text-reader.jsx';
-import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, timelineLayout, visibleRow } from './timeline.js';
+import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, sameTranscriptRows, timelineLayout, visibleRow } from './timeline.js';
 
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
 
@@ -381,6 +381,13 @@ function anchorIndex(rows, layout, anchor, reasoningTurn) {
   return fallback;
 }
 
+function sameTranscriptProps(previous, next) {
+  const keys = Object.keys(next);
+  return keys.length === Object.keys(previous).length && keys.every(key => Object.hasOwn(previous, key) && (
+    Object.is(previous[key], next[key]) || (key === 'rows' && !next.jumpToLatest.current &&
+      sameTranscriptRows(previous.rows, next.rows, next.liveReasoningTurn))));
+}
+
 export const Transcript = memo(function Transcript({
   rows, liveReasoningTurn, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
   onScrollPosition, openSession, openTrace, openArtifact, openImage, canOpenSession, showLatest,
@@ -637,4 +644,4 @@ export const Transcript = memo(function Transcript({
       })}
     </div> : null}
   </div>;
-});
+}, sameTranscriptProps);
