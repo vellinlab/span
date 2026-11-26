@@ -613,6 +613,7 @@ p { margin-block: 0 12px; }
 }
 .card-body :is(.text-scroll, .output-scroll) { max-height: clamp(72px, calc(100cqh - 145px), 250px); }
 .card-body .output-scroll { padding: 0 8px; border-radius: 4px; background: var(--canvas); scrollbar-width: thin; }
+.tool-output[data-error="true"] > .output-scroll:not(.text-scroll) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
 .diff-toolbar :is(.card-path, select) { flex: 1; min-width: 0; }
 .diff-toolbar select { font: 12px/18px var(--mono); padding: 3px 6px; }

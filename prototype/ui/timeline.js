@@ -65,7 +65,8 @@ export function activityStatus(row) {
 
 export function activityFailurePreview(row, status = activityStatus(row)) {
   if (!row.final || status !== 'failed' || (row.kind !== 'command' && row.kind !== 'tool')) return;
-  const text = row.errorMessage || row.text;
+  // A backend diagnostic can supply a useful first line before its detail.
+  const text = row.errorMessage ? row.errorMessage.trimStart().slice(0, 241).split(/[\r\n\u2028\u2029]/, 1)[0] : row.text;
   if (!text || text.length > 240) return;
   const line = text.trim();
   if (line && !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(line)) return line;

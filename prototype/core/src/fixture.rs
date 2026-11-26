@@ -1025,6 +1025,29 @@ pub fn run() -> Result<()> {
                     )?;
                     continue;
                 }
+                if params["input"][0]["text"] == "验证结构化工具错误。" {
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"mcpToolCall","id":format!("{turn}-diagnostic"),
+                            "server":"工作资料","tool":"打开复核记录","status":"completed",
+                            "error":{"message":"无法读取共享资料。\n请核对共享资料的访问权限，然后重新打开复核记录，并检查当前工作区可否读取关联的附件和目录。",
+                                "code":"WORKSPACE_ACCESS"}}}),
+                    )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-result"),
+                            "phase":"final_answer","text":"已保留错误详情供复核。"}}),
+                    )?;
+                    background.store(false, Ordering::Release);
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+                    )?;
+                    continue;
+                }
                 if params["input"][0]["text"] == "验证长差异与文件切换。" {
                     notice(
                         &output,

@@ -259,6 +259,11 @@ test('only finished failures with short plain-text output add a diagnostic line'
   for (const text of ['x'.repeat(241), '准备\n检查文件失败。', '\x1b[31mError']) {
     assert.equal(activityFailurePreview({ ...failed[0], text }), undefined);
   }
+  const tool = { ...failed[0], kind: 'tool', status: 'failed' };
+  assert.equal(activityFailurePreview({ ...tool, errorMessage: '\n文件无法读取。\r\n检查工作目录。' }), '文件无法读取。');
+  for (const errorMessage of ['x'.repeat(241) + '\n剩余内容', '\x1b[31mError\n剩余内容']) {
+    assert.equal(activityFailurePreview({ ...tool, errorMessage }), undefined);
+  }
   assert.equal(activityFailurePreview({ ...failed[0], exitCode: 0 }), undefined);
 });
 
@@ -617,7 +622,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     } } });
     publish('agent', { method: 'item/mcpToolCall/progress', params: { ...scope, itemId: 'inspect', message: 'Reading' } });
     publish('agent', { method: 'item/completed', params: { ...scope, item: {
-      ...tool, status: 'failed', error: { message: 'Missing file' },
+      ...tool, status: 'completed', error: { message: 'Missing file\nCheck workspace access.', code: 'NOT_FOUND', retryable: false },
     } } });
     const [card] = applyTimeline([], events.slice(start));
     assert.deepEqual(card.target, { kind: 'path', path });
@@ -625,7 +630,7 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     assert.equal(card.source, 'workspace');
     assert.equal(card.status, 'failed');
     assert.equal(activityFailurePreview(card), 'Missing file');
-    assert.deepEqual(JSON.parse(card.text), { message: 'Missing file' });
+    assert.equal(card.text, 'Missing file\nCheck workspace access.\n\n错误码 NOT_FOUND\n\n{\n  "retryable": false\n}');
     assert.ok(!JSON.stringify(card).includes('unrelated argument'));
 
     publish('agent', { method: 'item/completed', params: { ...scope, item: {

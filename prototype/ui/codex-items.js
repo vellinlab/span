@@ -59,10 +59,24 @@ export function normalizeItem(item, turnId, ref) {
     case 'dynamicToolCall':
     case 'functionCallOutput': {
       const target = toolPathTarget(item.arguments?.path);
+      const message = item.error?.message;
+      const errorMessage = typeof message === 'string' && message.trim() ? message : undefined;
+      let text;
+      if (errorMessage) {
+        const { message: _, ...details } = item.error;
+        const lines = [errorMessage];
+        if (typeof details.code === 'string' || typeof details.code === 'number') {
+          lines.push(`错误码 ${details.code}`);
+          delete details.code;
+        }
+        if (Object.keys(details).length) lines.push(detailText(details));
+        text = lines.join('\n\n');
+      } else {
+        text = detailText(item.error ?? item.result?.structuredContent ?? item.result?.content ?? item.contentItems ?? item.output);
+      }
+      const status = item.error && (!base.status || base.status === 'completed') ? 'failed' : base.status;
       return { ...base, kind: 'tool', name: item.tool ?? item.name, source: item.server ?? item.namespace,
-        ...(target && { target }),
-        ...(typeof item.error?.message === 'string' && { errorMessage: item.error.message }),
-        text: detailText(item.error ?? item.result?.structuredContent ?? item.result?.content ?? item.contentItems ?? item.output) };
+        status, ...(target && { target }), errorMessage, text };
     }
     case 'webSearch': {
       const action = item.action;

@@ -63,16 +63,19 @@ function ToolOutput({ row }) {
     const timer = setTimeout(() => setReleased(time), Math.max(0, time + refreshMs - performance.now()));
     return () => clearTimeout(timer);
   }, [pending, previous, refreshMs]);
-  const text = visible.text;
+  const text = visible.text || visible.errorMessage;
   const long = text && (text.length > largeOutputSize || text.split('\n', 32).length === 32);
   if (!text) return row.cwd && <PathText className="card-path" path={row.cwd} />;
-  return <div className="tool-output">
+  const error = Boolean(visible.errorMessage);
+  const heading = error ? '错误详情' : '输出';
+  return <div className="tool-output" data-error={error || undefined}>
     <div className="tool-output-heading">
       {row.cwd ? <span className="output-directory"><Folder size={13} role="img" aria-label="工作目录" />
-        <PathText path={row.cwd} /></span> : <span>输出</span>}
-      <CopyTextButton text={row.text} label="复制输出" copiedLabel="已复制输出" />
+        <PathText path={row.cwd} /></span> : <span>{heading}</span>}
+      <CopyTextButton text={row.text || row.errorMessage} label={`复制${heading}`} copiedLabel={`已复制${heading}`} />
     </div>
-    <TextReader text={text} output={visible.outputChunks} plain={!long} kind="output" label="工具输出" pagesLabel="输出分页" scroll={scroll} />
+    <TextReader text={text} output={visible.outputChunks} plain={!long} kind="output"
+      label={error ? '工具错误' : '工具输出'} pagesLabel="输出分页" scroll={scroll} />
   </div>;
 }
 
@@ -234,13 +237,13 @@ const TranscriptRow = memo(function TranscriptRow({
       hint = row.query ? (expanded ? undefined : row.query) : row.source;
       const targetPath = row.target?.kind === 'path' ? row.target.path : undefined;
       if (!row.query) path = targetPath;
-      if (targetPath || row.query || row.text) detail = () => <>
+      if (targetPath || row.query || row.text || row.errorMessage) detail = () => <>
         {(targetPath || row.query) && <dl className="tool-context">
           {row.query && <><dt>匹配规则</dt><dd><PathText path={row.query} /></dd></>}
           {targetPath && <><dt>{row.query ? '搜索目录' : '路径'}</dt><dd><PathText path={targetPath} /></dd></>}
           {row.source && <><dt>来源</dt><dd>{row.source}</dd></>}
         </dl>}
-        {row.text && <ToolOutput row={row} />}
+        {(row.text || row.errorMessage) && <ToolOutput row={row} />}
       </>;
       break;
     }

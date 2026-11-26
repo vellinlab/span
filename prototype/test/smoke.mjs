@@ -1395,6 +1395,39 @@ try {
   await failedCommand.getByText('退出码 1', { exact: true }).waitFor();
   console.log('Verified completed tool groups, concise failure diagnostics, and unmounting folded output.');
 
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
+  await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  await composer.fill('验证结构化工具错误。');
+  await composer.press('Enter');
+  const errorTool = transcript.locator('[data-card="tool"]').filter({ hasText: '打开复核记录' });
+  const errorHeading = errorTool.locator('summary');
+  await errorHeading.getByText('失败', { exact: true }).waitFor();
+  const errorPreview = errorHeading.locator('.card-failure-preview');
+  await errorHeading.getByText('无法读取共享资料。', { exact: true }).waitFor();
+  await transcript.getByText('已保留错误详情供复核。', { exact: true }).waitFor();
+  assert.equal(await errorTool.locator('.tool-output').count(), 0);
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-tool-error-collapsed.png') });
+  await errorHeading.press('Enter');
+  const errorDetail = errorTool.locator('pre[aria-label="工具错误"]');
+  await errorDetail.waitFor();
+  await errorTool.getByText('错误详情', { exact: true }).waitFor();
+  assert.equal(await errorPreview.count(), 0);
+  const diagnosticText = await errorDetail.textContent();
+  assert.match(diagnosticText, /^无法读取共享资料。\n请核对共享资料的访问权限/);
+  assert.match(diagnosticText, /\n错误码 WORKSPACE_ACCESS$/);
+  assert.ok(await errorDetail.evaluate(element => getComputedStyle(element).whiteSpace === 'pre-wrap' &&
+    element.scrollWidth <= element.clientWidth + 1), 'The full diagnostic should wrap within the compact tool card.');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-tool-error-detail.png') });
+  await errorTool.getByRole('button', { name: '复制错误详情', exact: true }).press('Enter');
+  await errorTool.locator('[title="已复制错误详情"]').waitFor();
+  assert.equal((await app.evaluate(({ clipboard }) => clipboard.readText())).replaceAll('\r\n', '\n'), diagnosticText);
+  await errorHeading.press('Enter');
+  await errorDetail.waitFor({ state: 'detached' });
+  assert.ok(await errorHeading.evaluate(element => element === document.activeElement));
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), windowSize);
+  await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);
+  console.log('Verified a readable structured tool error, compact wrapping, and full diagnostic copy.');
+
   await composer.fill('这段草稿留在原会话。');
   await page.getByRole('button', { name: /新会话/ }).click();
   const welcome = page.getByRole('heading', { name: '开始新会话' });
