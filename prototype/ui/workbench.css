@@ -1329,6 +1329,9 @@ summary.extension-heading { cursor: pointer; }
   border-top: 1px solid var(--line);
 }
 .terminal-panel header { background: var(--panel); }
+.terminal-panel header > button:first-of-type { margin-inline-start: auto; }
+.terminal-panel header .terminal-insert { min-height: 28px; flex: none; white-space: nowrap; }
+.terminal-panel header > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-canvas { flex: 1; min-height: 0; overflow: hidden; padding: 5px 8px 3px; }
 .terminal-error { color: #eed1c8; padding: 4px 9px; }
 .preview {

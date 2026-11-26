@@ -425,7 +425,7 @@ function App() {
   // Keep memoized controls bound to the conversation represented by the committed DOM.
   useLayoutEffect(() => {
     composerActions.current = { setDraft, textareaKey, pasteScreenshot, toggleReasoningPanel, toggleGoalPanel,
-      goalAction: work.goalAction, showPanel, showExtensions };
+      insertTerminalSelection, goalAction: work.goalAction, showPanel, showExtensions };
   });
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openTrace = useCallback((member, trigger) => latestWork.current.openMemberTrace(member, trigger), []);
@@ -437,6 +437,7 @@ function App() {
   }, []);
   const onDraftKey = useCallback(event => composerActions.current.textareaKey(event), []);
   const onDraftPaste = useCallback(event => composerActions.current.pasteScreenshot(event), []);
+  const onTerminalSelection = useCallback(text => composerActions.current.insertTerminalSelection(text), []);
   const onReasoningToggle = useCallback(event => composerActions.current.toggleReasoningPanel(event.currentTarget), []);
   const onGoalToggle = useCallback(event => composerActions.current.toggleGoalPanel(event.currentTarget), []);
   const onGoalAction = useCallback(action => composerActions.current.goalAction(action), []);
@@ -791,6 +792,21 @@ function App() {
     }
   }
 
+  function insertTerminalSelection(selection) {
+    const field = input.current;
+    if (!field) return;
+    const text = selection.replace(/\r\n?/g, '\n').replaceAll('\0', '�');
+    const { read } = new TextEncoder().encodeInto(text, new Uint8Array(64 * 1024));
+    const truncated = read < text.length;
+    const cursor = field.selectionEnd;
+    const before = cursor ? '\n\n' : '';
+    field.setRangeText(before + '[终端选区]\n' + text.slice(0, read) +
+      (truncated ? '\n…' : '') + '\n[/终端选区]\n', cursor, cursor, 'end');
+    setDraft(field.value);
+    field.focus({ preventScroll: true });
+    setComposerFeedback({ scope: work.timelineScope(), text: truncated ? '已加入部分终端选区' : '已加入终端选区' });
+  }
+
   function textareaKey(event) {
     if (event.nativeEvent.isComposing) return;
     if (event.key === 'Escape') {
@@ -1048,7 +1064,7 @@ function App() {
           </div>
           {terminal && config && <Suspense fallback={<div className="terminal-panel">正在打开终端…</div>}>
             <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer}
-              covered={readingOverlay} onClose={closeTerminal} />
+              covered={readingOverlay} onInsertSelection={onTerminalSelection} onClose={closeTerminal} />
           </Suspense>}
         </main>
         {preview && <aside className="preview" id="file-preview" aria-label="文件预览" hidden={preview.parked} ref={previewRegion}

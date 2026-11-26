@@ -11,11 +11,13 @@ const OUTPUT_GAP_MS = 96;
 const OUTPUT_BATCH_MS = 64;
 const INPUT_PRIORITY_MS = 140;
 
-export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, covered, onClose }) {
+export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, covered, onInsertSelection, onClose }) {
   const element = useRef(null);
+  const instance = useRef(null);
   const hidden = useRef(covered);
   const applyRenderVisibility = useRef(null);
   const [error, setError] = useState('');
+  const [hasSelection, setHasSelection] = useState(false);
   useLayoutEffect(() => observeWindowHidden(windowHidden => {
     const paused = covered || windowHidden;
     if (hidden.current === paused) return;
@@ -24,6 +26,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
   }), [covered]);
   useEffect(() => {
     setError('');
+    setHasSelection(false);
     const host = element.current;
     const source = ++generation;
     const terminal = new Terminal({
@@ -44,6 +47,8 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     terminal.loadAddon(fit);
     terminal.open(host);
     fit.fit();
+    instance.current = terminal;
+    const selection = terminal.onSelectionChange(() => setHasSelection(terminal.hasSelection()));
     let frame;
     let fitPending = false;
     // Keep the PTY at its last visible size until the terminal is revealed.
@@ -205,6 +210,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     observer.observe(host);
     return () => {
       closed = true;
+      instance.current = null;
       applyRenderVisibility.current = null;
       clearTimeout(outputTimer);
       queuedOutput = [];
@@ -213,13 +219,18 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       unsubscribe();
       input.dispose();
       size.dispose();
+      selection.dispose();
       terminal.dispose();
       update('close', {});
     };
   }, [workspace, ssh, renderer]);
   return <section className="terminal-panel" aria-label="终端">
     <header><SquareTerminal size={16} /> <strong>终端</strong><span>{ssh || '本地'}</span>
-      <button className="icon-button right" title="关闭终端" onClick={onClose}><X size={16} /></button>
+      {hasSelection && <button type="button" className="panel-link terminal-insert" title="加入当前会话草稿" onClick={() => {
+        const text = instance.current?.getSelection();
+        if (text) onInsertSelection(text);
+      }}>加入选区</button>}
+      <button className="icon-button" title="关闭终端" onClick={onClose}><X size={16} /></button>
     </header>
     {error && <div role="alert" className="terminal-error">{error}</div>}
     <div className="terminal-canvas" ref={element} />

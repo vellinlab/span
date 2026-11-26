@@ -238,6 +238,28 @@ try {
   }
   await page.waitForFunction(() => [...document.querySelectorAll('.xterm-rows > div')]
     .some(line => line.textContent.trim() === 'span_local_pty'), null, { timeout: 10_000 });
+  const composer = page.getByRole('textbox', { name: '消息' });
+  const insertSelection = page.getByRole('button', { name: '加入选区', exact: true });
+  assert.equal(await insertSelection.count(), 0);
+  const selectionDraft = '核对输出。继续编辑。';
+  const insertionPoint = selectionDraft.indexOf('继续');
+  await composer.fill(selectionDraft);
+  await composer.evaluate((element, end) => element.setSelectionRange(1, end), insertionPoint);
+  const selectedLine = await page.locator('.xterm-rows > div').filter({ hasText: /^\s*span_local_pty\s*$/ }).boundingBox();
+  assert.ok(selectedLine);
+  const selectionX = selectedLine.x + 12;
+  const selectionY = selectedLine.y + selectedLine.height / 2;
+  await page.mouse.dblclick(selectionX, selectionY);
+  await insertSelection.press('Enter');
+  const insertedSelection = '\n\n[终端选区]\nspan_local_pty\n[/终端选区]\n';
+  assert.equal(await composer.inputValue(), selectionDraft.slice(0, insertionPoint) + insertedSelection +
+    selectionDraft.slice(insertionPoint));
+  assert.ok(await composer.evaluate((element, end) => document.activeElement === element &&
+    element.selectionStart === end && element.selectionEnd === end, insertionPoint + insertedSelection.length));
+  await composer.fill('');
+  await page.mouse.click(selectionX, selectionY);
+  await insertSelection.waitFor({ state: 'detached' });
+  await terminal.focus();
 
   if (!verifySandbox && !exerciseWebgl) {
     await page.keyboard.type(terminalBurst(!linux, true));
@@ -262,7 +284,6 @@ try {
     assert.equal(await page.getByRole('textbox', { name: '消息' }).inputValue(), '');
   }
   await page.getByRole('button', { name: '会话', exact: true }).click();
-  const composer = page.getByRole('textbox', { name: '消息' });
   const goal = page.getByRole('button', { name: '会话目标', exact: true });
   await composer.fill('/goal 验证会话目标');
   await composer.press('Enter');
