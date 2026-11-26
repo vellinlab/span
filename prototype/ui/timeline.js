@@ -325,6 +325,13 @@ function projectSummaryFragment(previous, fragment) {
   return { prefix: source.slice(0, start), fragment: visible + source.slice(offset), destination };
 }
 
+function summaryLineText(text) {
+  if (!text.includes('**')) return text;
+  // The line is bounded. Remove paired emphasis markers while keeping inline code literal.
+  const codeOrStrong = /(?<![\\`])(`+)(?!`).*?(?:(?<!`)\1(?!`)|$)|(?<![\\*])\*\*([^*\s](?:[^*]*[^*\s])?)\*\*(?!\*)/g;
+  return text.replace(codeOrStrong, (source, _backticks, emphasized) => emphasized ?? source);
+}
+
 function summaryTail(previous, fragment) {
   const projected = projectSummaryFragment(previous, fragment);
   const prefix = projected?.prefix ?? previous?.tail;
@@ -344,9 +351,9 @@ function summaryTail(previous, fragment) {
     end = start - 1;
     if (!newText) continue;
     const line = raw.trim().replace(/^(?:>[ \t]*)+/, '');
-    if (/^([-*_])(?:[ \t]*\1){2,}$|^(?:`{3,}[^`]*|~{3,}[^~]*)$/.test(line)) continue;
-    const preview = line.replace(/^(?:[-*+]|#{1,6}|\d{1,9}[.)])(?:[ \t]+|$)/, '');
-    if (preview) return { tail, preview, advanced: true, destination };
+    if (line === '**' || /^([-*_])(?:[ \t]*\1){2,}$|^(?:`{3,}[^`]*|~{3,}[^~]*)$/.test(line)) continue;
+    const text = line.replace(/^(?:[-*+]|#{1,6}|\d{1,9}[.)])(?:[ \t]+|$)/, '');
+    if (text) return { tail, preview: summaryLineText(text), advanced: true, destination };
   }
   // A chunk can end at an empty Markdown block before its words arrive.
   return { tail, preview: previous?.preview, destination };

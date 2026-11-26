@@ -987,6 +987,29 @@ test('reasoning strips keep link labels while destinations stream or load from h
   assert.equal(turnReasoning(applyTimeline([], [delta(0, '`config[key](options)`')]), 't').preview, '`config[key](options)`');
 });
 
+test('reasoning strips remove paired bold markers without changing code or the saved detail', () => {
+  const delta = text => ({ kind: 'delta', delta: { kind: 'reasoning', id: 'r', turnId: 't', text } });
+  const preview = rows => turnReasoning(rows, 't')?.preview;
+  const first = '继续核对旧会话。\n\n';
+  const initial = applyTimeline([], [delta(first), delta('**')]);
+  assert.equal(preview(initial), '继续核对旧会话。');
+  const emphasized = applyTimeline(initial, [delta('确认工作目录'), delta('*'), delta('*')]);
+  assert.equal(preview(emphasized), '确认工作目录');
+  const openCode = applyTimeline(emphasized, [delta('，读取 `**literal**')]);
+  assert.equal(preview(openCode), '确认工作目录，读取 `**literal**');
+  assert.equal(preview(applyTimeline(openCode, [delta('`，再看 **输出**。')])), '确认工作目录，读取 `**literal**`，再看 输出。');
+  const literal = '，比对 ``echo `**label**` `` 和 \\**转义**，再检查 **[记录](https://example.test/run)**。';
+  const live = applyTimeline(emphasized, [delta(literal)]);
+  const raw = first + '**确认工作目录**' + literal;
+  assert.equal(preview(live), '确认工作目录，比对 ``echo `**label**` `` 和 \\**转义**，再检查 记录。');
+  assert.equal(live[0].sections[0], raw);
+  const restored = historyRows([{ run: { status: 'completed' }, rows: [
+    { kind: 'reasoning', id: 'r', turnId: 't', sections: [raw] },
+  ] }]);
+  assert.equal(preview(restored), preview(live));
+  assert.equal(restored[0].sections[0], raw);
+});
+
 test('the visible transcript can reuse rows across consecutive updates to a hidden summary', () => {
   const reasoning = (turnId, text, id = 'summary') => ({ kind: 'delta', delta: { kind: 'reasoning', id, turnId, text } });
   const reply = text => ({ kind: 'delta', delta: { kind: 'message', id: 'reply', turnId: 'live', text } });
