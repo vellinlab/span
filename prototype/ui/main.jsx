@@ -405,7 +405,8 @@ function App() {
     composerKey, draft, visibleDraft, files, canAttach, canSendImages };
   // Keep memoized controls bound to the conversation represented by the committed DOM.
   useLayoutEffect(() => {
-    composerActions.current = { setDraft, textareaKey, pasteScreenshot, toggleReasoningPanel, toggleGoalPanel, showPanel, showExtensions };
+    composerActions.current = { setDraft, textareaKey, pasteScreenshot, toggleReasoningPanel, toggleGoalPanel,
+      goalAction: work.goalAction, showPanel, showExtensions };
   });
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openTrace = useCallback((member, trigger) => latestWork.current.openMemberTrace(member, trigger), []);
@@ -419,6 +420,7 @@ function App() {
   const onDraftPaste = useCallback(event => composerActions.current.pasteScreenshot(event), []);
   const onReasoningToggle = useCallback(event => composerActions.current.toggleReasoningPanel(event.currentTarget), []);
   const onGoalToggle = useCallback(event => composerActions.current.toggleGoalPanel(event.currentTarget), []);
+  const onGoalAction = useCallback(action => composerActions.current.goalAction(action), []);
   const onAgentMenuSelect = useCallback((kind, trigger) => {
     const { showPanel, showExtensions } = composerActions.current;
     if (kind === 'skill') showExtensions('skill', trigger);
@@ -962,7 +964,7 @@ function App() {
               <div className="composer-overlay-anchor" aria-hidden="true" />
               <div className="composer-overlay">
                 <AgentPanel panel={panel} work={work} reasoning={reasoningDetails} reasoningArchived={reasoningArchived}
-                  onClose={closePanel} report={report} openSession={openRef} openTrace={openTrace}
+                  onClose={closePanel} onGoalAction={onGoalAction} report={report} openSession={openRef} openTrace={openTrace}
                   openArtifact={openArtifact} openImage={previewImage} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
                   {suggestions.map(([command, label], index) => <button type="button" key={command}

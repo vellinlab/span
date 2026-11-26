@@ -91,8 +91,8 @@ function RuntimeSettings({ api, models, options, setOptions }) {
   </div>;
 }
 
-function GoalPanel({ goal, capability, action, report, editOnOpen }) {
-  const [editing, setEditing] = useState(() => editOnOpen || !goal);
+const GoalPanel = memo(function GoalPanel({ hasGoal, savedObjective, savedBudget, status, reason, capability, action, report, editOnOpen }) {
+  const [editing, setEditing] = useState(() => editOnOpen || !hasGoal);
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
   const version = useRef(0);
@@ -102,13 +102,13 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
   const objectiveInput = useRef(null);
   const editButton = useRef(null);
   const moveFocus = useRef(editOnOpen);
-  const showEditor = editing || !goal;
-  const toggleStatus = ['active', 'waiting'].includes(goal?.status) ? 'pause'
-    : goal?.status === 'paused' || (capability?.canRestart && ['complete', 'blocked'].includes(goal?.status)) ? 'resume' : null;
+  const showEditor = editing || !hasGoal;
+  const toggleStatus = ['active', 'waiting'].includes(status) ? 'pause'
+    : status === 'paused' || (capability?.canRestart && ['complete', 'blocked'].includes(status)) ? 'resume' : null;
   const supports = kind => supportsGoalAction(capability, kind);
-  const saveLabel = capability?.startsOnSave ? goal ? '替换并启动' : '启动目标' : '保存目标';
-  const objective = draft?.objective ?? goal?.objective ?? '';
-  const budget = draft?.budget ?? goal?.budget ?? '';
+  const saveLabel = capability?.startsOnSave ? hasGoal ? '替换并启动' : '启动目标' : '保存目标';
+  const objective = draft?.objective ?? savedObjective ?? '';
+  const budget = draft?.budget ?? savedBudget ?? '';
   const trimmed = useMemo(() => showEditor ? objective.trim() : '', [showEditor, objective]);
   const rememberRemovedFocus = useCallback(element => {
     if (!element) return;
@@ -171,7 +171,7 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
     event.preventDefault();
     if (!trimmed) return;
     const tokenBudget = budget === '' ? null : Number(budget);
-    update(goal
+    update(hasGoal
       ? { kind: 'edit', objective: trimmed, budget: tokenBudget }
       : { kind: 'set', objective: trimmed, budget: tokenBudget ?? undefined });
   }}>
@@ -180,8 +180,8 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
         maxLength={capability?.objectiveLimit}
         onChange={event => edit('objective', event.target.value)} />
     </div> : <div className="agent-panel-content" ref={content}>
-      <p ref={rememberRemovedFocus} className="goal-objective" dir="auto" tabIndex={0}>{goal.objective}</p>
-      {goal.reason && <p className="goal-reason" dir="auto">{goal.reason}</p>}
+      <p ref={rememberRemovedFocus} className="goal-objective" dir="auto" tabIndex={0}>{savedObjective}</p>
+      {reason && <p className="goal-reason" dir="auto">{reason}</p>}
     </div>}
     <div className="panel-actions goal-actions">
       {showEditor ? <>
@@ -189,7 +189,7 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
           <input type="number" min={1} step={1} value={budget} placeholder="可选"
             onChange={event => edit('budget', event.target.value)} />
         </label>}
-        {goal && <button ref={rememberRemovedFocus} type="button" aria-disabled={busy} onClick={() => {
+        {hasGoal && <button ref={rememberRemovedFocus} type="button" aria-disabled={busy} onClick={() => {
           if (busy) return;
           setDraft(null);
           changeEditor(false);
@@ -200,13 +200,13 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
         {supports('clear') && <button ref={rememberRemovedFocus} type="button" className="goal-clear" aria-disabled={busy}
           onClick={() => update({ kind: 'clear' })}>清除</button>}
         {toggleStatus && supports(toggleStatus) && <button ref={rememberRemovedFocus} type="button" aria-disabled={busy}
-          onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : goal.status === 'complete' ? '重新开始' : '继续'}</button>}
+          onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : status === 'complete' ? '重新开始' : '继续'}</button>}
         {supports('edit') && <button type="button" ref={attachEditButton} aria-disabled={busy}
           onClick={() => { if (!busy) changeEditor(true); }}>编辑</button>}
       </>}
     </div>
   </form>;
-}
+});
 
 function UsageMeter({ label, amount, value, max, children }) {
   const showMeter = value !== undefined && max !== undefined;
@@ -503,7 +503,7 @@ function DiffPanel({ panel }) {
   </div>;
 }
 
-export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, report, openSession, openTrace, openArtifact, openImage }) {
+export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, onGoalAction, report, openSession, openTrace, openArtifact, openImage }) {
   const close = useRef(null);
   const content = useRef(null);
   const extensionSearch = useRef(null);
@@ -563,8 +563,9 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
         <X size={15} />
       </button>}
     </header>
-    {panel.kind === 'goal' ? <GoalPanel key={panel.id} goal={goal} capability={work.api?.goal}
-      action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}
+    {panel.kind === 'goal' ? <GoalPanel key={panel.id} hasGoal={Boolean(goal)} savedObjective={goal?.objective} savedBudget={goal?.budget}
+      status={goal?.status} reason={goal?.reason} capability={work.api?.goal} action={onGoalAction}
+      report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}
       tabIndex={detailsLabel ? 0 : undefined} role={detailsLabel ? 'group' : undefined} aria-label={detailsLabel}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
       {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} archived={reasoningArchived} />}
