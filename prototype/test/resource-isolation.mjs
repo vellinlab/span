@@ -297,6 +297,37 @@ async function output(page) {
   return { outputLines: 120, rowUpdates };
 }
 
+async function observeTerminalReveal(app, area) {
+  await app.evaluate(async ({ BrowserWindow }, area) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    const image = await Promise.race([contents.capturePage(), new Promise(resolve => setTimeout(resolve, 4000))]);
+    if (!image) throw Error('The covered terminal reference frame was not captured');
+    const covered = image.crop(area);
+    const state = { covered, frames: [], notifications: 0 };
+    globalThis.spanTerminalReveal = state;
+    contents.beginFrameSubscription(false, image => {
+      const at = performance.timeOrigin + performance.now();
+      state.notifications++;
+      state.frames.push({ at, image: image.crop(area) });
+      if (state.frames.length > 24) state.frames.shift();
+    });
+  }, area);
+  return async ({ clickAt, closedAt, outputAt, marker }) => app.evaluate(async ({ BrowserWindow }, stage) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    contents.endFrameSubscription();
+    const { covered, frames, notifications } = globalThis.spanTerminalReveal;
+    delete globalThis.spanTerminalReveal;
+    const image = await Promise.race([contents.capturePage(), new Promise(resolve => setTimeout(resolve, 4000))]);
+    if (!image) throw Error('The revealed terminal reference frame was not captured');
+    const revealed = image.crop(stage.area).toBitmap();
+    const rowPixels = image => image.crop(stage.marker).toBitmap();
+    if (!revealed.length || revealed.equals(rowPixels(covered))) throw Error('The output row must change when the preview closes');
+    const visible = frames.find(frame => frame.at >= stage.clickAt && rowPixels(frame.image).equals(revealed));
+    return { clickToCloseMs: stage.closedAt - stage.clickAt, clickToDomMs: stage.outputAt - stage.clickAt,
+      clickToFrameMs: visible ? visible.at - stage.clickAt : null, notifications, retainedFrames: frames.length };
+  }, { area: { ...marker, x: area.x + marker.x, y: area.y + marker.y }, marker, clickAt, closedAt, outputAt });
+}
+
 async function hiddenOutput(app, page, { profile, capture, variant, saveImage, minimized }) {
   const script = fileURLToPath(new URL('./terminal-covered-output.cjs', import.meta.url));
   const gate = join(profile, 'begin-terminal-output');
@@ -305,6 +336,10 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
   const readyRow = page.locator('.xterm-rows > div', { hasText: 'span_covered_ready' });
   const dimensions = () => screen.evaluate(element => [element.offsetWidth, element.offsetHeight]);
   const beforeCover = await dimensions();
+  const area = !minimized && await screen.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return { x: Math.ceil(bounds.left), y: Math.ceil(bounds.top), width: 146, height: Math.floor(bounds.height) - 1 };
+  });
   const readme = page.getByRole('button', { name: 'README.md' });
   const preview = page.getByRole('complementary', { name: '文件预览' });
   const waitForPreview = () => preview.getByText('Span 工作台预览', { exact: true }).waitFor();
@@ -327,6 +362,12 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     visibility.observe(element);
     const stopWindow = window.span.onWindowHidden(hidden => { windowHidden = hidden; });
     const observer = new MutationObserver(() => { batches++; });
+    const rows = element.querySelector('.xterm-rows');
+    let reveal;
+    let revealObserver;
+    const input = new AbortController();
+    const finishedRow = () => [...rows.children].find(row =>
+      row.querySelector('.xterm-fg-2')?.textContent.trim() === 'span_covered_done');
     const unsubscribe = window.span.onEvent(packet => {
       if (packet.event !== 'terminal') return;
       generations.add(packet.generation);
@@ -339,9 +380,38 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       get intersecting() { return intersecting; },
       get windowHidden() { return windowHidden; },
       get received() { return received; },
-      begin() { observer.observe(element.querySelector('.xterm-rows'), { childList: true, subtree: true, characterData: true }); },
+      begin() { observer.observe(rows, { childList: true, subtree: true, characterData: true }); },
       finish() { observer.disconnect(); return { batches, packets, generations: generations.size }; },
-      stop() { visibility.disconnect(); stopWindow(); unsubscribe(); },
+      armReveal() {
+        const preview = document.getElementById('file-preview');
+        const button = preview.querySelector('.preview-close');
+        const record = () => {
+          if (!reveal) return;
+          const at = performance.timeOrigin + performance.now();
+          if (!preview.isConnected) reveal.closedAt ??= at;
+          if (finishedRow()) reveal.outputAt ??= at;
+        };
+        revealObserver = new MutationObserver(record);
+        revealObserver.observe(preview.parentElement, { childList: true });
+        revealObserver.observe(rows, { childList: true, subtree: true, characterData: true });
+        button.addEventListener('click', event => {
+          if (!event.isTrusted) return;
+          reveal = { clickAt: performance.timeOrigin + event.timeStamp };
+          record();
+        }, { once: true, signal: input.signal });
+      },
+      readReveal(area) {
+        const rect = finishedRow().getBoundingClientRect();
+        return { ...reveal, marker: { x: Math.ceil(rect.left) - area.x, y: Math.ceil(rect.top) - area.y,
+          width: 130, height: Math.floor(rect.height) - 1 } };
+      },
+      stop() {
+        visibility.disconnect();
+        stopWindow();
+        unsubscribe();
+        revealObserver?.disconnect();
+        input.abort();
+      },
     };
   });
   try {
@@ -372,14 +442,32 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     } else if (!minimized) {
       assert.ok(events.batches >= 10, `Expected baseline terminal updates, saw ${events.batches}`);
     }
-    const revealStarted = performance.now();
+    let readReveal;
+    if (!minimized) {
+      readReveal = await observeTerminalReveal(app, area);
+      await observation.evaluate(state => state.armReveal());
+    }
+    const revealStarted = performance.timeOrigin + performance.now();
     if (minimized) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
       await page.waitForFunction(state => state.windowHidden === false, observation, { polling: 50 });
     } else await closePreview();
     await waitForOutput();
-    const revealDomMs = performance.now() - revealStarted;
+    const assertionAt = performance.timeOrigin + performance.now();
+    const revealDomMs = assertionAt - revealStarted;
     assert.deepEqual(await dimensions(), beforeCover);
+    let revealStages;
+    if (readReveal) {
+      const stage = await observation.evaluate((state, area) => state.readReveal(area), area);
+      assert.ok(stage.clickAt <= stage.closedAt && stage.clickAt <= stage.outputAt, JSON.stringify(stage));
+      assert.ok(stage.marker.x >= 0 && stage.marker.x + stage.marker.width <= area.width &&
+        stage.marker.y >= 0 && stage.marker.y + stage.marker.height <= area.height, JSON.stringify({ area, stage }));
+      await settle(page);
+      revealStages = { dispatchToClickMs: stage.clickAt - revealStarted, ...await readReveal(stage),
+        domToAssertionMs: assertionAt - stage.outputAt };
+      assert.ok(revealStages.notifications > 0, 'The frame observer must receive a notification as the preview closes');
+      console.log(`${variant} terminal reveal: ${JSON.stringify(revealStages)}`);
+    }
     const restored = minimized ? 'restored' : 'revealed';
     if (saveImage) await page.screenshot({ path: reportPath.replace(/\.json$/, `-${variant}-terminal-${restored}.png`) });
     let resizeWhileCovered;
@@ -402,7 +490,7 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     }
     await terminalLine(page, linux ? `printf '%s_%s\\n' span_covered still_open` : 'echo span_covered_still_open', 'span_covered_still_open');
     assert.equal(await observation.evaluate(state => state.finish().generations), 1);
-    return { variant, events, before, covered, revealDomMs, resizeWhileCovered };
+    return { variant, events, before, covered, revealDomMs, revealStages, resizeWhileCovered };
   } finally {
     await observation.evaluate(state => state.stop());
     await observation.dispose();
