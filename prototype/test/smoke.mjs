@@ -1063,12 +1063,19 @@ try {
   await approvalDetails.waitFor();
   assert.ok(await approval.evaluate(element => document.activeElement === element),
     'A new approval should take focus from a link inside the closing reasoning panel.');
-  await transcript.evaluate((element, top) => { element.scrollTop = top; }, anchor.scrollTop);
-  const beforeWithdrawal = await readingPosition();
   await approvalDetails.focus();
   await approvalDetails.evaluate(element => element.blur());
   const focusOutsideCard = () => page.evaluate(() => document.activeElement === document.body);
   assert.ok(await focusOutsideCard());
+  await transcript.evaluate(async (element, top) => {
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    element.scrollTop = Math.min(top, element.scrollHeight - element.clientHeight - 300);
+  }, anchor.scrollTop);
+  await latest.waitFor();
+  const beforeWithdrawal = await readingPosition();
+  assert.ok(await transcript.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop >= 240),
+    'The reader should be well above the live turn before the approval is withdrawn.');
   await writeFile(join(profile, 'withdraw-approval'), '');
   await approval.waitFor({ state: 'detached' });
   assert.ok(await focusOutsideCard(), 'Withdrawing an approval after the reader left it must not focus the composer.');
