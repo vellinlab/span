@@ -742,6 +742,9 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-archive.png` });
       await header.press('Enter');
       await startOfSummary.waitFor({ state: 'detached' });
+      await settleFrame(page);
+      assert.ok(Math.abs(expandedHeader.y - (await header.boundingBox()).y) <= 2,
+        'Closing a visible summary should preserve its reading position.');
       await placeInTimeline(header, 3, 'bottom');
       const edge = await header.evaluate(element =>
         element.closest('.timeline').getBoundingClientRect().bottom - element.getBoundingClientRect().bottom);
@@ -754,7 +757,22 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       assert.ok(moved > 0 && moved <= 55 && await beginningInView(), 'Opening should reveal the start with a short scroll.');
       assert.ok(await header.evaluate(element => element === document.activeElement));
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-archive-edge.png` });
-      await latest.click();
+      await header.evaluate(element => {
+        const view = element.closest('.timeline');
+        view.scrollTop += element.getBoundingClientRect().bottom - view.getBoundingClientRect().top + 120;
+      });
+      await settleFrame(page);
+      assert.ok(await header.evaluate(element => element === document.activeElement &&
+        element.getBoundingClientRect().bottom < element.closest('.timeline').getBoundingClientRect().top));
+      await page.keyboard.press('Enter');
+      await startOfSummary.waitFor({ state: 'detached' });
+      await settleFrame(page);
+      assert.ok(await header.evaluate(element => {
+        const title = element.getBoundingClientRect();
+        const view = element.closest('.timeline').getBoundingClientRect();
+        return element === document.activeElement && title.top >= view.top && title.bottom <= view.bottom;
+      }), 'Closing a long summary from its focused offscreen title should bring the title back into view.');
+      if (await latest.isVisible()) await latest.click();
       await latest.waitFor({ state: 'detached' });
       const answer = transcript.getByText('推理核对已完成。', { exact: true });
       assert.ok(await answer.evaluate(element => element.getBoundingClientRect().bottom <=

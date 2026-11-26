@@ -118,11 +118,17 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
   const reveal = useRef(null);
   useLayoutEffect(() => {
     const details = reveal.current;
-    if (!expanded || !details) return;
+    if (!details) return;
     reveal.current = null;
     const viewport = scroll.current;
     const view = viewport.getBoundingClientRect();
     const heading = details.firstElementChild.getBoundingClientRect();
+    if (!expanded) {
+      // The focused title can be offscreen when the reader closes a long card with Enter.
+      if (heading.top < view.top) viewport.scrollTop += heading.top - view.top - 4;
+      else if (heading.bottom > view.bottom) viewport.scrollTop += heading.bottom - view.bottom + 4;
+      return;
+    }
     const body = details.lastElementChild.getBoundingClientRect();
     // Show a compact diagnostic in full when the viewport has room for its heading and body.
     const fits = revealDiagnostic && body.bottom - heading.top + 4 <= view.height;
@@ -146,7 +152,8 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
     {children ? <details open={expanded} onToggle={event => {
       const details = event.currentTarget;
       if (details.open === expanded) return;
-      reveal.current = details.open ? details : null;
+      const focused = details.firstElementChild === details.ownerDocument.activeElement;
+      reveal.current = details.open || focused ? details : null;
       toggle(details.open);
     }}>
       <summary><ChevronRight size={13} className="card-chevron" />{head}
