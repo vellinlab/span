@@ -388,13 +388,17 @@ try {
     const card = document.querySelector('.goal-strip').getBoundingClientRect();
     const close = panel.querySelector('header button').getBoundingClientRect();
     const body = panel.querySelector('.agent-panel-content');
-    const actions = panel.querySelector('.goal-actions').getBoundingClientRect();
+    const actions = panel.querySelector('.goal-actions');
     const hit = document.elementFromPoint(close.left + close.width / 2, close.top + close.height / 2);
+    const actionsVisible = [...actions.querySelectorAll('button')].every(button => {
+      const rect = button.getBoundingClientRect();
+      return rect.height >= 28 && button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    });
     return { fits: bounds.top >= timeline.top + 34 && bounds.bottom < card.top,
       fillsColumn: Math.abs(bounds.left - card.left) <= 1 && Math.abs(bounds.right - card.right) <= 1,
       scrolls: body.scrollTop === 0 && body.scrollHeight > body.clientHeight,
       closeVisible: panel.querySelector('header button').contains(hit),
-      actionsVisible: actions.top > body.getBoundingClientRect().top && actions.bottom <= bounds.bottom };
+      actionsVisible: actionsVisible && actions.getBoundingClientRect().top > body.getBoundingClientRect().top };
   });
   assert.deepEqual(compactGoal, {
     fits: true, fillsColumn: true, scrolls: true, closeVisible: true, actionsVisible: true,
@@ -442,6 +446,17 @@ try {
         'The compact attachment tray must make room for another line of the conversation or goal.');
     } finally {
       await tray.evaluate(element => { element.style.removeProperty('max-height'); });
+    }
+    const originalSpacing = await page.addStyleTag({ content: `
+      #goal-panel { --panel-height: max(128px, calc(100% - 64px)); }
+      #goal-panel > header, #goal-panel :is(.goal-actions, .agent-panel-content) { padding-block: 4px; }
+    ` });
+    try {
+      const original = await readingSpace();
+      assert.ok(compactReading.abovePanel + compactReading.objectiveHeight - original.abovePanel - original.objectiveHeight >= 10,
+        'Goal spacing should free room for reading while the action buttons stay reachable.');
+    } finally {
+      await originalSpacing.evaluate(element => element.remove());
     }
     const fullGoalLayout = await page.addStyleTag({ content: `
       #goal-panel { --panel-height: 400px; }

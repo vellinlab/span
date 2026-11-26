@@ -1194,12 +1194,15 @@ p { margin-block: 0 12px; }
     --panel-height: max(106px, calc(100% - 70px));
     & .agent-panel-content { padding-block: 8px; }
   }
-  .agent-panel[data-kind="goal"]:has(.goal-objective) { --panel-height: max(128px, calc(100% - 64px)); }
+  .agent-panel[data-kind="goal"]:has(.goal-objective) {
+    --panel-height: max(116px, calc(100% - 76px));
+    & > header, & .goal-actions, & .agent-panel-content { padding-block: 2px; }
+    & :is(header, .goal-actions) button:focus-visible { outline-offset: -2px; }
+  }
   .composer-wrap:has(.agent-panel:is([data-kind="goal"], [data-kind="reasoning"])) {
     padding-block-end: 8px;
     & > .composer { padding-block: 5px; }
   }
-  .goal-panel-main > .agent-panel-content { padding-block: 4px; }
   .composer-wrap:has(.composer-files):has(.goal-objective, .agent-panel[data-kind="reasoning"]) {
     & > .composer:not(:focus-within) textarea { min-height: 24px; max-height: 24px; }
   }
