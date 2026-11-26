@@ -718,7 +718,8 @@ try {
     const box = selector => document.querySelector(selector).getBoundingClientRect();
     const bounds = element.getBoundingClientRect();
     const detail = element.querySelector('.agent-panel-content');
-    return bounds.top >= box('.timeline').top + 48 && detail.clientHeight >= 42 &&
+    const readable = detail.clientHeight > 0 && detail.clientHeight >= Math.min(42, detail.scrollHeight);
+    return bounds.top >= box('.timeline').top + 48 && readable &&
       box('.composer').bottom < box('section.terminal-panel').top;
   });
   assert.ok(await wideReadingSpace(reasoningPanel), 'A short wide window should leave room above reasoning with the terminal open.');
