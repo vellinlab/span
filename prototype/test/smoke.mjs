@@ -265,6 +265,16 @@ try {
   await mountedTerminal.waitFor({ state: 'hidden' });
   assert.equal(await mountedTerminal.count(), 1);
   assert.equal(await terminalToggle.getAttribute('aria-pressed'), 'false');
+  await composer.fill(selectionDraft);
+  await composer.evaluate((element, end) => element.setSelectionRange(1, end), insertionPoint);
+  await composer.press('Control+Shift+J');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
+  await page.keyboard.press('Control+Shift+J');
+  await mountedTerminal.waitFor({ state: 'hidden' });
+  assert.deepEqual(await composer.evaluate(element => [
+    document.activeElement === element, element.value, element.selectionStart, element.selectionEnd,
+  ]), [true, selectionDraft, 1, insertionPoint]);
+  await composer.fill('');
   await terminalToggle.press('Enter');
   await mountedTerminal.locator('.xterm-rows').getByText('span_local_pty', { exact: true }).waitFor();
   await terminal.focus();

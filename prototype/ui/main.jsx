@@ -112,7 +112,11 @@ function App() {
   const composerActions = useRef(null);
   const commandSelection = useRef(null);
   const terminalToggle = useRef(null);
+  const terminalFocusRequest = useRef(null);
+  const terminalReturnFocus = useRef(null);
   const closeTerminal = useCallback(() => {
+    terminalFocusRequest.current = null;
+    terminalReturnFocus.current = null;
     setTerminal('closed');
     terminalToggle.current?.focus({ preventScroll: true });
   }, []);
@@ -162,6 +166,7 @@ function App() {
   const reasoningExpanded = keepReasoning && panel.turnId === liveReasoning?.turnId;
   const previewBlocked = previewOverlay && Boolean(interaction);
   const readingOverlay = previewCoversConversation && !interaction;
+  const terminalVisible = terminal === 'visible' && !readingOverlay;
   const interactionItem = interaction?.itemId && rows.findLast(row => row.id === interaction.itemId && row.turnId === interaction.turnId);
   const canSteer = Boolean(api?.turns.steer && run?.id);
   const canQueue = Boolean(api?.turns.followUp && run?.id);
@@ -430,7 +435,7 @@ function App() {
   // Keep memoized controls bound to the conversation represented by the committed DOM.
   useLayoutEffect(() => {
     composerActions.current = { setDraft, textareaKey, pasteScreenshot, toggleReasoningPanel, toggleGoalPanel,
-      insertTerminalSelection, goalAction: work.goalAction, showPanel, showExtensions };
+      insertTerminalSelection, toggleTerminal, goalAction: work.goalAction, showPanel, showExtensions };
   });
   const openRef = useCallback(ref => latestWork.current.openSession({ ref }), []);
   const openTrace = useCallback((member, trigger) => latestWork.current.openMemberTrace(member, trigger), []);
@@ -458,6 +463,14 @@ function App() {
   }, [report]);
 
   useEffect(() => {
+    function onTerminalShortcut(event) {
+      if (event.isComposing || event.defaultPrevented || !event.ctrlKey || !event.shiftKey ||
+        event.altKey || event.metaKey || event.code !== 'KeyJ') return;
+      // Intercept before xterm can treat Ctrl+J as a line feed.
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) composerActions.current.toggleTerminal(true);
+    }
     function onShortcut(event) {
       if (event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
       if (event.code === 'KeyN') {
@@ -468,8 +481,12 @@ function App() {
         latestWork.current.openSearch();
       }
     }
+    window.addEventListener('keydown', onTerminalShortcut, true);
     window.addEventListener('keydown', onShortcut);
-    return () => window.removeEventListener('keydown', onShortcut);
+    return () => {
+      window.removeEventListener('keydown', onTerminalShortcut, true);
+      window.removeEventListener('keydown', onShortcut);
+    };
   }, []);
 
   function showPanel(kind, trigger = input.current, options = {}) {
@@ -518,11 +535,24 @@ function App() {
     setPreview({ ...preview, parked: !preview.parked });
   }
 
-  function toggleTerminal() {
-    if (readingOverlay) {
-      setPreview({ ...preview, parked: true });
+  function toggleTerminal(moveFocus = false) {
+    if (!config) return;
+    if (!terminalVisible) {
+      const origin = moveFocus ? new WeakRef(document.activeElement ?? document.body) : null;
+      terminalReturnFocus.current = origin;
+      terminalFocusRequest.current = origin;
+      if (readingOverlay) setPreview({ ...preview, parked: true });
       setTerminal('visible');
-    } else setTerminal(value => value === 'visible' ? 'collapsed' : 'visible');
+      return;
+    }
+    terminalFocusRequest.current = null;
+    if (moveFocus && document.activeElement?.closest('#workbench-terminal')) {
+      const origin = terminalReturnFocus.current?.deref();
+      origin?.focus({ preventScroll: true });
+      if (document.activeElement !== origin) input.current?.focus({ preventScroll: true });
+    }
+    terminalReturnFocus.current = null;
+    setTerminal('collapsed');
   }
 
   function showConnection() {
@@ -899,10 +929,10 @@ function App() {
         {preview && (preview.parked || readingOverlay) && <button type="button" className="preview-toggle"
           aria-controls="file-preview" title={previewBlocked ? '处理请求后可继续预览' : undefined}
           disabled={previewBlocked} onClick={togglePreview}>{preview.parked ? '继续预览' : '返回会话'}</button>}
-        <button ref={terminalToggle} className="icon-button terminal-toggle" aria-label="切换终端"
-          title={terminal === 'visible' && !readingOverlay ? '收起终端' : terminal === 'closed' ? '打开终端' : '展开终端'}
+        <button ref={terminalToggle} className="icon-button terminal-toggle" aria-label="切换终端" aria-keyshortcuts="Control+Shift+J"
+          title={`${terminalVisible ? '收起终端' : terminal === 'closed' ? '打开终端' : '展开终端'} (Ctrl+Shift+J)`}
           aria-controls={terminal === 'closed' ? undefined : 'workbench-terminal'}
-          aria-pressed={terminal === 'visible' && !readingOverlay} onClick={toggleTerminal}><SquareTerminal size={16} /></button>
+          aria-pressed={terminalVisible} onClick={() => toggleTerminal()}><SquareTerminal size={16} /></button>
       </div>
     </header>
     <div className="layout">
@@ -1072,7 +1102,8 @@ function App() {
           {terminal !== 'closed' && config && <Suspense fallback={<div id="workbench-terminal" className="terminal-panel"
             hidden={terminal === 'collapsed'}>正在打开终端…</div>}>
             <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer}
-              collapsed={terminal === 'collapsed'} covered={readingOverlay} onInsertSelection={onTerminalSelection} onClose={closeTerminal} />
+              collapsed={terminal === 'collapsed'} covered={readingOverlay} focusRequest={terminalFocusRequest}
+              onInsertSelection={onTerminalSelection} onClose={closeTerminal} />
           </Suspense>}
         </main>
         {preview && <aside className="preview" id="file-preview" aria-label="文件预览" hidden={preview.parked} ref={previewRegion}

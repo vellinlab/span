@@ -11,7 +11,7 @@ const OUTPUT_GAP_MS = 96;
 const OUTPUT_BATCH_MS = 64;
 const INPUT_PRIORITY_MS = 140;
 
-export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, collapsed, covered, onInsertSelection, onClose }) {
+export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, collapsed, covered, focusRequest, onInsertSelection, onClose }) {
   const element = useRef(null);
   const instance = useRef(null);
   const panelHidden = collapsed || covered;
@@ -225,6 +225,12 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       update('close', {});
     };
   }, [workspace, ssh, renderer]);
+  useEffect(() => {
+    if (panelHidden || !focusRequest?.current) return;
+    const origin = focusRequest.current.deref();
+    focusRequest.current = null;
+    if (document.activeElement === origin || document.activeElement === document.body) instance.current?.focus();
+  }, [panelHidden, focusRequest]);
   return <section id="workbench-terminal" className="terminal-panel" aria-label="终端" hidden={collapsed}>
     <header><SquareTerminal size={16} /> <strong>终端</strong><span>{ssh || '本地'}</span>
       {hasSelection && <button type="button" className="panel-link terminal-insert" title="加入当前会话草稿" onClick={() => {
