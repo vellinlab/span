@@ -373,7 +373,7 @@ try {
     const body = panel.querySelector('.agent-panel-content');
     const actions = panel.querySelector('.goal-actions').getBoundingClientRect();
     const hit = document.elementFromPoint(close.left + close.width / 2, close.top + close.height / 2);
-    return { fits: bounds.top >= timeline.top + 4 && bounds.bottom < card.top,
+    return { fits: bounds.top >= timeline.top + 34 && bounds.bottom < card.top,
       fillsColumn: Math.abs(bounds.left - card.left) <= 1 && Math.abs(bounds.right - card.right) <= 1,
       scrolls: body.scrollTop === 0 && body.scrollHeight > body.clientHeight,
       closeVisible: panel.querySelector('header button').contains(hit),
@@ -384,13 +384,18 @@ try {
   });
   assert.equal(await draftHeight(), 46);
   const goalViewport = goalPanel.locator('.agent-panel-content');
-  const largerGoalViewport = await goalViewport.evaluate(element => element.clientHeight);
+  const goalReadingHeight = () => goalViewport.evaluate(element => {
+    const panelTop = element.closest('.agent-panel').getBoundingClientRect().top;
+    const timelineTop = document.querySelector('.timeline').getBoundingClientRect().top;
+    return element.clientHeight + panelTop - timelineTop;
+  });
+  const largerGoalReading = await goalReadingHeight();
   await composer.evaluate(element => { element.style.maxHeight = 'max(48px, min(156px, 25cqb))'; });
   try {
     assert.equal(await draftHeight(), originalDraftHeight);
-    const originalGoalViewport = await goalViewport.evaluate(element => element.clientHeight);
-    assert.ok(largerGoalViewport - originalGoalViewport >= 32);
-    console.log(`Goal reading height with the terminal open: ${originalGoalViewport} → ${largerGoalViewport} CSS px.`);
+    const originalGoalReading = await goalReadingHeight();
+    assert.ok(largerGoalReading - originalGoalReading >= 32);
+    console.log(`Conversation and Goal reading height with the terminal open: ${originalGoalReading} → ${largerGoalReading} CSS px.`);
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact-before.png') });
   } finally {
     await composer.evaluate(element => element.style.removeProperty('max-height'));
@@ -619,8 +624,9 @@ try {
     const card = document.querySelector('.goal-strip');
     const form = document.querySelector('.composer');
     const box = element => element.getBoundingClientRect();
+    const timeline = document.querySelector('.timeline');
     return box(panel).bottom <= box(strip).top && box(strip).bottom < box(card).top &&
-      box(card).bottom < box(form).top && box(panel).left === box(form).left;
+      box(card).bottom < box(form).top && box(panel).left === box(form).left && box(panel).top >= box(timeline).top + 34;
   }));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-draft.png') });
   const stripColors = locator => locator.evaluate(element => {
