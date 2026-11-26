@@ -297,6 +297,23 @@ try {
   const longDraft = Array.from({ length: 12 }, (_, index) =>
     `草稿第 ${index + 1} 行，准备继续核对会话。`).join('\n');
   const draftHeight = () => composer.evaluate(element => element.getBoundingClientRect().height);
+  async function attachReviewFiles() {
+    const names = Array.from({ length: 4 }, (_, index) => `验收 ${index + 1} · 工作区走查记录与附加参考清单.txt`);
+    const paths = names.map(name => join(profile, name));
+    await Promise.all(paths.map(path => writeFile(path, '工作区验收记录')));
+    await app.evaluate(({ dialog }, filePaths) => {
+      const original = dialog.showOpenDialog;
+      dialog.showOpenDialog = async () => {
+        dialog.showOpenDialog = original;
+        return { canceled: false, filePaths };
+      };
+    }, paths);
+    const tray = page.getByRole('list', { name: '待发送的附件' });
+    await page.getByRole('button', { name: '添加本机文件', exact: true }).click();
+    await tray.getByTitle(paths.at(-1), { exact: true }).waitFor();
+    const removeButtons = names.map(name => tray.getByRole('button', { name: '移除附件 · ' + name, exact: true }));
+    return { tray, removeButtons };
+  }
   await composer.fill(longDraft);
   const originalDraftHeight = await draftHeight();
   assert.ok(originalDraftHeight >= 80);
@@ -402,19 +419,7 @@ try {
   }
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact.png') });
   if (!process.env.SPAN_TEST_SSH_ALIAS) {
-    const names = Array.from({ length: 4 }, (_, index) => `验收 ${index + 1} · 工作区走查记录与附加参考清单.txt`);
-    const paths = names.map(name => join(profile, name));
-    await Promise.all(paths.map(path => writeFile(path, '工作区验收记录')));
-    await app.evaluate(({ dialog }, filePaths) => {
-      const original = dialog.showOpenDialog;
-      dialog.showOpenDialog = async () => {
-        dialog.showOpenDialog = original;
-        return { canceled: false, filePaths };
-      };
-    }, paths);
-    const tray = page.getByRole('list', { name: '待发送的附件' });
-    await page.getByRole('button', { name: '添加本机文件', exact: true }).click();
-    await tray.getByTitle(paths.at(-1), { exact: true }).waitFor();
+    const { tray, removeButtons } = await attachReviewFiles();
     await dismissGoal.focus();
     const compact = await tray.evaluate(element => ({ height: element.clientHeight, scrollable: element.scrollHeight > element.clientHeight }));
     assert.deepEqual(compact, { height: 28, scrollable: true });
@@ -453,11 +458,10 @@ try {
       await fullGoalLayout.evaluate(element => element.remove());
     }
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact-attachments.png') });
-    const last = tray.getByRole('button', { name: '移除附件 · ' + names.at(-1), exact: true });
-    await last.focus();
+    await removeButtons.at(-1).focus();
     assert.ok(await tray.evaluate(element => element.clientHeight > 28 && element.contains(document.activeElement)));
     assert.equal(await draftHeight(), originalDraftHeight);
-    for (const name of names) await tray.getByRole('button', { name: '移除附件 · ' + name, exact: true }).press('Enter');
+    for (const button of removeButtons) await button.press('Enter');
     await tray.waitFor({ state: 'detached' });
     await dismissGoal.focus();
     assert.equal(await composer.inputValue(), longDraft);
@@ -629,6 +633,29 @@ try {
       box(card).bottom < box(form).top && box(panel).left === box(form).left && box(panel).top >= box(timeline).top + 34;
   }));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-draft.png') });
+  if (!process.env.SPAN_TEST_SSH_ALIAS) {
+    const { tray, removeButtons } = await attachReviewFiles();
+    const closeReasoning = reasoningPanel.getByRole('button', { name: '关闭面板' });
+    await closeReasoning.focus();
+    assert.equal(await draftHeight(), 24);
+    assert.equal(await tray.evaluate(element => element.clientHeight), 28);
+    assert.ok(await reasoningPanel.evaluate(panel => panel.getBoundingClientRect().top >=
+      document.querySelector('.timeline').getBoundingClientRect().top + 34));
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-attachments.png') });
+    const last = removeButtons.at(-1);
+    await last.focus();
+    assert.ok(await last.evaluate(button => {
+      const bounds = button.getBoundingClientRect();
+      const list = button.closest('ul').getBoundingClientRect();
+      return document.activeElement === button && bounds.top >= list.top && bounds.bottom <= list.bottom;
+    }));
+    assert.equal(await draftHeight(), originalDraftHeight);
+    assert.equal(await composer.inputValue(), longDraft);
+    for (const button of removeButtons) await button.press('Enter');
+    await tray.waitFor({ state: 'detached' });
+    await closeReasoning.focus();
+    assert.equal(await draftHeight(), 46);
+  }
   const stripColors = locator => locator.evaluate(element => {
     const style = getComputedStyle(element);
     return {

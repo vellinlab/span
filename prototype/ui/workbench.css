@@ -1193,7 +1193,7 @@ p { margin-block: 0 12px; }
   .agent-panel[data-kind="reasoning"] { --panel-height: max(112px, calc(100% - 52px)); }
   .agent-panel[data-kind="goal"]:has(.goal-objective) { --panel-height: max(128px, calc(100% - 52px)); }
   .goal-panel-main > .agent-panel-content { padding-block: 4px; }
-  .composer-wrap:has(.composer-files):has(.goal-objective) {
+  .composer-wrap:has(.composer-files):has(.goal-objective, .agent-panel[data-kind="reasoning"]) {
     & > .composer:not(:focus-within) textarea { min-height: 24px; max-height: 24px; }
   }
 }
