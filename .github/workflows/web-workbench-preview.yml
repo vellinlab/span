@@ -110,7 +110,7 @@ jobs:
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
             reasoning-following:fec399648c3366d3b5d0c54ff8bb988b94edab96 \
             reasoning-index:21265c804bf11dc827c957c83e0717568e432a89 \
-            grouped-history:a28e4b990966a03e8f369f0a4e779f1c98caeb51 \
+            grouped-history:6dce83b8c52b3e47dfa8de66483d05ab373f27d7 \
             terminal:"$TERMINAL_RENDERER_BASELINE" \
             terminal-cover:"$TERMINAL_COVER_BASELINE" \
             terminal-window:"$TERMINAL_WINDOW_BASELINE"
