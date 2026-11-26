@@ -95,9 +95,10 @@ async function check(binary, legacy, screenshot) {
       assert.ok(before > 160, 'The transcript must have room to scroll up.');
       await viewport.evaluate(element => {
         element.receivedDiffWheel = false;
+        // Observe the hit before compositor scrolling can move the short diff away from the pointer.
         element.addEventListener('wheel', event => {
           element.receivedDiffWheel = event.isTrusted && event.deltaY < 0;
-        }, { once: true, passive: true });
+        }, { once: true, passive: false });
       });
       await page.mouse.wheel(0, -144);
       await page.waitForFunction(() => document.querySelector('.diff-scroll')?.receivedDiffWheel);
