@@ -53,6 +53,16 @@ const ComposerInput = memo(function ComposerInput({ input, value, placeholder, s
     onFocus={() => suggest(true)} onBlur={() => suggest(false)} onChange={change} onKeyDown={keyDown} onPaste={paste} />;
 });
 
+function PreviewImage({ blob, name, onError }) {
+  const attach = useCallback(image => {
+    if (!image) return;
+    const url = URL.createObjectURL(blob);
+    image.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [blob]);
+  return <img ref={attach} alt={name} onError={onError} />;
+}
+
 function App() {
   const [config, setConfig] = useState(null);
   const [workspaceIdentity, setWorkspaceIdentity] = useState(null);
@@ -270,9 +280,11 @@ function App() {
     try {
       const result = await read();
       if (result && scope === previewScope.current) {
+        const { kind, data, mime } = result;
+        const content = kind === 'image' ? { blob: new Blob([Uint8Array.fromBase64(data)], { type: mime }) } : { data };
         previewTrigger.current = trigger;
         if (attachment) previewFocus.current = 'content';
-        setPreview({ ...result, path, scope, attachment, root });
+        setPreview({ kind, ...content, path, scope, attachment, root });
       }
     } catch (error) {
       if (scope === previewScope.current) report(error);
@@ -1048,8 +1060,8 @@ function App() {
           </header>
           <div className="preview-content" key={preview.scope} data-kind={preview.kind} tabIndex={0}>
             {preview.kind === 'image' ? preview.imageError ? <p role="status">无法显示这张图片。</p>
-              : <img alt={preview.path} src={`data:${preview.mime};base64,${preview.data}`} onError={() => {
-                setPreview(current => current?.scope === preview.scope ? { ...current, data: undefined, imageError: true } : current);
+              : <PreviewImage name={preview.path} blob={preview.blob} onError={() => {
+                setPreview(current => current?.scope === preview.scope ? { ...current, blob: undefined, imageError: true } : current);
               }} />
               : preview.kind === 'markdown' ? <Markdown text={preview.data} /> : <pre>{preview.data}</pre>}
           </div>

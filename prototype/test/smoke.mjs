@@ -1523,12 +1523,28 @@ try {
     await pick([reference, image, removed]);
     await draftFiles.getByTitle(removed, { exact: true }).waitFor();
     const draftImage = draftFiles.getByRole('button', { name: previewImageName, exact: true });
+    const imageReleases = await page.evaluateHandle(() => {
+      const revoke = URL.revokeObjectURL;
+      const released = [];
+      URL.revokeObjectURL = url => {
+        released.push(url);
+        revoke.call(URL, url);
+      };
+      return () => {
+        URL.revokeObjectURL = revoke;
+        return released;
+      };
+    });
     await draftImage.press('Enter');
     const closeImage = preview.getByRole('button', { name: '关闭预览' });
     await page.waitForFunction(() => document.querySelector('#file-preview img')?.naturalWidth > 0);
+    const imageUrl = await preview.getByRole('img', { name: imageName }).getAttribute('src');
+    assert.match(imageUrl, /^blob:/);
     assert.ok(await closeImage.evaluate(element => document.activeElement === element));
     await closeImage.press('Escape');
     await preview.waitFor({ state: 'detached' });
+    assert.deepEqual(await imageReleases.evaluate(release => release()), [imageUrl]);
+    await imageReleases.dispose();
     assert.ok(await draftImage.evaluate(element => document.activeElement === element));
     await pick([reference]);
     assert.equal(await draftFiles.getByRole('listitem').count(), 3);
