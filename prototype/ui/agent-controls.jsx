@@ -110,6 +110,21 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
   const objective = draft?.objective ?? goal?.objective ?? '';
   const budget = draft?.budget ?? goal?.budget ?? '';
   const trimmed = useMemo(() => showEditor ? objective.trim() : '', [showEditor, objective]);
+  const rememberRemovedFocus = useCallback(element => {
+    if (!element) return;
+    return () => {
+      if (element === element.ownerDocument.activeElement) moveFocus.current = true;
+    };
+  }, []);
+  const attachEditButton = useCallback(button => {
+    editButton.current = button;
+    if (!button) return;
+    const rememberFocus = rememberRemovedFocus(button);
+    return () => {
+      rememberFocus();
+      editButton.current = null;
+    };
+  }, [rememberRemovedFocus]);
 
   useLayoutEffect(() => {
     if (!showEditor) content.current.scrollTop = readingPosition.current;
@@ -117,7 +132,8 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
   useLayoutEffect(() => {
     if (!moveFocus.current) return;
     moveFocus.current = false;
-    (showEditor ? objectiveInput : editButton).current?.focus({ preventScroll: true });
+    const target = showEditor ? objectiveInput.current : editButton.current ?? content.current?.firstElementChild;
+    target?.focus({ preventScroll: true });
   });
 
   function edit(field, value) {
@@ -134,7 +150,6 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
   async function update(value) {
     if (busy) return;
     const submitted = version.current;
-    const wasFocused = form.current?.contains(form.current.ownerDocument.activeElement);
     setBusy(true);
     try {
       const updated = await action(value);
@@ -144,9 +159,7 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
         setDraft(null);
         readingPosition.current = 0;
         const panel = form.current;
-        const focused = panel?.ownerDocument.activeElement;
-        const restore = panel && (panel.contains(focused) || (cleared && wasFocused && focused === panel.ownerDocument.body));
-        changeEditor(Boolean(cleared), Boolean(restore));
+        changeEditor(Boolean(cleared), Boolean(panel?.contains(panel.ownerDocument.activeElement)));
       }
     } catch (error) {
       report(error);
@@ -167,7 +180,7 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
         maxLength={capability?.objectiveLimit}
         onChange={event => edit('objective', event.target.value)} />
     </div> : <div className="agent-panel-content" ref={content}>
-      <p className="goal-objective" tabIndex={0}>{goal.objective}</p>
+      <p ref={rememberRemovedFocus} className="goal-objective" tabIndex={0}>{goal.objective}</p>
       {goal.reason && <p className="goal-reason">{goal.reason}</p>}
     </div>}
     <div className="panel-actions goal-actions">
@@ -176,7 +189,7 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
           <input type="number" min={1} step={1} value={budget} placeholder="可选"
             onChange={event => edit('budget', event.target.value)} />
         </label>}
-        {goal && <button type="button" aria-disabled={busy} onClick={() => {
+        {goal && <button ref={rememberRemovedFocus} type="button" aria-disabled={busy} onClick={() => {
           if (busy) return;
           setDraft(null);
           changeEditor(false);
@@ -184,11 +197,11 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
         {/* The edit button must keep its original type when its click opens the editor. */}
         <button key="save-goal" type="submit" className="primary" disabled={!trimmed} aria-disabled={busy}>{saveLabel}</button>
       </> : <>
-        {supports('clear') && <button type="button" className="goal-clear" aria-disabled={busy}
+        {supports('clear') && <button ref={rememberRemovedFocus} type="button" className="goal-clear" aria-disabled={busy}
           onClick={() => update({ kind: 'clear' })}>清除</button>}
-        {toggleStatus && supports(toggleStatus) && <button type="button" aria-disabled={busy}
+        {toggleStatus && supports(toggleStatus) && <button ref={rememberRemovedFocus} type="button" aria-disabled={busy}
           onClick={() => update({ kind: toggleStatus })}>{toggleStatus === 'pause' ? '暂停' : goal.status === 'complete' ? '重新开始' : '继续'}</button>}
-        {supports('edit') && <button type="button" ref={editButton} aria-disabled={busy}
+        {supports('edit') && <button type="button" ref={attachEditButton} aria-disabled={busy}
           onClick={() => { if (!busy) changeEditor(true); }}>编辑</button>}
       </>}
     </div>

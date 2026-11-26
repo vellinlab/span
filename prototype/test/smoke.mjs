@@ -1093,6 +1093,28 @@ try {
   await writeFile(join(profile, 'goal-clear'), '');
   await goal.waitFor({ state: 'detached' });
   assert.ok(await composer.evaluate(element => document.activeElement === element));
+
+  await rm(join(profile, 'goal-clear'));
+  await composer.fill('/goal 验证展开时清除目标');
+  await composer.press('Enter');
+  await goal.getByText('验证展开时清除目标', { exact: true }).waitFor();
+  await composer.fill('/goal clear');
+  await composer.press('Enter');
+  const draftAfterClear = '后端清除目标时保留这段草稿。';
+  await composer.fill(draftAfterClear);
+  await composer.evaluate(element => element.setSelectionRange(2, 5));
+  await goal.press('Enter');
+  await dismissGoal.press('Tab');
+  assert.ok(await goalText.evaluate(element => document.activeElement === element));
+  await writeFile(join(profile, 'goal-clear'), '');
+  await goalInput.waitFor();
+  assert.ok(await goalInput.evaluate(element => document.activeElement === element));
+  await page.keyboard.press('Escape');
+  await goalPanel.waitFor({ state: 'detached' });
+  assert.deepEqual(await composer.evaluate(element => [
+    document.activeElement === element, element.value, element.selectionStart, element.selectionEnd,
+  ]), [true, draftAfterClear, 2, 5]);
+  console.log('Verified focus stays in the expanded Goal panel after a delayed clear and Escape restores the message draft.');
   await agentToggle.press('Enter');
   await createGoal.waitFor();
   await agentToggle.press('Escape');
