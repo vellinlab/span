@@ -597,6 +597,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       const bounds = await goalPanel.boundingBox();
       const previewBounds = await strip.boundingBox();
       assert.ok(bounds.y + bounds.height < previewBounds.y);
+      const goalEditorHeight = await objective.evaluate(element => element.clientHeight);
       archived = '检查推理更新期间的目标编辑。步骤 016';
       const start = await metrics();
       await writeFile(join(profile, 'goal-editor'), '');
@@ -609,6 +610,16 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       assert.deepEqual(await objective.evaluate(element => ({ value: element.value, start: element.selectionStart,
         end: element.selectionEnd, focused: element === document.activeElement })), { value, start: 2, end: 8, focused: true });
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-goal-editor.png` });
+      if (label === 'candidate') {
+        assert.ok(goalEditorHeight <= 55, 'A single-line goal should fit a compact editor.');
+        await objective.fill(Array(18).fill(value).join('\n'));
+        const long = await objective.evaluate(element => ({ height: element.clientHeight, scrollHeight: element.scrollHeight }));
+        assert.ok(long.height >= goalEditorHeight + 32 && long.height <= 142 && long.scrollHeight > long.height,
+          'A multiline goal should grow within a bounded, scrollable editor.');
+        const expanded = await goalPanel.boundingBox();
+        assert.ok(Math.abs(expanded.y + expanded.height - bounds.y - bounds.height) <= 1);
+        assert.deepEqual(await strip.boundingBox(), previewBounds);
+      }
       await objective.press('Escape');
       await goalPanel.waitFor({ state: 'detached' });
       assert.ok(await goal.evaluate(element => element === document.activeElement));

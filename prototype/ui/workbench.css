@@ -1152,7 +1152,9 @@ p { margin-block: 0 12px; }
 .goal-budget input { width: 90px; padding: 2px 6px; font-variant-numeric: tabular-nums; }
 .goal-editor { display: flex; flex-direction: column; min-height: 0; padding: 8px 12px; }
 .goal-editor textarea {
+  field-sizing: content;
   min-height: 0;
+  max-height: 142px;
   resize: none;
   scrollbar-width: thin;
   padding: 7px;
