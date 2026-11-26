@@ -639,8 +639,28 @@ try {
     await closeReasoning.focus();
     assert.equal(await draftHeight(), 24);
     assert.equal(await tray.evaluate(element => element.clientHeight), 28);
-    assert.ok(await reasoningPanel.evaluate(panel => panel.getBoundingClientRect().top >=
-      document.querySelector('.timeline').getBoundingClientRect().top + 34));
+    const readingSpace = () => reasoningPanel.evaluate(panel => {
+      const above = panel.getBoundingClientRect().top - document.querySelector('.timeline').getBoundingClientRect().top;
+      const body = panel.querySelector('.agent-panel-content');
+      const style = getComputedStyle(body);
+      return { above, detail: body.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) };
+    });
+    const compact = await readingSpace();
+    assert.ok(compact.above >= 34);
+    const originalSpacing = await page.addStyleTag({ content: `
+      .composer-wrap:has(#reasoning-panel) { padding-block-end: 15px; }
+      .composer-wrap:has(#reasoning-panel) > .composer { padding-block: 8px; }
+      #reasoning-panel { --panel-height: max(112px, calc(100% - 52px)); }
+      #reasoning-panel .agent-panel-content { padding-block: 10px 12px; }
+    ` });
+    try {
+      const original = await readingSpace();
+      assert.ok(compact.above + compact.detail - original.above - original.detail >= 17,
+        'Compact spacing should preserve room for another line across the transcript and reasoning detail.');
+      console.log(`Conversation and reasoning reading height with attachments: ${original.above + original.detail} → ${compact.above + compact.detail} CSS px.`);
+    } finally {
+      await originalSpacing.evaluate(element => element.remove());
+    }
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-attachments.png') });
     const last = removeButtons.at(-1);
     await last.focus();
