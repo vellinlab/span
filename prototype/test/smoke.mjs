@@ -1120,12 +1120,13 @@ try {
   await approvalDetails.evaluate(element => element.blur());
   const focusOutsideCard = () => page.evaluate(() => document.activeElement === document.body);
   assert.ok(await focusOutsideCard());
-  await transcript.evaluate(async (element, top) => {
-    await new Promise(requestAnimationFrame);
-    await new Promise(requestAnimationFrame);
-    element.scrollTop = Math.min(top, element.scrollHeight - element.clientHeight - 300);
-  }, anchor.scrollTop);
-  await latest.waitFor();
+  await readingPosition();
+  await transcript.hover({ position: { x: 12, y: 12 } });
+  await page.mouse.wheel(0, -640);
+  await page.waitForFunction(() => {
+    const element = document.querySelector('.timeline');
+    return element.scrollHeight - element.clientHeight - element.scrollTop >= 240;
+  });
   const beforeWithdrawal = await readingPosition();
   assert.ok(await transcript.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop >= 240),
     'The reader should be well above the live turn before the approval is withdrawn.');
