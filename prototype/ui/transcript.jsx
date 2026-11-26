@@ -113,9 +113,24 @@ function CommandText({ command, titleRef, force }) {
 }
 
 function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, failurePreview,
-  revealDiagnostic, expanded, toggle, scroll, children }) {
+  revealDiagnostic, expanded, toggle, scroll, reasoningTurn, children }) {
   const titleRef = useRef(null);
   const reveal = useRef(null);
+  const trackReasoningFocus = useCallback(element => {
+    const timeline = element?.closest('.timeline');
+    const viewport = timeline?.parentElement;
+    if (!viewport?.matches('.transcript-viewport')) return;
+    return () => {
+      const document = element.ownerDocument;
+      if (!element.contains(document.activeElement)) return;
+      // The fixed strip is mounted later in the same commit when an approval ends.
+      queueMicrotask(() => {
+        if (!timeline.isConnected || document.activeElement !== document.body) return;
+        const strip = viewport.parentElement.querySelector('[data-card="live-reasoning"]');
+        if (strip?.dataset.turnId === reasoningTurn) strip.focus({ preventScroll: true });
+      });
+    };
+  }, [reasoningTurn]);
   useLayoutEffect(() => {
     const details = reveal.current;
     if (!details) return;
@@ -148,7 +163,7 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
       {statusLabel && statusNote && <span aria-hidden="true">·</span>}
       {statusNote && <span>{statusNote}</span>}
     </span>}</>;
-  return <div className="activity" data-card={type} data-failed={failed || undefined}>
+  return <div className="activity" ref={reasoningTurn ? trackReasoningFocus : undefined} data-card={type} data-failed={failed || undefined}>
     {children ? <details open={expanded} onToggle={event => {
       const details = event.currentTarget;
       if (details.open === expanded) return;
@@ -310,7 +325,8 @@ const TranscriptRow = memo(function TranscriptRow({
   return <Card type={row.kind} icon={icon} status={status} recordedStatus={recordedStatus}
     statusText={statusText} statusNote={statusNote} failurePreview={expanded ? undefined : activityFailurePreview(row, status)}
     revealDiagnostic={row.kind === 'tool' && status === 'failed' && Boolean(row.errorMessage)}
-    title={title} hint={hint} path={path} expanded={expanded} scroll={scroll} toggle={open => toggle(row.key, open)}>{detail}</Card>;
+    title={title} hint={hint} path={path} expanded={expanded} scroll={scroll}
+    reasoningTurn={row.kind === 'reasoning' ? row.turnId : undefined} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
 const ActivityGroup = memo(function ActivityGroup({ group, open, toggle, releaseAnchor }) {

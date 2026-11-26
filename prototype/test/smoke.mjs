@@ -1189,6 +1189,19 @@ try {
   await approvalDetails.waitFor();
   assert.ok(await approval.evaluate(element => document.activeElement === element),
     'A new approval should take focus from a link inside the closing reasoning panel.');
+  if (await latest.isVisible()) await latest.click();
+  const inlineSummary = archivedReasoning.filter({ hasText: '已准备可撤回的审批请求。' });
+  await inlineSummary.locator('summary').press('Enter');
+  const inlineReference = inlineSummary.getByRole('link', { name: '审批说明' });
+  await inlineReference.focus();
+  assert.ok(await inlineReference.evaluate(element => document.activeElement === element));
+  await writeFile(join(profile, 'withdraw-focused-approval'), '');
+  await approval.waitFor({ state: 'detached' });
+  await liveReasoning.waitFor();
+  assert.ok(await liveReasoning.evaluate(element => document.activeElement === element),
+    'When the approval ends during the turn, focus should follow the reasoning back to its fixed line.');
+  await writeFile(join(profile, 'show-withdrawable-approval-again'), '');
+  await approvalDetails.waitFor();
   await approvalDetails.focus();
   await approvalDetails.evaluate(element => element.blur());
   const focusOutsideCard = () => page.evaluate(() => document.activeElement === document.body);

@@ -46,7 +46,7 @@ export const ReasoningText = memo(function ReasoningText({ rows, scroll, archive
     <ReasoningSections key={row.key} row={row} scroll={scroll} />)}</div>;
 });
 
-export const ReasoningStrip = memo(function ReasoningStrip({ preview, expanded, toggle, hadFocus }) {
+export const ReasoningStrip = memo(function ReasoningStrip({ turnId, preview, expanded, toggle, hadFocus }) {
   const trigger = useRef(null);
   useLayoutEffect(() => {
     const button = trigger.current;
@@ -54,7 +54,7 @@ export const ReasoningStrip = memo(function ReasoningStrip({ preview, expanded, 
       hadFocus.current = document.activeElement === button;
     };
   }, [hadFocus]);
-  return <button type="button" ref={trigger} className="reasoning-strip" data-card="live-reasoning"
+  return <button type="button" ref={trigger} className="reasoning-strip" data-card="live-reasoning" data-turn-id={turnId}
     aria-label="实时推理摘要" aria-describedby="live-reasoning-preview" aria-expanded={expanded}
     aria-controls={expanded ? 'reasoning-panel' : undefined} onClick={toggle}>
     <Brain size={15} aria-hidden="true" /><span className="reasoning-label">推理摘要</span>

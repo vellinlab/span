@@ -996,8 +996,8 @@ function App() {
               </div>
               <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host}
                 focusTarget={interactionRegion} returnFocus={input} />
-              {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningExpanded} hadFocus={reasoningHadFocus}
-                toggle={onReasoningToggle} />}
+              {showReasoning && <ReasoningStrip turnId={liveReasoning.turnId} preview={liveReasoning.preview}
+                expanded={reasoningExpanded} hadFocus={reasoningHadFocus} toggle={onReasoningToggle} />}
               {goal && <GoalStrip ref={returnComposerFocus} objective={goal.objective} status={goal.status}
                 activeWithoutTurn={api?.goal?.activeWithoutTurn}
                 expanded={panel?.kind === 'goal'} toggle={onGoalToggle} />}

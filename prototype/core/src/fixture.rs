@@ -93,25 +93,30 @@ fn withdraw_approval(
         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning",
             "id":format!("{turn}-withdrawn-summary"),"summary":["查阅[审批说明](https://example.com/span/review)。\n\n已准备可撤回的审批请求。"]}}),
     )?;
-    if !wait_for_stream_gate(&gate.join("show-withdrawable-approval"), running) {
-        return Ok(());
-    }
     let item = approval_command(turn, cwd, "inProgress");
-    let request_id = format!("{turn}-withdrawn-approval");
-    send(
-        output,
-        json!({"id":request_id,"method":"item/commandExecution/requestApproval",
-            "params":{"threadId":thread_id,"turnId":turn,"itemId":item["id"],
-                "command":item["command"],"cwd":cwd}}),
-    )?;
-    if !wait_for_stream_gate(&gate.join("withdraw-approval"), running) {
-        return Ok(());
+    for (show, withdraw) in [
+        ("show-withdrawable-approval", "withdraw-focused-approval"),
+        ("show-withdrawable-approval-again", "withdraw-approval"),
+    ] {
+        if !wait_for_stream_gate(&gate.join(show), running) {
+            return Ok(());
+        }
+        let request_id = format!("{turn}-{withdraw}");
+        send(
+            output,
+            json!({"id":request_id,"method":"item/commandExecution/requestApproval",
+                "params":{"threadId":thread_id,"turnId":turn,"itemId":item["id"],
+                    "command":item["command"],"cwd":cwd}}),
+        )?;
+        if !wait_for_stream_gate(&gate.join(withdraw), running) {
+            return Ok(());
+        }
+        notice(
+            output,
+            "serverRequest/resolved",
+            json!({"threadId":thread_id,"requestId":request_id}),
+        )?;
     }
-    notice(
-        output,
-        "serverRequest/resolved",
-        json!({"threadId":thread_id,"requestId":request_id}),
-    )?;
     running.store(false, Ordering::Release);
     notice(
         output,
