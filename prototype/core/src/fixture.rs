@@ -150,11 +150,15 @@ fn patch_sample(turn: &str) -> Value {
 fn command_output(turn: &str, cwd: &Path) -> Value {
     let mut text = format!("    prepare\t{}\n", "index workspace ".repeat(12));
     for index in 1..20_000 {
-        writeln!(
+        write!(
             text,
             "    检查 {index:05}\tworkspace/source/feature_{index:05}.rs"
         )
         .unwrap();
+        if index == 19_999 {
+            write!(text, "\t{}", "保留输出阅读位置。".repeat(10)).unwrap();
+        }
+        text.push('\n');
     }
     text.push_str("warning: 已核对全部命令输出。\n");
     json!({"type":"commandExecution","id":format!("{turn}-output"),"command":"workspace verify --all",

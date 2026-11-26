@@ -11,7 +11,7 @@ import { attachmentName } from './file-references.js';
 import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
-import { CopyTextButton, TextReader } from './text-reader.jsx';
+import { CopyTextButton, readTextPosition, TextReader } from './text-reader.jsx';
 import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, timelineLayout, visibleRow } from './timeline.js';
 
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
@@ -39,8 +39,9 @@ function ArtifactList({ artifacts, openArtifact, openImage, label }) {
 const largeOutputSize = 16 * 1024;
 const streamedOutputRefreshMs = 64;
 const snapshotOutputRefreshMs = 125;
+const outputPositionLimit = 64;
 
-function ToolOutput({ row }) {
+function ToolOutput({ row, positions }) {
   const scroll = useRef(null);
   const streaming = !row.final && row.status === 'running';
   const deferred = useDeferredValue(row);
@@ -57,6 +58,14 @@ function ToolOutput({ row }) {
   useLayoutEffect(() => {
     if (committed.current.row !== visible) committed.current = { row: visible, time: performance.now() };
   }, [visible]);
+  useLayoutEffect(() => () => {
+    const position = readTextPosition(scroll.current);
+    if (!position) return;
+    positions.delete(row.key);
+    if (!position.page && !position.top && !position.left) return;
+    positions.set(row.key, position);
+    if (positions.size > outputPositionLimit) positions.delete(positions.keys().next().value);
+  }, [positions, row.key]);
   useEffect(() => {
     if (!pending) return;
     const { time } = previous;
@@ -75,7 +84,7 @@ function ToolOutput({ row }) {
       <CopyTextButton text={row.text || row.errorMessage} label={`复制${heading}`} copiedLabel={`已复制${heading}`} />
     </div>
     <TextReader text={text} output={visible.outputChunks} plain={!long} kind="output"
-      label={error ? '工具错误' : '工具输出'} pagesLabel="输出分页" scroll={scroll} />
+      label={error ? '工具错误' : '工具输出'} pagesLabel="输出分页" position={positions.get(row.key)} scroll={scroll} />
   </div>;
 }
 
@@ -170,7 +179,7 @@ function delegationStatus(members) {
 
 const TranscriptRow = memo(function TranscriptRow({
   row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openTrace, openArtifact, openImage, canOpenSession,
-  streaming, following, scroll,
+  streaming, following, scroll, outputPositions,
 }) {
   if (row.kind === 'user') return <div className="user-message" data-attachment-only={(!row.text && !row.queued) || undefined}>
     {row.attachments?.length && row.text ? <span>{row.text}</span> : row.text}
@@ -222,7 +231,7 @@ const TranscriptRow = memo(function TranscriptRow({
       }
       if (command || hasContext) detail = titleRef => <>
         {command && <CommandText command={command} titleRef={titleRef} force={!hasContext} />}
-        {hasContext && <ToolOutput row={row} />}
+        {hasContext && <ToolOutput row={row} positions={outputPositions} />}
       </>;
       break;
     }
@@ -243,14 +252,14 @@ const TranscriptRow = memo(function TranscriptRow({
           {targetPath && <><dt>{row.query ? '搜索目录' : '路径'}</dt><dd><PathText path={targetPath} /></dd></>}
           {row.source && <><dt>来源</dt><dd>{row.source}</dd></>}
         </dl>}
-        {(row.text || row.errorMessage) && <ToolOutput row={row} />}
+        {(row.text || row.errorMessage) && <ToolOutput row={row} positions={outputPositions} />}
       </>;
       break;
     }
     case 'search':
       title = row.query;
       if (row.url || row.text) detail = () => <>{row.url && <SourceLink url={row.url}>{row.url}</SourceLink>}
-        {row.text && <ToolOutput row={row} />}</>;
+        {row.text && <ToolOutput row={row} positions={outputPositions} />}</>;
       break;
     case 'delegation': {
       title = row.action;
@@ -376,6 +385,8 @@ export const Transcript = memo(function Transcript({
 }) {
   const expanded = useRef(null);
   if (!expanded.current) expanded.current = new Map(remembered?.expansion);
+  const outputPositions = useRef(null);
+  if (!outputPositions.current) outputPositions.current = new Map(remembered?.outputPositions);
   const ungroupedTurns = useRef(null);
   if (!ungroupedTurns.current) ungroupedTurns.current = new Set(remembered?.ungroupedTurns);
   const [openGroups, setOpenGroups] = useState(() => new Set(remembered?.openGroups));
@@ -508,8 +519,9 @@ export const Transcript = memo(function Transcript({
       const current = latest.current;
       if (!viewKey || current?.restore || !current?.rows.length) return;
       const anchor = readAnchor(element, current.rows, current.layout);
+      // Open outputs record their position during child layout cleanup.
       remember(viewKey, { anchor, pages: current.historyPages, expansion: Array.from(expanded.current).slice(-64),
-        openGroups: Array.from(current.openGroups).slice(-64),
+        openGroups: Array.from(current.openGroups).slice(-64), outputPositions: outputPositions.current,
         ungroupedTurns: anchor && ungroupedTurns.current.has(anchor.turnId) ? [anchor.turnId] : [] });
     };
   }, [viewKey, remember, scroll]);
@@ -614,7 +626,7 @@ export const Transcript = memo(function Transcript({
             : <TranscriptRow row={row} activePlan={activePlan}
               liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
-              streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll}
+              streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll} outputPositions={outputPositions.current}
               expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
               toggle={toggle} openSession={openSession} openTrace={openTrace} openArtifact={openArtifact} openImage={openImage}
               canOpenSession={canOpenSession} />)}

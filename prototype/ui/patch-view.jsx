@@ -1,6 +1,6 @@
 import { memo, useRef, useState } from 'react';
 import { PathText } from './file-reference-name.jsx';
-import { CopyTextButton, TextReader } from './text-reader.jsx';
+import { CopyTextButton, readTextPosition, TextReader } from './text-reader.jsx';
 
 function updateHunk(inHunk, text, start) {
   if (text.startsWith('diff --', start)) return false;
@@ -24,9 +24,8 @@ export const PatchView = memo(function PatchView({ files, text, label = '本轮�
   const active = sources.find(source => source.key === selection) ?? sources[0];
   if (!active) return null;
   function select(key) {
-    const viewport = scroll.current;
-    if (viewport) positions.current.set(active.key, { page: Number(viewport.dataset.page),
-      top: viewport.scrollTop, left: viewport.scrollLeft });
+    const position = readTextPosition(scroll.current);
+    if (position) positions.current.set(active.key, position);
     setSelection(key);
   }
   return <>

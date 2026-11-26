@@ -113,7 +113,7 @@ function App() {
   const rememberReadingView = useCallback((key, view) => {
     const recent = readingViews.current;
     recent.delete(key);
-    if (view.anchor || view.expansion.length || view.openGroups.length) recent.set(key, view);
+    if (view.anchor || view.expansion.length || view.openGroups.length || view.outputPositions.size) recent.set(key, view);
     if (recent.size > 24) recent.delete(recent.keys().next().value);
   }, []);
   const previewCoversConversation = previewOverlay && Boolean(preview && !preview.parked);

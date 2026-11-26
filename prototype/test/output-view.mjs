@@ -116,7 +116,30 @@ async function check(binary, legacy, screenshot) {
     const raw = await readClipboard();
     assert.ok(raw.length > 256 * 1024 && raw.startsWith('    prepare\t') && raw.endsWith(lastLine + '\n'));
     assert.equal(raw.split('\n').length, 20_002);
-    await summary.click();
+    const saved = await viewport.evaluate(element => {
+      element.scrollTo({ top: element.scrollHeight, left: 72 });
+      return { page: Number(element.dataset.page), top: element.scrollTop, left: element.scrollLeft };
+    });
+    assert.equal(saved.page, 2);
+    assert.ok(saved.top > 0 && saved.left > 0);
+    const verifyRestoredOutput = async () => {
+      await navigation.getByText('16385–20001 行', { exact: true }).waitFor();
+      await lines.getByText(lastLine, { exact: true }).waitFor();
+      assert.deepEqual(await viewport.evaluate(element => ({ page: Number(element.dataset.page),
+        top: element.scrollTop, left: element.scrollLeft })), saved);
+      assert.ok(await lines.count() <= 40);
+    };
+    await summary.press('Enter');
+    await viewport.waitFor({ state: 'detached' });
+    await summary.press('Enter');
+    await verifyRestoredOutput();
+    assert.ok(await summary.evaluate(element => element === document.activeElement));
+    const beforeLeaving = await timeline.evaluate(element => element.scrollTop);
+    await timeline.evaluate(element => { element.scrollTop = Math.max(200, element.scrollTop - 2400); });
+    await command.waitFor({ state: 'detached' });
+    await timeline.evaluate((element, top) => { element.scrollTop = top; }, beforeLeaving);
+    await verifyRestoredOutput();
+    await summary.press('Enter');
     await viewport.waitFor({ state: 'detached' });
     const shortTool = timeline.locator('[data-card="tool"]').filter({ hasText: '核对异常项' });
     await shortTool.locator('summary').click();
@@ -198,7 +221,8 @@ async function check(binary, legacy, screenshot) {
     assert.equal(await readClipboard(), fullCommand);
     await longSummary.press('Enter');
     await original.waitFor({ state: 'detached' });
-    return { mountedAtStart, mountedAtEnd, rawLines: 20_001, rawCharacters: raw.length };
+    return { mountedAtStart, mountedAtEnd, restoredPage: saved.page + 1,
+      restoredScroll: { top: saved.top, left: saved.left }, rawLines: 20_001, rawCharacters: raw.length };
   } finally {
     await app?.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 3 });

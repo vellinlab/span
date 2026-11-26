@@ -7,6 +7,10 @@ const LINE_HEIGHT = 18;
 const estimateLine = () => LINE_HEIGHT;
 const FIRST_PAGE = [{ start: 0 }];
 
+export function readTextPosition(viewport) {
+  if (viewport) return { page: Number(viewport.dataset.page), top: viewport.scrollTop, left: viewport.scrollLeft };
+}
+
 function TextViewport({ data, text, kind, label, position, page, scroll }) {
   const initialPosition = useRef(position);
   const mounted = useRef(false);
@@ -44,7 +48,10 @@ export function TextReader({ text, output, plain = false, kind, label, pagesLabe
   const pageText = typeof page === 'string' ? page : text.slice(page.start, pages[current + 1]?.start);
   const data = useMemo(() => plain ? null : readTextPage(pageText, context, updateContext, classify, previous.current.data),
     [plain, pageText, context, updateContext, classify]);
-  useLayoutEffect(() => { previous.current = { index, data }; }, [index, data]);
+  useLayoutEffect(() => {
+    previous.current = { index, data };
+    if (view.page !== current) setView({ page: current });
+  }, [index, data, view.page, current]);
   return <>
     <TextViewport key={current} data={data} text={pageText} kind={kind} label={label} position={view.page === current ? view : null}
       page={current} scroll={scroll} />
