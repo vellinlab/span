@@ -780,6 +780,8 @@ try {
   assert.equal(await usageEntry.locator('code').textContent(), '/usage');
   assert.equal(await agentsEntry.locator('code').textContent(), '/agents');
   assert.match(await agentToggle.getAttribute('aria-description'), /用量、代理与团队/);
+  await settingsEntry.getByText('Fixture', { exact: true }).waitFor();
+  assert.match(await settingsEntry.getAttribute('aria-description'), /^Fixture/);
   await page.keyboard.press('Tab');
   assert.ok(await settingsEntry.evaluate(element => document.activeElement === element));
   assert.ok(await settingsEntry.evaluate(element => {

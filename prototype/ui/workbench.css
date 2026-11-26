@@ -1037,11 +1037,24 @@ p { margin-block: 0 12px; }
   z-index: 2;
   bottom: calc(100% + 6px);
   right: 0;
+  width: max-content;
   min-width: 142px;
+  max-width: min(232px, 100cqi - 72px);
   padding: 4px;
   white-space: nowrap;
 }
-.agent-menu-entries svg { color: var(--muted); }
+.agent-menu-entries svg { flex: none; color: var(--muted); }
+.agent-menu-entries button:has(.agent-menu-setting) > svg { align-self: start; margin-block-start: 1px; }
+.agent-menu-setting { min-width: 0; }
+.agent-menu-setting small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 15px;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .agent-menu-entries code { margin-inline-start: auto; color: var(--muted); font: 11px/16px var(--mono); }
 .agent-menu-entries button:focus-visible { outline-width: 1px; outline-offset: -1px; }
 .agent-menu-entries button:focus-visible svg { color: var(--accent); }

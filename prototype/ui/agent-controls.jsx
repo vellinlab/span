@@ -718,8 +718,9 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
   ];
   if (!entries.length) return null;
   const selectedModel = models.find(model => model.id === modelId) ?? models.find(model => model.isDefault);
+  const modelLabel = selectedModel?.label ?? (models.length ? '后端默认' : undefined);
   const modeLabel = modeId === 'default' ? undefined : api?.modes?.find(mode => mode.id === modeId)?.label;
-  const label = [selectedModel?.label, modeLabel].filter(Boolean).join(' · ');
+  const label = [modelLabel, modeLabel].filter(Boolean).join(' · ');
   const actions = entries.map(([, , name]) => name).join('、');
   function onKeyDown(event) {
     if (event.nativeEvent.isComposing || event.defaultPrevented) return;
@@ -765,10 +766,17 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
       <ChevronDown className="agent-menu-chevron" size={12} aria-hidden="true" />
     </button>
     {open && <div ref={menu} id={menuId} role="group" className="agent-menu-entries popup-surface" aria-label="Agent 操作">
-      {entries.map(([kind, Icon, name, command]) => <button key={kind} type="button" aria-description={command} onClick={() => {
-        setOpen(false);
-        onSelect(kind, trigger.current);
-      }}><Icon size={15} aria-hidden="true" />{name}{command && <code aria-hidden="true">{command}</code>}</button>)}
+      {entries.map(([kind, Icon, name, command]) => {
+        const detail = kind === 'settings' ? label : '';
+        return <button key={kind} type="button" aria-description={detail || command} onClick={() => {
+          setOpen(false);
+          onSelect(kind, trigger.current);
+        }}>
+          <Icon size={15} aria-hidden="true" />
+          {detail ? <span className="agent-menu-setting">{name}<small dir="auto" aria-hidden="true">{detail}</small></span> : name}
+          {command && <code aria-hidden="true">{command}</code>}
+        </button>;
+      })}
     </div>}
   </div>;
 });
