@@ -1,6 +1,6 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PathText } from './file-reference-name.jsx';
-import { CopyTextButton, readTextPosition, TextReader } from './text-reader.jsx';
+import { CopyTextButton, readTextPosition, rememberReaderPosition, TextReader } from './text-reader.jsx';
 
 function updateHunk(inHunk, text, start) {
   if (text.startsWith('diff --', start)) return false;
@@ -15,17 +15,46 @@ function toneFor(line, inHunk) {
   if (line.startsWith('-')) return 'remove';
 }
 
-export const PatchView = memo(function PatchView({ files, text, label = '本轮差异', directory }) {
-  const [selection, setSelection] = useState('');
-  const positions = useRef(new Map());
+function rememberFilePosition(positions, key, viewport) {
+  const position = readTextPosition(viewport);
+  if (!position) return;
+  rememberReaderPosition(positions, key, position.page || position.top || position.left ? position : undefined, Infinity);
+}
+
+export const PatchView = memo(function PatchView({ files, text, label = '本轮差异', directory, viewKey, viewPositions }) {
+  const saved = viewPositions?.get(viewKey);
+  const positions = useRef(null);
+  if (!positions.current) positions.current = new Map(saved?.files);
   const scroll = useRef(null);
-  const sources = files.map((file, index) => ({ label: file.path, diff: file.diff, key: JSON.stringify([file.path, index]) }));
-  if (text) sources.push({ label, diff: text, key: 'turn' });
+  const currentFile = useRef(null);
+  const sources = useMemo(() => {
+    const occurrences = new Map();
+    const sources = files.map(file => {
+      const occurrence = occurrences.get(file.path) ?? 0;
+      occurrences.set(file.path, occurrence + 1);
+      return { label: file.path, diff: file.diff, key: JSON.stringify([file.path, occurrence]) };
+    });
+    if (text) sources.push({ label, diff: text, key: 'turn' });
+    return sources;
+  }, [files, label, text]);
+  const firstKey = sources[0]?.key;
+  const [selection, setSelection] = useState(saved?.selection ?? firstKey);
   const active = sources.find(source => source.key === selection) ?? sources[0];
+  const activeKey = active?.key;
+  useLayoutEffect(() => {
+    currentFile.current = activeKey ? { key: activeKey, first: activeKey === firstKey } : null;
+    if (activeKey !== selection) setSelection(activeKey);
+  }, [activeKey, firstKey, selection]);
+  useLayoutEffect(() => () => {
+    if (!viewPositions || !currentFile.current) return;
+    const { key, first } = currentFile.current;
+    rememberFilePosition(positions.current, key, scroll.current);
+    const files = new Map(Array.from(positions.current).slice(-8));
+    rememberReaderPosition(viewPositions, viewKey, !first || files.size ? { selection: key, files } : undefined);
+  }, [viewKey, viewPositions]);
   if (!active) return null;
   function select(key) {
-    const position = readTextPosition(scroll.current);
-    if (position) positions.current.set(active.key, position);
+    rememberFilePosition(positions.current, activeKey, scroll.current);
     setSelection(key);
   }
   return <>

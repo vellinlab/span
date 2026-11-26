@@ -11,7 +11,7 @@ import { attachmentName } from './file-references.js';
 import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
-import { CopyTextButton, readTextPosition, TextReader } from './text-reader.jsx';
+import { CopyTextButton, readTextPosition, rememberReaderPosition, TextReader } from './text-reader.jsx';
 import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, sameTranscriptRows, timelineLayout, visibleRow } from './timeline.js';
 
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
@@ -39,7 +39,6 @@ function ArtifactList({ artifacts, openArtifact, openImage, label }) {
 const largeOutputSize = 16 * 1024;
 const streamedOutputRefreshMs = 64;
 const snapshotOutputRefreshMs = 125;
-const outputPositionLimit = 64;
 
 function ToolOutput({ row, positions }) {
   const scroll = useRef(null);
@@ -61,10 +60,7 @@ function ToolOutput({ row, positions }) {
   useLayoutEffect(() => () => {
     const position = readTextPosition(scroll.current);
     if (!position) return;
-    positions.delete(row.key);
-    if (!position.page && !position.top && !position.left) return;
-    positions.set(row.key, position);
-    if (positions.size > outputPositionLimit) positions.delete(positions.keys().next().value);
+    rememberReaderPosition(positions, row.key, position.page || position.top || position.left ? position : undefined);
   }, [positions, row.key]);
   useEffect(() => {
     if (!pending) return;
@@ -241,7 +237,7 @@ const TranscriptRow = memo(function TranscriptRow({
       title = row.files?.length ? '文件变更' : '本轮差异';
       if (!expanded && row.files?.length === 1) path = row.files[0].path;
       else if (row.files?.length > 1) hint = `${row.files.length} 个文件`;
-      detail = () => <PatchView files={row.files ?? []} text={row.text} />;
+      detail = () => <PatchView files={row.files ?? []} text={row.text} viewKey={row.key} viewPositions={outputPositions} />;
       break;
     case 'tool': {
       title = row.name || '调用工具';

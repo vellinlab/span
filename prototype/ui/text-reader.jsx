@@ -11,6 +11,13 @@ export function readTextPosition(viewport) {
   if (viewport) return { page: Number(viewport.dataset.page), top: viewport.scrollTop, left: viewport.scrollLeft };
 }
 
+export function rememberReaderPosition(positions, key, position, limit = 64) {
+  positions.delete(key);
+  if (!position) return;
+  positions.set(key, position);
+  if (positions.size > limit) positions.delete(positions.keys().next().value);
+}
+
 function TextViewport({ data, text, kind, label, position, page, scroll }) {
   const initialPosition = useRef(position);
   const mounted = useRef(false);

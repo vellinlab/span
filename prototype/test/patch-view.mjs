@@ -117,9 +117,19 @@ async function check(binary, legacy, screenshot) {
     const before = await position();
     assert.deepEqual(before, [14000, 120]);
     const files = patch.getByRole('combobox', { name: '变更文件' });
+    const reopenPatch = async () => {
+      await summary.press('Enter');
+      await viewport.waitFor({ state: 'detached' });
+      await summary.press('Enter');
+      await viewport.waitFor();
+      assert.ok(await summary.evaluate(element => element === document.activeElement));
+    };
     await files.selectOption({ label: 'prototype/REVIEW.md' });
     await viewport.getByText('保留原文和缩进。', { exact: false }).waitFor();
     assert.deepEqual(await position(), [0, 0]);
+    await reopenPatch();
+    await viewport.getByText('保留原文和缩进。', { exact: false }).waitFor();
+    assert.equal(await files.evaluate(field => field.selectedOptions[0].label), 'prototype/REVIEW.md');
     await files.selectOption({ label: 'prototype/sample/README.md' });
     await patch.getByText('没有可显示的差异。', { exact: true }).waitFor();
     assert.equal(await viewport.count(), 0);
@@ -142,6 +152,21 @@ async function check(binary, legacy, screenshot) {
     const raw = await readClipboard();
     assert.ok(raw.startsWith('--- a/' + mainFile) && raw.endsWith(lastLine + '\n'));
     assert.equal(raw.split('\n').length, 10006);
+    const endPosition = await position();
+    const checkRestoredPage = async () => {
+      await viewport.getByText(lastLine, { exact: true }).waitFor();
+      assert.equal(await viewport.getAttribute('data-page'), '1');
+      assert.deepEqual(await position(), endPosition);
+      assert.ok(await patch.locator('.diff-line').count() <= 40);
+    };
+    await reopenPatch();
+    await checkRestoredPage();
+    const timeline = page.getByTestId('transcript');
+    const beforeLeaving = await timeline.evaluate(element => element.scrollTop);
+    await timeline.evaluate(element => { element.scrollTop = Math.max(200, element.scrollTop - 2400); });
+    await patch.waitFor({ state: 'detached' });
+    await timeline.evaluate((element, top) => { element.scrollTop = top; }, beforeLeaving);
+    await checkRestoredPage();
     await summary.click();
     await patch.locator('.diff-scroll').waitFor({ state: 'detached' });
     await page.locator('.code-card').filter({ hasText: 'patch preview ready' }).getByRole('button', { name: '复制代码' }).click();
