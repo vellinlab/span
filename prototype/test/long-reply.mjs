@@ -478,11 +478,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
         return { connected: element.isConnected, updates: seen.size };
       };
     });
-    const detailMutations = await detail?.evaluateHandle(element => {
+    const detailMutations = await detail?.locator('.prose').last().evaluateHandle(element => {
       let mutations = 0;
       const observer = new MutationObserver(() => { mutations++; });
-      observer.observe(element.querySelector('.reasoning-section:last-child .prose'),
-        { subtree: true, childList: true, characterData: true });
+      observer.observe(element, { subtree: true, childList: true, characterData: true });
       return () => {
         observer.disconnect();
         return mutations;
