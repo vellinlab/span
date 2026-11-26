@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, ChevronRight, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
@@ -691,7 +691,16 @@ function ExtensionList({ panel, search }) {
 
 export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId, modeId, onSelect }) {
   const [open, setOpen] = useState(false);
+  const menuId = useId();
   const trigger = useRef(null);
+  const menu = useRef(null);
+  const focusOnOpen = useRef(0);
+  useLayoutEffect(() => {
+    if (!open || !focusOnOpen.current) return;
+    const entry = focusOnOpen.current > 0 ? menu.current?.firstElementChild : menu.current?.lastElementChild;
+    focusOnOpen.current = 0;
+    entry?.focus({ preventScroll: true });
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const dismiss = event => {
@@ -712,25 +721,50 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
   const modeLabel = modeId === 'default' ? undefined : api?.modes?.find(mode => mode.id === modeId)?.label;
   const label = [selectedModel?.label, modeLabel].filter(Boolean).join(' · ');
   const actions = entries.map(([, , name]) => name).join('、');
-  return <div className="agent-menu"
-    onBlur={event => {
-      if (open && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-    }}
-    onKeyDown={event => {
-      if (!open || event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+  function onKeyDown(event) {
+    if (event.nativeEvent.isComposing || event.defaultPrevented) return;
+    const { key } = event;
+    if (open && key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
       trigger.current?.focus({ preventScroll: true });
       setOpen(false);
-    }}>
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const arrow = key === 'ArrowUp' || key === 'ArrowDown';
+    if (!arrow && (!open || (key !== 'Home' && key !== 'End'))) return;
+    event.preventDefault();
+    if (!open) {
+      focusOnOpen.current = key === 'ArrowDown' ? 1 : -1;
+      setOpen(true);
+      return;
+    }
+    const items = Array.from(menu.current.children);
+    const active = items.indexOf(event.target);
+    let next;
+    switch (key) {
+      case 'ArrowDown': next = (active + 1) % items.length; break;
+      case 'ArrowUp': next = active > 0 ? active - 1 : items.length - 1; break;
+      case 'Home': next = 0; break;
+      case 'End': next = items.length - 1; break;
+    }
+    items[next]?.focus({ preventScroll: true });
+  }
+  return <div className="agent-menu"
+    onBlur={event => {
+      if (open && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}
+    onKeyDown={onKeyDown}>
     <button ref={trigger} className="composer-control" type="button" aria-label="Agent 控件" aria-expanded={open}
+      aria-controls={open ? menuId : undefined}
       aria-description={actions} title={label ? `${label} · ${actions}` : actions}
       onClick={() => setOpen(value => !value)}>
       <span className="agent-menu-label">Agent</span>
       {label && <span className="agent-menu-model">{label}</span>}
       <ChevronDown className="agent-menu-chevron" size={12} aria-hidden="true" />
     </button>
-    {open && <div className="agent-menu-entries popup-surface" aria-label="Agent 控件">
+    {open && <div ref={menu} id={menuId} role="group" className="agent-menu-entries popup-surface" aria-label="Agent 操作">
       {entries.map(([kind, Icon, name, command]) => <button key={kind} type="button" aria-description={command} onClick={() => {
         setOpen(false);
         onSelect(kind, trigger.current);
