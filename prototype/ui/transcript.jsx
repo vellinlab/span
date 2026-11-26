@@ -116,7 +116,8 @@ function CommandText({ command, titleRef, force }) {
   </div>;
 }
 
-function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, failurePreview, expanded, toggle, scroll, children }) {
+function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, failurePreview,
+  revealDiagnostic, expanded, toggle, scroll, children }) {
   const titleRef = useRef(null);
   const reveal = useRef(null);
   useLayoutEffect(() => {
@@ -127,11 +128,12 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
     const view = viewport.getBoundingClientRect();
     const heading = details.firstElementChild.getBoundingClientRect();
     const body = details.lastElementChild.getBoundingClientRect();
-    // Leave room for the start of the body when a card opens against the viewport edge.
-    const end = Math.min(body.bottom, body.top + 44);
+    // Show a compact diagnostic in full when the viewport has room for its heading and body.
+    const fits = revealDiagnostic && body.bottom - heading.top + 4 <= view.height;
+    const end = fits ? body.bottom : Math.min(body.bottom, body.top + 44);
     const delta = Math.min(heading.top - view.top, end + 4 - view.bottom);
     if (delta > 1) viewport.scrollTop += delta;
-  }, [expanded, scroll]);
+  }, [expanded, revealDiagnostic, scroll]);
   const failed = status === 'failed' && !recordedStatus;
   const CardIcon = failed ? CircleAlert : Icon;
   const statusLabel = statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
@@ -304,6 +306,7 @@ const TranscriptRow = memo(function TranscriptRow({
   const icon = row.kind === 'tool' && row.query ? Search : cardIcons[row.kind] ?? CodeXml;
   return <Card type={row.kind} icon={icon} status={status} recordedStatus={recordedStatus}
     statusText={statusText} statusNote={statusNote} failurePreview={expanded ? undefined : activityFailurePreview(row, status)}
+    revealDiagnostic={row.kind === 'tool' && status === 'failed' && Boolean(row.errorMessage)}
     title={title} hint={hint} path={path} expanded={expanded} scroll={scroll} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 

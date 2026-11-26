@@ -1397,6 +1397,10 @@ try {
 
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
+  if (showTerminalAfterReview) {
+    await terminalToggle.click();
+    await terminalPanel.waitFor({ state: 'hidden' });
+  }
   await composer.fill('验证结构化工具错误。');
   await composer.press('Enter');
   const errorTool = transcript.locator('[data-card="tool"]').filter({ hasText: '打开复核记录' });
@@ -1417,6 +1421,12 @@ try {
   assert.match(diagnosticText, /\n错误码 WORKSPACE_ACCESS$/);
   assert.ok(await errorDetail.evaluate(element => getComputedStyle(element).whiteSpace === 'pre-wrap' &&
     element.scrollWidth <= element.clientWidth + 1), 'The full diagnostic should wrap within the compact tool card.');
+  await page.waitForFunction(() => {
+    const detail = document.querySelector('pre[aria-label="工具错误"]');
+    const viewport = detail?.closest('.timeline').getBoundingClientRect();
+    const heading = detail?.closest('details').querySelector('summary').getBoundingClientRect();
+    return viewport && heading.top >= viewport.top - 1 && detail.getBoundingClientRect().bottom <= viewport.bottom + 1;
+  });
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-tool-error-detail.png') });
   await errorTool.getByRole('button', { name: '复制错误详情', exact: true }).press('Enter');
   await errorTool.locator('[title="已复制错误详情"]').waitFor();
@@ -1424,6 +1434,10 @@ try {
   await errorHeading.press('Enter');
   await errorDetail.waitFor({ state: 'detached' });
   assert.ok(await errorHeading.evaluate(element => element === document.activeElement));
+  if (showTerminalAfterReview) {
+    await terminalToggle.click();
+    await terminalPanel.waitFor();
+  }
   await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), windowSize);
   await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);
   console.log('Verified a readable structured tool error, compact wrapping, and full diagnostic copy.');
