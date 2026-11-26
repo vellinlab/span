@@ -936,6 +936,18 @@ p { margin-block: 0 12px; }
 .goal-strip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
 .goal-strip small { margin-inline-start: auto; white-space: nowrap; color: var(--muted); font-size: 11px; }
 .goal-strip[data-status="blocked"] small { color: #efb8ad; }
+@media (forced-colors: active) {
+  .goal-strip { border-color: ButtonText; }
+  .composer-wrap :is(.reasoning-strip, .goal-strip)[aria-expanded="true"] {
+    /* Use the system selection pair without separate backplates behind the text. */
+    forced-color-adjust: none;
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+    &:focus-visible { outline-color: Highlight; }
+    & :is(svg, span, small) { color: inherit; }
+  }
+}
 .composer-overlay-anchor { anchor-name: --composer-overlay; }
 .composer-overlay {
   position: absolute;

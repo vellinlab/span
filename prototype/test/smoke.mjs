@@ -623,8 +623,35 @@ try {
       box(card).bottom < box(form).top && box(panel).left === box(form).left;
   }));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-draft.png') });
-  await reasoningBody.press('Escape');
-  await reasoningPanel.waitFor({ state: 'detached' });
+  const stripColors = locator => locator.evaluate(element => {
+    const style = getComputedStyle(element);
+    return {
+      expanded: element.getAttribute('aria-expanded') === 'true',
+      foreground: style.color, background: style.backgroundColor,
+      colorAdjust: style.forcedColorAdjust,
+      uniform: [...element.querySelectorAll('span, small, svg')].every(child => getComputedStyle(child).color === style.color),
+    };
+  });
+  await page.emulateMedia({ forcedColors: 'active' });
+  try {
+    const openReasoning = await stripColors(liveReasoning);
+    assert.ok(openReasoning.expanded && openReasoning.uniform && openReasoning.colorAdjust === 'none');
+    assert.notEqual(openReasoning.background, (await stripColors(goal)).background);
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-forced-colors.png') });
+    await reasoningBody.press('Escape');
+    await reasoningPanel.waitFor({ state: 'detached' });
+    assert.ok(await liveReasoning.evaluate(element => element.matches(':focus-visible')));
+    await goal.press('Enter');
+    await goalPanel.waitFor();
+    assert.deepEqual(await stripColors(goal), openReasoning);
+    assert.notEqual((await stripColors(liveReasoning)).background, openReasoning.background);
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-forced-colors.png') });
+    await dismissGoal.press('Escape');
+    await goalPanel.waitFor({ state: 'detached' });
+    assert.ok(await goal.evaluate(element => element.matches(':focus-visible')));
+  } finally {
+    await page.emulateMedia({ forcedColors: null });
+  }
   assert.equal(await draftHeight(), originalDraftHeight);
   assert.equal(await composer.inputValue(), longDraft);
   await composer.fill('');
