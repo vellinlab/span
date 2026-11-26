@@ -305,6 +305,16 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
   const readyRow = page.locator('.xterm-rows > div', { hasText: 'span_covered_ready' });
   const dimensions = () => screen.evaluate(element => [element.offsetWidth, element.offsetHeight]);
   const beforeCover = await dimensions();
+  const readme = page.getByRole('button', { name: 'README.md' });
+  const preview = page.getByRole('complementary', { name: '文件预览' });
+  const waitForPreview = () => preview.getByText('Span 工作台预览', { exact: true }).waitFor();
+  const closePreview = () => preview.getByRole('button', { name: '关闭预览' }).click();
+  const waitForOutput = () => page.waitForFunction(() => {
+    const rows = [...document.querySelectorAll('.xterm-rows > div')];
+    const last = rows.findIndex(row => row.textContent.trim() === 'span_hidden_080');
+    const done = rows.findIndex(row => row.querySelector('.xterm-fg-2')?.textContent.trim() === 'span_covered_done');
+    return last >= 0 && done > last;
+  });
   const observation = await screen.evaluateHandle(element => {
     let intersecting;
     let windowHidden;
@@ -334,7 +344,6 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       stop() { visibility.disconnect(); stopWindow(); unsubscribe(); },
     };
   });
-  let preview;
   try {
     if (minimized) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
@@ -342,9 +351,8 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       assert.ok(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()));
     } else {
       await page.getByRole('button', { name: '文件', exact: true }).click();
-      await page.getByRole('button', { name: 'README.md' }).click();
-      preview = page.getByRole('complementary', { name: '文件预览' });
-      await preview.getByText('Span 工作台预览', { exact: true }).waitFor();
+      await readme.click();
+      await waitForPreview();
       await page.waitForFunction(state => state.intersecting === (document.querySelector('.xterm').getBoundingClientRect().left < innerWidth), observation);
       assert.equal(await observation.evaluate(state => state.intersecting), variant === 'baseline');
     }
@@ -368,20 +376,33 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     if (minimized) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
       await page.waitForFunction(state => state.windowHidden === false, observation, { polling: 50 });
-    } else await preview.getByRole('button', { name: '关闭预览' }).click();
-    await page.waitForFunction(() => {
-      const rows = [...document.querySelectorAll('.xterm-rows > div')];
-      const last = rows.findIndex(row => row.textContent.trim() === 'span_hidden_080');
-      const done = rows.findIndex(row => row.querySelector('.xterm-fg-2')?.textContent.trim() === 'span_covered_done');
-      return last >= 0 && done > last;
-    });
+    } else await closePreview();
+    await waitForOutput();
     const revealDomMs = performance.now() - revealStarted;
     assert.deepEqual(await dimensions(), beforeCover);
     const restored = minimized ? 'restored' : 'revealed';
     if (saveImage) await page.screenshot({ path: reportPath.replace(/\.json$/, `-${variant}-terminal-${restored}.png`) });
+    let resizeWhileCovered;
+    if (!minimized && variant === 'candidate') {
+      await readme.click();
+      await waitForPreview();
+      await page.waitForFunction(state => state.intersecting === false, observation);
+      const windowWidths = [800, 740];
+      for (const width of windowWidths) {
+        await resize(app, page, [width, initialSize[1]]);
+        await settle(page);
+        assert.ok(await preview.isVisible());
+        assert.deepEqual(await dimensions(), beforeCover, 'Resizing under the preview must preserve the painted grid');
+      }
+      await closePreview();
+      await page.waitForFunction(width => document.querySelector('.terminal-canvas .xterm-screen').offsetWidth <= width,
+        beforeCover[0] - 80);
+      await waitForOutput();
+      resizeWhileCovered = { windowWidths, originalGrid: beforeCover, revealedGrid: await dimensions() };
+    }
     await terminalLine(page, linux ? `printf '%s_%s\\n' span_covered still_open` : 'echo span_covered_still_open', 'span_covered_still_open');
     assert.equal(await observation.evaluate(state => state.finish().generations), 1);
-    return { variant, events, before, covered, revealDomMs };
+    return { variant, events, before, covered, revealDomMs, resizeWhileCovered };
   } finally {
     await observation.evaluate(state => state.stop());
     await observation.dispose();

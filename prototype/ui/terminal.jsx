@@ -44,6 +44,13 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     terminal.loadAddon(fit);
     terminal.open(host);
     fit.fit();
+    let frame;
+    let fitPending = false;
+    // Keep the PTY at its last visible size until the terminal is revealed.
+    const fitWhenVisible = () => {
+      fitPending = hidden.current;
+      if (!fitPending) fit.fit();
+    };
     const renderService = terminal._core?._renderService;
     let intersection = { isIntersecting: true };
     const outsideViewport = { isIntersecting: false };
@@ -87,6 +94,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       };
     }
     applyRenderVisibility.current = () => {
+      if (!hidden.current && fitPending) fitWhenVisible();
       setIntersection?.(hidden.current ? outsideViewport : intersection);
       if (!hidden.current) restoreSelection?.();
     };
@@ -105,11 +113,11 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
         }
         host.dataset.renderer = 'webgl';
         flushOutput();
-        fit.fit();
+        fitWhenVisible();
         webgl.onContextLoss(() => {
           webgl.dispose();
           host.dataset.renderer = 'dom';
-          fit.fit();
+          fitWhenVisible();
         });
       }).catch(() => {
         // The DOM renderer is already active if the optional addon cannot load.
@@ -185,10 +193,13 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       update('write', { data });
     });
     const size = terminal.onResize(value => update('resize', value));
-    let frame;
     const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => fit.fit());
+      fitPending = true;
+      if (hidden.current || frame !== undefined) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        if (fitPending) fitWhenVisible();
+      });
     });
     observer.observe(host);
     return () => {
