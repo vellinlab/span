@@ -12,7 +12,7 @@ import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFile
 import { watchPiTeamTranscript } from '../ui/pi-teams.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
-import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, historyRows, mergeHistory, sameTranscriptRows, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
+import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, hasReasoningSection, historyRows, mergeHistory, sameTranscriptRows, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
 import { workspacePathKey } from '../ui/workspace-path.js';
 
 const local = { kind: 'local' };
@@ -935,6 +935,23 @@ test('a live reasoning preview waits for text in the next Markdown block', () =>
   assert.equal(preview(next), '读取最新状态');
   assert.equal(next[0].sections[0], '## 检查会话\r\n> 1. 读取最新状态');
   assert.equal(preview(applyTimeline(start, [delta('2.0 已加载')])), '2.0 已加载');
+});
+
+test('restored reasoning keeps readable sections before trailing Markdown markers', () => {
+  const saved = sections => historyRows([{ run: { id: 't', status: 'completed' }, rows: [
+    { kind: 'reasoning', id: 'r', turnId: 't', sections },
+  ] }]);
+  const separators = '---\n'.repeat(70);
+  const summary = '> 1. 核对前文\n' + separators;
+  const sections = [summary, '   ', '---\n~~~'];
+  const restored = saved(sections);
+  assert.equal(restored.length, 1);
+  assert.equal(turnReasoning(restored, 't').preview, '核对前文');
+  assert.deepEqual(turnReasoningRows(restored, 't'), restored);
+  assert.deepEqual(restored[0].sections, sections);
+  assert.deepEqual(sections.map((_, index) => hasReasoningSection(restored[0], index)), [true, false, false]);
+  assert.equal(turnReasoning(saved([...sections, '## 最新正文', '# ']), 't').preview, '最新正文');
+  assert.deepEqual(saved(['## ', separators]), []);
 });
 
 test('reasoning strips keep link labels while destinations stream or load from history', () => {

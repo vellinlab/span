@@ -54,8 +54,14 @@ export function sameTranscriptRows(previous, next, hiddenTurn) {
 }
 
 export function hasReasoningSection(row, index) {
-  const cached = summaryTailsByRow.get(row)?.[index];
-  return cached ? Boolean(cached.preview) : Boolean(row.sections[index]?.trim());
+  const text = row.sections[index];
+  if (!text) return false;
+  const tails = summaryTailsByRow.get(row) ?? [];
+  if (!tails[index]) {
+    tails[index] = snapshotSummary(text);
+    summaryTailsByRow.set(row, tails);
+  }
+  return Boolean(tails[index].preview);
 }
 
 function estimateRow(row) {
@@ -343,6 +349,21 @@ function summaryTail(previous, fragment) {
   return { tail, preview: previous?.preview, destination };
 }
 
+function snapshotSummary(text) {
+  const latest = summaryTail(undefined, text);
+  if (latest.preview || text.length <= summaryPreviewLength) return latest;
+  // A saved section can end with enough empty Markdown blocks to fill the preview window.
+  const cutoff = Math.max(0, text.trimEnd().length - summaryPreviewLength);
+  let end = text.indexOf('\n', cutoff);
+  while (end > 0) {
+    const start = text.lastIndexOf('\n', end - 1) + 1;
+    const { preview } = summaryTail(undefined, text.slice(start, end));
+    if (preview) return { ...latest, preview };
+    end = start - 1;
+  }
+  return latest;
+}
+
 function addReasoning({ rows, positions, write }, data, final, delta) {
   const { turnId, id } = data;
   const section = data.section ?? 0;
@@ -361,17 +382,22 @@ function addReasoning({ rows, positions, write }, data, final, delta) {
     const text = sections[section] ?? '';
     // Keep the complete text for expanded details and history. The fixed
     // strip only reads the next fragment and the bounded tail for its section.
-    const current = cached?.[section] ?? summaryTail(undefined, text);
+    const current = cached?.[section] ?? snapshotSummary(text);
     sections[section] = text + data.text;
     tails = cached?.slice() ?? [];
     summary = tails[section] = summaryTail(current, data.text);
   } else {
-    const index = sections.findLastIndex(part => part?.trim());
-    if (index !== -1) {
-      summary = sections[index] === previous?.sections[index] ? cached?.[index] : undefined;
-      summary ??= summaryTail(undefined, sections[index]);
-      tails = [];
-      tails[index] = summary;
+    if (!final) tails = [];
+    for (let index = sections.length - 1; index >= 0; index--) {
+      const text = sections[index];
+      if (!text) continue;
+      const prior = text === previous?.sections[index] ? cached?.[index] : undefined;
+      const sectionSummary = prior ?? snapshotSummary(text);
+      if (tails) tails[index] = sectionSummary;
+      if (sectionSummary.preview) {
+        summary = sectionSummary;
+        break;
+      }
     }
   }
   const preview = (delta && !summary.advanced ? undefined : summary?.preview) || previous?.preview;
