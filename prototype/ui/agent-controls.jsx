@@ -567,7 +567,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
       action={work.goalAction} report={report} editOnOpen={panel.editGoal} /> : <div className="agent-panel-content" ref={content}
       tabIndex={detailsLabel ? 0 : undefined} role={detailsLabel ? 'group' : undefined} aria-label={detailsLabel}>
       {panel.kind === 'settings' && <RuntimeSettings api={work.api} models={work.models} options={work.options} setOptions={work.setOptions} />}
-      {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} />}
+      {reasoningPanel && <ReasoningText rows={reasoning} scroll={content} archived={reasoningArchived} />}
       {usagePanel && <UsagePanel usage={work.usage} refreshing={work.usageRefreshing} />}
       {agentsPanel && <AgentsPanel work={work} openSession={openSession} openTrace={openTrace} report={report} />}
       {panel.kind === 'subagent' && <SubagentTranscript key={panel.id} panel={panel} delegation={work.api?.delegation}

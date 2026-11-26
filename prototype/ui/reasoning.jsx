@@ -10,13 +10,13 @@ const ReasoningSections = memo(function ReasoningSections({ row, scroll }) {
       : <Markdown text={text} />}</div>)}</div>;
 });
 
-export const ReasoningText = memo(function ReasoningText({ rows, scroll }) {
+export const ReasoningText = memo(function ReasoningText({ rows, scroll, archived }) {
   const content = useRef(null);
   const hasContent = Boolean(rows?.length);
   useEffect(() => {
     const viewport = scroll?.current;
     const body = content.current;
-    if (!viewport || !body) return;
+    if (!viewport || !body || archived) return;
     let following = false;
     const rememberScroll = () => {
       following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 24;
@@ -28,12 +28,13 @@ export const ReasoningText = memo(function ReasoningText({ rows, scroll }) {
       viewport.scrollTop = viewport.scrollHeight;
     });
     observer.observe(body);
+    observer.observe(viewport);
     viewport.addEventListener('scroll', rememberScroll, { passive: true });
     return () => {
       observer.disconnect();
       viewport.removeEventListener('scroll', rememberScroll);
     };
-  }, [hasContent, scroll]);
+  }, [hasContent, scroll, archived]);
   return hasContent && <div ref={content} className="reasoning-text">{rows.map(row =>
     <ReasoningSections key={row.key} row={row} scroll={scroll} />)}</div>;
 });

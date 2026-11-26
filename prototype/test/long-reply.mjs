@@ -427,6 +427,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
   const detail = reasoningDetails ? panel.locator('.agent-panel-content') : null;
   const heading = panel.getByRole('heading', { name: '复核顺序' });
   let detailPosition;
+  let detailOffsetBeforeArchive;
   let initialHeading;
   const revealBottom = () => page.waitForFunction(() => {
     const region = document.querySelector('#reasoning-panel .agent-panel-content');
@@ -622,6 +623,28 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
         await page.keyboard.press('End');
         await revealBottom();
         assert.equal(await position(), before);
+
+        const [width, height] = await page.evaluate(() => [innerWidth, innerHeight]);
+        const resize = async size => {
+          await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), size);
+          await page.waitForFunction(height => innerHeight === height, size[1]);
+          await settleFrame(page);
+        };
+        const detailHeight = () => detail.evaluate(element => element.clientHeight);
+        const detailTop = () => detail.evaluate(element => element.scrollTop);
+        await resize([width, height + 140]);
+        await revealBottom();
+        const tall = await detailHeight();
+        await resize([width, height]);
+        assert.ok(tall - await detailHeight() >= 16, 'Resizing should shorten the summary viewport.');
+        await revealBottom();
+        await detail.evaluate(element => { element.scrollTop = 120; });
+        await settleFrame(page);
+        await resize([width, height + 140]);
+        assert.equal(await detailTop(), 120, 'Growing the summary should preserve an earlier reading position.');
+        await resize([width, height]);
+        assert.equal(await detailTop(), 120, 'Shrinking the summary should preserve an earlier reading position.');
+        detailOffsetBeforeArchive = await detailTop();
       }
       archived = '引用检查完成。';
       await strip.getByText(archived, { exact: true }).waitFor();
@@ -633,6 +656,9 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     if (detail && keepsArchive) {
       await panel.getByText('已归档', { exact: true }).waitFor();
       assert.ok(await detail.evaluate(element => element === document.activeElement));
+      if (detailOffsetBeforeArchive !== undefined) {
+        assert.equal(await detail.evaluate(element => element.scrollTop), detailOffsetBeforeArchive);
+      }
       await detail.press('Escape');
       assert.ok(await composer.evaluate(element => element === document.activeElement));
     }
