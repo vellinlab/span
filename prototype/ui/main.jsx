@@ -305,9 +305,16 @@ function App() {
   const previewImage = config?.ssh || !window.span.previewImage ? undefined : openImage;
 
   function openDirectory(path) {
+    previewScope.current++;
     directoryFocus.current = true;
     setEntries([]);
     setDirectory(path);
+  }
+
+  function selectSidebarTab(next) {
+    if (next === tab) return;
+    previewScope.current++;
+    setTab(next);
   }
 
   const openArtifact = useCallback(artifact => {
@@ -360,7 +367,7 @@ function App() {
 
   function openSearch() {
     setSidebarOpen(true);
-    setTab('sessions');
+    selectSidebarTab('sessions');
     setSearchOpen(true);
     requestAnimationFrame(() => search.current?.focus());
   }
@@ -517,7 +524,7 @@ function App() {
     setTarget(config?.ssh ?? '');
     setConnectionCwd(config?.cwd ?? '');
     setSidebarOpen(true);
-    setTab('hosts');
+    selectSidebarTab('hosts');
     requestAnimationFrame(() => backendControl.current?.focus());
   }
 
@@ -940,8 +947,8 @@ function App() {
           </div>
         </>}
         <nav className="sidebar-tools" aria-label="工作台面板">
-          <button aria-pressed={tab === 'sessions'} onClick={() => setTab('sessions')}><SquarePen size={16} />会话</button>
-          <button aria-pressed={tab === 'files'} onClick={() => setTab('files')}><Folder size={16} />文件</button>
+          <button aria-pressed={tab === 'sessions'} onClick={() => selectSidebarTab('sessions')}><SquarePen size={16} />会话</button>
+          <button aria-pressed={tab === 'files'} onClick={() => selectSidebarTab('files')}><Folder size={16} />文件</button>
         </nav>
       </Sidebar>}
       <div className="workspace-area" data-preview-overlay={previewOverlay || undefined}>

@@ -1961,12 +1961,57 @@ try {
   await preview.getByRole('heading', { name: '窗口布局复核' }).waitFor();
   await checkPreviewHeader();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-file-location-wide.png') });
+
+  const holdNotesPreview = async () => {
+    await app.evaluate(({ BrowserWindow }) => {
+      const { ipc } = BrowserWindow.getAllWindows()[0].webContents;
+      let receive;
+      let release;
+      const request = new Promise(resolve => { receive = resolve; });
+      const reply = new Promise(resolve => { release = resolve; });
+      globalThis.spanNotesPreview = { request, release };
+      ipc.handleOnce('span:request', (_event, method, params) => {
+        receive({ method, path: params?.path });
+        return reply;
+      });
+    });
+    await notesFile.press('Enter');
+    const request = await app.evaluate(() => Promise.race([
+      globalThis.spanNotesPreview.request,
+      new Promise(resolve => setTimeout(resolve, 5000).unref()),
+    ]));
+    assert.deepEqual(request, { method: 'files.preview', path: 'workbench-guides/interface-review/' + notesName });
+  };
+  const releaseNotesPreview = async () => {
+    await app.evaluate(() => {
+      globalThis.spanNotesPreview.release({ kind: 'text', data: '旧目录的预览回包' });
+      delete globalThis.spanNotesPreview;
+    });
+    // A subsequent renderer request and frame let the earlier preview reply reach its caller.
+    await page.evaluate(async cwd => {
+      await window.span.request('files.list', { cwd, path: '' });
+      await new Promise(requestAnimationFrame);
+    }, reviewWorkspace);
+    assert.equal(await previewTitle.textContent(), reviewName);
+  };
+  await holdNotesPreview();
+  await upDirectory.press('Enter');
+  const interfaceDirectory = sidebar.getByRole('button', { name: 'interface-review', exact: true });
+  await interfaceDirectory.waitFor();
+  assert.equal(await location.textContent(), 'workbench-guides');
+  await releaseNotesPreview();
+  await interfaceDirectory.press('Enter');
+  await holdNotesPreview();
+  await sidebar.getByRole('button', { name: '会话', exact: true }).click();
+  await releaseNotesPreview();
+  await sidebar.getByRole('button', { name: '文件', exact: true }).click();
   await upDirectory.press('Enter');
   await upDirectory.press('Enter');
   await reviewFile.waitFor();
   assert.equal(await location.textContent(), 'review-workspace');
   assert.equal(await reviewFile.getAttribute('aria-current'), null);
   assert.equal(await previewTitle.textContent(), reviewName);
+  console.log('Verified changing directory or leaving the files tab discards a pending preview without replacing the open file.');
   console.log('Verified folder context, current-file styling, filename suffix, scroll reset, and keyboard navigation in the file preview.');
 } finally {
   await app.close();
