@@ -45,6 +45,16 @@ test('append-only readers reuse completed log lines and rebuild when the backend
   assert.deepEqual(readTextPage(replaced, undefined, undefined, undefined, last), readTextPage(replaced));
 });
 
+test('log and patch columns account for tab stops and wide characters', () => {
+  for (const [line, columns] of [
+    ['abcd\t', 8], ['é\t中😀', 8], ['𠀀\tabc', 7], ['\uD800a\uDC00\tZ', 9],
+  ]) {
+    const data = readTextPage(`a\r\n${line}\r\n`);
+    assert.equal(data.columns, columns);
+    assert.deepEqual(data.rows.map(row => row.text), ['a', line]);
+  }
+});
+
 test('ACP history preserves user-visible content and turn boundaries while hiding assistant-only context', () => {
   const replay = acpReplay();
   const chunk = (sessionUpdate, messageId, text, audience) => replay.update({ sessionUpdate, messageId,

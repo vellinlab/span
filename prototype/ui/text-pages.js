@@ -58,8 +58,10 @@ export function indexText(text, updateContext, previous) {
 
 function lineWidth(line) {
   let width = 0;
-  for (const char of line) {
-    width += char === '\t' ? 4 - (width % 4) : char.codePointAt(0) >= 0x2e80 ? 2 : 1;
+  for (let index = 0; index < line.length; index++) {
+    const codePoint = line.codePointAt(index);
+    width += codePoint === 0x09 ? 4 - (width % 4) : codePoint >= 0x2e80 ? 2 : 1;
+    if (codePoint > 0xffff) index++;
   }
   return width;
 }
