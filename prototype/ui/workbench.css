@@ -932,8 +932,8 @@ p { margin-block: 0 12px; }
 .goal-icon { color: var(--accent); }
 .goal-chevron { color: var(--muted); }
 .goal-strip[aria-expanded="true"] .goal-chevron { transform: rotate(180deg); }
-.goal-strip span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.goal-strip small { white-space: nowrap; color: var(--muted); font-size: 11px; }
+.goal-strip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
+.goal-strip small { margin-inline-start: auto; white-space: nowrap; color: var(--muted); font-size: 11px; }
 .goal-strip[data-status="blocked"] small { color: #efb8ad; }
 .composer-overlay-anchor { anchor-name: --composer-overlay; }
 .composer-overlay {

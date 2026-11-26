@@ -311,9 +311,54 @@ try {
   assert.equal(await goalInput.count(), 0);
   await editGoal.press('Enter');
   assert.ok(await goalInput.evaluate(field => field === document.activeElement));
+  const goalObjective = goal.locator('#goal-strip-objective');
+  const shortRtlGoal = 'راجع السجل';
+  await goalInput.fill(shortRtlGoal);
+  await saveGoal.press('Enter');
+  await goal.getByText(shortRtlGoal, { exact: true }).waitFor();
+  assert.ok(await goalObjective.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const icon = element.previousElementSibling.getBoundingClientRect();
+    const status = element.nextElementSibling.getBoundingClientRect();
+    return bounds.left - icon.right <= 10 && status.left - bounds.right > bounds.width;
+  }), 'A short Arabic objective should sit next to the Goal icon.');
+  await editGoal.press('Enter');
+  const rtlGoal = 'راجع حالة Windows وEL8، واحفظ موضع القراءة قبل المتابعة. '.repeat(8).trim();
+  await goalInput.fill(rtlGoal);
+  await saveGoal.press('Enter');
+  await goal.getByText(rtlGoal, { exact: true }).waitFor();
+  assert.equal(await goalText.evaluate(element => getComputedStyle(element).direction), 'rtl');
+  assert.ok(await goalObjective.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const start = document.createRange();
+    start.setStart(element.firstChild, 0);
+    start.setEnd(element.firstChild, 1);
+    const first = start.getBoundingClientRect();
+    const icon = element.previousElementSibling.getBoundingClientRect();
+    const status = element.nextElementSibling.getBoundingClientRect();
+    return getComputedStyle(element).direction === 'rtl' && element.scrollWidth > element.clientWidth &&
+      first.left >= bounds.left && Math.abs(first.right - bounds.right) <= 4 &&
+      icon.right < bounds.left && bounds.right < status.left;
+  }), 'The clipped Goal should retain its Arabic start with the icon and status in their original positions.');
+  if (screenshot) {
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-rtl.png') });
+    const objectiveText = page.locator('#goal-strip-objective, #goal-panel .goal-objective');
+    const setDirection = direction => objectiveText.evaluateAll((nodes, value) => {
+      for (const node of nodes) node.setAttribute('dir', value);
+    }, direction);
+    await setDirection('ltr');
+    try {
+      await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-rtl-before.png') });
+    } finally {
+      await setDirection('auto');
+    }
+  }
+  await editGoal.press('Enter');
+  assert.equal(await goalInput.evaluate(element => getComputedStyle(element).direction), 'rtl');
   const longGoal = Array.from({ length: 10 }, (_, index) =>
     `第 ${index + 1} 项。对照窗口尺寸、输入响应与会话恢复，记录对应的验收证据。`).join('\n');
   await goalInput.fill(longGoal);
+  assert.equal(await goalInput.evaluate(element => getComputedStyle(element).direction), 'ltr');
   await goalBudget.fill('40000');
   await saveGoal.press('Enter');
   await goalText.waitFor();

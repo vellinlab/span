@@ -176,12 +176,12 @@ function GoalPanel({ goal, capability, action, report, editOnOpen }) {
       : { kind: 'set', objective: trimmed, budget: tokenBudget ?? undefined });
   }}>
     {showEditor ? <div className="goal-editor">
-      <textarea ref={objectiveInput} aria-label="目标" rows={6} value={objective} required
+      <textarea ref={objectiveInput} aria-label="目标" dir="auto" rows={6} value={objective} required
         maxLength={capability?.objectiveLimit}
         onChange={event => edit('objective', event.target.value)} />
     </div> : <div className="agent-panel-content" ref={content}>
-      <p ref={rememberRemovedFocus} className="goal-objective" tabIndex={0}>{goal.objective}</p>
-      {goal.reason && <p className="goal-reason">{goal.reason}</p>}
+      <p ref={rememberRemovedFocus} className="goal-objective" dir="auto" tabIndex={0}>{goal.objective}</p>
+      {goal.reason && <p className="goal-reason" dir="auto">{goal.reason}</p>}
     </div>}
     <div className="panel-actions goal-actions">
       {showEditor ? <>
@@ -740,7 +740,7 @@ export const GoalStrip = memo(function GoalStrip({ ref, objective, status, activ
     aria-describedby="goal-strip-status goal-strip-objective" aria-expanded={expanded}
     aria-controls={expanded ? 'goal-panel' : undefined} data-status={status} onClick={toggle}>
     <Goal size={16} className="goal-icon" aria-hidden="true" />
-    <span id="goal-strip-objective">{objective}</span><small id="goal-strip-status">{label}</small>
+    <span id="goal-strip-objective" dir="auto">{objective}</span><small id="goal-strip-status">{label}</small>
     <ChevronDown size={13} className="goal-chevron" aria-hidden="true" />
   </button>;
 });
