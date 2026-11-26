@@ -1064,7 +1064,9 @@ p { margin-block: 0 12px; }
   width: min(100%, 560px);
 }
 .agent-panel:is([data-kind="agents"], [data-kind="subagent"]) { width: min(100%, 560px); }
-.agent-panel[data-kind="reasoning"] { --panel-height: 320px; }
+/* Leave a few lines of the conversation above details while keeping the panel readable. */
+.agent-panel[data-kind="reasoning"] { --panel-height: clamp(106px, 100% - 70px, 320px); }
+.agent-panel[data-kind="goal"]:has(.goal-objective) { --panel-height: clamp(116px, 100% - 76px, 400px); }
 .composer-overlay:has(> .agent-panel[data-kind="subagent"]) { container-type: size; }
 .agent-panel[data-kind="subagent"] {
   --subagent-panel-height: min(calc(100cqh - 10px), 55vh, 310px);
@@ -1207,15 +1209,8 @@ p { margin-block: 0 12px; }
   }
   .goal-editor { padding-block: 6px; }
   .goal-editor textarea { padding-block: 4px; }
-}
-@container (max-width: 600px) and (max-height: 400px) {
-  /* Keep some of the conversation visible above details in a short reading column. */
-  .agent-panel[data-kind="reasoning"] {
-    --panel-height: max(106px, calc(100% - 70px));
-    & .agent-panel-content { padding-block: 8px; }
-  }
+  .agent-panel[data-kind="reasoning"] .agent-panel-content { padding-block: 8px; }
   .agent-panel[data-kind="goal"]:has(.goal-objective) {
-    --panel-height: max(116px, calc(100% - 76px));
     & > header, & .goal-actions, & .agent-panel-content { padding-block: 2px; }
     & :is(header, .goal-actions) button:focus-visible { outline-offset: -2px; }
   }
