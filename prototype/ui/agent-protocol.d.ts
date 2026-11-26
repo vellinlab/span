@@ -237,7 +237,8 @@ declare global {
       previewImage(path: string): Promise<{ kind: 'image'; mime: string; data: string } | null>;
       openLink(url: string): Promise<void>;
       onWindowHidden?(listener: (hidden: boolean) => void): () => void;
-      onEvent(listener: (packet: { event: string; generation: number; data: any }) => void): () => void;
+      onEvent(listener: (packet: { event: string; generation?: number; data: any }) => void,
+        subscription?: { events?: string[]; generation?: number }): () => void;
     };
   }
 }

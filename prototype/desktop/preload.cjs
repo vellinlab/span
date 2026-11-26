@@ -8,9 +8,13 @@ ipcRenderer.on('span:window-hidden', (_event, hidden) => {
   for (const listener of visibilityListeners) listener(hidden);
 });
 
-const listeners = new Set();
+const listeners = new Map();
 ipcRenderer.on('span:event', (_event, packet) => {
-  for (const listener of listeners) listener(packet);
+  for (const [listener, { events, generation }] of listeners) {
+    if (generation !== undefined && packet.generation !== generation) continue;
+    if (events && !events.includes(packet.event)) continue;
+    listener(packet);
+  }
 });
 
 contextBridge.exposeInMainWorld('span', {
@@ -30,8 +34,8 @@ contextBridge.exposeInMainWorld('span', {
     listener(windowHidden);
     return () => visibilityListeners.delete(listener);
   },
-  onEvent: listener => {
-    listeners.add(listener);
+  onEvent: (listener, subscription = {}) => {
+    listeners.set(listener, subscription);
     return () => listeners.delete(listener);
   },
 });

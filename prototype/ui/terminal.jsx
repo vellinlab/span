@@ -185,7 +185,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
         terminal.writeln('\r\n[终端已退出]');
       }
       if (packet.event === 'terminal-error') setError(packet.data);
-    });
+    }, { events: ['terminal', 'terminal-closed', 'terminal-error'], generation: source });
     update('start', { cwd: workspace, ssh, cols: terminal.cols, rows: terminal.rows });
     const input = terminal.onData(data => {
       // Send input before parsing queued output. Its response can arrive in the same paint as that output.

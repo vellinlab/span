@@ -183,7 +183,7 @@ function App() {
     }).catch(report);
     return window.span.onEvent(packet => {
       if (packet.event === 'core-error') setError(packet.data);
-    });
+    }, { events: ['core-error'] });
   }, [move, report]);
 
   useEffect(() => {

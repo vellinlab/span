@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { runInNewContext } from 'node:vm';
 import { acpReplay } from '../ui/acp-items.js';
 import { createAcpTaskTraces } from '../ui/acp-task-traces.js';
 import acpHttp from '../desktop/acp-http.cjs';
@@ -16,6 +18,41 @@ import { workspacePathKey } from '../ui/workspace-path.js';
 const local = { kind: 'local' };
 const remote = { kind: 'ssh', host: 'dev' };
 const session = (backend, location) => ({ backend, location, id: 'thread' });
+
+test('desktop event subscriptions cross into the workbench only for their kind and generation', async () => {
+  const preload = await readFile(new URL('../desktop/preload.cjs', import.meta.url), 'utf8');
+  let receive, span;
+  runInNewContext(preload, {
+    require(name) {
+      assert.equal(name, 'electron');
+      return {
+        contextBridge: { exposeInMainWorld: (key, api) => { if (key === 'span') span = api; } },
+        ipcRenderer: { on: (channel, listener) => { if (channel === 'span:event') receive = listener; } },
+      };
+    },
+  });
+  const agent = [], terminal = [], errors = [], all = [];
+  const disconnect = span.onEvent(packet => agent.push(packet), { events: ['agent', 'agent-closed'], generation: 7 });
+  span.onEvent(packet => terminal.push(packet), { events: ['terminal', 'terminal-closed'], generation: 8 });
+  span.onEvent(packet => errors.push(packet), { events: ['core-error'] });
+  span.onEvent(packet => all.push(packet));
+  const packets = [
+    { event: 'agent', generation: 7, data: { result: ['history'] } },
+    { event: 'terminal', generation: 8, data: 'b3V0cHV0' },
+    { event: 'agent', generation: 3, data: { result: ['old history'] } },
+    { event: 'terminal', generation: 5, data: 'b2xk' },
+    { event: 'core-error', data: 'Service error' },
+    { event: 'agent-closed', generation: 7 },
+    { event: 'terminal-closed', generation: 8 },
+  ];
+  for (const packet of packets) receive(null, packet);
+  disconnect();
+  receive(null, packets[0]);
+  assert.deepEqual(agent, [packets[0], packets[5]]);
+  assert.deepEqual(terminal, [packets[1], packets[6]]);
+  assert.deepEqual(errors, [packets[4]]);
+  assert.deepEqual(all, [...packets, packets[0]]);
+});
 
 test('workspace grouping recognizes Windows path spelling while retaining case-sensitive directory names', () => {
   assert.equal(workspacePathKey('D:\\Span\\Case\\'), workspacePathKey('d:/Span/Case'));

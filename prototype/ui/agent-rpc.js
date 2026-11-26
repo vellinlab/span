@@ -37,7 +37,7 @@ export function connectRpc(generation, onPacket, onRoute, onClosed, wire = jsonR
     } else if (wire.event(data)) {
       onPacket(data);
     }
-  });
+  }, { events: ['agent', 'agent-route', 'agent-closed'], generation });
 
   async function ready() {
     let timer;

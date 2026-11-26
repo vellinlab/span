@@ -505,7 +505,12 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
       .map(({ name, value }) => [name, value]));
     const processMemory = async () => {
-      if (!linux) return;
+      if (!linux) {
+        const memory = await app.evaluate(({ app }, pid) => app.getAppMetrics().find(metric => metric.pid === pid)?.memory,
+          rendererPid);
+        assert.ok(memory?.workingSetSize > 0 && memory.privateBytes > 0);
+        return { workingSetKiB: memory.workingSetSize, privateKiB: memory.privateBytes };
+      }
       const memory = await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8');
       const kib = field => Number(memory.match(new RegExp(`^${field}:\\s+(\\d+)`, 'm'))[1]);
       return { pssKiB: kib('Pss'), rssKiB: kib('Rss'), privateDirtyKiB: kib('Private_Dirty') };
@@ -746,7 +751,8 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       assert.ok(await answer.evaluate(element => element.getBoundingClientRect().bottom <=
         element.closest('.timeline').getBoundingClientRect().bottom));
     }
-    return { label, updates, bodyUpdates, goalEditorScriptMs, startPssKiB: startMemory?.pssKiB, endPssKiB: endMemory?.pssKiB, typing, diagnosticMemory,
+    return { label, updates, bodyUpdates, goalEditorScriptMs, startPssKiB: startMemory.pssKiB, endPssKiB: endMemory.pssKiB,
+      startMemory, endMemory, typing, diagnosticMemory,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000, layouts: end.LayoutCount - start.LayoutCount };
