@@ -1304,6 +1304,16 @@ pub fn run() -> Result<()> {
                 json!({"goal":goal})
             }
             "thread/goal/clear" => {
+                if let Some(gate) = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from)
+                    && gate.join("hold-goal-clear").is_file()
+                    && !wait_for_stream_gate(&gate.join("goal-clear"), &AtomicBool::new(true))
+                {
+                    send(
+                        &output,
+                        json!({"id":id,"error":{"code":-32603,"message":"目标清除验收超时。"}}),
+                    )?;
+                    continue;
+                }
                 goal = Value::Null;
                 notice(&output, "thread/goal/cleared", json!({"threadId":THREAD}))?;
                 json!({"cleared":true})

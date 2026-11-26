@@ -721,9 +721,9 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
   </div>;
 });
 
-export const GoalStrip = memo(function GoalStrip({ objective, status, activeWithoutTurn, expanded, toggle }) {
+export const GoalStrip = memo(function GoalStrip({ ref, objective, status, activeWithoutTurn, expanded, toggle }) {
   const label = status === 'active' && activeWithoutTurn ? '已启用' : statuses[status];
-  return <button type="button" className="goal-strip" title={objective} aria-label="会话目标"
+  return <button ref={ref} type="button" className="goal-strip" title={objective} aria-label="会话目标"
     aria-describedby="goal-strip-status goal-strip-objective" aria-expanded={expanded}
     aria-controls={expanded ? 'goal-panel' : undefined} data-status={status} onClick={toggle}>
     <Goal size={16} className="goal-icon" aria-hidden="true" />

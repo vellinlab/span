@@ -1085,9 +1085,14 @@ try {
   await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, windowSize);
   if (!wasTerminalOpen) await terminalToggle.click();
   console.log('Verified long approvals, action visibility, queued input, focus and the backend reply.');
+  await writeFile(join(profile, 'hold-goal-clear'), '');
   await composer.fill('/goal clear');
   await composer.press('Enter');
+  await goal.focus();
+  assert.ok(await goal.evaluate(button => document.activeElement === button));
+  await writeFile(join(profile, 'goal-clear'), '');
   await goal.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => document.activeElement === element));
   await agentToggle.press('Enter');
   await createGoal.waitFor();
   await agentToggle.press('Escape');

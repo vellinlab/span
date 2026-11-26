@@ -104,7 +104,7 @@ function App() {
   const closeTerminal = useCallback(() => setTerminal(false), []);
   const report = useCallback(error => setError(error.message), []);
   const clearError = useCallback(() => setError(''), []);
-  const stopButton = useCallback(button => {
+  const returnComposerFocus = useCallback(button => {
     if (!button) return;
     return () => {
       if (button === document.activeElement) input.current?.focus({ preventScroll: true });
@@ -975,7 +975,8 @@ function App() {
                 focusTarget={interactionRegion} returnFocus={input} />
               {showReasoning && <ReasoningStrip preview={liveReasoning.preview} expanded={reasoningExpanded} hadFocus={reasoningHadFocus}
                 toggle={onReasoningToggle} />}
-              {goal && <GoalStrip objective={goal.objective} status={goal.status} activeWithoutTurn={api?.goal?.activeWithoutTurn}
+              {goal && <GoalStrip ref={returnComposerFocus} objective={goal.objective} status={goal.status}
+                activeWithoutTurn={api?.goal?.activeWithoutTurn}
                 expanded={panel?.kind === 'goal'} toggle={onGoalToggle} />}
               <form className="composer" onSubmit={event => { event.preventDefault(); submit(); }}>
                 {files.length > 0 && <ul className="composer-files" aria-label="待发送的附件">
@@ -1011,7 +1012,7 @@ function App() {
                     onJump={() => { if (reasoningArchived) closePanel({ restoreFocus: false }); }} />}
                   {connection === 'ready' && <AgentMenu api={api} hasGoal={Boolean(goal)} models={work.models}
                     modelId={work.options.model} modeId={work.options.mode} onSelect={onAgentMenuSelect} />}
-                  {running && api?.turns.stop && <button ref={stopButton} type="button" className="send stop" aria-label="停止"
+                  {running && api?.turns.stop && <button ref={returnComposerFocus} type="button" className="send stop" aria-label="停止"
                     aria-disabled={work.stopping || undefined} disabled={!run.id} title={work.stopping ? '正在停止…' : undefined}
                     onClick={() => work.stop().catch(report)}><Square size={13} fill="currentColor" /></button>}
                   {(!running || ((canSteer || canQueue) && canSendDraft)) && <button className="send" type="submit" aria-label={running ? canSteer ? '追加' : '排队' : '发送'}
