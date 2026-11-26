@@ -526,6 +526,10 @@ try {
   }, beforeReasoningScroll);
   await reasoningJump.waitFor();
   const reasoningAnchor = await transcript.evaluate(element => element.scrollTop);
+  const liveGoalRect = await goal.boundingBox();
+  await composer.fill('/goal resume');
+  await composer.press('Enter');
+  await goal.getByText('进行中', { exact: true }).waitFor();
   await liveReasoning.getByText('确认目标卡片和输入区之间的间距。', { exact: true }).waitFor();
   assert.ok(await liveElement.evaluate((element, initial) => {
     const rect = element.getBoundingClientRect();
@@ -534,6 +538,7 @@ try {
     return element.contains(hit) && rect.y === initial.y && rect.height === initial.height
       && rect.x === goalRect.x && rect.width === goalRect.width && rect.bottom < goalRect.top;
   }, liveRect));
+  assert.deepEqual(await goal.boundingBox(), liveGoalRect);
   assert.equal(await transcript.evaluate(element => element.scrollTop), reasoningAnchor);
   if (screenshot) {
     await checkTranscriptEdge(app, page, transcript, screenshot);
@@ -626,7 +631,7 @@ try {
   assert.equal(await transcript.locator('[data-card="command"] pre').count(), 0);
   await earlyReasoning.locator('summary').click();
   assert.equal(await page.getByRole('alert').count(), 0);
-  console.log('Verified the fixed reasoning strip, history scroll position, nested details, and archived summary.');
+  console.log('Verified the fixed reasoning strip and Goal positions during a Goal status change, nested details, and archived summary.');
   console.log('Verified steering while reading, acknowledgement, and keyboard return to the latest conversation.');
 
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
