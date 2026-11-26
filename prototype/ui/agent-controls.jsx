@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, ChevronRight, Ellipsis, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, ChevronRight, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
 import { mergeAgentMember } from './delegation.js';
@@ -701,16 +701,17 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
     return () => window.removeEventListener('pointerdown', dismiss);
   }, [open]);
   const entries = [
-    ...(models.length || api?.modes?.length || api?.permissions?.length ? [['settings', SlidersHorizontal]] : []),
-    ...(api?.goal && !hasGoal ? [['goal', Goal]] : []),
-    ...(api?.usage ? [['usage', ChartNoAxesColumnIncreasing]] : []),
-    ...(api?.delegation ? [['agents', Users]] : []),
-    ...(api?.extensions?.kinds.includes('skill') ? [['skill', BookOpen]] : []),
+    ...(models.length || api?.modes?.length || api?.permissions?.length ? [['settings', SlidersHorizontal, titles.settings]] : []),
+    ...(api?.goal && !hasGoal ? [['goal', Goal, titles.goal, '/goal']] : []),
+    ...(api?.usage ? [['usage', ChartNoAxesColumnIncreasing, titles.usage, '/usage']] : []),
+    ...(api?.delegation ? [['agents', Users, titles.agents, '/agents']] : []),
+    ...(api?.extensions?.kinds.includes('skill') ? [['skill', BookOpen, extensionLabels.skill, '/skills']] : []),
   ];
   if (!entries.length) return null;
-  const selectedModel = models.find(model => model.id === modelId);
+  const selectedModel = models.find(model => model.id === modelId) ?? models.find(model => model.isDefault);
   const modeLabel = modeId === 'default' ? undefined : api?.modes?.find(mode => mode.id === modeId)?.label;
   const label = [selectedModel?.label, modeLabel].filter(Boolean).join(' · ');
+  const actions = entries.map(([, , name]) => name).join('、');
   return <div className="agent-menu"
     onBlur={event => {
       if (open && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
@@ -723,14 +724,17 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
       setOpen(false);
     }}>
     <button ref={trigger} className="composer-control" type="button" aria-label="Agent 控件" aria-expanded={open}
+      aria-description={actions} title={label ? `${label} · ${actions}` : actions}
       onClick={() => setOpen(value => !value)}>
-      {label ? <><span>{label}</span><ChevronDown className="agent-menu-chevron" size={12} /></> : <Ellipsis size={17} />}
+      <span className="agent-menu-label">Agent</span>
+      {label && <span className="agent-menu-model">{label}</span>}
+      <ChevronDown className="agent-menu-chevron" size={12} aria-hidden="true" />
     </button>
     {open && <div className="agent-menu-entries popup-surface" aria-label="Agent 控件">
-      {entries.map(([kind, Icon]) => <button key={kind} type="button" onClick={() => {
+      {entries.map(([kind, Icon, name, command]) => <button key={kind} type="button" aria-description={command} onClick={() => {
         setOpen(false);
         onSelect(kind, trigger.current);
-      }}><Icon size={15} />{kind === 'skill' ? extensionLabels.skill : titles[kind]}</button>)}
+      }}><Icon size={15} aria-hidden="true" />{name}{command && <code aria-hidden="true">{command}</code>}</button>)}
     </div>}
   </div>;
 });

@@ -763,7 +763,10 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(740, 520));
   await page.waitForFunction(() => Math.abs(innerWidth - 740) <= 2 && Math.abs(innerHeight - 520) <= 2);
   const agentToggle = page.getByRole('button', { name: 'Agent 控件' });
-  const createGoal = page.locator('.agent-menu-entries').getByRole('button', { name: '会话目标', exact: true });
+  const agentMenu = page.locator('.agent-menu-entries');
+  const createGoal = agentMenu.getByRole('button', { name: '会话目标', exact: true });
+  const usageEntry = agentMenu.getByRole('button', { name: '用量', exact: true });
+  const agentsEntry = agentMenu.getByRole('button', { name: '代理与团队', exact: true });
   const settingsEntry = page.getByRole('button', { name: '运行设置' });
   const settings = page.getByRole('region', { name: '运行设置' });
   const closeSettings = settings.getByRole('button', { name: '关闭面板' });
@@ -771,8 +774,12 @@ try {
   const settingsDraft = '检查设置关闭后，原草稿和选区都保留。';
   await composer.fill(settingsDraft);
   await composer.evaluate(element => element.setSelectionRange(2, 6));
+  await agentToggle.getByText('Agent', { exact: true }).waitFor();
   await agentToggle.press('Enter');
   assert.equal(await createGoal.count(), 0, 'The Goal card is the sole entry point while an objective exists.');
+  assert.equal(await usageEntry.locator('code').textContent(), '/usage');
+  assert.equal(await agentsEntry.locator('code').textContent(), '/agents');
+  assert.match(await agentToggle.getAttribute('aria-description'), /用量、代理与团队/);
   await page.keyboard.press('Tab');
   assert.ok(await settingsEntry.evaluate(element => document.activeElement === element));
   assert.ok(await settingsEntry.evaluate(element => {
@@ -824,6 +831,13 @@ try {
   await settingsEntry.waitFor({ state: 'detached' });
   assert.equal(await composer.inputValue(), settingsDraft);
   assert.deepEqual(await composer.evaluate(element => [element.selectionStart, element.selectionEnd]), [2, 6]);
+  const usage = page.getByRole('region', { name: '用量', exact: true });
+  await agentToggle.press('Enter');
+  await usageEntry.press('Enter');
+  await usage.getByRole('button', { name: '关闭面板' }).press('Escape');
+  await usage.waitFor({ state: 'detached' });
+  assert.ok(await agentToggle.evaluate(element => document.activeElement === element));
+  assert.equal(await composer.inputValue(), settingsDraft);
 
   await composer.fill('/model');
   await composer.press('Enter');
@@ -849,7 +863,6 @@ try {
 
   await composer.fill('/usage');
   await composer.press('Enter');
-  const usage = page.getByRole('region', { name: '用量', exact: true });
   const sessionUsage = usage.getByRole('region', { name: '会话用量' });
   const accountUsage = usage.getByRole('region', { name: '账号额度' });
   await sessionUsage.getByText('140 / 512', { exact: true }).waitFor();

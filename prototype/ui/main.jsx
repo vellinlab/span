@@ -1022,7 +1022,8 @@ function App() {
                     title={canSendImages ? '添加本机文件，也可在输入框粘贴截图' : '添加本机文件'}
                     disabled={!canAttach || pastingScreenshot} onClick={addFiles}><Paperclip size={16} /></button>}
                   <button type="button" className="composer-control connection" aria-label="主机" data-route={route || undefined}
-                    title={[backendName, host, connectionLabel, routeLabels[route]].filter(Boolean).join(' · ')}
+                    aria-description="切换 Agent 与主机"
+                    title={[backendName, host, connectionLabel, routeLabels[route], '切换 Agent 与主机'].filter(Boolean).join(' · ')}
                     onClick={showConnection}>
                     <i className={connection} /><span>{backendName} · {host}</span><ChevronDown size={12} />
                   </button>
