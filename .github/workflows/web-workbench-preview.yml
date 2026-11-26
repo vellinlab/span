@@ -10,6 +10,7 @@ permissions:
 
 env:
   FOLLOWING_REPLY_BASELINE: 28b8963cefc13f084686e0d29127ee4232f4f824
+  STREAMING_OUTPUT_BASELINE: 59b1dd2c7a940fa08f09f9ef66a4a2e76a57825a
   TERMINAL_RENDERER_BASELINE: b4d95f68481e073da9fa4df344629a5b9d07f1b5
   TERMINAL_COVER_BASELINE: 1f708fcb93da896f425cdc292ad07adddc1204e6
   TERMINAL_WINDOW_BASELINE: 127feffb69fbd7a752c49b7666f3198a3c0e8cb6
@@ -105,7 +106,7 @@ jobs:
             following-reply:"$FOLLOWING_REPLY_BASELINE" \
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
             startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af \
-            streaming-output:72576f01c969e452c5f8cc66940ce110f4fb7693 \
+            streaming-output:"$STREAMING_OUTPUT_BASELINE" \
             reasoning:2b2da807b5ec4496e20eece8df6d54763e2379e3 \
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
             reasoning-following:fec399648c3366d3b5d0c54ff8bb988b94edab96 \
@@ -222,10 +223,11 @@ jobs:
           bash prototype/test/install-pi.sh "$PWD/pi-test"
           SPAN_TEST_PI_TEAMS="$PWD/pi-test/team-state-fixture" node prototype/test/real-pi.mjs \
             "$PWD/verified-preview/preview/span-preview.exe" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
-      - name: Prepare the baseline renderers for terminal output and preview
+      - name: Prepare the baseline renderers for terminal, streamed replies and command output
         run: |
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" \
-            terminal-window:"$TERMINAL_WINDOW_BASELINE" following-reply:"$FOLLOWING_REPLY_BASELINE"; do
+            terminal-window:"$TERMINAL_WINDOW_BASELINE" following-reply:"$FOLLOWING_REPLY_BASELINE" \
+            streaming-output:"$STREAMING_OUTPUT_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
             source_dir=$(mktemp -d)
@@ -249,7 +251,7 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-long-reply"
           node prototype/test/long-reply.mjs "$binary" "$PWD/following-reply-baseline/span-preview.exe" --following | tee windows-workbench-following-reply.json
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-grouped-history" --grouped-history
-          node prototype/test/long-reply.mjs "$binary" --tool-output
+          node prototype/test/long-reply.mjs "$binary" "$PWD/streaming-output-baseline/span-preview.exe" --tool-output | tee windows-workbench-streaming-output.json
           reasoning_result=0
           SPAN_TEST_DEVICE_SCALE=1.25 node prototype/test/long-reply.mjs \
             "$binary" "" "$PWD/windows-workbench-reasoning-stream-125" --reasoning \
@@ -284,5 +286,6 @@ jobs:
             windows-workbench-reasoning-*.json
             windows-workbench-resource-isolation.json
             windows-workbench-following-reply.json
+            windows-workbench-streaming-output.json
             windows-workbench-scroll.json
           if-no-files-found: warn

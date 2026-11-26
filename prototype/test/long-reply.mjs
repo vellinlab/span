@@ -341,12 +341,28 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
   await composer.fill('验证流式命令输出。');
   await composer.press('Enter');
   const command = page.getByTestId('transcript').locator('[data-card="command"]').filter({ hasText: 'workspace verify --all' });
-  await command.locator('summary').press('Enter');
+  const summary = command.locator('summary');
+  await summary.waitFor();
   const output = command.getByLabel('工具输出');
   const next = command.getByRole('button', { name: '下一段' });
-  await next.press('Enter');
-  await next.press('Enter');
-  await output.getByText('feature_16384.rs', { exact: false }).waitFor();
+  await settleFrame(page);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Performance.enable');
+  const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
+    .map(({ name, value }) => [name, value]));
+  const readPage = async (button, marker) => {
+    const start = await metrics();
+    await button.press('Enter');
+    await output.getByText(marker, { exact: false }).waitFor();
+    await settleFrame(page);
+    const end = await metrics();
+    return {
+      mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
+      scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,
+    };
+  };
+  const openPage = await readPage(summary, 'feature_00001.rs');
+  const nextPages = [await readPage(next, 'feature_08192.rs'), await readPage(next, 'feature_16384.rs')];
   let desktop;
   try {
     let sampleInput;
@@ -363,10 +379,6 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
     }));
     const position = await offsets();
     assert.equal(position.log, 90);
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send('Performance.enable');
-    const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
-      .map(({ name, value }) => [name, value]));
     const pss = async () => linux ? Number((await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8'))
       .match(/^Pss:\s+(\d+) kB$/m)[1]) : undefined;
     const startPssKiB = await pss();
@@ -378,7 +390,7 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
     const end = await metrics();
     const endPssKiB = await pss();
     assert.deepEqual(await offsets(), position);
-    if (label === 'candidate') await command.getByText('16385–20073 行', { exact: true }).waitFor();
+    await command.getByText('16385–20073 行', { exact: true }).waitFor();
     await output.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await output.getByText('workspace/source/stream_072.rs', { exact: false }).waitFor();
     assert.equal(await output.evaluate(element => element.tabIndex), 0);
@@ -389,7 +401,7 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
       await settleFrame(page);
       await page.screenshot({ path: `${screenshot}-${label}.png` });
     }
-    return { label, startPssKiB, endPssKiB, typing,
+    return { label, openPage, nextPages, startPssKiB, endPssKiB, typing,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000 };
