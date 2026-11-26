@@ -1304,8 +1304,6 @@ summary.extension-heading { cursor: pointer; }
 }
 .terminal-panel header { background: var(--panel); }
 .terminal-canvas { flex: 1; min-height: 0; overflow: hidden; padding: 5px 8px 3px; }
-/* Let xterm pause painting while the preview covers it, with its PTY and dimensions intact. */
-.main[inert] .terminal-canvas > .xterm { transform: translateX(100vw); }
 .terminal-error { color: #eed1c8; padding: 4px 9px; }
 .preview {
   flex: 0 1 clamp(240px, 29vw, 450px);

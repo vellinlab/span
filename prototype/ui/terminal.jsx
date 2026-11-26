@@ -57,7 +57,8 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     const setIntersection = typeof renderService?._handleIntersectionChange === 'function'
       ? renderService._handleIntersectionChange.bind(renderService) : undefined;
     if (setIntersection) {
-      // Electron window visibility can change without changing the terminal's intersection.
+      // A preview can cover the terminal without changing its intersection. Keeping the grid in place
+      // lets the renderer resume on the next frame without waiting for an intersection notification.
       renderService._handleIntersectionChange = entry => {
         intersection = entry;
         if (!hidden.current) setIntersection(entry);

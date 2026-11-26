@@ -344,6 +344,13 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
   const preview = page.getByRole('complementary', { name: '文件预览' });
   const waitForPreview = () => preview.getByText('Span 工作台预览', { exact: true }).waitFor();
   const closePreview = () => preview.getByRole('button', { name: '关闭预览' }).click();
+  const checkCover = async () => {
+    await page.waitForFunction(({ x, y }) => document.elementFromPoint(x + 8, y + 8)?.closest('#file-preview'), area);
+    assert.deepEqual(await screen.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return [Math.ceil(bounds.left), Math.ceil(bounds.top)];
+    }), [area.x, area.y], 'The preview covers the terminal in its normal painting position');
+  };
   const waitForOutput = () => page.waitForFunction(() => {
     const rows = [...document.querySelectorAll('.xterm-rows > div')];
     const last = rows.findIndex(row => row.textContent.trim() === 'span_hidden_080');
@@ -351,15 +358,12 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     return last >= 0 && done > last;
   });
   const observation = await screen.evaluateHandle(element => {
-    let intersecting;
     let windowHidden;
     let batches = 0;
     let tail = '';
     let packets = 0;
     let received = false;
     const generations = new Set();
-    const visibility = new IntersectionObserver(entries => { intersecting = entries.at(-1).isIntersecting; });
-    visibility.observe(element);
     const stopWindow = window.span.onWindowHidden(hidden => { windowHidden = hidden; });
     const observer = new MutationObserver(() => { batches++; });
     const rows = element.querySelector('.xterm-rows');
@@ -377,7 +381,6 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       tail = text.slice(-32);
     });
     return {
-      get intersecting() { return intersecting; },
       get windowHidden() { return windowHidden; },
       get received() { return received; },
       begin() { observer.observe(rows, { childList: true, subtree: true, characterData: true }); },
@@ -406,7 +409,6 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
           width: 130, height: Math.floor(rect.height) - 1 } };
       },
       stop() {
-        visibility.disconnect();
         stopWindow();
         unsubscribe();
         revealObserver?.disconnect();
@@ -423,8 +425,7 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       await page.getByRole('button', { name: '文件', exact: true }).click();
       await readme.click();
       await waitForPreview();
-      await page.waitForFunction(state => state.intersecting === (document.querySelector('.xterm').getBoundingClientRect().left < innerWidth), observation);
-      assert.equal(await observation.evaluate(state => state.intersecting), variant === 'baseline');
+      await checkCover();
     }
     assert.deepEqual(await dimensions(), beforeCover);
     await observation.evaluate(state => state.begin());
@@ -474,7 +475,7 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     if (!minimized && variant === 'candidate') {
       await readme.click();
       await waitForPreview();
-      await page.waitForFunction(state => state.intersecting === false, observation);
+      await checkCover();
       const windowWidths = [800, 740];
       for (const width of windowWidths) {
         await resize(app, page, [width, initialSize[1]]);
