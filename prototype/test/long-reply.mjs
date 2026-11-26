@@ -697,33 +697,30 @@ async function check(binary, label, trial) {
     await page.waitForLoadState('domcontentloaded');
     const readViewport = () => page.evaluate(() => [innerWidth, innerHeight]);
     assert.equal(await page.evaluate(() => devicePixelRatio), deviceScaleFactor);
-    const initialViewport = deviceScaleFactor === 1 ? null : await readViewport();
-    const window = await app.evaluate(({ BrowserWindow }, { size, initialViewport }) => {
+    const rendererPid = await app.evaluate(({ BrowserWindow }, size) => {
       const window = BrowserWindow.getAllWindows()[0];
-      const initialContent = window.getContentSize();
-      // Windows content sizes use desktop units, while forced Chromium scaling changes CSS units.
-      const requested = initialViewport
-        ? size.map((target, axis) => Math.round(target * initialContent[axis] / initialViewport[axis])) : size;
-      window.setContentSize(...requested);
-      return { initialContent, requested, rendererPid: window.webContents.getOSProcessId() };
-    }, { size, initialViewport });
-    const tolerance = initialViewport ? 1 : 0;
+      window.setContentSize(...size);
+      return window.webContents.getOSProcessId();
+    }, size);
+    // At Windows 125%, resizing to the native minimum can yield a 742 × 522 CSS viewport.
+    const tolerance = deviceScaleFactor === 1 ? 0 : 2;
     try {
       await page.waitForFunction(({ size: [width, height], tolerance }) =>
         Math.abs(innerWidth - width) <= tolerance && Math.abs(innerHeight - height) <= tolerance, { size, tolerance });
     } catch (error) {
       const contentSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
       throw new Error(`Expected a ${size.join(' × ')} CSS viewport at ${deviceScaleFactor}×, observed ` +
-        `${(await readViewport()).join(' × ')}. Initial CSS: ${initialViewport}; initial native: ${window.initialContent}; ` +
-        `requested native: ${window.requested}; actual native: ${contentSize}.`, { cause: error });
+        `${(await readViewport()).join(' × ')}. Native content: ${contentSize.join(' × ')}.`, { cause: error });
     }
-    const { rendererPid } = window;
     const composer = page.getByRole('textbox', { name: '消息' });
     const transcript = page.getByTestId('transcript');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
     if (grouped || reasoningIndex) assert.equal(await transcript.getAttribute('data-items'), '2901');
     if (toolOutput) return await checkToolOutput(app, page, composer, profile, rendererPid, label, trial);
-    if (streamedReasoning) return await checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial);
+    if (streamedReasoning) {
+      const viewport = await readViewport();
+      return { viewport, ...await checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial) };
+    }
     if (grouped) {
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
       const titleOffset = () => group.evaluate(button =>
