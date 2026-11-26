@@ -434,6 +434,9 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     return region.scrollHeight - region.clientHeight - region.scrollTop <= 2;
   });
   if (detail) {
+    const fittedSummary = reasoningFollowing && label === 'candidate' ? await page.addStyleTag({
+      content: '#reasoning-panel .reasoning-text { max-height: 116px; overflow: hidden; }',
+    }) : null;
     await strip.press('Enter');
     await heading.waitFor();
     await panel.locator('ul ul').getByText('保留两级缩进', { exact: true }).waitFor();
@@ -449,7 +452,13 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     }
     if (reasoningFollowing) {
       initialHeading = await heading.elementHandle();
-      await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      if (fittedSummary) {
+        assert.ok(await detail.evaluate(element => element.scrollHeight === element.clientHeight));
+        await detail.press('End');
+        await settleFrame(page);
+        assert.equal(await detail.evaluate(element => element.scrollTop), 0, 'End should have no scroll range yet.');
+        await fittedSummary.evaluate(element => element.remove());
+      } else await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
       await revealBottom();
     }
   }

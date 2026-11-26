@@ -21,6 +21,11 @@ export const ReasoningText = memo(function ReasoningText({ rows, scroll, archive
     const rememberScroll = () => {
       following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 24;
     };
+    const rememberBoundaryKey = event => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      // A short summary fits in the panel and Home or End may produce no scroll event.
+      if (event.key === 'Home' || event.key === 'End') following = event.key === 'End';
+    };
     const observer = new ResizeObserver(() => {
       if (!following) return;
       const selection = viewport.ownerDocument.getSelection();
@@ -30,9 +35,11 @@ export const ReasoningText = memo(function ReasoningText({ rows, scroll, archive
     observer.observe(body);
     observer.observe(viewport);
     viewport.addEventListener('scroll', rememberScroll, { passive: true });
+    viewport.addEventListener('keydown', rememberBoundaryKey);
     return () => {
       observer.disconnect();
       viewport.removeEventListener('scroll', rememberScroll);
+      viewport.removeEventListener('keydown', rememberBoundaryKey);
     };
   }, [hasContent, scroll, archived]);
   return hasContent && <div ref={content} className="reasoning-text">{rows.map(row =>
