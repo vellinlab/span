@@ -616,7 +616,7 @@ export const Transcript = memo(function Transcript({
     onWheel={event => {
       releaseGroupAnchor();
       if (event.deltaY < 0 && scroll.current.scrollTop < 160 &&
-        !event.target.closest('.text-scroll, .output-scroll, .command-text, .plan-list')) onScroll(event);
+        !event.target.closest('.diff-scroll[data-scrollable-y], .output-scroll, .command-text, .plan-list')) onScroll(event);
     }}>
     {rows.length ? <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
       {virtualRows.map(item => {

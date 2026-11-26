@@ -632,6 +632,7 @@ p { margin-block: 0 12px; }
   background: var(--surface);
 }
 .output-scroll { overscroll-behavior: contain; }
+.diff-scroll[data-scrollable-y] { overscroll-behavior-y: contain; }
 .text-rail { display: block; position: relative; }
 .text-line { position: absolute; inset-inline: 0; height: var(--text-line-height); }
 .output-line, .diff-line { padding-inline: 8px; }
@@ -1073,7 +1074,6 @@ p { margin-block: 0 12px; }
 }
 .agent-panel[data-kind="subagent"] .card-body :is(.text-scroll, .output-scroll) {
   max-height: clamp(72px, calc(var(--subagent-panel-height) - 126px), 160px);
-  overscroll-behavior: contain;
 }
 .agent-panel[data-kind="subagent"] .plan-list {
   max-height: clamp(72px, calc(var(--subagent-panel-height) - 106px), 178px);
@@ -1138,7 +1138,7 @@ p { margin-block: 0 12px; }
   background: var(--canvas);
   line-height: var(--text-line-height);
   scrollbar-width: thin;
-  overscroll-behavior: contain;
+  overscroll-behavior-x: contain;
 }
 .workspace-diff .diff-toolbar { margin: 0; }
 .agent-panel[data-kind="reasoning"] .reasoning-sections + .reasoning-sections {

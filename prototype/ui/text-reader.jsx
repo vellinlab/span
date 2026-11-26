@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
 import { AlertCircle, Check, Copy } from 'lucide-react';
 import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from './text-pages.js';
 
@@ -18,22 +18,39 @@ export function rememberReaderPosition(positions, key, position, limit = 64) {
   if (positions.size > limit) positions.delete(positions.keys().next().value);
 }
 
+function updateDiffScrollBoundary(viewport) {
+  viewport.toggleAttribute('data-scrollable-y', viewport.scrollHeight > viewport.clientHeight);
+}
+
+function observeDiffRect(instance, notify) {
+  const viewport = instance.scrollElement;
+  return observeElementRect(instance, rect => {
+    updateDiffScrollBoundary(viewport);
+    notify(rect);
+  });
+}
+
 function TextViewport({ data, text, kind, label, position, page, scroll }) {
   const initialPosition = useRef(position);
   const mounted = useRef(false);
   const virtual = useVirtualizer({ count: data?.rows.length ?? 0, getScrollElement: () => scroll.current,
     enabled: Boolean(data), estimateSize: estimateLine, overscan: 8,
+    observeElementRect: kind === 'diff' ? observeDiffRect : observeElementRect,
     // During a page change the shared ref can still point to the previous viewport.
     initialOffset: () => initialPosition.current?.top ?? (mounted.current ? scroll.current?.scrollTop ?? 0 : 0) });
+  const height = data ? virtual.getTotalSize() : 0;
 
   useLayoutEffect(() => {
     mounted.current = true;
     if (initialPosition.current) scroll.current.scrollTo(initialPosition.current);
   }, [scroll]);
+  useLayoutEffect(() => {
+    if (kind === 'diff') updateDiffScrollBoundary(scroll.current);
+  }, [height, kind, scroll]);
 
   return <pre ref={scroll} className={`${data ? 'text-scroll ' : ''}${kind}-scroll`} tabIndex={0} aria-label={label} data-page={page}
     style={{ '--text-line-height': `${LINE_HEIGHT}px` }}>
-    {data ? <code className="text-rail" style={{ height: virtual.getTotalSize(), minWidth: `max(100%, ${data.columns}ch)` }}>
+    {data ? <code className="text-rail" style={{ height, minWidth: `max(100%, ${data.columns}ch)` }}>
       {virtual.getVirtualItems().map(({ key, index, start }) => <span key={key} className={`text-line ${kind}-line`}
         data-tone={data.rows[index].tone} style={{ top: start }}>{data.rows[index].text}{'\n'}</span>)}
     </code> : text}

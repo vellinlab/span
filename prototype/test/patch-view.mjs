@@ -88,6 +88,26 @@ async function check(binary, legacy, screenshot) {
     }
 
     assert.ok(mountedAtStart <= 40);
+    const timeline = page.getByTestId('transcript');
+    const wheelUpFromDiff = async () => {
+      await viewport.hover();
+      const before = await timeline.evaluate(element => element.scrollTop);
+      assert.ok(before > 160, 'The transcript must have room to scroll up.');
+      await viewport.evaluate(element => {
+        element.receivedDiffWheel = false;
+        element.addEventListener('wheel', event => {
+          element.receivedDiffWheel = event.isTrusted && event.deltaY < 0;
+        }, { once: true, passive: true });
+      });
+      await page.mouse.wheel(0, -144);
+      await page.waitForFunction(() => document.querySelector('.diff-scroll')?.receivedDiffWheel);
+      // On Windows a wheel burst can continue moving the viewport after input dispatch.
+      await page.evaluate(async () => {
+        for (let frame = 0; frame < 16; frame++) await new Promise(requestAnimationFrame);
+      });
+      return before - await timeline.evaluate(element => element.scrollTop);
+    };
+    assert.ok(Math.abs(await wheelUpFromDiff()) <= 2, 'The first line of a long diff must hold the transcript position.');
     const pages = patch.getByRole('navigation', { name: '差异分页' });
     assert.ok(await pages.evaluate(element => {
       const timeline = element.closest('.timeline').getBoundingClientRect();
@@ -130,6 +150,9 @@ async function check(binary, legacy, screenshot) {
     await reopenPatch();
     await viewport.getByText('保留原文和缩进。', { exact: false }).waitFor();
     assert.equal(await files.evaluate(field => field.selectedOptions[0].label), 'prototype/REVIEW.md');
+    assert.ok(await viewport.evaluate(element => element.scrollHeight === element.clientHeight));
+    assert.ok(await wheelUpFromDiff() > 40, 'A diff that fits should allow the transcript to scroll.');
+    await reveal();
     await files.selectOption({ label: 'prototype/sample/README.md' });
     await patch.getByText('没有可显示的差异。', { exact: true }).waitFor();
     assert.equal(await viewport.count(), 0);
@@ -161,7 +184,6 @@ async function check(binary, legacy, screenshot) {
     };
     await reopenPatch();
     await checkRestoredPage();
-    const timeline = page.getByTestId('transcript');
     const beforeLeaving = await timeline.evaluate(element => element.scrollTop);
     await timeline.evaluate(element => { element.scrollTop = Math.max(200, element.scrollTop - 2400); });
     await patch.waitFor({ state: 'detached' });
