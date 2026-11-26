@@ -323,6 +323,36 @@ test('live commands reuse earlier group mappings until a history change affects 
   assert.equal(opened.rowAt(saved, 0), initial.groups[0]);
 });
 
+test('finishing an already visible command reuses measurements until the live group folds', () => {
+  const command = (turnId, id, final = true, exitCode = 0) => ({ kind: 'item', final,
+    item: { kind: 'command', turnId, id, status: final ? 'completed' : 'running', exitCode, text: 'Checked.' } });
+  const ids = ['a', 'b', 'c', 'd'];
+  const running = applyTimeline([], [
+    ...ids.map(id => command('history', id)),
+    ...ids.map(id => command('live', id, false)),
+  ]);
+  const previous = timelineLayout(running);
+  const open = new Set();
+  const plain = new Set();
+  const view = groupedTimelineLayout(previous, 'live', plain, open);
+  const finished = applyTimeline(running, ids.map(id => command('live', id)));
+  const updated = timelineLayout(finished);
+  assert.equal(previous.groups.length, 1);
+  assert.equal(updated.groups.length, 2);
+  assert.equal(updated.getItemKey, previous.getItemKey);
+  assert.equal(updated.estimateSize, previous.estimateSize);
+  assert.equal(groupedTimelineLayout(updated, 'live', plain, open), view);
+  assert.equal(view.rowAt(finished, 4).status, 'completed');
+
+  const folded = groupedTimelineLayout(updated, undefined, plain, open);
+  assert.equal(folded.count, 2);
+  assert.equal(folded.rowAt(finished, 1), updated.groups[1]);
+  const failed = applyTimeline(finished, [command('live', 'd', true, 1)]);
+  const nextView = groupedTimelineLayout(timelineLayout(failed), 'live', plain, open);
+  assert.notEqual(nextView, view);
+  assert.equal(nextView.estimateSize(4), 52);
+});
+
 test('delegation metadata survives sparse events and unrelated timeline updates reuse the roster', () => {
   const turnId = 'turn';
   const member = { id: 'child', name: 'Reviewer', role: 'review', status: 'running', session: { ...session('codex', remote), id: 'child' } };

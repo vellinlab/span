@@ -552,15 +552,24 @@ fn long_reply(
                 return Ok(());
             }
             if grouped {
+                let id = format!("{turn}-history-command-{index}");
+                let command = format!("workspace verify --live {index:02}");
+                notice(
+                    output,
+                    "item/started",
+                    json!({"threadId":thread_id,"turnId":turn,"item":{
+                        "id":id,"type":"commandExecution","status":"inProgress","command":command,
+                    }}),
+                )?;
+                thread::sleep(Duration::from_millis(interval / 2));
                 notice(
                     output,
                     "item/completed",
                     json!({"threadId":thread_id,"turnId":turn,"item":{
-                        "id":format!("{turn}-history-command-{index}"),"type":"commandExecution",
-                        "status":"completed","exitCode":0,"command":format!("workspace verify --live {index:02}")
+                        "id":id,"type":"commandExecution","status":"completed","exitCode":0,"command":command,
                     }}),
                 )?;
-                thread::sleep(Duration::from_millis(interval));
+                thread::sleep(Duration::from_millis(interval - interval / 2));
                 continue;
             }
             let mut fragment = format!("追加记录 {index:03}。继续核对正在生成的结果。\n\n");

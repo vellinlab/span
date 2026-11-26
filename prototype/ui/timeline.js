@@ -112,6 +112,13 @@ function refreshActivityGroups(groups, rows, changed) {
   let keep = groups.length;
   while (keep > 0 && groups[keep - 1].end > start) keep--;
   const updates = activityGroups(rows, start);
+  updates.forEach((group, index) => {
+    const previous = groups[keep + index];
+    if (previous?.key === group.key && previous.turnId === group.turnId && previous.depth === group.depth &&
+      previous.start === group.start && previous.end === group.end && previous.commands === group.commands) {
+      updates[index] = previous;
+    }
+  });
   return keep === groups.length && !updates.length ? groups : [...groups.slice(0, keep), ...updates];
 }
 
@@ -144,7 +151,7 @@ export function timelineLayout(rows) {
 
 function updateTimelineLayout(layout, changes, groups) {
   if (!changes?.size) {
-    return groups === layout.groups ? layout : createTimelineLayout(layout.keys, layout.sizes, layout.reasoningTurns, groups);
+    return groups === layout.groups ? layout : { ...layout, groups };
   }
   const keys = layout.keys.slice();
   const sizes = layout.sizes.slice();
@@ -162,7 +169,10 @@ function updateTimelineLayout(layout, changes, groups) {
 
 export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
   const groups = layout.groups.filter(group => group.turnId !== liveTurnId && !ungroupedTurns.has(group.turnId));
-  if (!groups.length) return layout;
+  if (!groups.length) {
+    groupedPrefixByExpansion.delete(openGroups);
+    return layout;
+  }
   let prefix = groupedPrefixByExpansion.get(openGroups);
   if (prefix?.groups.length !== groups.length ||
     groups.some((group, index) => prefix.groups[index] !== group || prefix.open[index] !== openGroups.has(group.key))) {
@@ -184,11 +194,15 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
     prefix = { groups, open, entries, nested, offset: entries.length - nextRow };
     groupedPrefixByExpansion.set(openGroups, prefix);
   }
+  // A command finishing in the live turn can change its future group without
+  // changing the rows currently used by the virtualizer.
+  if (prefix.source?.getItemKey === layout.getItemKey && prefix.source.estimateSize === layout.estimateSize) return prefix.view;
   // The ungrouped tail maps directly to source rows. Appending to a live
   // turn keeps the existing history map and does not allocate tail entries.
   const { entries, offset, nested } = prefix;
   const entryAt = index => index < entries.length ? entries[index] : index - offset;
-  return {
+  prefix.source = layout;
+  prefix.view = {
     count: layout.count + offset, nested,
     getItemKey(index) {
       const entry = entryAt(index);
@@ -203,6 +217,7 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
       return typeof entry === 'number' ? rows[entry] : entry;
     },
   };
+  return prefix.view;
 }
 
 export function historyRows(turns, previous = []) {
