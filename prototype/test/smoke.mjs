@@ -1158,6 +1158,8 @@ try {
   await usage.waitFor({ state: 'detached' });
   await liveReasoning.waitFor({ state: 'detached' });
   await latest.press('Enter');
+  const waitingCommand = transcript.locator('[data-card="command"][data-awaiting="approval"]');
+  await waitingCommand.getByText('待审批', { exact: true }).waitFor();
   const contextTitle = approvalContext.locator('summary');
   await contextTitle.press('Enter');
   await approvalContext.locator('.card-body').getByText(approvalSummary, { exact: true }).waitFor();

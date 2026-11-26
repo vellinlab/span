@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDown, ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
-  Folder, Image, ListChecks, Search, Terminal, Users, Wrench,
+  CircleHelp, Folder, Image, ListChecks, Search, ShieldAlert, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
@@ -12,9 +12,10 @@ import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, readTextPosition, rememberReaderPosition, TextReader } from './text-reader.jsx';
-import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, sameTranscriptRows, timelineLayout, visibleRow } from './timeline.js';
+import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, itemKey, sameTranscriptRows, timelineLayout, visibleRow } from './timeline.js';
 
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
+const waitingLabels = { approval: '待审批', input: '待回答' };
 
 function SourceLink({ url, children }) {
   return <a href={url} onClick={event => {
@@ -112,7 +113,7 @@ function CommandText({ command, titleRef, force }) {
   </div>;
 }
 
-function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, hint, path, failurePreview,
+function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, awaiting, hint, path, failurePreview,
   revealDiagnostic, expanded, toggle, scroll, reasoningTurn, children }) {
   const titleRef = useRef(null);
   const reveal = useRef(null);
@@ -152,8 +153,8 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
     if (delta > 1) viewport.scrollTop += delta;
   }, [expanded, revealDiagnostic, scroll]);
   const failed = status === 'failed' && !recordedStatus;
-  const CardIcon = failed ? CircleAlert : Icon;
-  const statusLabel = statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
+  const CardIcon = failed ? CircleAlert : awaiting === 'approval' ? ShieldAlert : awaiting === 'input' ? CircleHelp : Icon;
+  const statusLabel = waitingLabels[awaiting] ?? statusText ?? (status !== 'completed' ? statusLabels[status] : undefined);
   const name = path && (attachmentName(path.replace(path.startsWith('/') ? /\/+$/ : /[\\/]+$/, '')) || path);
   const head = <><CardIcon size={15} className="card-icon" aria-hidden="true" />
     <span className="card-title" ref={titleRef} title={title}>{title}</span>
@@ -163,7 +164,8 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
       {statusLabel && statusNote && <span aria-hidden="true">·</span>}
       {statusNote && <span>{statusNote}</span>}
     </span>}</>;
-  return <div className="activity" ref={reasoningTurn ? trackReasoningFocus : undefined} data-card={type} data-failed={failed || undefined}>
+  return <div className="activity" ref={reasoningTurn ? trackReasoningFocus : undefined} data-card={type}
+    data-failed={failed || undefined} data-awaiting={awaiting}>
     {children ? <details open={expanded} onToggle={event => {
       const details = event.currentTarget;
       if (details.open === expanded) return;
@@ -199,7 +201,7 @@ function delegationStatus(members) {
 
 const TranscriptRow = memo(function TranscriptRow({
   row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openTrace, openArtifact, openImage, canOpenSession,
-  streaming, following, scroll, outputPositions,
+  streaming, following, scroll, outputPositions, awaiting,
 }) {
   if (row.kind === 'user') return <div className="user-message" data-attachment-only={(!row.text && !row.queued) || undefined}>
     {row.attachments?.length && row.text ? <span>{row.text}</span> : row.text}
@@ -323,7 +325,8 @@ const TranscriptRow = memo(function TranscriptRow({
 
   const icon = row.kind === 'tool' && row.query ? Search : cardIcons[row.kind] ?? CodeXml;
   return <Card type={row.kind} icon={icon} status={status} recordedStatus={recordedStatus}
-    statusText={statusText} statusNote={statusNote} failurePreview={expanded ? undefined : activityFailurePreview(row, status)}
+    statusText={statusText} statusNote={statusNote} awaiting={status === 'failed' ? undefined : awaiting}
+    failurePreview={expanded ? undefined : activityFailurePreview(row, status)}
     revealDiagnostic={row.kind === 'tool' && status === 'failed' && Boolean(row.errorMessage)}
     title={title} hint={hint} path={path} expanded={expanded} scroll={scroll}
     reasoningTurn={row.kind === 'reasoning' ? row.turnId : undefined} toggle={open => toggle(row.key, open)}>{detail}</Card>;
@@ -409,9 +412,19 @@ function sameTranscriptProps(previous, next) {
 
 export const Transcript = memo(function Transcript({
   rows, liveReasoningTurn, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
-  onScrollPosition, openSession, openTrace, openArtifact, openImage, canOpenSession, showLatest,
+  onScrollPosition, openSession, openTrace, openArtifact, openImage, canOpenSession, showLatest, requests,
   label = '会话记录', testId = 'transcript',
 }) {
+  const waiting = useMemo(() => {
+    if (!requests?.length) return;
+    const items = new Map();
+    for (const { kind, itemId, turnId } of requests) {
+      if (!itemId || !turnId) continue;
+      const key = itemKey({ id: itemId, turnId });
+      if (!items.has(key)) items.set(key, kind);
+    }
+    return items;
+  }, [requests]);
   const expanded = useRef(null);
   if (!expanded.current) expanded.current = new Map(remembered?.expansion);
   const outputPositions = useRef(null);
@@ -653,7 +666,7 @@ export const Transcript = memo(function Transcript({
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
           {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)}
             toggle={toggleGroup} releaseAnchor={releaseGroupAnchor} />
-            : <TranscriptRow row={row} activePlan={activePlan}
+            : <TranscriptRow row={row} activePlan={activePlan} awaiting={row.final ? undefined : waiting?.get(row.key)}
               liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
               roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
               streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll} outputPositions={outputPositions.current}

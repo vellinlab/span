@@ -511,6 +511,10 @@ p { margin-block: 0 12px; }
 .activity[data-failed="true"] { border-left-color: color-mix(in srgb, var(--failure) 48%, transparent); }
 .activity[data-failed="true"] > .card-heading > .card-icon,
 .activity[data-failed="true"] > details > summary > .card-icon { color: var(--failure); }
+.activity[data-awaiting="approval"] { border-left-color: #e0c78c72; }
+.activity[data-awaiting="approval"] :is(.card-icon, .card-status) { color: #e0c78c; }
+.activity[data-awaiting="input"] { border-left-color: #c2dbc94a; }
+.activity[data-awaiting="input"] :is(.card-icon, .card-status) { color: var(--accent); }
 .activity[data-card="command"] .card-title { font: 12px/20px var(--mono); font-weight: 400; }
 .card-hint { color: var(--muted); }
 .activity :is(summary, .card-heading) > .file-reference-name {
@@ -532,7 +536,7 @@ p { margin-block: 0 12px; }
   line-height: 18px;
   white-space: nowrap;
 }
-:is(.card-status, .agent-state)[data-status="running"] { color: #dbca9d; }
+.agent-state[data-status="running"] { color: #dbca9d; }
 .agent-state[data-status="blocked"] { color: #e0c78c; }
 :is(.card-status, .agent-state)[data-status="failed"] { color: var(--failure); }
 :is(.card-status, .agent-state)[data-status="completed"] { color: var(--accent); }

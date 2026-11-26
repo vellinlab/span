@@ -1011,7 +1011,7 @@ function App() {
             <div className="transcript-viewport">
               <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
                 rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
-                liveReasoningTurn={showReasoning ? liveReasoning.turnId : undefined} activeTurnId={run?.id}
+                liveReasoningTurn={showReasoning ? liveReasoning.turnId : undefined} activeTurnId={run?.id} requests={work.requests}
                 jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
                 openArtifact={openArtifact} openImage={previewImage} openTrace={openTrace}
                 canOpenSession={!running && !loading && connection === 'ready'} />
