@@ -139,10 +139,12 @@ function App() {
   const liveReasoning = turnReasoning(rows, running ? run.id : undefined);
   const showReasoning = Boolean(liveReasoning?.preview && !interaction);
   const reasoningOpen = panel?.kind === 'reasoning';
-  const keepReasoning = reasoningOpen && panel.sessionKey === refKey && connection === 'ready' && !interaction &&
+  const reasoningInSession = reasoningOpen && panel.sessionKey === refKey;
+  const keepReasoning = reasoningInSession && connection === 'ready' && !interaction &&
     (!running || run.id === panel.turnId);
   const reasoningArchived = keepReasoning && !running;
-  const reasoningDetails = keepReasoning ? turnReasoningRows(rows, panel.turnId) : undefined;
+  // Keep links mounted until the layout effect can move focus out of the closing panel.
+  const reasoningDetails = reasoningInSession ? turnReasoningRows(rows, panel.turnId) : undefined;
   const reasoningExpanded = keepReasoning && panel.turnId === liveReasoning?.turnId;
   const previewBlocked = previewOverlay && Boolean(interaction);
   const readingOverlay = previewCoversConversation && !interaction;

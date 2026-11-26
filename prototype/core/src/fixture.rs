@@ -91,7 +91,7 @@ fn withdraw_approval(
         output,
         "item/completed",
         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning",
-            "id":format!("{turn}-withdrawn-summary"),"summary":["已准备可撤回的审批请求。"]}}),
+            "id":format!("{turn}-withdrawn-summary"),"summary":["查阅[审批说明](https://example.com/span/review)。\n\n已准备可撤回的审批请求。"]}}),
     )?;
     if !wait_for_stream_gate(&gate.join("show-withdrawable-approval"), running) {
         return Ok(());

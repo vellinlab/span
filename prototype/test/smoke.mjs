@@ -1054,10 +1054,15 @@ try {
   await composer.fill('验证后台撤回审批。');
   await composer.press('Enter');
   await liveReasoning.getByText('已准备可撤回的审批请求。', { exact: true }).waitFor();
-  await liveReasoning.focus();
+  await liveReasoning.press('Enter');
+  const approvalReference = reasoningPanel.getByRole('link', { name: '审批说明' });
+  await approvalReference.focus();
+  assert.ok(await approvalReference.evaluate(element => document.activeElement === element));
   await writeFile(join(profile, 'show-withdrawable-approval'), '');
+  await reasoningPanel.waitFor({ state: 'detached' });
   await approvalDetails.waitFor();
-  assert.ok(await approval.evaluate(element => document.activeElement === element));
+  assert.ok(await approval.evaluate(element => document.activeElement === element),
+    'A new approval should take focus from a link inside the closing reasoning panel.');
   await transcript.evaluate((element, top) => { element.scrollTop = top; }, anchor.scrollTop);
   const beforeWithdrawal = await readingPosition();
   await approvalDetails.focus();
