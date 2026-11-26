@@ -134,10 +134,11 @@ async function check(binary, legacy, screenshot) {
     await summary.press('Enter');
     await verifyRestoredOutput();
     assert.ok(await summary.evaluate(element => element === document.activeElement));
-    const beforeLeaving = await timeline.evaluate(element => element.scrollTop);
     await timeline.evaluate(element => { element.scrollTop = Math.max(200, element.scrollTop - 2400); });
     await command.waitFor({ state: 'detached' });
-    await timeline.evaluate((element, top) => { element.scrollTop = top; }, beforeLeaving);
+    // The virtualizer can measure earlier rows while away, shifting the command's absolute offset.
+    await page.getByRole('button', { name: '滚到最新消息' }).click();
+    await summary.scrollIntoViewIfNeeded();
     await verifyRestoredOutput();
     await summary.press('Enter');
     await viewport.waitFor({ state: 'detached' });

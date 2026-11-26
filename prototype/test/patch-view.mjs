@@ -184,10 +184,10 @@ async function check(binary, legacy, screenshot) {
     };
     await reopenPatch();
     await checkRestoredPage();
-    const beforeLeaving = await timeline.evaluate(element => element.scrollTop);
     await timeline.evaluate(element => { element.scrollTop = Math.max(200, element.scrollTop - 2400); });
     await patch.waitFor({ state: 'detached' });
-    await timeline.evaluate((element, top) => { element.scrollTop = top; }, beforeLeaving);
+    await page.getByRole('button', { name: '滚到最新消息' }).click();
+    await summary.scrollIntoViewIfNeeded();
     await checkRestoredPage();
     await summary.click();
     await patch.locator('.diff-scroll').waitFor({ state: 'detached' });
