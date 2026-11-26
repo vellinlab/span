@@ -889,6 +889,9 @@ test('reasoning detail reads only its turn and retains the same view for unrelat
   const fromHistory = turnReasoningRows(reloaded, 'live');
   assert.deepEqual(fromHistory, turnReasoningRows(updated, 'live'));
   assert.equal(turnReasoningRows(applyTimeline(reloaded, [delta('message', 'message', 'Last part.')]), 'live'), fromHistory);
+  assert.equal(mergeHistory([], updated), updated);
+  assert.equal(mergeHistory(updated, []), updated);
+  assert.equal(turnReasoningRows(mergeHistory([], updated), 'live'), turnReasoningRows(updated, 'live'));
 });
 
 test('streamed reasoning keeps a bounded preview and preserves the full summary', () => {

@@ -245,6 +245,9 @@ export function historyRows(turns, previous = []) {
 }
 
 export function mergeHistory(previous, history) {
+  // The first history page already has an item index. Preserve it for later deltas.
+  if (!previous.length) return history;
+  if (!history.length) return previous;
   const liveKeys = new Set(previous.map(row => row.itemKey ?? row.key));
   const summaries = new Map(history.filter(row => row.kind === 'reasoning').map(row => [row.key, row]));
   const sent = new Set(previous.filter(row => row.optimistic).map(row => row.clientId));
