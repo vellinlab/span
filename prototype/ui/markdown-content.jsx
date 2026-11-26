@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useRef } from 'react';
+import { Fragment, memo, useLayoutEffect, useRef } from 'react';
 import { Copy, Terminal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -53,17 +53,27 @@ const MarkdownPart = memo(function MarkdownPart({ text, inspect }) {
   return <ReactMarkdown remarkPlugins={inspect ? [...plugins, inspect] : plugins} components={components}>{text}</ReactMarkdown>;
 });
 
+const emptyParts = [];
+
 export const MarkdownContent = memo(function MarkdownContent({ text, streaming }) {
   const prepared = useRef(null);
-  const prefix = prepared.current && text.startsWith(prepared.current.source)
-    ? prepared.current.prefix : '';
-  const reading = !prefix && streaming && text.length >= 4096 ? {} : null;
-  const inspect = reading && (() => tree => { reading.end = stablePrefixEnd(tree, text); });
+  const retained = prepared.current && text.startsWith(prepared.current.prefix) ? prepared.current : null;
+  const parts = retained?.parts ?? emptyParts;
+  const offset = retained?.prefix.length ?? 0;
+  const suffix = text.slice(offset);
+  // Freeze each stable batch as the reply grows, then inspect only the unfinished suffix.
+  const reading = streaming && suffix.length >= 4096 ? {} : null;
+  const inspect = reading && (() => tree => { reading.end = stablePrefixEnd(tree, suffix); });
   useLayoutEffect(() => {
-    if (!prefix) prepared.current = reading?.end ? { source: text, prefix: text.slice(0, reading.end) } : null;
-  }, [text, prefix, reading]);
+    const end = reading?.end;
+    prepared.current = end ? {
+      prefix: text.slice(0, offset + end),
+      parts: [...parts, suffix.slice(0, end)],
+    } : retained;
+  }, [text, offset, parts, suffix, retained, reading]);
   return <div className="prose">
-    <MarkdownPart text={prefix || text} inspect={inspect} />
-    {prefix && <>{'\n'}<MarkdownPart text={text.slice(prefix.length)} /></>}
+    {[...parts, suffix].map((part, index) => <Fragment key={index}>
+      {index > 0 && '\n'}<MarkdownPart text={part} inspect={index === parts.length ? inspect : null} />
+    </Fragment>)}
   </div>;
 });
