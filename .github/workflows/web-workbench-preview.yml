@@ -238,6 +238,7 @@ jobs:
             cp -R "$source_dir/prototype/dist" "$target/resources/app/"
           done
       - name: Verify the extracted Windows preview and native ConPTY
+        id: desktop_checks
         run: |
           node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
           binary="$PWD/verified-preview/preview/span-preview.exe"
@@ -249,19 +250,26 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "$PWD/following-reply-baseline/span-preview.exe" --following | tee windows-workbench-following-reply.json
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-grouped-history" --grouped-history
           node prototype/test/long-reply.mjs "$binary" --tool-output
+          reasoning_result=0
           SPAN_TEST_DEVICE_SCALE=1.25 node prototype/test/long-reply.mjs \
-            "$binary" "" "$PWD/windows-workbench-reasoning-stream-125" --reasoning
-          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-details" --reasoning-details
-          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following
-          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-index" --reasoning-index
+            "$binary" "" "$PWD/windows-workbench-reasoning-stream-125" --reasoning \
+            | tee windows-workbench-reasoning-stream-125.json || reasoning_result=$?
+          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-details" --reasoning-details \
+            | tee windows-workbench-reasoning-details.json || reasoning_result=$?
+          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following \
+            | tee windows-workbench-reasoning-following.json || reasoning_result=$?
+          node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-index" --reasoning-index \
+            | tee windows-workbench-reasoning-index.json || reasoning_result=$?
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
           node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
             "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
             "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
             "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE"
+          if ((reasoning_result != 0)); then exit "$reasoning_result"; fi
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Compare native Windows wheel rendering with and without animation
+        if: ${{ !cancelled() && (steps.desktop_checks.outcome == 'success' || steps.desktop_checks.outcome == 'failure') }}
         timeout-minutes: 3
         run: node prototype/test/scroll-windows.mjs "$PWD/verified-preview/preview/span-preview.exe" "$PWD/windows-workbench-scroll.json"
       - name: Publish Windows preview and screenshot
@@ -273,6 +281,7 @@ jobs:
             span-web-windows-x86_64.zip
             windows-workbench*.png
             windows-workbench-startup.json
+            windows-workbench-reasoning-*.json
             windows-workbench-resource-isolation.json
             windows-workbench-following-reply.json
             windows-workbench-scroll.json

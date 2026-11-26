@@ -122,33 +122,35 @@ SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffini
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/streaming-output-baseline/span-preview /artifacts/el8-streaming-tool-output \
     --tool-output | tee /artifacts/streaming-output.json
+result=0
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/reasoning-baseline/span-preview /artifacts/el8-reasoning-stream \
-    --reasoning | tee /artifacts/reasoning.json
+    --reasoning | tee /artifacts/reasoning.json || result=$?
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/reasoning-details-baseline/span-preview /artifacts/el8-reasoning-details \
-    --reasoning-details | tee /artifacts/reasoning-details.json
+    --reasoning-details | tee /artifacts/reasoning-details.json || result=$?
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/reasoning-following-baseline/span-preview /artifacts/el8-reasoning-following \
-    --reasoning-following | tee /artifacts/reasoning-following.json
+    --reasoning-following | tee /artifacts/reasoning-following.json || result=$?
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/reasoning-index-baseline/span-preview /artifacts/el8-reasoning-index \
-    --reasoning-index | tee /artifacts/reasoning-index.json
-tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
+    --reasoning-index | tee /artifacts/reasoning-index.json || result=$?
+if ((result == 0)); then
+    tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
+fi
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs \
     /artifacts/linux/span-preview /artifacts/resource-isolation.json \
     /artifacts/terminal-baseline/span-preview "$(cat /artifacts/terminal-baseline-commit.txt)" \
     /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)" \
-    /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)"
+    /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)" || result=$?
 
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &
 for _ in {1..50}; do [[ -S "$widget_socket" ]] && break; sleep 0.1; done
-result=0
 python3.9 prototype/test/benchmark.py "$widget_socket" /artifacts/benchmark.json || result=$?
 SPAN_TEST_DISPLAY_PID="$display_pid" python3.9 prototype/test/benchmark.py --scroll-trace /artifacts/scroll-trace.json || result=$?
 python3.9 prototype/test/benchmark.py --catalog /artifacts/catalog-benchmark.json || result=$?
