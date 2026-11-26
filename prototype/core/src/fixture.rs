@@ -491,6 +491,18 @@ fn stream_reasoning(
         }
         delta("\n\n[迟到引用]: https://example.com/span/reference\n\n引用检查完成。")?;
     }
+    if gate.join("check-goal-editor").is_file() {
+        if !wait_for_stream_gate(&gate.join("goal-editor"), running) {
+            return Ok(());
+        }
+        for index in 1..=16 {
+            if !running.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            delta(&format!("\n检查推理更新期间的目标编辑。步骤 {index:03}"))?;
+            thread::sleep(Duration::from_millis(40));
+        }
+    }
     if !wait_for_stream_gate(&gate.join("finish"), running) {
         return Ok(());
     }

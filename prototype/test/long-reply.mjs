@@ -585,6 +585,35 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-tail.png` });
     }
     let archived = detail ? '步骤 073' : lastBatch;
+    let goalEditorScriptMs;
+    if (!detail) {
+      await goal.press('Enter');
+      const goalPanel = page.getByRole('region', { name: '会话目标' });
+      await goalPanel.getByRole('button', { name: '编辑', exact: true }).press('Enter');
+      const objective = goalPanel.getByRole('textbox', { name: '目标', exact: true });
+      const value = '这段目标草稿会保留原来的选区。';
+      await objective.fill(value);
+      await objective.evaluate(element => element.setSelectionRange(2, 8));
+      const bounds = await goalPanel.boundingBox();
+      const previewBounds = await strip.boundingBox();
+      assert.ok(bounds.y + bounds.height < previewBounds.y);
+      archived = '检查推理更新期间的目标编辑。步骤 016';
+      const start = await metrics();
+      await writeFile(join(profile, 'goal-editor'), '');
+      await strip.getByText(archived, { exact: true }).waitFor();
+      await settleFrame(page);
+      const end = await metrics();
+      goalEditorScriptMs = (end.ScriptDuration - start.ScriptDuration) * 1000;
+      assert.deepEqual(await goalPanel.boundingBox(), bounds);
+      assert.deepEqual(await strip.boundingBox(), previewBounds);
+      assert.deepEqual(await objective.evaluate(element => ({ value: element.value, start: element.selectionStart,
+        end: element.selectionEnd, focused: element === document.activeElement })), { value, start: 2, end: 8, focused: true });
+      if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-goal-editor.png` });
+      await objective.press('Escape');
+      await goalPanel.waitFor({ state: 'detached' });
+      assert.ok(await goal.evaluate(element => element === document.activeElement));
+      assert.equal(await goal.locator('#goal-strip-objective').textContent(), goalText);
+    }
     if (reasoningFollowing) {
       await writeFile(join(profile, 'reference-prefix'), '');
       await panel.getByText('[迟到引用]', { exact: true }).waitFor();
@@ -706,7 +735,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       assert.ok(await answer.evaluate(element => element.getBoundingClientRect().bottom <=
         element.closest('.timeline').getBoundingClientRect().bottom));
     }
-    return { label, updates, bodyUpdates, startPssKiB: startMemory?.pssKiB, endPssKiB: endMemory?.pssKiB, typing, diagnosticMemory,
+    return { label, updates, bodyUpdates, goalEditorScriptMs, startPssKiB: startMemory?.pssKiB, endPssKiB: endMemory?.pssKiB, typing, diagnosticMemory,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000, layouts: end.LayoutCount - start.LayoutCount };
@@ -722,6 +751,7 @@ async function check(binary, label, trial) {
   try {
     if (following) await writeFile(join(profile, 'fast'), '');
     if (grouped || reasoningIndex) await writeFile(join(profile, 'grouped-history'), '');
+    if (streamedReasoning && !reasoningDetails) await writeFile(join(profile, 'check-goal-editor'), '');
     if (reasoningDetails) await writeFile(join(profile, reasoningFollowing ? 'reasoning-following' : 'reasoning-details'), '');
     if (reasoningIndex) await writeFile(join(profile, 'reasoning-index'), '');
     app = await electron.launch({
