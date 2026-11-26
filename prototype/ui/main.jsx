@@ -82,7 +82,7 @@ function App() {
   const [suggesting, setSuggesting] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const [panel, setPanel] = useState(null);
-  const [terminal, setTerminal] = useState(false);
+  const [terminal, setTerminal] = useState('closed');
   const [directory, setDirectory] = useState('');
   const [entries, setEntries] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -111,7 +111,11 @@ function App() {
   const panelTrigger = useRef(null);
   const composerActions = useRef(null);
   const commandSelection = useRef(null);
-  const closeTerminal = useCallback(() => setTerminal(false), []);
+  const terminalToggle = useRef(null);
+  const closeTerminal = useCallback(() => {
+    setTerminal('closed');
+    terminalToggle.current?.focus({ preventScroll: true });
+  }, []);
   const report = useCallback(error => setError(error.message), []);
   const clearError = useCallback(() => setError(''), []);
   const returnComposerFocus = useCallback(button => {
@@ -361,6 +365,7 @@ function App() {
     setEntries([]);
     setDirectory('');
     closePanel({ restoreFocus: false });
+    if (terminal === 'collapsed' && (next.ssh !== config?.ssh || next.cwd !== config?.cwd)) setTerminal('closed');
     work.prepareConnection();
     setConfig(next);
   }
@@ -516,8 +521,8 @@ function App() {
   function toggleTerminal() {
     if (readingOverlay) {
       setPreview({ ...preview, parked: true });
-      setTerminal(true);
-    } else setTerminal(value => !value);
+      setTerminal('visible');
+    } else setTerminal(value => value === 'visible' ? 'collapsed' : 'visible');
   }
 
   function showConnection() {
@@ -894,8 +899,10 @@ function App() {
         {preview && (preview.parked || readingOverlay) && <button type="button" className="preview-toggle"
           aria-controls="file-preview" title={previewBlocked ? '处理请求后可继续预览' : undefined}
           disabled={previewBlocked} onClick={togglePreview}>{preview.parked ? '继续预览' : '返回会话'}</button>}
-        <button className="icon-button terminal-toggle" aria-label="切换终端" title="切换终端"
-          aria-pressed={terminal && !readingOverlay} onClick={toggleTerminal}><SquareTerminal size={16} /></button>
+        <button ref={terminalToggle} className="icon-button terminal-toggle" aria-label="切换终端"
+          title={terminal === 'visible' && !readingOverlay ? '收起终端' : terminal === 'closed' ? '打开终端' : '展开终端'}
+          aria-controls={terminal === 'closed' ? undefined : 'workbench-terminal'}
+          aria-pressed={terminal === 'visible' && !readingOverlay} onClick={toggleTerminal}><SquareTerminal size={16} /></button>
       </div>
     </header>
     <div className="layout">
@@ -1062,9 +1069,10 @@ function App() {
               </form>
             </div>
           </div>
-          {terminal && config && <Suspense fallback={<div className="terminal-panel">正在打开终端…</div>}>
+          {terminal !== 'closed' && config && <Suspense fallback={<div id="workbench-terminal" className="terminal-panel"
+            hidden={terminal === 'collapsed'}>正在打开终端…</div>}>
             <TerminalPanel workspace={config.cwd} ssh={config.ssh} renderer={config.terminalRenderer}
-              covered={readingOverlay} onInsertSelection={onTerminalSelection} onClose={closeTerminal} />
+              collapsed={terminal === 'collapsed'} covered={readingOverlay} onInsertSelection={onTerminalSelection} onClose={closeTerminal} />
           </Suspense>}
         </main>
         {preview && <aside className="preview" id="file-preview" aria-label="文件预览" hidden={preview.parked} ref={previewRegion}

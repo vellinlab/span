@@ -190,7 +190,8 @@ try {
   }
   await page.getByRole('button', { name: '关闭预览' }).click();
 
-  await page.getByRole('button', { name: '切换终端' }).click();
+  const terminalToggle = page.getByRole('button', { name: '切换终端' });
+  await terminalToggle.click();
   const terminal = page.locator('.xterm-helper-textarea');
   await terminal.waitFor();
   if (!linux) {
@@ -259,6 +260,13 @@ try {
   await composer.fill('');
   await page.mouse.click(selectionX, selectionY);
   await insertSelection.waitFor({ state: 'detached' });
+  const mountedTerminal = page.locator('#workbench-terminal');
+  await terminalToggle.press('Enter');
+  await mountedTerminal.waitFor({ state: 'hidden' });
+  assert.equal(await mountedTerminal.count(), 1);
+  assert.equal(await terminalToggle.getAttribute('aria-pressed'), 'false');
+  await terminalToggle.press('Enter');
+  await mountedTerminal.locator('.xterm-rows').getByText('span_local_pty', { exact: true }).waitFor();
   await terminal.focus();
 
   if (!verifySandbox && !exerciseWebgl) {
@@ -1149,7 +1157,6 @@ try {
   await latest.waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval.png') });
   const windowSize = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
-  const terminalToggle = page.getByRole('button', { name: '切换终端' });
   const wasTerminalOpen = await terminalToggle.getAttribute('aria-pressed') === 'true';
   if (!wasTerminalOpen) await terminalToggle.click();
   await page.locator('section.terminal-panel').waitFor();

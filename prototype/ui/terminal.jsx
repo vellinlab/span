@@ -11,19 +11,20 @@ const OUTPUT_GAP_MS = 96;
 const OUTPUT_BATCH_MS = 64;
 const INPUT_PRIORITY_MS = 140;
 
-export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, covered, onInsertSelection, onClose }) {
+export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, collapsed, covered, onInsertSelection, onClose }) {
   const element = useRef(null);
   const instance = useRef(null);
-  const hidden = useRef(covered);
+  const panelHidden = collapsed || covered;
+  const hidden = useRef(panelHidden);
   const applyRenderVisibility = useRef(null);
   const [error, setError] = useState('');
   const [hasSelection, setHasSelection] = useState(false);
   useLayoutEffect(() => observeWindowHidden(windowHidden => {
-    const paused = covered || windowHidden;
+    const paused = panelHidden || windowHidden;
     if (hidden.current === paused) return;
     hidden.current = paused;
     applyRenderVisibility.current?.();
-  }), [covered]);
+  }), [panelHidden]);
   useEffect(() => {
     setError('');
     setHasSelection(false);
@@ -224,7 +225,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       update('close', {});
     };
   }, [workspace, ssh, renderer]);
-  return <section className="terminal-panel" aria-label="终端">
+  return <section id="workbench-terminal" className="terminal-panel" aria-label="终端" hidden={collapsed}>
     <header><SquareTerminal size={16} /> <strong>终端</strong><span>{ssh || '本地'}</span>
       {hasSelection && <button type="button" className="panel-link terminal-insert" title="加入当前会话草稿" onClick={() => {
         const text = instance.current?.getSelection();

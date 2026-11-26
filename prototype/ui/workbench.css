@@ -1328,6 +1328,7 @@ summary.extension-heading { cursor: pointer; }
   min-width: 0;
   border-top: 1px solid var(--line);
 }
+.terminal-panel[hidden] { display: none; }
 .terminal-panel header { background: var(--panel); }
 .terminal-panel header > button:first-of-type { margin-inline-start: auto; }
 .terminal-panel header .terminal-insert { min-height: 28px; flex: none; white-space: nowrap; }
