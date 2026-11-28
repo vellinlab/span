@@ -874,6 +874,16 @@ async function check(binary, label, trial) {
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
       const titleOffset = () => group.evaluate(button =>
         button.getBoundingClientRect().top - button.closest('.timeline').getBoundingClientRect().top);
+      if (label === 'candidate') {
+        // Start while reading history, with room above the disclosure for the row that will grow.
+        const inset = await group.evaluate(button => {
+          const viewport = button.closest('.timeline');
+          const title = button.getBoundingClientRect();
+          const offset = title.top - viewport.getBoundingClientRect().top;
+          return Math.min(viewport.clientHeight - title.height - 24, Math.max(128, offset + 64));
+        });
+        await placeInTimeline(group, inset);
+      }
       const closedTop = label === 'candidate' ? await titleOffset() : undefined;
       const lastCommand = transcript.getByText('workspace verify --record 160-143', { exact: true });
       await group.press('Enter');
@@ -889,8 +899,9 @@ async function check(binary, label, trial) {
             await new Promise(requestAnimationFrame);
           };
           await frame();
-          if (row.getBoundingClientRect().top < viewport.getBoundingClientRect().top) {
-            throw new Error('The row being resized must be inside the viewport.');
+          const rowTop = row?.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+          if (!(rowTop >= 0 && rowTop < viewport.clientHeight)) {
+            throw new Error(`The row being resized is at ${rowTop}px in a ${viewport.clientHeight}px viewport.`);
           }
           const before = titleOffset();
           const padding = row.style.paddingBottom;
