@@ -149,32 +149,32 @@ function canFoldProcess(row) {
     case 'command':
     case 'tool':
     case 'search': return row.final;
+    case 'artifact': return row.final && row.purpose === 'viewed';
     default: return false;
   }
 }
 
-function completedProcess(rows, end) {
-  const answer = rows[end];
+function completedProcess(rows, answerIndex) {
+  const answer = rows[answerIndex];
   if (!answer?.completedRun || !visibleRow(answer)) return;
+  let start = answerIndex;
+  while (start > 0 && rows[start - 1].turnId === answer.turnId) start--;
   const ranges = [];
-  let start = end;
-  let hasProcess = answer.phase === 'final';
-  while (start > 0) {
-    const row = rows[start - 1];
-    if (row.turnId !== answer.turnId || (row.kind === 'message' && row.phase === 'final')) break;
-    start--;
-    if (canFoldProcess(row) && (row.itemKey ?? row.key) !== (answer.itemKey ?? answer.key)) {
-      const range = ranges.at(-1);
-      if (range?.start === start + 1) range.start = start;
-      else ranges.push({ start, end: start + 1 });
-      hasProcess ||= row.kind === 'reasoning' || row.kind === 'message';
-    }
+  let identified = answer.phase === 'final';
+  for (let index = start; index < rows.length && rows[index].turnId === answer.turnId; index++) {
+    const row = rows[index];
+    if (!canFoldProcess(row)) continue;
+    identified ||= row.kind === 'message' || row.kind === 'reasoning' || row.purpose === 'viewed';
+    const range = ranges.at(-1);
+    if (range?.end === index) range.end++;
+    else ranges.push({ start: index, end: index + 1 });
   }
-  // Legacy answers without phase information may still carry identifiable progress.
-  if (hasProcess) ranges.reverse();
-  else ranges.length = 0;
+  // Older backends can omit phases and present commands as standalone results.
+  if (!identified) ranges.length = 0;
+  // Even when a tool lands between two answer fragments, keep the disclosure above the answer.
   return { kind: 'turn-process', key: JSON.stringify(['process', answer.turnId]),
-    turnId: answer.turnId, start: ranges[0]?.start ?? end, end, ranges, durationMs: answer.completedRun.durationMs };
+    turnId: answer.turnId, answerIndex, start: Math.min(ranges[0]?.start ?? answerIndex, answerIndex),
+    end: ranges.at(-1)?.end ?? answerIndex, ranges, durationMs: answer.completedRun.durationMs };
 }
 
 function completedProcesses(rows) {
@@ -250,7 +250,7 @@ function groupPrefix(groups, openGroups) {
     entries.push(group);
     const open = openGroups.has(group.key);
     for (const range of group.ranges ?? [group]) {
-      // Gaps carry results and failures, which remain visible when the process is closed.
+      // Keep results and failures at their original positions when the process is opened.
       for (; nextRow < range.start; nextRow++) entries.push(nextRow);
       if (open) {
         for (; nextRow < range.end; nextRow++) {
@@ -295,7 +295,7 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
     },
     estimateSize(index, hiddenItem) {
       const entry = entryAt(index);
-      return typeof entry === 'number' ? layout.estimateSize(entry, hiddenItem) : 34;
+      return typeof entry === 'number' ? layout.estimateSize(entry, hiddenItem) : entry.kind === 'turn-process' ? 32 : 34;
     },
     rowAt(rows, index) {
       const entry = entryAt(index);
@@ -729,9 +729,9 @@ export function applyTimeline(previous, events) {
       const process = processes?.get(row.turnId);
       if (processes && row.completedRun !== earlier?.completedRun) {
         (processChanges ??= new Map()).set(row.turnId, position);
-      } else if (process && position <= process.end && !processChanges?.has(row.turnId) &&
-        (position === process.end ? visibleRow(row) !== visibleRow(earlier) : canFoldProcess(row) !== canFoldProcess(earlier))) {
-        (processChanges ??= new Map()).set(row.turnId, process.end);
+      } else if (process && !processChanges?.has(row.turnId) &&
+        (position === process.answerIndex ? visibleRow(row) !== visibleRow(earlier) : canFoldProcess(row) !== canFoldProcess(earlier))) {
+        (processChanges ??= new Map()).set(row.turnId, process.answerIndex);
       }
       if (row.kind === 'delegation' || earlier?.kind === 'delegation') members = undefined;
       if (row.kind === 'reasoning' && row.turnId === reasoningView?.turnId && (row.preview || earlier?.preview)) {

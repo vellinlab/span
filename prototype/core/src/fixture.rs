@@ -1071,6 +1071,12 @@ pub fn run() -> Result<()> {
                         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-activity-result"),
                             "phase":"final_answer","text":"## 连续工具活动验收完成。\n\n已记录缺少的复核文件。"}}),
                     )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"imageView","id":format!("{turn}-inspected-image"),
+                            "status":"completed","path":"review/checks/fixture-inspection.png"}}),
+                    )?;
                     background.store(false, Ordering::Release);
                     notice(
                         &output,

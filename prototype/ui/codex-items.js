@@ -98,7 +98,8 @@ export function normalizeItem(item, turnId, ref) {
     case 'imageView':
     case 'imageGeneration': {
       const path = item.savedPath ?? item.path;
-      return path ? { ...base, kind: 'artifact', artifacts: [{ id: item.id, kind: 'image', path, name: nameOf(path) }] } : null;
+      return path ? { ...base, kind: 'artifact', purpose: item.type === 'imageView' ? 'viewed' : undefined,
+        artifacts: [{ id: item.id, kind: 'image', path, name: nameOf(path) }] } : null;
     }
     case 'contextCompaction':
       return { ...base, kind: 'notice', title: '已压缩上下文' };

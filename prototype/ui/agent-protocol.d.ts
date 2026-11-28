@@ -85,7 +85,7 @@ export type TimelineItem = ItemBase & (
   | { kind: 'tool'; name: string; source?: string; target?: ToolTarget; query?: string; progress?: string; text?: string; errorMessage?: string }
   | { kind: 'delegation'; action: string; members: AgentMember[]; text?: string }
   | { kind: 'search'; query: string; url?: string; text?: string }
-  | { kind: 'artifact'; artifacts: Artifact[]; text?: string }
+  | { kind: 'artifact'; artifacts: Artifact[]; purpose?: 'viewed'; text?: string }
   | { kind: 'notice'; title: string; text?: string }
 );
 export type ItemDelta = { id: string; turnId: string } & (

@@ -544,8 +544,16 @@ p { margin-block: 0 12px; }
   text-align: start;
   cursor: pointer;
 }
-.turn-process { border-left-color: transparent; }
-.turn-process button.card-heading { width: fit-content; max-width: 100%; color: var(--secondary); }
+.turn-process { margin-inline-start: 0; border-left: 0; }
+.turn-process button.card-heading {
+  width: fit-content;
+  max-width: 100%;
+  gap: 5px;
+  padding: 3px 6px 3px 0;
+  border-radius: 5px;
+  color: var(--muted);
+}
+.turn-process .card-chevron { order: 1; }
 .card-chevron, .card-icon { color: var(--muted); }
 .card-placeholder { width: 13px; flex: none; }
 .card-title, .card-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

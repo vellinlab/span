@@ -210,7 +210,7 @@ const TranscriptRow = memo(function TranscriptRow({
     </small>}{Boolean(row.attachments?.length) && <ArtifactList artifacts={row.attachments} openArtifact={openArtifact}
       openImage={openImage} label="已发送的附件" />}
   </div>;
-  if (row.kind === 'message') return <div className={row.phase === 'commentary' ? 'agent-commentary' : 'agent-reply'}>
+  if (row.kind === 'message') return <div className={row.phase === 'commentary' || row.phase === 'partial' ? 'agent-commentary' : 'agent-reply'}>
     <StreamingMarkdown text={row.text} streaming={streaming} following={following} scroll={scroll} />
   </div>;
 
@@ -316,7 +316,8 @@ const TranscriptRow = memo(function TranscriptRow({
       break;
     }
     case 'artifact':
-      title = '产物';
+      title = row.purpose === 'viewed' ? (row.final ? '已查看图片' : '查看图片') : '产物';
+      if (row.purpose === 'viewed' && !expanded && row.artifacts.length === 1) path = row.artifacts[0].path;
       detail = () => <ArtifactList artifacts={row.artifacts} openArtifact={openArtifact} />;
       break;
     case 'notice':
@@ -339,7 +340,7 @@ const TranscriptRow = memo(function TranscriptRow({
 
 const ActivityGroup = memo(function ActivityGroup({ group, open, toggle, releaseAnchor }) {
   const process = group.kind === 'turn-process';
-  const count = group.end - group.start;
+  const count = process ? 0 : group.end - group.start;
   const tools = count - group.commands;
   const Icon = tools ? Wrench : Terminal;
   const label = process ? '任务过程' : tools ? `${group.commands ? `${group.commands} 条命令 · ` : ''}${tools} 次工具调用`

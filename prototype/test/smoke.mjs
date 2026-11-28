@@ -1530,10 +1530,12 @@ try {
   const firstCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git status --short -- review-1' });
   const failedCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git diff --check -- review-missing' });
   const change = transcript.locator('[data-card="patch"]').filter({ hasText: 'review-notes.md' });
+  const inspectedImage = transcript.locator('[data-card="artifact"]').filter({ hasText: 'fixture-inspection.png' });
   await groupAnswer.waitFor();
   await group.waitFor();
   assert.equal(await group.getAttribute('aria-expanded'), 'false');
   assert.equal(await progressHeading.count(), 0);
+  assert.equal(await inspectedImage.count(), 0);
   assert.equal(await readFile(join(profile, 'stop-requests'), 'utf8'), '11');
   await rm(join(profile, 'hold-stop'));
   await change.waitFor();
@@ -1588,6 +1590,8 @@ try {
   // The expanded process retains its anchor. In the compact window the answer can be outside the virtual rows.
   await transcript.evaluate(element => { element.scrollTop = element.scrollHeight; });
   await waitForTranscriptEnd();
+  await inspectedImage.getByText('已查看图片', { exact: true }).waitFor();
+  assert.ok(await inspectedImage.evaluate(rowIndex) > await groupAnswer.evaluate(rowIndex));
   const answerType = await groupAnswer.evaluate(messageType);
   assert.ok(progressType.headingSize < answerType.headingSize &&
     progressType.lineHeight < answerType.lineHeight, `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
@@ -1610,6 +1614,7 @@ try {
   }
   await group.press('Enter');
   await progressHeading.waitFor({ state: 'detached' });
+  assert.equal(await inspectedImage.count(), 0);
   await waitForTranscriptEnd();
   if (showTerminalAfterReview) {
     await terminalToggle.click();

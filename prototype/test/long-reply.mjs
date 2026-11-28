@@ -850,7 +850,15 @@ async function check(binary, label, trial) {
       await failure.waitFor();
       assert.equal(await group.getAttribute('aria-expanded'), 'false');
       assert.equal(await progress.count(), 0);
-      if (label === 'candidate') assert.equal(await group.innerText(), '用时 3 分 18 秒');
+      if (label === 'candidate') {
+        assert.equal(await group.innerText(), '用时 3 分 18 秒');
+        assert.ok(await group.evaluate(button => {
+          const title = button.querySelector('.card-title').getBoundingClientRect();
+          const arrow = button.querySelector('.card-chevron').getBoundingClientRect();
+          const column = button.closest('.reading-column').getBoundingClientRect();
+          return Math.abs(title.left - column.left) <= 1 && arrow.left > title.right;
+        }), 'The elapsed time leads the disclosure and aligns with the reply.');
+      }
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-closed.png` });
       await group.scrollIntoViewIfNeeded();
       await group.press('Enter');

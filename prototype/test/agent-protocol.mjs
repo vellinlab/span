@@ -7,6 +7,7 @@ import { acpReplay } from '../ui/acp-items.js';
 import { createAcpTaskTraces } from '../ui/acp-task-traces.js';
 import acpHttp from '../desktop/acp-http.cjs';
 import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
+import { normalizeItem } from '../ui/codex-items.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { watchPiTeamTranscript } from '../ui/pi-teams.js';
@@ -461,6 +462,48 @@ test('a completed answer folds the turn process while keeping results and errors
   const processes = timelineLayout(next).processes;
   assert.equal(processes.get(turnId), group);
   assert.deepEqual(processes.get(nextRun.id).ranges, [{ start: rows.length, end: rows.length + 1 }]);
+});
+
+test('the process includes image inspections and activity between or after final answer fragments', () => {
+  const turnId = 'turn';
+  const run = { id: turnId, status: 'completed', durationMs: 198000 };
+  const post = item => ({ kind: 'item', final: true, item: { turnId, ...item } });
+  const image = (type, id, path) => post(normalizeItem({ type, id, path, status: 'completed' }, turnId));
+  const answer = { kind: 'message', id: 'answer', turnId };
+  const events = [
+    post({ id: 'question', kind: 'user', text: 'Compare these images.' }),
+    { kind: 'item', final: false, item: { ...answer, phase: 'final', text: '' } },
+    { kind: 'delta', delta: { ...answer, text: 'First paragraph.' } },
+    image('imageView', 'input', '/workspace/input.png'),
+    { kind: 'delta', delta: { ...answer, text: '\n\nSecond paragraph.' } },
+    post({ ...answer, phase: 'final', text: 'First paragraph.\n\nSecond paragraph.' }),
+    image('imageGeneration', 'output', '/workspace/output.png'),
+  ];
+  const read = (rows, active, open = []) => {
+    const view = groupedTimelineLayout(timelineLayout(rows), active, new Set(), new Set(open));
+    return Array.from({ length: view.count }, (_, index) => {
+      const row = view.rowAt(rows, index);
+      return row.kind === 'message' ? row.text.trim() : row.id ?? row.kind;
+    });
+  };
+  const live = applyTimeline([], events);
+  const expanded = ['question', 'First paragraph.', 'input', 'Second paragraph.', 'output'];
+  assert.deepEqual(read(live, turnId), expanded);
+
+  const finished = applyTimeline(live, [{ kind: 'run', run }]);
+  const collapsed = ['question', 'turn-process', 'First paragraph.', 'Second paragraph.', 'output'];
+  assert.deepEqual(read(finished), collapsed);
+  const group = timelineLayout(finished).processes.get(turnId);
+  assert.deepEqual(read(finished, undefined, [group.key]), [expanded[0], 'turn-process', ...expanded.slice(1)]);
+
+  const late = applyTimeline(finished, [image('imageView', 'verification', '/workspace/output.png')]);
+  assert.deepEqual(read(late), collapsed);
+  assert.deepEqual(read(late, undefined, [group.key]), [expanded[0], 'turn-process', ...expanded.slice(1), 'verification']);
+
+  const legacy = historyRows([{ id: turnId, run, rows: [
+    { ...events[0].item }, { ...events[3].item }, { ...answer, text: 'Images compared.' }, { ...events.at(-1).item },
+  ] }]);
+  assert.deepEqual(read(legacy), ['question', 'turn-process', 'Images compared.', 'output']);
 });
 
 test('finishing an already visible command reuses measurements until the live group folds', () => {
