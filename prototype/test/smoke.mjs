@@ -1572,9 +1572,6 @@ try {
     };
   };
   const progressType = await progressHeading.evaluate(messageType);
-  const answerType = await groupAnswer.evaluate(messageType);
-  assert.ok(progressType.headingSize < answerType.headingSize &&
-    progressType.lineHeight < answerType.lineHeight, `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
   assert.ok(await progressHeading.evaluate(heading => {
     const prose = heading.closest('.prose');
     const outer = prose.querySelector(':scope > ul');
@@ -1583,23 +1580,31 @@ try {
   }), 'Nested steps in the progress message should remain indented.');
   const progressBox = await progressHeading.boundingBox();
   const groupBox = await group.boundingBox();
-  const failureBox = await failedCommand.boundingBox();
-  const answerBox = await groupAnswer.boundingBox();
-  assert.ok(groupBox.y < progressBox.y && progressBox.y < failureBox.y && failureBox.y < answerBox.y);
+  assert.ok(groupBox.y < progressBox.y);
+  const rowIndex = element => Number(element.closest('.message').dataset.index);
+  const progressIndex = await progressHeading.evaluate(rowIndex);
+  const processTop = await transcript.evaluate(element => element.scrollTop);
+  // The expanded process retains its anchor. In the compact window the answer can be outside the virtual rows.
+  await transcript.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await waitForTranscriptEnd();
+  const answerType = await groupAnswer.evaluate(messageType);
+  assert.ok(progressType.headingSize < answerType.headingSize &&
+    progressType.lineHeight < answerType.lineHeight, `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
+  assert.ok(progressIndex < await failedCommand.evaluate(rowIndex));
+  assert.ok((await failedCommand.boundingBox()).y < (await groupAnswer.boundingBox()).y);
+  await transcript.evaluate((element, top) => { element.scrollTop = top; }, processTop);
   if (screenshot) {
     const progressBlock = await progressHeading.evaluateHandle(heading => heading.closest('.agent-commentary'));
     await progressBlock.evaluate(element => {
       element.style.color = getComputedStyle(element).color;
       element.classList.remove('agent-commentary');
     });
-    await waitForTranscriptEnd();
     await page.screenshot({ path: screenshot.replace(/\.png$/, '-commentary-before.png') });
     await progressBlock.evaluate(element => {
       element.classList.add('agent-commentary');
       element.style.removeProperty('color');
     });
     await progressBlock.dispose();
-    await waitForTranscriptEnd();
     await page.screenshot({ path: screenshot.replace(/\.png$/, '-commentary.png') });
   }
   await group.press('Enter');
