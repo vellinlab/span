@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
 import { AlertCircle, Check, Copy } from 'lucide-react';
-import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from './text-pages.js';
+import { indexOutput, indexText, LINES_PER_PAGE, readOutputRange, readTextPage } from './text-pages.js';
 
 const LINE_HEIGHT = 18;
 const estimateLine = () => LINE_HEIGHT;
@@ -69,13 +69,23 @@ export function TextReader({ text, output, plain = false, kind, label, pagesLabe
   const current = Math.min(view.page, pages.length - 1);
   const page = pages[current];
   const context = page.context;
-  const pageText = typeof page === 'string' ? page : text.slice(page.start, pages[current + 1]?.start);
+  const start = page.start;
+  const end = pages[current + 1]?.start ?? text.length;
+  const pageText = useMemo(() => {
+    if (!index?.output) return text.slice(start, end);
+    const last = previous.current;
+    if (last.index?.revision === index.revision && last.start === start && last.end <= end && last.data) {
+      // Earlier pages stay unchanged. On the live page only materialize the newly received range.
+      return last.data.text + readOutputRange(output, last.end, end);
+    }
+    return readOutputRange(output, start, end);
+  }, [text, start, end, index, output]);
   const data = useMemo(() => plain ? null : readTextPage(pageText, context, updateContext, classify, previous.current.data),
     [plain, pageText, context, updateContext, classify]);
   useLayoutEffect(() => {
-    previous.current = { index, data };
+    previous.current = { index, data, start, end };
     if (view.page !== current) setView({ page: current });
-  }, [index, data, view.page, current]);
+  }, [index, data, start, end, view.page, current]);
   return <>
     <TextViewport key={current} data={data} text={pageText} kind={kind} label={label} position={view.page === current ? view : null}
       page={current} scroll={scroll} />

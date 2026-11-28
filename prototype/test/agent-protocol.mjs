@@ -11,7 +11,7 @@ import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegat
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
 import { watchPiTeamTranscript } from '../ui/pi-teams.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
-import { indexOutput, indexText, LINES_PER_PAGE, readTextPage } from '../ui/text-pages.js';
+import { indexOutput, indexText, LINES_PER_PAGE, readOutputRange, readTextPage } from '../ui/text-pages.js';
 import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, hasReasoningSection, historyRows, mergeHistory, sameTranscriptRows, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
 import { workspacePathKey } from '../ui/workspace-path.js';
 
@@ -224,18 +224,28 @@ test('command output indexes only new chunks and can jump to a replaced or compa
   const add = text => ({ kind: 'delta', delta: { id: item.id, turnId: item.turnId, kind: 'command', text } });
   const first = applyTimeline([], [{ kind: 'item', item, final: false }]);
   const initial = indexOutput(first[0].outputChunks);
-  for (const branch of ['一', '二']) {
+  const readPages = (index, row) => index.pages.map(({ start }, page) =>
+    readOutputRange(row.outputChunks, start, index.pages[page + 1]?.start ?? row.text.length));
+  for (const branch of ['一', '二🚀']) {
     const [row] = applyTimeline(first, [add('\n'), add(branch)]);
     const index = indexOutput(row.outputChunks, initial);
-    assert.equal(index.pages.join(''), row.text);
-    assert.deepEqual(index.pages, [item.text + '\n', branch]);
-    assert.deepEqual(initial.pages, [item.text]);
+    assert.deepEqual(index.pages, [{ start: 0 }, { start: item.text.length + 1 }]);
+    assert.equal(index.revision, initial.revision);
+    assert.deepEqual(readPages(index, row), [item.text + '\n', branch]);
+    assert.equal(readOutputRange(row.outputChunks, item.text.length - 1, row.text.length), '\r\n' + branch);
+    assert.deepEqual(initial.pages, [{ start: 0 }]);
+    assert.deepEqual(readPages(initial, first[0]), [item.text]);
+    const [extended] = applyTimeline([row], [add('后续')]);
+    const continued = indexOutput(extended.outputChunks, index);
+    assert.equal(continued.pages, index.pages);
+    assert.equal(readOutputRange(extended.outputChunks, row.text.length, extended.text.length), '后续');
   }
 
   const comments = Array.from({ length: 300 }, (_, i) => add(`记录 ${i}\n`));
   const [log] = applyTimeline(first, comments);
   const rebuilt = indexOutput(log.outputChunks, initial);
-  assert.equal(rebuilt.pages.join(''), log.text);
+  assert.notEqual(rebuilt.revision, initial.revision);
+  assert.equal(readPages(rebuilt, log).join(''), log.text);
   assert.ok(log.outputChunks.depth < comments.length);
   const [final] = applyTimeline([log], [{ kind: 'item', item: { ...item, text: '最终输出' }, final: true }]);
   assert.equal(final.outputChunks, undefined);

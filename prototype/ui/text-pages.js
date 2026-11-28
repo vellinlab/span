@@ -2,8 +2,8 @@ export const LINES_PER_PAGE = 8192;
 const OUTPUT_CHECKPOINT_INTERVAL = 256;
 
 export function appendOutput(previous, fragment, text) {
-  if (!previous || previous.depth >= OUTPUT_CHECKPOINT_INTERVAL) return { fragment: text, depth: 0 };
-  return { previous, fragment, depth: previous.depth + 1 };
+  if (!previous || previous.depth >= OUTPUT_CHECKPOINT_INTERVAL) return { fragment: text, depth: 0, length: text.length };
+  return { previous, fragment, depth: previous.depth + 1, length: text.length };
 }
 
 // Only index chunks newer than the last committed view. A replaced or
@@ -15,12 +15,14 @@ export function indexOutput(output, previous) {
     fragments.push(node.fragment);
     node = node.previous;
   }
-  const pages = node ? previous.pages.slice() : [''];
+  let pages = node ? previous.pages : [{ start: 0 }];
   let lines = node ? previous.lines : 0;
+  let offset = node?.length ?? 0;
   for (const fragment of fragments.reverse()) {
     for (let start = 0; start < fragment.length;) {
       if (lines === LINES_PER_PAGE) {
-        pages.push('');
+        if (pages === previous?.pages) pages = pages.slice();
+        pages.push({ start: offset + start });
         lines = 0;
       }
       let end = start;
@@ -33,11 +35,21 @@ export function indexOutput(output, previous) {
         end = newline + 1;
         lines++;
       }
-      pages[pages.length - 1] += fragment.slice(start, end);
       start = end;
     }
+    offset += fragment.length;
   }
-  return { output, pages, lines };
+  return { output, pages, lines, revision: node ? previous.revision : {} };
+}
+
+export function readOutputRange(output, start, end) {
+  if (start >= end) return '';
+  const fragments = [];
+  for (let node = output; node && node.length > start; node = node.previous) {
+    const offset = node.length - node.fragment.length;
+    if (offset < end) fragments.push(node.fragment.slice(Math.max(0, start - offset), end - offset));
+  }
+  return fragments.length === 1 ? fragments[0] : fragments.reverse().join('');
 }
 
 export function indexText(text, updateContext, previous) {
