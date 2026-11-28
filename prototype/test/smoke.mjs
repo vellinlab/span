@@ -1525,7 +1525,8 @@ try {
   await composer.fill('验证连续工具活动。');
   await composer.press('Enter');
   const progressHeading = transcript.getByRole('heading', { name: '正在核对工作区', level: 1 });
-  const group = transcript.getByRole('button', { name: '任务过程', exact: true }).last();
+  const group = transcript.getByRole('button', { name: '任务过程，用时 3 分 18 秒', exact: true }).last();
+  const progressDetail = transcript.locator('[data-card="reasoning"] ul ul').getByText('确认记录格式', { exact: true });
   const groupAnswer = transcript.getByRole('heading', { name: '连续工具活动验收完成。', level: 2 });
   const firstCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git status --short -- review-1' });
   const failedCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git diff --check -- review-missing' });
@@ -1535,6 +1536,7 @@ try {
   await group.waitFor();
   assert.equal(await group.getAttribute('aria-expanded'), 'false');
   assert.equal(await progressHeading.count(), 0);
+  assert.equal(await progressDetail.count(), 0);
   assert.equal(await inspectedImage.count(), 0);
   assert.equal(await readFile(join(profile, 'stop-requests'), 'utf8'), '11');
   await rm(join(profile, 'hold-stop'));
@@ -1567,6 +1569,7 @@ try {
   await waitForTranscriptEnd();
   await group.press('Enter');
   await progressHeading.waitFor();
+  await progressDetail.waitFor();
   const messageType = heading => {
     const prose = heading.closest('.prose');
     return {
@@ -1614,6 +1617,7 @@ try {
   }
   await group.press('Enter');
   await progressHeading.waitFor({ state: 'detached' });
+  assert.equal(await progressDetail.count(), 0);
   assert.equal(await inspectedImage.count(), 0);
   await waitForTranscriptEnd();
   if (showTerminalAfterReview) {

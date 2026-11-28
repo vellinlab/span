@@ -199,9 +199,22 @@ function delegationStatus(members) {
   return {};
 }
 
+function fitsInlineProgress(sections) {
+  let characters = 360;
+  let lines = 8;
+  for (const text of sections) {
+    if (!text) continue;
+    characters -= text.length;
+    if (characters < 0) return false;
+    lines -= text.split(/\r\n?|\n/, lines + 1).length;
+    if (lines < 0) return false;
+  }
+  return true;
+}
+
 const TranscriptRow = memo(function TranscriptRow({
   row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openTrace, openArtifact, openImage, canOpenSession,
-  streaming, following, scroll, outputPositions, awaiting,
+  streaming, following, scroll, outputPositions, awaiting, inTurnProcess,
 }) {
   if (row.kind === 'user') return <div className="user-message" data-attachment-only={(!row.text && !row.queued) || undefined}>
     {row.attachments?.length && row.text ? <span>{row.text}</span> : row.text}
@@ -213,6 +226,9 @@ const TranscriptRow = memo(function TranscriptRow({
   if (row.kind === 'message') return <div className={row.phase === 'commentary' || row.phase === 'partial' ? 'agent-commentary' : 'agent-reply'}>
     <StreamingMarkdown text={row.text} streaming={streaming} following={following} scroll={scroll} />
   </div>;
+  if (inTurnProcess && row.final && fitsInlineProgress(row.sections)) {
+    return <div className="agent-commentary" data-card="reasoning"><ReasoningText rows={[row]} /></div>;
+  }
 
   let title, hint, path, detail, recordedStatus, statusText, statusNote;
   let status = activityStatus(row);
@@ -559,14 +575,20 @@ export const Transcript = memo(function Transcript({
         followAfterFold.current = true;
       }
       if (process?.ranges.length) {
-        const inspecting = [...element.querySelectorAll('.message[data-empty="false"]')].some(item => {
+        let inspecting = false;
+        for (const item of element.querySelectorAll('.message[data-empty="false"]')) {
           const index = layout.sourceIndex(Number(item.dataset.index));
-          if (typeof index !== 'number' || !process.ranges.some(range => index >= range.start && index < range.end)) return false;
-          if (item.contains(focus) || (selecting && selection.containsNode(item, true))) return true;
-          if (!viewport) return false;
-          const rect = item.getBoundingClientRect();
-          return rect.bottom > viewport.top && rect.top < viewport.bottom;
-        });
+          if (typeof index !== 'number' || !process.ranges.some(range => index >= range.start && index < range.end)) continue;
+          if (item.contains(focus) || (selecting && selection.containsNode(item, true))) {
+            inspecting = true;
+            const row = rows[index];
+            // Keep an individually inspected progress entry in its existing form.
+            if (row.kind === 'reasoning' && !expanded.current.has(row.key)) expanded.current.set(row.key, false);
+          } else if (!inspecting && viewport) {
+            const rect = item.getBoundingClientRect();
+            inspecting = rect.bottom > viewport.top && rect.top < viewport.bottom;
+          }
+        }
         if (inspecting) setOpenGroups(previous => new Set(previous).add(process.key));
         else if (following.current) followAfterFold.current = true;
       }
@@ -707,7 +729,8 @@ export const Transcript = memo(function Transcript({
       <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
         {virtualRows.map(item => {
           const row = layout.rowAt(rows, item.index);
-          const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + (layout.depthByIndex?.get(item.index) ?? 0);
+          const groupDepth = layout.depthByIndex?.get(item.index) ?? 0;
+          const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + groupDepth;
           const show = row.key !== liveReasoningItem && Boolean(visibleRow(row));
           const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
           const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);
@@ -716,6 +739,7 @@ export const Transcript = memo(function Transcript({
             {show && (row.kind === 'activity-group' || row.kind === 'turn-process' ? <ActivityGroup group={row} open={openGroups.has(row.key)}
               toggle={toggleGroup} releaseAnchor={releaseGroupAnchor} />
               : <TranscriptRow row={row} activePlan={activePlan} awaiting={row.final ? undefined : waiting?.get(row.key)}
+                inTurnProcess={row.kind === 'reasoning' && groupDepth > 0 && !expanded.current.has(row.key)}
                 liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
                 roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
                 streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll} outputPositions={outputPositions.current}

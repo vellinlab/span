@@ -1033,6 +1033,12 @@ pub fn run() -> Result<()> {
                         json!({"threadId":thread_id,"turnId":turn,"item":{"type":"agentMessage","id":format!("{turn}-activity-progress"),
                             "phase":"commentary","text":"# 正在核对工作区\n\n- 检查复核记录\n  - 逐项核对文件状态"}}),
                     )?;
+                    notice(
+                        &output,
+                        "item/completed",
+                        json!({"threadId":thread_id,"turnId":turn,"item":{"type":"reasoning","id":format!("{turn}-activity-reasoning"),
+                            "summary":["已核对记录。\n\n- 读取复核文件\n  - 确认记录格式"]}}),
+                    )?;
                     for index in 1..=6 {
                         notice(
                             &output,
@@ -1081,7 +1087,7 @@ pub fn run() -> Result<()> {
                     notice(
                         &output,
                         "turn/completed",
-                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","items":[]}}),
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","durationMs":198000,"items":[]}}),
                     )?;
                     continue;
                 }
