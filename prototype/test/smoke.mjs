@@ -1655,7 +1655,8 @@ try {
   await inspectedImage.getByText('已查看图片', { exact: true }).waitFor();
   assert.ok(await inspectedImage.evaluate(rowIndex) > await groupAnswer.evaluate(rowIndex));
   const answerType = await groupAnswer.evaluate(messageType);
-  assert.equal(answerType.bodySize, 12);
+  assert.equal(answerType.bodySize, 11);
+  assert.equal(answerType.lineHeight, 19);
   assert.equal(progressType.bodySize, answerType.bodySize);
   assert.ok(progressType.headingSize < answerType.headingSize && progressType.lineHeight < answerType.lineHeight,
     `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
@@ -2151,11 +2152,19 @@ try {
     await app.evaluate(({ BrowserWindow }, [w, h]) =>
       BrowserWindow.getAllWindows()[0].setContentSize(w, h), [width, height]);
     await page.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [width, height]);
-    const tableLayout = await table.evaluate(element => ({
-      compact: element.offsetWidth < element.closest('.prose').clientWidth / 2,
-      rightAligned: getComputedStyle(element.querySelector('td:last-child')).textAlign === 'right',
-    }));
+    const tableLayout = await table.evaluate(element => {
+      const prose = element.closest('.prose');
+      const cell = getComputedStyle(element.querySelector('td:last-child'));
+      return {
+        compact: element.offsetWidth < prose.clientWidth / 2,
+        rightAligned: cell.textAlign === 'right',
+        fontSize: cell.fontSize,
+        proseSize: getComputedStyle(prose).fontSize,
+      };
+    });
     assert.ok(tableLayout.compact && tableLayout.rightAligned, 'Short tables keep related values together and preserve Markdown alignment.');
+    assert.equal(tableLayout.proseSize, '11px');
+    assert.equal(tableLayout.fontSize, tableLayout.proseSize);
     const codeOverflow = await code.evaluate(element => element.scrollWidth - element.clientWidth);
     assert.equal(codeOverflow > 0, width === 740, 'The long command scrolls horizontally when the reading column is narrow.');
     const hasNestedList = await reply.locator('ul ul').getByText('审批出现后，仍可看到原先阅读的段落。').count();

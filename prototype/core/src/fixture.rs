@@ -580,7 +580,7 @@ fn long_reply(
         String::from("## 长回复的开头\n\n[复核链接](https://example.com/span)和正文可以选择。\n\n");
     for index in 1..=144 {
         let anchor = if index == 80 {
-            "保持当前阅读位置。"
+            "缩放窗口后保持当前阅读位置。"
         } else {
             ""
         };
