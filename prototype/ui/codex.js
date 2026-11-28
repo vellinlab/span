@@ -195,6 +195,8 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   const rpc = connectRpc(generation, packet, route => onEvent({ kind: 'connection', route }),
     error => onEvent({ kind: 'disconnected', error }));
   const request = rpc.request;
+  const historyRequest = (thread, limit, cursor) =>
+    request('thread/turns/list', { threadId: thread.id, ...pageRequest(limit), cursor });
   const notify = (id, event) => onEvent({ ...event, session: ref(id) });
 
   function watchChildTranscript(parent, id, listener) {
@@ -501,10 +503,20 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         }
       },
       async history(thread, { limit, cursor }) {
-        const page = await request('thread/turns/list', { threadId: thread.id, ...pageRequest(limit), cursor });
+        const page = await historyRequest(thread, limit, cursor);
         return normalizePage(page, thread.id, cursor);
       },
       ...(native && {
+        prefetchHistory(thread, { cursors, limit }) {
+          const pages = new Map(Array.from(new Set(cursors), cursor =>
+            [cursor, historyRequest(thread, limit, cursor).catch(() => undefined)]));
+          return async cursor => {
+            const pending = pages.get(cursor);
+            pages.delete(cursor);
+            const page = await pending;
+            if (page && active.has(thread.id)) return normalizePage(page, thread.id, cursor);
+          };
+        },
         listPinned,
         async release(thread) {
           active.delete(thread.id);

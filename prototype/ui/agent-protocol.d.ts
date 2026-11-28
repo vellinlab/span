@@ -163,6 +163,9 @@ export interface AgentAdapter {
     start(options: { cwd?: string }): Promise<OpenSession>;
     resume(ref: SessionRef, limit: number): Promise<OpenSession>;
     history(ref: SessionRef, options: { cursor?: string; limit: number }): Promise<Page<Turn>>;
+    /** Start independent reads and project only pages consumed in cursor order. */
+    prefetchHistory?(ref: SessionRef, options: { cursors: string[]; limit: number }):
+      (cursor: string) => Promise<Page<Turn> | undefined>;
     release?(ref: SessionRef): Promise<void>;
     fork?(ref: SessionRef, from?: { turnId?: string; checkpointId?: string }): Promise<OpenSession>;
     checkpoints?(ref: SessionRef): Promise<Checkpoint[]>;

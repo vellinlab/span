@@ -657,6 +657,8 @@ pub fn run() -> Result<()> {
     let output = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
     let cwd = env::current_dir()?;
     let catalog_mode = env::var("SPAN_PREVIEW_CATALOG_FIXTURE").unwrap_or_default();
+    let catalog_trace = env::var_os("SPAN_PREVIEW_CATALOG_TRACE").map(PathBuf::from);
+    let mut deferred_catalog_page = None;
     let gate = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from);
     let grouped = gate
         .as_ref()
@@ -811,7 +813,23 @@ pub fn run() -> Result<()> {
                 let limit = params["limit"].as_u64().unwrap_or(20).min(160) as usize;
                 let start = end.saturating_sub(limit);
                 let page: Vec<_> = history[start..end].iter().rev().collect();
-                json!({"data":page,"nextCursor":(start > 0).then(|| start.to_string())})
+                let response =
+                    json!({"data":page,"nextCursor":(start > 0).then(|| start.to_string())});
+                if let Some(path) = catalog_trace.as_ref().filter(|path| path.is_file()) {
+                    let mut trace = fs::OpenOptions::new().append(true).open(path)?;
+                    writeln!(trace, "{end} {limit}")?;
+                    // Require concurrent requests and deliver the second page before the first.
+                    if end == 140 {
+                        deferred_catalog_page = Some(json!({"id":id,"result":response}));
+                        continue;
+                    }
+                    if let Some(deferred) = deferred_catalog_page.take() {
+                        send(&output, json!({"id":id,"result":response}))?;
+                        send(&output, deferred)?;
+                        continue;
+                    }
+                }
+                response
             }
             "review/start" => {
                 let thread_id = params["threadId"].as_str().unwrap_or(THREAD).to_owned();

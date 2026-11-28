@@ -425,7 +425,7 @@ function sameTranscriptProps(previous, next) {
 }
 
 export const Transcript = memo(function Transcript({
-  rows, liveReasoningItem, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
+  rows, liveReasoningItem, activeTurnId, viewKey, remembered, remember, historyCursors, cursor, loadOlder, loading, jumpToLatest, scroll,
   onScrollPosition, openSession, openTrace, openArtifact, openImage, canOpenSession, showLatest, requests,
   label = '会话记录', testId = 'transcript',
 }) {
@@ -516,8 +516,8 @@ export const Transcript = memo(function Transcript({
   }, [inspectedCard, height, onScrollPosition, virtual]);
 
   useLayoutEffect(() => {
-    latest.current = { rows, layout, historyPages, restore, openGroups };
-  }, [rows, layout, historyPages, restore, openGroups]);
+    latest.current = { rows, layout, historyCursors, restore, openGroups };
+  }, [rows, layout, historyCursors, restore, openGroups]);
 
   useLayoutEffect(() => {
     if (restore || !jumpToLatest.current || !rows.length) return;
@@ -593,7 +593,7 @@ export const Transcript = memo(function Transcript({
       if (!viewKey || current?.restore || !current?.rows.length) return;
       const anchor = readAnchor(element, current.rows, current.layout);
       // Open outputs record their position during child layout cleanup.
-      remember(viewKey, { anchor, pages: current.historyPages, expansion: Array.from(expanded.current).slice(-64),
+      remember(viewKey, { anchor, historyCursors: current.historyCursors, expansion: Array.from(expanded.current).slice(-64),
         openGroups: Array.from(current.openGroups).slice(-64), outputPositions: outputPositions.current,
         ungroupedTurns: anchor && ungroupedTurns.current.has(anchor.turnId) ? [anchor.turnId] : [] });
     };

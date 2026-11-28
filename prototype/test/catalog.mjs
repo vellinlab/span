@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron } from 'playwright';
 
 const [binary, screenshot] = process.argv.slice(2);
 const profile = await mkdtemp(join(tmpdir(), 'span-catalog-'));
+const historyTrace = join(profile, 'catalog-history-requests');
 const app = await electron.launch({
   executablePath: binary, args: ['--demo', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])],
-  env: { ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_CATALOG_FIXTURE: 'paged' },
+  env: {
+    ...process.env, SPAN_PREVIEW_PROFILE: profile, SPAN_PREVIEW_CATALOG_FIXTURE: 'paged',
+    SPAN_PREVIEW_CATALOG_TRACE: historyTrace,
+  },
 });
 
 try {
@@ -90,6 +94,7 @@ try {
   assert.equal(await historyCommand.count(), 0);
   assert.equal(await composer.inputValue(), '');
   await composer.fill(secondDraft);
+  await writeFile(historyTrace, '');
   await openThread('工作台架构评审');
   await historyCommand.getByText('已核对第 90 项历史记录。', { exact: false }).waitFor();
   assert.equal(await composer.inputValue(), firstDraft);
@@ -98,7 +103,12 @@ try {
   assert.ok(Math.abs(restoredReading.top - beforeReadingSwitch.top) <= 2, JSON.stringify({ beforeReadingSwitch, restoredReading }));
   assert.equal(await timeline.getAttribute('data-items'), '82');
   assert.ok(await timeline.locator('.message').count() < 30);
+  const restoreRequests = '140 20\n120 20\n100 20\n';
+  assert.equal(await readFile(historyTrace, 'utf8'), restoreRequests);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reading-restored.png') });
+  await timeline.evaluate(element => { element.scrollTop = 100; });
+  await page.waitForFunction(() => document.querySelector('[data-testid="transcript"]').dataset.items === '102');
+  assert.equal(await readFile(historyTrace, 'utf8'), restoreRequests + '80 20\n');
   await jumpToLatest.click();
   await jumpToLatest.waitFor({ state: 'detached' });
   await openThread('目录会话 0002');
@@ -107,6 +117,8 @@ try {
   await openThread('工作台架构评审');
   await timeline.getByText('第 160 项', { exact: false }).waitFor();
   assert.equal(Number(await timeline.getAttribute('data-items')), 21);
+  assert.equal(await readFile(historyTrace, 'utf8'), restoreRequests + '80 20\n');
+  await rm(historyTrace);
   await jumpToLatest.waitFor({ state: 'detached' });
   assert.ok(await timeline.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop < 40));
   assert.equal(await composer.inputValue(), firstDraft);

@@ -7,6 +7,7 @@ import { applyTimeline, historyRows, mergeHistory } from './timeline.js';
 import { observeWindowHidden } from './window-visibility.js';
 
 const PAGE_SIZE = 20;
+const RESTORE_LOOKAHEAD = 3;
 const HIDDEN_DELTA_LIMIT = 128;
 const HIDDEN_TEXT_LIMIT = 64 * 1024;
 
@@ -21,7 +22,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const [session, setSession] = useState(null);
   const [rows, publishRows] = useState([]);
   const [cursor, setCursor] = useState(null);
-  const [historyPages, setHistoryPages] = useState(0);
+  const [historyCursors, setHistoryCursors] = useState([]);
   const [loading, setLoading] = useState(false);
   const [run, setRun] = useState(null);
   const [stopping, setStopping] = useState(false);
@@ -101,7 +102,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     bufferedRows.current = empty;
     publishRows(empty);
     setCursor(null);
-    setHistoryPages(0);
+    setHistoryCursors([]);
     setSession(null);
     setRequests([]);
     setGoal(null);
@@ -234,10 +235,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     }
   }
 
-  function readPage(history, runVersion, pageCount) {
+  function readPage(history, runVersion, cursors) {
     updateRows(previous => mergeHistory(previous, historyRows(history.items)));
     setCursor(history.cursor);
-    setHistoryPages(pageCount);
+    setHistoryCursors(cursors);
     const restored = history.items.findLast(item => item.run.status === 'running');
     if (restored && runVersion === callbacks.current.run) changeRun(restored.run);
   }
@@ -282,20 +283,33 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       const pages = [page.items];
       const seen = new Set();
       const target = view?.anchor?.turnId;
+      const saved = view?.historyCursors ?? [];
+      let prefetched;
+      let prefetchedThrough = 0;
       // Restore the part of history already read, with one extra page for new turns.
-      while (scope === layer.current && target && pages.length <= view.pages && page.cursor && !seen.has(page.cursor)
-        && !page.items.some(turn => turn.id === target)) {
-        seen.add(page.cursor);
+      while (scope === layer.current && target && seen.size <= saved.length && page.cursor
+        && !seen.has(page.cursor) && !page.items.some(turn => turn.id === target)) {
+        const cursor = page.cursor;
+        // A fresh response must confirm each cursor before its prefetched page can be used.
+        if (cursor !== saved[seen.size]) prefetched = undefined;
+        else if (seen.size >= prefetchedThrough && seen.size + 1 < saved.length) {
+          const cursors = saved.slice(seen.size, seen.size + RESTORE_LOOKAHEAD);
+          prefetched = client.sessions.prefetchHistory?.(selected.ref, { limit: PAGE_SIZE, cursors });
+          prefetchedThrough = seen.size + cursors.length;
+        }
         try {
-          page = await client.sessions.history(selected.ref, { limit: PAGE_SIZE, cursor: page.cursor });
+          const prefetch = prefetched && await prefetched(cursor);
+          if (scope !== layer.current) return;
+          page = prefetch ?? await client.sessions.history(selected.ref, { limit: PAGE_SIZE, cursor });
           pages.push(page.items);
+          seen.add(cursor);
         } catch (error) {
           if (scope === layer.current) report(error);
           break;
         }
       }
       if (scope === layer.current) {
-        readPage({ items: pages.reverse().flat(), cursor: page.cursor }, runVersion, pages.length);
+        readPage({ items: pages.reverse().flat(), cursor: page.cursor }, runVersion, [...seen]);
         rememberWorkspace(config, selected.ref.id);
       }
     } catch (error) {
@@ -418,7 +432,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       if (pendingPage.current !== request) return;
       updateRows(previous => mergeHistory(previous, historyRows(history.items)));
       setCursor(history.cursor);
-      setHistoryPages(previous => previous + 1);
+      setHistoryCursors(previous => [...previous, cursor]);
     } catch (error) {
       if (pendingPage.current === request) report(error);
     } finally {
@@ -732,7 +746,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   }
 
   return {
-    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyPages, loading, run, stopping, requests,
+    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyCursors, loading, run, stopping, requests,
     goal, usage, usageRefreshing, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
     prepareConnection, timelineScope: () => layer.current,
     refreshDelegation, delegate, manageTeam,
