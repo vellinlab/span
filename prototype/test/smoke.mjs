@@ -98,6 +98,8 @@ try {
     if (message.type() === 'error') console.error(message.text());
   });
   await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 20_000 });
+  const transcript = page.getByTestId('transcript');
+  assert.equal(Number(await transcript.getAttribute('data-items')), 21, 'Open on the first page of recent history.');
   const branch = page.locator('.topbar .branch');
   await branch.filter({ hasText: /^prototype\/web-workbench$/ }).waitFor();
   assert.equal(await branch.getAttribute('title'), 'prototype/web-workbench');
@@ -167,13 +169,13 @@ try {
     await page.waitForFunction(() => outerWidth < screen.availWidth - 2, null, { timeout: 5000 });
     console.log('Verified moving, maximizing and restoring the window using the integrated title bar.');
   }
-  const transcript = page.getByTestId('transcript');
-  assert.equal(Number(await transcript.getAttribute('data-items')), 21);
+  const historyBeforeScroll = Number(await transcript.getAttribute('data-items'));
   const area = await transcript.boundingBox();
   await page.mouse.move(area.x + area.width / 2, area.y + 150);
   await transcript.evaluate(element => { element.scrollTop = 25; });
   await page.mouse.wheel(0, -300);
-  await page.waitForFunction(() => Number(document.querySelector('[data-testid="transcript"]').dataset.items) >= 41);
+  await page.waitForFunction(previous =>
+    Number(document.querySelector('[data-testid="transcript"]').dataset.items) >= previous + 20, historyBeforeScroll);
   assert.ok(await transcript.locator('.message').count() < 30);
 
   await page.getByRole('button', { name: '文件', exact: true }).click();
