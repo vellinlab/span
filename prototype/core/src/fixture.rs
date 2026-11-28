@@ -1118,7 +1118,11 @@ pub fn run() -> Result<()> {
                         json!({"type":"imageGeneration","id":format!("{turn}-delivered"),"status":"completed",
                             "savedPath":"工作台键盘导航与窄窗验收最终版.png"}),
                     ] {
-                        notice(&output, "item/completed", json!({"threadId":thread_id,"turnId":turn,"item":item}))?;
+                        notice(
+                            &output,
+                            "item/completed",
+                            json!({"threadId":thread_id,"turnId":turn,"item":item}),
+                        )?;
                     }
                     background.store(false, Ordering::Release);
                     notice(
