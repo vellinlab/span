@@ -27,10 +27,12 @@ async function processStats(pid) {
 }
 
 async function chromiumStartupStats(app, rendererPid) {
-  const processes = await app.evaluate(({ app }) => app.getAppMetrics().map(({ pid, type, serviceName }) =>
-    ({ pid, type, serviceName })));
+  const processes = await app.evaluate(({ app }) => app.getAppMetrics().map(({ pid, type, serviceName, memory }) =>
+    ({ pid, type, serviceName, workingSetKiB: memory?.workingSetSize, privateKiB: memory?.privateBytes })));
   assert.ok(processes.some(({ pid }) => pid === rendererPid), 'Capture the renderer for the first ready window');
-  return Promise.all(processes.map(async process => {
+  if (!linux) return processes;
+  return Promise.all(processes.map(async ({ pid, type, serviceName }) => {
+    const process = { pid, type, serviceName };
     try {
       return { ...process, ...await processStats(process.pid) };
     } catch (error) {
@@ -63,8 +65,9 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
       viewport: [innerWidth, innerHeight],
     }));
     const rendererPid = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getOSProcessId());
-    const chromiumProcesses = linux ? await chromiumStartupStats(app, rendererPid) : undefined;
-    const renderer = chromiumProcesses?.find(({ pid }) => pid === rendererPid) ?? {};
+    const chromiumProcesses = await chromiumStartupStats(app, rendererPid);
+    const renderer = chromiumProcesses.find(({ pid }) => pid === rendererPid);
+    if (!linux) assert.ok(renderer.workingSetKiB > 0 && renderer.privateKiB > 0, 'Sample native Windows renderer memory');
 
     // Enabling Debugger reports previously parsed scripts without needing instrumentation in either renderer.
     const cdp = await page.context().newCDPSession(page);

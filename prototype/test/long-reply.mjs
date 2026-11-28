@@ -379,16 +379,23 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
     }));
     const position = await offsets();
     assert.equal(position.log, 90);
-    const pss = async () => linux ? Number((await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8'))
-      .match(/^Pss:\s+(\d+) kB$/m)[1]) : undefined;
-    const startPssKiB = await pss();
+    async function rendererMemory() {
+      if (!linux) return app.evaluate(({ app }, pid) => {
+        const { memory } = app.getAppMetrics().find(process => process.pid === pid);
+        return { workingSetKiB: memory.workingSetSize, privateKiB: memory.privateBytes };
+      }, rendererPid);
+      const memory = await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8');
+      const kib = name => Number(memory.match(new RegExp(`^${name}:\\s+(\\d+) kB$`, 'm'))[1]);
+      return { pssKiB: kib('Pss'), rssKiB: kib('Rss'), privateDirtyKiB: kib('Private_Dirty') };
+    }
+    const startMemory = await rendererMemory();
     const start = await metrics();
     await writeFile(join(profile, 'append'), '');
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
     await delay(160);
     await settleFrame(page);
     const end = await metrics();
-    const endPssKiB = await pss();
+    const endMemory = await rendererMemory();
     assert.deepEqual(await offsets(), position);
     await command.getByText('16385–20073 行', { exact: true }).waitFor();
     await output.evaluate(element => { element.scrollTop = element.scrollHeight; });
@@ -401,7 +408,9 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
       await settleFrame(page);
       await page.screenshot({ path: `${screenshot}-${label}.png` });
     }
-    return { label, openPage, nextPages, startPssKiB, endPssKiB, typing,
+    return { label, openPage, nextPages, startPssKiB: startMemory.pssKiB, endPssKiB: endMemory.pssKiB, typing,
+      startMemory: { ...startMemory, usedHeapBytes: start.JSHeapUsedSize },
+      endMemory: { ...endMemory, usedHeapBytes: end.JSHeapUsedSize },
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000 };
