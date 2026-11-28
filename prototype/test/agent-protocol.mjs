@@ -436,8 +436,10 @@ test('a completed answer folds the turn process while keeping results and errors
   assert.deepEqual(ids(collapsed, rows), ['question', 'turn-process', 'failure', 'change', 'answer', 'artifact']);
   const group = collapsed.rowAt(rows, 1);
   assert.equal(group.durationMs, 198000);
+  assert.deepEqual(group.ranges, [{ start: 1, end: 3 }, { start: 4, end: 5 }, { start: 6, end: 7 }]);
   const open = groupedTimelineLayout(layout, undefined, empty, new Set([group.key]));
   assert.deepEqual(ids(open, rows), ['question', 'turn-process', ...items.slice(1).map(row => row.id)]);
+  assert.deepEqual([...open.nested], [2, 3, 5, 7]);
   const restored = historyRows([{ id: turnId, run, rows: items }]);
   assert.deepEqual(ids(groupedTimelineLayout(timelineLayout(restored), undefined, empty, empty), restored), ids(collapsed, rows));
 
@@ -458,7 +460,7 @@ test('a completed answer folds the turn process while keeping results and errors
   ]);
   const processes = timelineLayout(next).processes;
   assert.equal(processes.get(turnId), group);
-  assert.equal(processes.get(nextRun.id).members.size, 1);
+  assert.deepEqual(processes.get(nextRun.id).ranges, [{ start: rows.length, end: rows.length + 1 }]);
 });
 
 test('finishing an already visible command reuses measurements until the live group folds', () => {

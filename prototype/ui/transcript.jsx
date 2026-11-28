@@ -352,12 +352,11 @@ const ActivityGroup = memo(function ActivityGroup({ group, open, toggle, release
     ].filter(([value]) => value).map(([value, unit]) => `${value} ${unit}`).join(' ');
   }
   return <div className={process ? 'activity turn-process' : 'activity'} data-card={group.kind}>
-    <button type="button" className="card-heading" aria-expanded={open}
+    <button type="button" className="card-heading" aria-expanded={open} aria-label={duration ? `${label}，用时 ${duration}` : undefined}
       onClick={event => toggle(group.key, !open, event.currentTarget)} onBlur={releaseAnchor}>
       <ChevronRight size={13} className="card-chevron" aria-hidden="true" />
       {!process && <Icon size={15} className="card-icon" aria-hidden="true" />}
-      <span className="card-title">{label}</span>
-      {duration && <span className="process-duration">用时 {duration}</span>}
+      <span className="card-title">{duration ? `用时 ${duration}` : label}</span>
     </button>
   </div>;
 });
@@ -473,8 +472,9 @@ export const Transcript = memo(function Transcript({
     updateExpansion();
   }, [inspect]);
   const rawLayout = timelineLayout(rows);
-  const layout = useMemo(() => groupedTimelineLayout(rawLayout, liveTurnId, ungroupedTurns.current, openGroups),
-    [rawLayout, liveTurnId, openGroups]);
+  const preservedTurns = ungroupedTurns.current;
+  const layout = useMemo(() => groupedTimelineLayout(rawLayout, liveTurnId, preservedTurns, openGroups),
+    [rawLayout, liveTurnId, preservedTurns, openGroups]);
   const target = restore && !loading ? anchorIndex(rows, layout, restore, liveReasoningItem) : -1;
   const estimate = useCallback(index => layout.estimateSize(index, liveReasoningItem), [layout, liveReasoningItem]);
   const rangeExtractor = useCallback(range => {
@@ -552,13 +552,14 @@ export const Transcript = memo(function Transcript({
       const openActivity = expanded.current.size && rows.some(row => row.turnId === liveTurnId &&
         (row.kind === 'command' || row.kind === 'tool') && expanded.current.get(row.key));
       if (viewport || element.contains(focusedActivity) || (selecting && selection.containsNode(element, true)) || openActivity) {
-        ungroupedTurns.current.add(liveTurnId);
+        ungroupedTurns.current = new Set(preservedTurns).add(liveTurnId);
       } else if (groups.length) {
         followAfterFold.current = true;
       }
-      if (process?.members.size) {
+      if (process?.ranges.length) {
         const inspecting = [...element.querySelectorAll('.message[data-empty="false"]')].some(item => {
-          if (!process.members.has(layout.sourceIndex(Number(item.dataset.index)))) return false;
+          const index = layout.sourceIndex(Number(item.dataset.index));
+          if (typeof index !== 'number' || !process.ranges.some(range => index >= range.start && index < range.end)) return false;
           if (item.contains(focus) || (selecting && selection.containsNode(item, true))) return true;
           if (!viewport) return false;
           const rect = item.getBoundingClientRect();
@@ -582,7 +583,7 @@ export const Transcript = memo(function Transcript({
       }
     }
     setLiveTurnId(activeTurnId);
-  }, [activeTurnId, liveTurnId, rawLayout, scroll, virtual]);
+  }, [activeTurnId, liveTurnId, preservedTurns, rawLayout, scroll, virtual]);
 
   useLayoutEffect(() => {
     if (!remember) return;

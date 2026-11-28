@@ -546,8 +546,6 @@ p { margin-block: 0 12px; }
 }
 .turn-process { border-left-color: transparent; }
 .turn-process button.card-heading { width: fit-content; max-width: 100%; color: var(--secondary); }
-.turn-process .card-title { flex: none; }
-.process-duration { color: var(--muted); }
 .card-chevron, .card-icon { color: var(--muted); }
 .card-placeholder { width: 13px; flex: none; }
 .card-title, .card-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

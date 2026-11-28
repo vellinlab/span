@@ -156,27 +156,25 @@ function canFoldProcess(row) {
 function completedProcess(rows, end) {
   const answer = rows[end];
   if (!answer?.completedRun || !visibleRow(answer)) return;
-  const members = new Set();
+  const ranges = [];
   let start = end;
-  let firstMember = end;
   let hasProcess = answer.phase === 'final';
   while (start > 0) {
     const row = rows[start - 1];
     if (row.turnId !== answer.turnId || (row.kind === 'message' && row.phase === 'final')) break;
     start--;
     if (canFoldProcess(row) && (row.itemKey ?? row.key) !== (answer.itemKey ?? answer.key)) {
-      members.add(start);
-      firstMember = start;
+      const range = ranges.at(-1);
+      if (range?.start === start + 1) range.start = start;
+      else ranges.push({ start, end: start + 1 });
       hasProcess ||= row.kind === 'reasoning' || row.kind === 'message';
     }
   }
   // Legacy answers without phase information may still carry identifiable progress.
-  if (!hasProcess) {
-    members.clear();
-    firstMember = end;
-  }
+  if (hasProcess) ranges.reverse();
+  else ranges.length = 0;
   return { kind: 'turn-process', key: JSON.stringify(['process', answer.turnId]),
-    turnId: answer.turnId, start: firstMember, end, members, durationMs: answer.completedRun.durationMs };
+    turnId: answer.turnId, start: ranges[0]?.start ?? end, end, ranges, durationMs: answer.completedRun.durationMs };
 }
 
 function completedProcesses(rows) {
@@ -230,45 +228,56 @@ function updateTimelineLayout(layout, changes, groups, processes) {
   return createTimelineLayout(keys, sizes, groups, processes);
 }
 
-export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
-  const processes = layout.processes;
-  const groups = layout.groups.filter(group => {
+function visibleGroups(activity, processes, liveTurnId, ungroupedTurns) {
+  const groups = activity.filter(group => {
     if (group.turnId === liveTurnId || ungroupedTurns.has(group.turnId)) return false;
     const process = processes.get(group.turnId);
     return !process || group.end <= process.start || group.start >= process.end;
   });
   for (const process of processes.values()) {
-    if (process.turnId !== liveTurnId && process.members.size) groups.push(process);
+    if (process.turnId !== liveTurnId && process.ranges.length) groups.push(process);
   }
   groups.sort((a, b) => a.start - b.start);
-  if (!groups.length) {
-    groupedPrefixByExpansion.delete(openGroups);
-    return layout;
-  }
-  let prefix = groupedPrefixByExpansion.get(openGroups);
-  if (prefix?.groups.length !== groups.length ||
-    groups.some((group, index) => prefix.groups[index] !== group || prefix.open[index] !== openGroups.has(group.key))) {
-    const entries = [];
-    const nested = new Set();
-    const open = groups.map(group => openGroups.has(group.key));
-    let nextRow = 0;
-    for (const [index, group] of groups.entries()) {
-      for (; nextRow < group.start; nextRow++) entries.push(nextRow);
-      entries.push(group);
-      if (!open[index] && !group.members) {
-        nextRow = group.end;
-        continue;
-      }
-      for (; nextRow < group.end; nextRow++) {
-        const member = !group.members || group.members.has(nextRow);
-        if (member && !open[index]) continue;
-        if (member) nested.add(entries.length);
-        entries.push(nextRow);
+  return groups;
+}
+
+function groupPrefix(groups, openGroups) {
+  const entries = [];
+  const nested = new Set();
+  let nextRow = 0;
+  for (const group of groups) {
+    for (; nextRow < group.start; nextRow++) entries.push(nextRow);
+    entries.push(group);
+    const open = openGroups.has(group.key);
+    for (const range of group.ranges ?? [group]) {
+      // Gaps carry results and failures, which remain visible when the process is closed.
+      for (; nextRow < range.start; nextRow++) entries.push(nextRow);
+      if (open) {
+        for (; nextRow < range.end; nextRow++) {
+          nested.add(entries.length);
+          entries.push(nextRow);
+        }
+      } else {
+        nextRow = range.end;
       }
     }
-    prefix = { groups, open, entries, nested, offset: entries.length - nextRow };
+  }
+  return { groups, entries, nested, offset: entries.length - nextRow };
+}
+
+export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
+  let prefix = groupedPrefixByExpansion.get(openGroups);
+  const { groups: activity, processes } = layout;
+  if (!prefix || prefix.activity !== activity || prefix.processes !== processes ||
+    prefix.liveTurnId !== liveTurnId || prefix.ungroupedTurns !== ungroupedTurns) {
+    const groups = visibleGroups(activity, processes, liveTurnId, ungroupedTurns);
+    if (prefix?.groups.length !== groups.length || groups.some((group, index) => prefix.groups[index] !== group)) {
+      prefix = groupPrefix(groups, openGroups);
+    }
+    Object.assign(prefix, { activity, processes, liveTurnId, ungroupedTurns });
     groupedPrefixByExpansion.set(openGroups, prefix);
   }
+  if (!prefix.groups.length) return layout;
   // A command finishing in the live turn can change its future group without
   // changing the rows currently used by the virtualizer.
   if (prefix.source?.getItemKey === layout.getItemKey && prefix.source.estimateSize === layout.estimateSize) return prefix.view;
