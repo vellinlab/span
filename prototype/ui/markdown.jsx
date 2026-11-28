@@ -2,11 +2,32 @@ import { createContext, lazy, memo, Suspense, useContext, useEffect, useLayoutEf
 
 let markdownModule;
 export function prepareMarkdown() {
-  return markdownModule ??= import('./markdown-content.jsx').then(module => ({ default: module.MarkdownContent }));
+  return markdownModule ??= import('./markdown-content.jsx');
 }
 
-const MarkdownContent = lazy(prepareMarkdown);
+const MarkdownContent = lazy(() => prepareMarkdown().then(module => ({ default: module.MarkdownContent })));
+const FileMarkdownContent = lazy(() => prepareMarkdown().then(module => ({ default: module.FileMarkdownContent })));
 export const MarkdownCache = createContext(null);
+
+const parkedPreviewDelayMs = 5000;
+const largePreviewText = 16 * 1024;
+
+export const FileMarkdown = memo(function FileMarkdown({ text, parked, preserveSelection }) {
+  const [released, setReleased] = useState(false);
+  useEffect(() => {
+    if (!parked) {
+      setReleased(false);
+      return;
+    }
+    if (preserveSelection || text.length < largePreviewText) return;
+    // Brief trips back to the conversation keep the already mounted reader.
+    const timer = setTimeout(() => setReleased(true), parkedPreviewDelayMs);
+    return () => clearTimeout(timer);
+  }, [parked, preserveSelection, text]);
+  return <Suspense fallback={parked ? null : <div className="prose markdown-pending" aria-busy="true" />}>
+    <FileMarkdownContent text={text} parked={parked} released={parked && released} />
+  </Suspense>;
+});
 
 export const Markdown = memo(function Markdown({ text, streaming = false }) {
   const cache = useContext(MarkdownCache);

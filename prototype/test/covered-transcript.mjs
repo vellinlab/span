@@ -186,8 +186,12 @@ async function checkPreviewSwitch(binary) {
     await page.waitForFunction(() => innerWidth <= 820 && innerHeight <= 660);
     const { cwd } = await page.evaluate(() => window.span.workspace(false));
     filename = join(cwd, `${basename(profile)}.md`);
-    const paragraphs = Array.from({ length: 64 }, (_, index) => `${index + 1}. 核对工作区里的配置与命令输出。`);
-    await writeFile(filename, `# 工作区复核记录\n\n${paragraphs.join('\n')}`);
+    const paragraphs = Array.from({ length: 300 }, (_, index) => [
+      `## 复核第 ${index + 1} 项`,
+      '核对 **工作区** 的终端和会话输出，确认重新打开文件时保留当前阅读位置。',
+      '- 查看配置\n  - 保留列表层级\n  - 复查变更记录',
+    ].join('\n\n'));
+    await writeFile(filename, `# 工作区复核记录\n\n${paragraphs.join('\n\n')}`);
 
     const transcript = page.getByTestId('transcript');
     const composer = page.getByRole('textbox', { name: '消息' });
@@ -238,6 +242,9 @@ async function checkPreviewSwitch(binary) {
     const content = preview.locator('.preview-content');
     await content.getByText('工作区复核记录').waitFor();
     const previewContent = await content.elementHandle();
+    const previewBody = await content.locator('.prose').elementHandle();
+    const previewElements = await previewBody.evaluate(element => element.querySelectorAll('*').length);
+    assert.ok(previewElements > 1000);
     const fileTop = await content.evaluate(element => { element.scrollTop = 300; return element.scrollTop; });
     assert.equal(fileTop, 300);
     assert.ok(await page.locator('main[inert]').count());
@@ -264,8 +271,13 @@ async function checkPreviewSwitch(binary) {
     await page.waitForFunction(top => document.querySelector('#reasoning-panel .agent-panel-content').scrollTop > top, detailTop);
     await assertReadingPosition(transcript, reading);
 
+    await page.waitForFunction(element => !element.isConnected, previewBody);
+    await previewBody.dispose();
+    const parkedElements = await previewContent.evaluate(element => element.querySelectorAll('*').length);
+    assert.equal(parkedElements, 0);
     await page.getByRole('button', { name: '继续预览', exact: true }).press('Enter');
     await content.waitFor();
+    await content.getByRole('heading', { name: '复核第 300 项', exact: true }).waitFor();
     assert.ok(await previewContent.evaluate(element => element.isConnected && element === document.activeElement));
     assert.equal(await content.evaluate(element => element.scrollTop), fileTop);
     await content.press('Escape');
@@ -336,7 +348,7 @@ async function checkPreviewSwitch(binary) {
     const replacement = await readReplacement.evaluate(read => read());
     await readReplacement.dispose();
     assert.deepEqual(replacement, { previousRows: 0, previousMounted: false });
-    return { fileTop, transcriptTop, detailTop,
+    return { fileTop, transcriptTop, detailTop, previewElements, parkedElements,
       reasoningObservers: { opened: openedObservers, closed: closedObservers, reopened: reopenedObservers, archived: archivedObservers },
       replacement };
   } finally {

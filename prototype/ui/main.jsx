@@ -10,7 +10,7 @@ import { memberName } from './agent-members.jsx';
 import { FileReferenceName, ImageReference } from './file-reference-name.jsx';
 import { imageFileName, maxFileReferences } from './file-references.js';
 import { Interactions } from './interactions.jsx';
-import { Markdown, prepareMarkdown } from './markdown.jsx';
+import { FileMarkdown, prepareMarkdown } from './markdown.jsx';
 import { ReasoningStrip } from './reasoning.jsx';
 import { startupWorkspace } from './recent-workspaces.js';
 import { SessionActions } from './session-actions.jsx';
@@ -65,6 +65,32 @@ function PreviewImage({ blob, name, onError }) {
   return <img ref={attach} alt={name} onError={onError} />;
 }
 
+function previewPosition(reader) {
+  const { scrollTop: top, scrollLeft: left } = reader;
+  const position = { top, left };
+  const blocks = reader.querySelector(':scope > .prose')?.children;
+  if (!top || !blocks?.length) return position;
+  const viewportTop = reader.getBoundingClientRect().top;
+  let start = 0;
+  let end = blocks.length;
+  while (start < end) {
+    const middle = Math.floor((start + end) / 2);
+    if (blocks[middle].getBoundingClientRect().bottom <= viewportTop) start = middle + 1;
+    else end = middle;
+  }
+  const block = blocks[start];
+  if (block) position.anchor = { index: start, offset: block.getBoundingClientRect().top - viewportTop, width: reader.clientWidth };
+  return position;
+}
+
+function restorePreviewPosition(reader, { top, left, anchor }) {
+  if (anchor && reader.clientWidth !== anchor.width) {
+    const block = reader.querySelector(':scope > .prose')?.children[anchor.index];
+    if (block) top = reader.scrollTop + block.getBoundingClientRect().top - reader.getBoundingClientRect().top - anchor.offset;
+  }
+  reader.scrollTo({ top, left });
+}
+
 function App() {
   const [config, setConfig] = useState(null);
   const [workspaceIdentity, setWorkspaceIdentity] = useState(null);
@@ -103,6 +129,7 @@ function App() {
   const readingViews = useRef(new Map());
   const previewScope = useRef(0);
   const previewRegion = useRef(null);
+  const previewReader = useRef(null);
   const previewTrigger = useRef(null);
   const previewFocus = useRef(null);
   const conversationFocus = useRef(null);
@@ -271,6 +298,14 @@ function App() {
     if (focused) (interactionRegion.current ?? input.current)?.focus({ preventScroll: true });
   }, [keepReasoning, reasoningOpen, showReasoning]);
 
+  const parkPreview = useCallback(value => {
+    const reader = previewReader.current;
+    const position = reader && previewPosition(reader);
+    const selection = reader?.ownerDocument.getSelection();
+    const preserveSelection = selection?.type === 'Range' && selection.containsNode(reader, true);
+    setPreview({ ...value, parked: true, position, preserveSelection });
+  }, []);
+
   useLayoutEffect(() => {
     const focus = previewFocus.current;
     previewFocus.current = null;
@@ -289,15 +324,16 @@ function App() {
     }
     if (!preview || preview.parked) return;
     if (previewBlocked) {
-      setPreview({ ...preview, parked: true });
+      parkPreview(preview);
       if (previewRegion.current?.contains(document.activeElement)) {
         interactionRegion.current?.focus({ preventScroll: true });
       }
     } else if (focus === 'content' || (readingOverlay && !previewRegion.current?.contains(document.activeElement))) {
+      if (focus === 'content' && preview.position && previewReader.current) restorePreviewPosition(previewReader.current, preview.position);
       const target = preview.attachment ? '.preview-close' : '.preview-content';
       previewRegion.current?.querySelector(target)?.focus({ preventScroll: true });
     }
-  }, [hasSession, preview, previewBlocked, readingOverlay]);
+  }, [hasSession, parkPreview, preview, previewBlocked, readingOverlay]);
 
   const loadPreview = useCallback(async (read, path, attachment = false, root) => {
     const scope = ++previewScope.current;
@@ -548,7 +584,8 @@ function App() {
 
   function togglePreview() {
     previewFocus.current = preview.parked ? 'content' : 'conversation';
-    setPreview({ ...preview, parked: !preview.parked });
+    if (preview.parked) setPreview({ ...preview, parked: false });
+    else parkPreview(preview);
   }
 
   function toggleTerminal(moveFocus = false) {
@@ -557,7 +594,7 @@ function App() {
       const origin = moveFocus ? new WeakRef(document.activeElement ?? document.body) : null;
       terminalReturnFocus.current = origin;
       terminalFocusRequest.current = origin;
-      if (readingOverlay) setPreview({ ...preview, parked: true });
+      if (readingOverlay) parkPreview(preview);
       setTerminal('visible');
       return;
     }
@@ -1176,12 +1213,13 @@ function App() {
             </div>
             <button className="icon-button right preview-close" aria-label="关闭预览" title="关闭预览" onClick={closePreview}><X size={16} /></button>
           </header>
-          <div className="preview-content" key={preview.scope} data-kind={preview.kind} tabIndex={0}>
+          <div className="preview-content" key={preview.scope} ref={previewReader} data-kind={preview.kind} tabIndex={0}>
             {preview.kind === 'image' ? preview.imageError ? <p role="status">无法显示这张图片。</p>
               : !preview.parked && <PreviewImage name={preview.path} blob={preview.blob} onError={() => {
                 setPreview(current => current?.scope === preview.scope ? { ...current, blob: undefined, imageError: true } : current);
               }} />
-              : preview.kind === 'markdown' ? <Markdown text={preview.data} /> : <pre>{preview.data}</pre>}
+              : preview.kind === 'markdown' ? <FileMarkdown text={preview.data} parked={Boolean(preview.parked)}
+                preserveSelection={preview.preserveSelection} /> : <pre>{preview.data}</pre>}
           </div>
         </aside>}
       </div>
