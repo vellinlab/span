@@ -128,6 +128,22 @@ test('ACP replay leaves every answer after the last tool call outside the proces
   }), ['Verify the workspace.', 'turn-process', 'The workspace is verified.', 'The report is attached.']);
 });
 
+test('ACP delivered artifacts preserve the file MIME type and omit private links', () => {
+  const replay = acpReplay();
+  const send = content => replay.update({ sessionUpdate: 'agent_message_chunk', content });
+  const file = { type: 'resource_link', uri: 'file:///C:/Workspace/%E6%8A%A5%E5%91%8A.xlsx', name: '报告.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+  send(file);
+  send(file);
+  send({ type: 'resource_link', uri: 'https://example.test/report', name: '查看报告' });
+  send({ type: 'resource_link', uri: 'https://example.test/private', annotations: { audience: ['assistant'] } });
+  const [turn] = replay.finish();
+  assert.deepEqual(turn.rows.map(({ artifacts: [artifact] }) => artifact), [
+    { kind: 'file', id: file.uri, path: 'C:/Workspace/报告.xlsx', name: file.name, mime: file.mimeType },
+    { kind: 'link', id: 'https://example.test/report', url: 'https://example.test/report', name: '查看报告', mime: undefined },
+  ]);
+});
+
 test('Claude commands remove only the bridge’s console wrapper from saved output', () => {
   const raw = '  Check the archive\n```\nKeep the embedded backticks';
   const fenced = '```console\n' + raw + '\n```';

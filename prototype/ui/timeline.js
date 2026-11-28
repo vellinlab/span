@@ -68,6 +68,7 @@ export function hasReasoningSection(row, index) {
 function estimateRow(row) {
   if (!visibleRow(row)) return 0;
   if (row.kind === 'message' || row.kind === 'user') return 92;
+  if (isDeliveredArtifact(row)) return 62 * row.artifacts.length;
   return activityFailurePreview(row) ? 52 : 34;
 }
 
@@ -77,6 +78,11 @@ export function activityStatus(row) {
     return 'failed';
   }
   return status;
+}
+
+export function isDeliveredArtifact(row) {
+  return row.kind === 'artifact' && row.purpose !== 'viewed' && row.final && row.artifacts.length > 0 &&
+    (!activityStatus(row) || row.status === 'completed');
 }
 
 export function activityFailurePreview(row, status = activityStatus(row)) {

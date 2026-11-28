@@ -90,13 +90,13 @@ export function acpTurn(id, notify, { childSession, consoleFences, projectTask }
           message.calls = seenCalls.size;
           notify({ kind: 'delta', delta: { id: messageId, turnId: id, kind: 'message', text } });
         } else if (update.content?.type === 'resource_link') {
-          const { uri, name } = update.content;
+          const { uri, name, mimeType } = update.content;
           if (!uri || artifacts.has(uri)) return;
           artifacts.set(uri, true);
           const artifact = uri.startsWith('file:') ? { kind: 'file', path: filePath(uri) }
             : /^https?:\/\//i.test(uri) ? { kind: 'link', url: uri } : null;
           if (artifact) item({ kind: 'artifact', id: 'artifact:' + uri,
-            artifacts: [{ ...artifact, id: uri, name: name || uri }] }, true);
+            artifacts: [{ ...artifact, id: uri, name: name || uri, mime: typeof mimeType === 'string' ? mimeType : undefined }] }, true);
         }
         break;
       case 'agent_thought_chunk':

@@ -348,7 +348,7 @@ function App() {
     }
   }, [hasSession, parkPreview, preview, previewBlocked, readingOverlay]);
 
-  const loadPreview = useCallback(async (read, path, attachment = false, root) => {
+  const loadPreview = useCallback(async (read, path, { attachment = false, root, focus = false } = {}) => {
     const scope = ++previewScope.current;
     const trigger = document.activeElement === document.body ? null : document.activeElement;
     try {
@@ -357,7 +357,7 @@ function App() {
         const { kind, data, mime } = result;
         const content = kind === 'image' ? { blob: new Blob([Uint8Array.fromBase64(data)], { type: mime }) } : { data };
         previewTrigger.current = trigger;
-        if (attachment) previewFocus.current = 'content';
+        if (attachment || (focus && document.activeElement === trigger)) previewFocus.current = 'content';
         setPreview({ kind, ...content, path, scope, attachment, root });
       }
     } catch (error) {
@@ -365,16 +365,29 @@ function App() {
     }
   }, [report]);
 
-  const readPreview = useCallback((cwd, path) =>
-    loadPreview(() => window.span.request('files.preview', { cwd, path }), path, false, cwd), [loadPreview]);
+  const readPreview = useCallback((cwd, path, focus = false) =>
+    loadPreview(() => window.span.request('files.preview', { cwd, path }), path, { root: cwd, focus }), [loadPreview]);
 
   const previewCwd = session?.cwd || config?.cwd;
+  const localArtifactCwd = config?.ssh ? undefined : previewCwd;
+  const canPreviewArtifact = useCallback(file => {
+    if (!localArtifactCwd || !file.path) return false;
+    const path = workspaceRelativePath(localArtifactCwd, file.path);
+    if (!path || path.split('/').includes('..')) return false;
+    if (imageFileName(path)) return true;
+    if (file.kind === 'image') return false;
+    const mime = file.mime?.split(';', 1)[0].trim().toLowerCase();
+    if (mime && mime !== 'application/octet-stream') {
+      return mime.startsWith('text/') || /^application\/(?:[\w.-]+\+)?(?:json|xml)$/.test(mime);
+    }
+    return !/\.(?:avif|heic|ico|bmp|tiff?|svg|pdf|epub|docx?|xlsx?|pptx?|od[stp]|zip|gz|7z|rar|tar|exe|dll|rpm|deb|mp[34]|mov|avi|mkv|wav|webm|woff2?)$/i.test(path);
+  }, [localArtifactCwd]);
   const openImage = useCallback(file => {
     const path = previewCwd && workspaceRelativePath(previewCwd, file.path);
     const read = path
       ? () => window.span.request('files.preview', { cwd: previewCwd, path, imageOnly: true })
       : () => window.span.previewImage(file.path);
-    return loadPreview(read, file.name, true);
+    return loadPreview(read, file.name, { attachment: true });
   }, [previewCwd, loadPreview]);
   const previewImage = config?.ssh || !window.span.previewImage ? undefined : openImage;
 
@@ -392,21 +405,17 @@ function App() {
   }
 
   const openArtifact = useCallback(artifact => {
-    const path = artifact.path?.replaceAll('\\', '/');
-    const cwd = session?.cwd || config?.cwd;
-    if (!cwd || !path || config?.ssh) {
+    if (!localArtifactCwd || !artifact.path) {
       report(new Error(`产物位置 · ${artifact.path ?? artifact.name}`));
       return;
     }
-    const root = cwd.replaceAll('\\', '/').replace(/\/$/, '') + '/';
-    const absolute = /^(?:\/|[a-z]:\/)/i.test(path);
-    const normalize = value => /^[a-z]:\//i.test(root) ? value.toLowerCase() : value;
-    if (absolute && !normalize(path).startsWith(normalize(root))) {
+    const path = workspaceRelativePath(localArtifactCwd, artifact.path);
+    if (path === null) {
       report(new Error(`产物位于工作区之外 · ${artifact.path}`));
       return;
     }
-    readPreview(cwd, absolute ? path.slice(root.length) : path);
-  }, [session?.cwd, config, report, readPreview]);
+    readPreview(localArtifactCwd, path, true);
+  }, [localArtifactCwd, report, readPreview]);
 
   function closePanel({ restoreFocus = true } = {}) {
     const id = ++panelScope.current;
@@ -1118,7 +1127,7 @@ function App() {
                   rows={rows} cursor={work.cursor} historyCursors={work.historyCursors} loadOlder={work.loadOlder} loading={loading}
                   liveReasoningItem={showReasoning ? liveReasoning.key : undefined} activeTurnId={run?.id} requests={work.requests}
                   jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
-                  openArtifact={openArtifact} openImage={previewImage} openTrace={openTrace}
+                  openArtifact={openArtifact} canPreviewArtifact={canPreviewArtifact} openImage={previewImage} openTrace={openTrace}
                   canOpenSession={!running && !loading && connection === 'ready'} />
                 : <div className="timeline" role="log" aria-label="会话记录" aria-live="off" data-testid="transcript" data-items={0} />}
             </div>
@@ -1144,7 +1153,7 @@ function App() {
                 <AgentPanel panel={panel} work={work} reasoning={reasoningDetails} reasoningArchived={reasoningArchived}
                   reasoningProgress={reasoningExpanded ? liveReasoning : undefined}
                   onClose={closePanel} onGoalAction={onGoalAction} report={report} openSession={openRef} openTrace={openTrace}
-                  openArtifact={openArtifact} openImage={previewImage} />
+                  openArtifact={openArtifact} canPreviewArtifact={canPreviewArtifact} openImage={previewImage} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" id={commandListId} role="listbox" aria-label="会话命令">
                   {suggestions.map(({ name, title, Icon, description, detail }, index) => <button type="button" role="option" tabIndex={-1}
                     key={name} id={`${commandListId}-${index}`} ref={index === activeCommand ? commandSelection : undefined}

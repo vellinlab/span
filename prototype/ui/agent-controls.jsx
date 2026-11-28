@@ -281,7 +281,7 @@ function FeedbackPanel({ send }) {
 }
 
 export function AgentPanel({ panel, work, reasoning, reasoningArchived, reasoningProgress,
-  onClose, onGoalAction, report, openSession, openTrace, openArtifact, openImage }) {
+  onClose, onGoalAction, report, openSession, openTrace, openArtifact, canPreviewArtifact, openImage }) {
   const close = useRef(null);
   const content = useRef(null);
   const extensionSearch = useRef(null);
@@ -358,7 +358,8 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, reasonin
       {inspect && <AgentInspector panel={panel} work={work} close={close} extensionSearch={extensionSearch}
         extensionLabel={extensionLabels[panel.extension]} memberScroll={memberScroll} readingMemberHistory={readingMemberHistory}
         onMemberScroll={onMemberScroll} canResumeMember={canResumeMember}
-        report={report} openSession={openSession} openTrace={openTrace} openArtifact={openArtifact} openImage={openImage} />}
+        report={report} openSession={openSession} openTrace={openTrace}
+        openArtifact={openArtifact} canPreviewArtifact={canPreviewArtifact} openImage={openImage} />}
     </div>}
   </section>;
 }

@@ -265,7 +265,7 @@ function AgentsPanel({ work, openSession, openTrace, report }) {
 }
 
 function SubagentTranscript({ panel, delegation, scroll, showLatest, onScrollPosition,
-  openSession, canOpenSession, openTrace, openArtifact, openImage }) {
+  openSession, canOpenSession, openTrace, openArtifact, canPreviewArtifact, openImage }) {
   const [view, setView] = useState();
   const [error, setError] = useState('');
   const jumpToLatest = useRef(true);
@@ -286,7 +286,8 @@ function SubagentTranscript({ panel, delegation, scroll, showLatest, onScrollPos
       label="子代理会话记录" testId="subagent-transcript" activeTurnId={view.run?.status === 'running' ? view.run.id : undefined}
       cursor={view.cursor} loadOlder={view.loadOlder} loading={view.loading}
       showLatest={showLatest} onScrollPosition={onScrollPosition} openTrace={openTrace}
-      openSession={openSession} canOpenSession={canOpenSession} openArtifact={openArtifact} openImage={openImage} />
+      openSession={openSession} canOpenSession={canOpenSession}
+      openArtifact={openArtifact} canPreviewArtifact={canPreviewArtifact} openImage={openImage} />
   </>;
 }
 
@@ -425,7 +426,8 @@ function ExtensionList({ panel, search, close, label }) {
 }
 
 export default function AgentInspector({ panel, work, close, extensionSearch, extensionLabel, memberScroll,
-  readingMemberHistory, onMemberScroll, canResumeMember, report, openSession, openTrace, openArtifact, openImage }) {
+  readingMemberHistory, onMemberScroll, canResumeMember, report, openSession, openTrace,
+  openArtifact, canPreviewArtifact, openImage }) {
   switch (panel.kind) {
     case 'usage':
       return <UsagePanel usage={work.usage} refreshing={work.usageRefreshing} />;
@@ -435,7 +437,7 @@ export default function AgentInspector({ panel, work, close, extensionSearch, ex
       return <SubagentTranscript key={panel.id} panel={panel} delegation={work.api?.delegation}
         scroll={memberScroll} showLatest={readingMemberHistory} onScrollPosition={onMemberScroll}
         openSession={openSession} canOpenSession={canResumeMember} openTrace={openTrace}
-        openArtifact={openArtifact} openImage={openImage} />;
+        openArtifact={openArtifact} canPreviewArtifact={canPreviewArtifact} openImage={openImage} />;
     case 'diff':
       return <DiffPanel key={panel.id} panel={panel} />;
     case 'extensions':

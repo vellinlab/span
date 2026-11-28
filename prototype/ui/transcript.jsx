@@ -2,7 +2,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMem
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowUpRight, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
-  CircleHelp, Folder, Image, ListChecks, Search, ShieldAlert, Terminal, Users, Wrench,
+  CircleHelp, Folder, Image, Link2, ListChecks, Search, ShieldAlert, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
 import { transientAgentStatus } from './delegation.js';
@@ -12,17 +12,18 @@ import { Markdown, MarkdownCache, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, readTextPosition, rememberReaderPosition, TextReader } from './text-reader.jsx';
-import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, itemKey, sameTranscriptRows, timelineLayout, visibleRow } from './timeline.js';
+import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, isDeliveredArtifact,
+  itemKey, sameTranscriptRows, timelineLayout, visibleRow } from './timeline.js';
 import { transcriptIsAtEnd } from './transcript-navigation.jsx';
 
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
 const waitingLabels = { approval: '待审批', input: '待回答' };
 
-function SourceLink({ url, children }) {
-  return <a href={url} onClick={event => {
+function SourceLink({ url, children, className, label }) {
+  return <a href={url} className={className} aria-label={label} onClick={event => {
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) window.span.openLink(url).catch(() => {});
-  }}>{children}<ArrowUpRight size={12} /></a>;
+  }}>{children}<ArrowUpRight size={12} aria-hidden="true" /></a>;
 }
 
 function ArtifactList({ artifacts, openArtifact, openImage, label }) {
@@ -36,6 +37,30 @@ function ArtifactList({ artifacts, openArtifact, openImage, label }) {
           : <span title={file.path}>{file.name}</span>}
     </>}
   </li>)}</ul>;
+}
+
+function ArtifactResults({ artifacts, canPreviewArtifact, openArtifact }) {
+  return <ul className="artifact-results" aria-label="会话产物">{artifacts.map(file => {
+    const link = file.url && /^https?:\/\//i.test(file.url);
+    const image = file.kind === 'image' || file.mime?.startsWith('image/');
+    const Icon = link ? Link2 : image ? Image : file.kind === 'diff' ? FileCode2 : FileText;
+    const extension = /\.([a-z\d]{1,9})$/i.exec(file.path || file.name)?.[1]?.toUpperCase();
+    const type = link ? '网页链接' : file.kind === 'diff' ? '差异文件' : extension || (image ? '图片' : '文件');
+    return <li className="artifact-result" key={file.id}>
+      <span className="artifact-result-icon"><Icon size={18} aria-hidden="true" /></span>
+      <div className="artifact-result-file">
+        <FileReferenceName name={file.name} path={file.path ?? file.url ?? file.name} />
+        <small>{type}</small>
+      </div>
+      {link ? <SourceLink className="artifact-result-action" url={file.url} label={`打开链接 · ${file.name}`}>
+        <span>打开</span>
+      </SourceLink> : canPreviewArtifact?.(file) ? <button type="button" className="artifact-result-action"
+        aria-label={`预览 · ${file.name}`} onClick={() => openArtifact(file)}>
+        <span>预览</span><ChevronRight size={14} aria-hidden="true" />
+      </button> : file.path && <CopyTextButton className="artifact-result-action" text={file.path}
+        label={`复制路径 · ${file.name}`} actionText="复制路径" copiedLabel="已复制" />}
+    </li>;
+  })}</ul>;
 }
 
 const largeOutputSize = 16 * 1024;
@@ -214,7 +239,8 @@ function fitsInlineProgress(sections) {
 }
 
 const TranscriptRow = memo(function TranscriptRow({
-  row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openTrace, openArtifact, openImage, canOpenSession,
+  row, activePlan, liveDelegation, roster, currentKey, expanded, toggle, openSession, openTrace,
+  openArtifact, canPreviewArtifact, openImage, canOpenSession,
   streaming, following, scroll, outputPositions, awaiting, inTurnProcess,
 }) {
   if (row.kind === 'user') return <div className="user-message" data-attachment-only={(!row.text && !row.queued) || undefined}>
@@ -230,6 +256,8 @@ const TranscriptRow = memo(function TranscriptRow({
   if (inTurnProcess && row.final && fitsInlineProgress(row.sections)) {
     return <div className="agent-commentary" data-card="reasoning"><ReasoningText rows={[row]} /></div>;
   }
+  if (isDeliveredArtifact(row)) return <ArtifactResults artifacts={row.artifacts}
+    canPreviewArtifact={canPreviewArtifact} openArtifact={openArtifact} />;
 
   let title, hint, path, detail, recordedStatus, statusText, statusNote;
   let status = activityStatus(row);
@@ -431,7 +459,7 @@ function sameTranscriptProps(previous, next) {
 
 export const Transcript = memo(function Transcript({
   rows, liveReasoningItem, activeTurnId, viewKey, remembered, remember, historyCursors, cursor, loadOlder, loading, jumpToLatest, scroll,
-  onScrollPosition, openSession, openTrace, openArtifact, openImage, canOpenSession, showLatest, requests,
+  onScrollPosition, openSession, openTrace, openArtifact, canPreviewArtifact, openImage, canOpenSession, showLatest, requests,
   label = '会话记录', testId = 'transcript',
 }) {
   const waiting = useMemo(() => {
@@ -733,7 +761,7 @@ export const Transcript = memo(function Transcript({
                 streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll} outputPositions={outputPositions.current}
                 expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
                 toggle={toggle} openSession={openSession} openTrace={openTrace} openArtifact={openArtifact} openImage={openImage}
-                canOpenSession={canOpenSession} />)}
+                canPreviewArtifact={canPreviewArtifact} canOpenSession={canOpenSession} />)}
           </div>;
         })}
       </div>

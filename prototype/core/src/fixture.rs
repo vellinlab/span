@@ -1109,6 +1109,25 @@ pub fn run() -> Result<()> {
                     )?;
                     continue;
                 }
+                if params["input"][0]["text"] == "验证交付文件。" {
+                    for item in [
+                        json!({"type":"imageView","id":format!("{turn}-viewed"),"status":"completed",
+                            "path":"reference.png"}),
+                        json!({"type":"agentMessage","id":format!("{turn}-report"),"phase":"final_answer",
+                            "text":"窗口复核完成，已附上截图。"}),
+                        json!({"type":"imageGeneration","id":format!("{turn}-delivered"),"status":"completed",
+                            "savedPath":"工作台键盘导航与窄窗验收最终版.png"}),
+                    ] {
+                        notice(&output, "item/completed", json!({"threadId":thread_id,"turnId":turn,"item":item}))?;
+                    }
+                    background.store(false, Ordering::Release);
+                    notice(
+                        &output,
+                        "turn/completed",
+                        json!({"threadId":thread_id,"turn":{"id":turn,"status":"completed","durationMs":198000,"items":[]}}),
+                    )?;
+                    continue;
+                }
                 if params["input"][0]["text"] == "验证结构化工具错误。" {
                     notice(
                         &output,

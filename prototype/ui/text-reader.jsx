@@ -99,15 +99,15 @@ export function TextReader({ text, output, plain = false, kind, label, pagesLabe
   </>;
 }
 
-export function CopyTextButton({ text, label, copiedLabel }) {
+export function CopyTextButton({ text, label, copiedLabel, actionText, className = 'icon-button' }) {
   const [copy, setCopy] = useState('');
   const Icon = copy === copiedLabel ? Check : copy ? AlertCircle : Copy;
-  return <button className="icon-button" type="button" aria-label={label} title={copy || label} onClick={async () => {
+  return <button className={className} type="button" aria-label={label} title={copy || label} onClick={async () => {
     try {
       await window.span.copyText(text);
       setCopy(copiedLabel);
     } catch {
       setCopy('复制失败');
     }
-  }}><Icon size={14} /></button>;
+  }}><Icon size={14} aria-hidden="true" />{actionText && <span aria-live="polite">{copy || actionText}</span>}</button>;
 }

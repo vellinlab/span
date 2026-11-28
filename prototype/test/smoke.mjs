@@ -2336,6 +2336,37 @@ try {
   await lastFile.press('Home');
   assert.ok(await upDirectory.evaluate(button => button === document.activeElement));
   console.log('Verified viewport file mounting, keyboard navigation past unmounted rows, and preview focus in a 2,000-file directory.');
+
+  if (!process.env.SPAN_TEST_SSH_ALIAS) {
+    const artifactName = '工作台键盘导航与窄窗验收最终版.png';
+    await writeFile(join(reviewWorkspace, artifactName), samplePng);
+    await composer.fill('验证交付文件。');
+    await composer.press('Enter');
+    const delivered = transcript.getByRole('button', { name: '预览 · ' + artifactName, exact: true });
+    const answer = transcript.getByText('窗口复核完成，已附上截图。', { exact: true });
+    await delivered.waitFor();
+    assert.ok(await answer.evaluate((reply, filename) => {
+      const rows = reply.closest('.rail');
+      const file = [...rows.querySelectorAll('.artifact-result-file .file-reference-name')]
+        .find(name => name.textContent === filename);
+      return file && Boolean(reply.compareDocumentPosition(file) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }, artifactName));
+    assert.equal(await transcript.getByText('已查看图片', { exact: true }).count(), 0);
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-delivered-artifact.png') });
+    await delivered.press('Enter');
+    const previewedImage = previewContent.getByRole('img', { name: artifactName, exact: true });
+    await previewedImage.waitFor();
+    await page.waitForFunction(name => [...document.images].some(image => image.alt === name && image.naturalWidth > 0), artifactName);
+    assert.ok(await previewContent.evaluate(content => content === document.activeElement));
+    await page.keyboard.press('Escape');
+    await previewedImage.waitFor({ state: 'detached' });
+    assert.ok(await delivered.evaluate(button => button === document.activeElement));
+    const artifactProcess = transcript.getByRole('button', { name: '任务过程，用时 3 分 18 秒', exact: true }).last();
+    await artifactProcess.press('Enter');
+    await transcript.getByText('已查看图片', { exact: true }).waitFor();
+    assert.equal(await delivered.count(), 1);
+    console.log('Verified delivered artifacts remain actionable outside folded tool history, with native image preview and keyboard focus.');
+  }
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });
