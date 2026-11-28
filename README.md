@@ -1,94 +1,45 @@
-# Span
+<div align="center">
+  <img src="packaging/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg" width="64" height="64" alt="Span 图标">
+  <h1>Span</h1>
+  <p><strong>在一个桌面工作台里使用 SSH 终端、浏览远程文件、接续 Codex 会话。</strong></p>
+  <p>
+    <a href="https://github.com/vellinlab/span/releases/latest">下载稳定版</a> ·
+    <a href="docs/usage.md">使用指南</a> ·
+    <a href="https://github.com/vellinlab/span/issues/new/choose">反馈问题</a> ·
+    <a href="CONTRIBUTING.md">参与贡献</a>
+  </p>
+</div>
 
-<img src="packaging/icons/hicolor/scalable/apps/io.github.zyw02.SshWorkbench.svg" width="72" height="72" alt="Span 图标">
+![Span Windows 原生工作台。左栏列出会话，中央展示 Codex 回复和命令记录。](docs/images/windows-workbench.png)
 
-用 Rust 构建的 SSH 终端和 Codex 工作台。NewStartOS／EL8 使用 GTK3 和 VTE，Windows 使用 Iced 和 ConPTY。左侧管理 SSH 主机，顶部标签在本地终端和远程会话间切换。
+## 用 Span 做什么
 
-## 安装
+- **管理远程工作。** 从左栏切换 SSH 主机，在同一窗口打开多个终端，通过文件页访问、上传和下载文件。
+- **接续 Codex 会话。** 在本机或 SSH 主机上打开已有会话，查看命令、文件变更和审批，继续当前任务。
+- **就地阅读产物。** 在右侧查看 Markdown、代码、图片和差异，在回复或文件里选取内容带回对话。
 
-### NewStartOS／EL8 x86_64
+## 下载与启动
 
-从 [GitHub Releases](https://github.com/vellinlab/span/releases) 直接下载 `.rpm` 文件并安装。
+前往 [GitHub Releases](https://github.com/vellinlab/span/releases/latest)，选择对应平台的文件。稳定版为原生桌面应用。
 
-```sh
-sudo dnf install ./span-0.1.0-1.el8.x86_64.rpm
-span
-```
+| 平台 | 下载文件 | 启动方式 |
+| --- | --- | --- |
+| Windows x86_64 | `span-*-windows-x86_64.zip` | 解压后运行 `Span/Span.exe` |
+| NewStartOS／EL8 x86_64 | `span-*-1.el8.x86_64.rpm` | 用 `sudo dnf install ./文件名.rpm` 安装，运行 `span` |
 
-CI 使用 AlmaLinux 8，验证 glibc 2.28 和 GTK 3.22.30，并在虚拟 X11 下启动已安装的 RPM。RPM 带有仅由 Span 加载的 VTE 0.64.2。该版本能忽略 Codex 的 OSC 状态序列。对应源码 `vte-0.64.2.tar.xz` 随 Release 提供。
+打开应用即可进入本地终端。使用 Codex 时，在实际运行 Agent 的机器上安装并登录 Codex CLI。连接和配置步骤见[使用指南](docs/usage.md)。
 
-安装包与启动命令均使用 `span`。安装时会替换旧的 `ssh-workbench` 软件包，继续读取已有的主机配置。`ssh-workbench` 启动命令仍可作为兼容别名使用。
+## Electron 预览
 
-Ubuntu／DEB 暂停更新。已发布的 Ubuntu 安装包仍可在对应的 Release 下载。
+[Electron 工作台](https://github.com/vellinlab/span/tree/prototype/web-workbench/prototype)在独立分支开发，探索把 Codex、Claude Code、Pi、OpenCode 和 Kilo 等后端接进同一套会话界面。可在 [预览验收](https://github.com/vellinlab/span/actions/workflows/web-workbench-preview.yml?query=branch%3Aprototype%2Fweb-workbench)查看 Windows 和 EL8 的检查与产物。
 
-### Windows x86_64
+<details>
+<summary>查看 Electron 预览界面</summary>
 
-下载 `span-*-windows-x86_64.zip`，解压后打开 `Span/Span.exe`。Windows 原生版默认使用 tiny-skia 软件渲染，用系统自带的 ConPTY 运行 PowerShell。便携包内只有一个可执行文件。从 [GitHub Releases](https://github.com/vellinlab/span/releases) 下载，Windows 便携包与 EL8 RPM 同时发布。
+![Span Electron 预览。会话、目标和输入框放在中间，文件阅读区域在右侧。](docs/images/electron-preview.png)
 
-远程终端使用系统 OpenSSH 客户端，密码和验证码在终端中输入。Windows 的 SFTP 和远程 Codex 会为同一主机建立后台 SSH 连接，需要可直接使用的密钥或 SSH Agent。先在终端确认主机公钥，后台连接会验证已保存的主机身份。使用本地 Codex 会话需要将已登录的 `codex.exe` 放在 `PATH` 中。本地 Windows Codex 目前使用独立的 App Server。
+</details>
 
-带 `-alpha.N`、`-beta.N` 或 `-rc.N` 后缀的版本会标记为预发布，供测试使用。
+## 参与
 
-界面英文字体优先使用本机的 Segoe UI，简体中文优先使用微软雅黑 UI 或微软雅黑。NewStartOS／EL8 的 RPM 使用系统已有字体。缺少微软雅黑时，优先使用系统已有的思源黑体或 Noto Sans CJK SC。
-
-## 使用
-
-- 启动后进入本地终端。Linux 默认使用 Bash，Windows 默认使用 PowerShell。标签栏的「+」打开另一个本地终端。Linux 标签可拖动排序。
-- 主机栏的「+」添加配置，点击主机打开 SSH 标签，「…」提供编辑和删除。「主机 → 导入 SSH 配置」可从本机 SSH 配置选中要保存的别名。Linux 配置保存在 `$XDG_CONFIG_HOME/ssh-workbench/hosts.ini`，Windows 配置保存在 `%LOCALAPPDATA%\Span\hosts.json`，首次启动原生版会读取并迁移旧版 Windows 的 `ssh-workbench\hosts.ini`。
-- SSH 目标可填 OpenSSH 别名或 `user@host`。从「会话 → 快速连接」或左侧工具栏打开。Windows 主机页还列出最近连接。系统 OpenSSH 读取现有配置、代理和认证设置。
-- Linux 下，为可信主机开启「信任 X11 转发」后，应用使用 `ssh -Y` 和当前标签的专用控制套接字。连接后在远端 Codex 中按 `Ctrl+V` 附上本机截图。
-- 文字复制和粘贴使用 `Ctrl+Shift+C` 和 `Ctrl+Shift+V`。用 `Ctrl+Shift+T` 新建本地标签，`Ctrl+Shift+W` 关闭当前标签。
-
-## 文件目录
-
-在左栏切换「主机」「会话」「文件」，或按 `Ctrl+Shift+F` 打开文件页。文件页根据当前终端标签显示本地或远端目录，可输入路径、双击进入子目录、返回上一级、刷新和显示隐藏项。每个标签单独记住当前目录。
-
-可拖动左栏右边的分隔线调整宽度。快速连接先填写 SSH 目标，由 OpenSSH 请求认证。支持 AskPass 的 OpenSSH 在需要时弹出掩码输入框，较早的客户端在终端中提示。密码与验证码不会保存。
-
-双击文件可在右侧预览 UTF-8 文本、代码、Markdown、HTML、Mermaid 和 PNG/JPEG/SVG 图片。图片可缩放、适合宽度或恢复原始大小，也可用 `Ctrl`＋滚轮缩放。SVG 和 Mermaid 按当前倍率重绘。Markdown 预览保留代码块与表格，HTML 以静态方式展示。上方按钮可上传本机文件到当前目录，或下载选中的文件。上传遇到同名文件时会提示，下载覆盖前会确认。Linux 的远端文件操作复用已登录的 OpenSSH 连接，Windows 按上述要求建立后台 SFTP 连接。
-
-Codex 回复中生成的图片、Mermaid、HTML 和可识别的文件链接会自动进入同一个右侧预览区。用预览标题栏的箭头切换产物，点击会话里的文件链接或预览按钮可再次打开。HTML 预览中的 HTTP／HTTPS 链接由系统默认浏览器打开。手动选中的预览会保留，新的产物可用箭头切换查看。
-
-## Codex 会话
-
-点击窗口顶部右侧的对话图标，或按 `Ctrl+Shift+A`，在同一标签内切换终端与 Agent 界面。
-
-- 左栏的「主机」和「会话」页签用于切换连接列表和 Codex 会话。通过「会话」（`Ctrl+Shift+H`）按工作目录浏览当前标签所在主机的会话，支持搜索、归档筛选和新建。打开旧会话后可以加载更早的对话。SSH 断开后，在同一标签重新连接会恢复上次打开的已保存会话。
-- 会话页右上角的终端面板图标（`Ctrl+Shift+J`）在下方展开当前标签的真实终端。「加入选区」把终端中选中的文字放进输入框，供编辑后发送。
-- 底部终端右上角的「+」在面板中新开一个终端。SSH 标签使用当前主机和已认证的连接，下拉框切换终端，「×」关闭当前新增的终端。
-- 每轮的活动区展示 Codex 提供的推理摘要、命令、代码搜索、网页搜索和文件变更。运行中可以展开查看命令输出或带行号的实时 diff，并复制原始补丁。Codex 的问题和审批以可操作卡片呈现。
-- 输入区可以选择当前主机提供的模型和思考强度。点亮闪电使用 Fast，关闭恢复标准速度，设置从下一条消息起生效。Fast 需要支持该模式的模型及 Codex CLI 0.151 或更新版本。任务运行时，输入区上方显示进度和用时，按 `Esc` 可中断。悬停或点击输入区右侧的两个环，分别查看套餐剩余额度和上下文占用。
-- 输入框底部的盾牌按钮可切换「工作区权限」「只读」「完全访问」。新会话默认采用工作区权限，打开已有会话时沿用 Codex 返回的权限。完全访问需要确认，选择从下一轮起生效。
-- 在会话输入框按 `Enter` 发送，按 `Shift+Enter` 换行。`Ctrl+Enter` 也可发送。任务运行时输入新内容再按 `Enter`，可将消息追加到当前任务，同时可用方块按钮或 `Esc` 中断。
-- 在输入框开头输入 `/` 打开命令列表，可用方向键和 `Enter` 选择。`/model` 打开模型菜单，输入 `/goal` 并选择「设置目标」，直接在聊天框填写并发送，也可键入 `/goal <目标>`。`/goal status` 查看会话目标，`/goal edit` 编辑，`/goal pause`、`/goal resume`、`/goal clear` 管理同一个目标。
-- 会话命令还包括 `/plan [任务]`、`/review [--base 分支 | --commit SHA | 审查重点]`、`/compact`、`/diff`、`/status`、`/usage`、`/mcp [verbose]`、`/reasoning [强度]`、`/new [名称]`、`/resume [会话 ID]`、`/fork`、`/rename <名称>`、`/pwd` 和 `/copy [rich]`。`/diff` 显示已跟踪文件的改动并列出未跟踪文件，Git 操作在当前会话的主机上执行。`/usage` 打开套餐额度。
-- 左侧「扩展」页和工具栏的拼图按钮用于管理当前终端标签所在主机的插件与连接器，也可用 `/plugins` 或 `/apps` 进入。插件目录和安装状态来自该主机的 Codex App Server，取决于主机上的 Codex 版本与其登录的账号。连接器在账号层面的授权和解绑通过浏览器中的 ChatGPT 完成，Span 内可启停该主机对已可用连接器的使用。
-- 用户消息支持 Markdown。粘贴 Notion 等应用的富文本时，标题、列表、链接、代码和表格会转换为可编辑的 Markdown，发送后在消息气泡中排版。
-- 推理摘要、生成中的回复和已完成的回复支持 Markdown 加粗与可点击的 HTTP／HTTPS 链接。每轮完成后，末尾的两个图标分别复制该轮的 Markdown 和富文本。
-- 鼠标选中回复、推理摘要或文件预览中的文字后，点击「引用」把选区加入输入框上方的引用卡片。每条可单独移除，发送时与正文一同交给 Codex。
-- 点击「附件」选择本机文件，或在输入框按 `Ctrl+V` 粘贴剪贴板图片。发送前可移除，每条消息最多 6 个、合计 16 MiB。SSH 会话通过当前连接的 SFTP 将附件放入远端私有临时目录。支持视觉输入的模型会直接收到 PNG、JPEG、GIF 和 WebP 图片，其余附件按文件路径交给 Agent 读取。
-
-运行 Agent 的主机需要安装具备 App Server 的 Codex CLI。使用 SSH 时，Span 通过已认证的连接启动远端 App Server，并将所选工作目录交给它。使用 OpenAI 后端时，先在运行 Agent 的主机上完成对应的模型登录。
-
-### 使用获准的 OpenAI 兼容网关
-
-在**运行 App Server 的机器**配置 `~/.codex/config.toml`。本地标签读取本机配置，SSH 标签读取远端用户配置。若已设置 `CODEX_HOME`，使用其中的 `config.toml`。
-
-```toml
-model = "your-model-id"
-model_provider = "internal_gateway"
-
-[model_providers.internal_gateway]
-name = "内部模型网关"
-base_url = "https://gateway.example.invalid/v1"
-wire_api = "responses"
-env_key = "SPAN_GATEWAY_API_KEY"
-```
-
-按部署环境填写网关地址和实际支持的模型 ID。需要 Bearer 鉴权时，让运行 App Server 的进程从批准的凭据来源继承 `SPAN_GATEWAY_API_KEY`。无需把密钥写入 Span 主机配置或 Git 仓库。使用新配置后重新打开 Agent 标签。
-
-网关需要提供 `POST /v1/responses` 并支持流式输出，以及工具调用和工具结果的往返。模型、图片、Fast 和额度显示取决于后端能力。CI 用真实 App Server 和本机模拟网关检查 EL8 RPM 的打开会话、审批、文件 diff 和续聊。基线固定在 `packaging/app-server-baseline`，Actions 的「Review App Server upstream」会给出稳定版更新清单。
-
-使用 ChatGPT App 接续时，先在运行 Codex 的主机上配置并启动 Codex 远程控制，再在 Span 中打开会话。Span 会自动接入同一用户、同一 `CODEX_HOME` 下正在运行的共享后台，保留原会话 ID，接收其他客户端的会话更新。关闭 Span 标签只会断开该标签的连接。未运行共享后台时，Span 使用独立的 App Server，可在关闭该会话标签后从其他客户端接续。
-
-Agent 回复支持可滚动和复制的 Markdown 代码卡片、GitHub 风格表格、Mermaid 基础流程图和时序图，以及本机或远端文件中的 PNG/JPEG 图片。正文和表格可跨段落或单元格拖选，按 `Ctrl+C` 复制。表格也可以单独复制为 HTML 富文本、CSV 或 Markdown。图片和 Mermaid 图可以放大、复制和保存，Mermaid 图同时提供源码。复杂 Mermaid 语法以源码显示，图片文件预览上限为 8 MiB。
+欢迎提交[问题和需求](https://github.com/vellinlab/span/issues/new/choose)或阅读[贡献指南](CONTRIBUTING.md)。两条开发线均通过 [GitHub Actions](https://github.com/vellinlab/span/actions)运行构建和安装验证。

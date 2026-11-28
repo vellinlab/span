@@ -1,0 +1,40 @@
+name: Check repository documentation
+
+on:
+  push:
+    branches: [main]
+    paths: ['README.md', 'CONTRIBUTING.md', 'docs/**', '.github/ISSUE_TEMPLATE/**', '.github/workflows/repository-docs.yml']
+  pull_request:
+    branches: [main]
+    paths: ['README.md', 'CONTRIBUTING.md', 'docs/**', '.github/ISSUE_TEMPLATE/**', '.github/workflows/repository-docs.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check local links and screenshots
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          from urllib.parse import unquote, urlsplit
+
+          guides = (Path("README.md"), Path("CONTRIBUTING.md"), *Path("docs").glob("*.md"))
+          for guide in guides:
+              text = guide.read_text(encoding="utf-8")
+              links = re.findall(r"\]\(([^\s)]+)\)", text)
+              links += re.findall(r'(?:href|src)="([^"]+)"', text)
+              for link in links:
+                  target = urlsplit(link)
+                  if not target.scheme and not target.netloc and target.path:
+                      destination = guide.parent / unquote(target.path)
+                      if not destination.exists():
+                          raise SystemExit(f"{guide}: missing {link}")
+          PY

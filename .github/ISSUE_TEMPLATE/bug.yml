@@ -1,0 +1,25 @@
+name: 问题反馈
+description: 报告终端、文件、会话或安装中可以复现的问题
+labels: [bug]
+body:
+  - type: input
+    id: environment
+    attributes:
+      label: 平台和 Span 版本
+      placeholder: Windows 11 / Span 0.1.0，或 EL8 / Electron 预览提交
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 请说明打开了哪个界面、执行了哪些操作，以及是否使用 SSH。
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 实际结果与预期结果
+      description: 可以附上截图或相关日志。提交前请移除口令、令牌和私密连接信息。
+    validations:
+      required: true
