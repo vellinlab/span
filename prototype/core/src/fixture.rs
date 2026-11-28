@@ -211,10 +211,27 @@ fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str, is_archived: boo
     json!({"data":entries[start..end],"nextCursor":(end < entries.len()).then(|| end.to_string())})
 }
 
-fn history(grouped: bool, processes: bool) -> Vec<Value> {
-    (1..=160)
+fn markdown_report(number: usize) -> String {
+    let description =
+        "复核 **工作区报告**、目录状态与阅读位置；在会话窗口不同宽度下确认正文换行。".repeat(3);
+    let paragraphs = (1..=36)
+        .map(|index| format!("第 {index:02} 项。{description}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    format!(
+        "## 第 {number:03} 项 · 工作区报告\n\n{paragraphs}\n\n\
+        | 平台 | 结果 |\n| --- | ---: |\n| Windows | 29 |\n| EL8 | 42 |\n\n\
+        - 检查工具输出\n  - 保留原始层次\n  - 核对条目顺序\n\n\
+        [验收链接](https://example.test/report) 与 `code` 仍可选中。\n\n报告结尾 {number:03}。"
+    )
+}
+
+fn history(grouped: bool, processes: bool, revisit: bool) -> Vec<Value> {
+    let start = if revisit { 141 } else { 1 };
+    (start..=160)
         .map(|number| {
             let reply = match number % 8 {
+                _ if revisit && matches!(number, 141 | 142 | 159 | 160) => markdown_report(number),
                 0 => format!(
                     "**第 {number:03} 项 · 工作区响应检查**\n\n\
                     | 项目 | 状态 |\n| --- | --- |\n| 会话回放 | 已验证 |\n| 终端输出 | 持续接收 |\n\n\
@@ -231,7 +248,7 @@ fn history(grouped: bool, processes: bool) -> Vec<Value> {
                     中英文保持自然换行，连续滚动时会保留当前阅读位置。"
                 ),
             };
-            let mut items = if number == 1 || number == 160 {
+            let mut items = if number == start || number == 160 {
                 vec![
                     json!({"id":format!("question-{number}"),"type":"userMessage",
                         "content":[{"type":"text","text":"请检查长会话、终端和文件预览的表现。"}]}),
@@ -666,7 +683,8 @@ pub fn run() -> Result<()> {
     let processes = gate
         .as_ref()
         .is_some_and(|path| path.join("process-history").is_file());
-    let history = history(grouped, processes);
+    let revisit = env::var_os("SPAN_PREVIEW_MARKDOWN_REVISIT").is_some();
+    let history = history(grouped, processes, revisit);
     let child_turn = json!({"id":"child-turn","status":"completed","items":[
         {"type":"userMessage","id":"child-task","content":[{"type":"text","text":"复核工作台键盘导航。"}]},
         {"type":"reasoning","id":"child-reasoning","summary":["检查窄窗口与返回焦点。"]},
@@ -792,7 +810,7 @@ pub fn run() -> Result<()> {
                     .map(|_| cwd.join("second-workspace"));
                 let directory = directory.as_deref().unwrap_or(&cwd);
                 json!({"thread":{"id":thread,"name":name,"cwd":directory,"turns":turns},
-                    "initialTurnsPage":{"data":page,"nextCursor":(history.len()-20).to_string()},
+                    "initialTurnsPage":{"data":page,"nextCursor":(history.len()>20).then(|| (history.len()-20).to_string())},
                     "cwd":directory,"model":"fixture","modelProvider":"fixture","approvalPolicy":"on-request"})
             }
             "thread/turns/list" if params["threadId"] == "fixture-subagent" => {

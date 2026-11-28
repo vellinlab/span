@@ -14,6 +14,9 @@ const linux = process.platform === 'linux';
 const initialSize = [880, 640];
 const activeWindowMs = 7500;
 const interactionTimeoutMs = 10_000;
+const allocationSampling = {
+  samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true,
+};
 const settle = page => page.evaluate(async () => {
   await new Promise(requestAnimationFrame);
   await new Promise(requestAnimationFrame);
@@ -698,6 +701,70 @@ async function directoryList(app, page, capture, variant, screenshot) {
   return { activeMs, events: { ...events, entries: count }, beforeOpen: beforeWorkload, beforeWorkload, active, closed, settled };
 }
 
+async function sampledAllocations(cdp) {
+  const { profile } = await cdp.send('HeapProfiler.stopSampling');
+  const bytes = profile.samples.reduce((sum, sample) => sum + sample.size, 0);
+  assert.ok(bytes > 0, 'Sample allocations during history navigation.');
+  return bytes;
+}
+
+async function revisitMarkdown(page, cdp, capture, screenshot) {
+  const timeline = page.getByTestId('transcript');
+  const hop = end => timeline.evaluate(async (element, end) => {
+    const title = number => `第 ${number} 项 · 工作区报告`;
+    const expected = title(end ? 160 : 141);
+    const leaving = title(end ? 141 : 160);
+    let domMs;
+    const started = performance.now();
+    const observer = new MutationObserver(() => {
+      const headings = Array.from(element.querySelectorAll('h2'), heading => heading.textContent);
+      if (headings.includes(expected) && !headings.includes(leaving)) domMs ??= performance.now() - started;
+    });
+    observer.observe(element, { childList: true, subtree: true });
+    try {
+      element.scrollTop = end ? element.scrollHeight : 0;
+      for (let frame = 0; frame < 90 && domMs === undefined; frame++) await new Promise(requestAnimationFrame);
+      if (domMs === undefined) throw new Error(`Long reply did not remount: ${expected}`);
+      await new Promise(requestAnimationFrame);
+      return { domMs, mountedRows: element.querySelectorAll('.message').length,
+        edgeDistance: end ? element.scrollHeight - element.clientHeight - element.scrollTop : element.scrollTop };
+    } finally {
+      observer.disconnect();
+    }
+  }, end);
+  // Warm both regions, then observe virtual rows actually leave and re-enter the DOM.
+  await hop(false);
+  await hop(true);
+  await cdp.send('HeapProfiler.collectGarbage');
+  const beforeWorkload = await capture();
+  await cdp.send('HeapProfiler.startSampling', allocationSampling);
+  const started = performance.now();
+  const hops = [];
+  for (let step = 0; step < 20; step++) hops.push(await hop(step % 2 === 1));
+  const activeMs = Math.round(performance.now() - started);
+  const sampledAllocatedBytes = await sampledAllocations(cdp);
+  const active = await capture();
+  assert.ok(hops.every(sample => Math.abs(sample.edgeDistance) <= 2 && sample.mountedRows < 20), JSON.stringify(hops));
+
+  const reply = timeline.locator('.agent-reply .prose').filter({ hasText: '报告结尾 160。' });
+  assert.equal(await reply.locator('table tr').count(), 3);
+  assert.equal(await reply.locator('ul ul li').first().textContent(), '保留原始层次');
+  const link = reply.getByRole('link', { name: '验收链接', exact: true });
+  assert.equal(await link.getAttribute('href'), 'https://example.test/report');
+  if (screenshot) await page.screenshot({ path: screenshot });
+  await link.evaluate(element => element.ownerDocument.getSelection().selectAllChildren(element));
+  assert.equal(await page.evaluate(() => getSelection().toString()), '验收链接');
+  await page.getByRole('button', { name: /^新会话/ }).click();
+  await page.getByRole('heading', { name: '开始新会话' }).waitFor();
+  const closed = await capture();
+  await delay(2000);
+  const settled = await capture();
+  await cdp.send('HeapProfiler.collectGarbage');
+  const diagnosticGc = await capture();
+  return { activeMs, sampledAllocatedBytes, events: { hops }, beforeOpen: beforeWorkload,
+    beforeWorkload, active, closed, settled, diagnosticGc };
+}
+
 const exercise = { output, scroll, reflow };
 
 async function snapshot(app, page, cdp, pid) {
@@ -734,7 +801,8 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     app = await electron.launch({ executablePath: executable,
       args: ['--demo', '--force-device-scale-factor=1', '--disable-gpu', '--terminal-renderer=dom',
         ...(linux ? ['--no-sandbox', '--disable-webgl'] : [])],
-      env: { ...process.env, SPAN_PREVIEW_PROFILE: profile },
+      env: { ...process.env, SPAN_PREVIEW_PROFILE: profile,
+        ...(workload === 'revisit' && { SPAN_PREVIEW_MARKDOWN_REVISIT: '1' }) },
     });
     if (workload === 'interaction') {
       interactionWatchdog = setTimeout(() => {
@@ -774,6 +842,10 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
       await cdp.send('HeapProfiler.collectGarbage');
       return { workload, variant, ...sample, diagnosticGc: await capture() };
     }
+    if (workload === 'revisit') {
+      const screenshot = saveImage ? reportPath.replace(/\.json$/, `-${variant}-markdown-end.png`) : undefined;
+      return { workload, variant, ...await revisitMarkdown(page, cdp, capture, screenshot) };
+    }
     const beforeOpen = await capture();
     await openTerminal();
     if (workload === 'covered' || workload === 'minimized' || workload === 'collapsed') {
@@ -784,9 +856,7 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     const beforeWorkload = await capture();
     assert.ok(beforeWorkload.terminalElements > 0);
     const sampleAllocations = workload === 'scroll' && Boolean(markdownBaseline);
-    if (sampleAllocations) await cdp.send('HeapProfiler.startSampling', {
-      samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true,
-    });
+    if (sampleAllocations) await cdp.send('HeapProfiler.startSampling', allocationSampling);
     const startedAt = performance.now();
     const screenshot = workload === 'reflow' && saveImage
       ? reportPath.replace(/\.json$/, `-${variant}-terminal-reflow.png`) : undefined;
@@ -794,12 +864,7 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     await delay(Math.max(0, activeWindowMs - (performance.now() - startedAt)));
     await settle(page);
     const activeMs = Math.round(performance.now() - startedAt);
-    let sampledAllocatedBytes;
-    if (sampleAllocations) {
-      const { profile } = await cdp.send('HeapProfiler.stopSampling');
-      sampledAllocatedBytes = profile.samples.reduce((bytes, sample) => bytes + sample.size, 0);
-      assert.ok(sampledAllocatedBytes > 0, 'Sample allocations during the history scroll.');
-    }
+    const sampledAllocatedBytes = sampleAllocations ? await sampledAllocations(cdp) : undefined;
     const active = await capture();
     await page.getByRole('button', { name: '关闭终端' }).click();
     await page.locator('.terminal-canvas').waitFor({ state: 'detached' });
@@ -838,11 +903,13 @@ for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimi
     console.log(`${variant} ${workload} terminal DOM batches: ${sample.events.batches}`);
   }
 }
-const pairedBaselines = { output: baselineBinary, scroll: markdownBaseline, reflow: reflowBaseline, files: reflowBaseline };
+const pairedBaselines = {
+  output: baselineBinary, scroll: markdownBaseline, revisit: markdownBaseline, reflow: reflowBaseline, files: reflowBaseline,
+};
 const previousPairs = new Set();
-for (const workload of ['idle', 'output', 'scroll', 'files', 'reflow', 'reflow', 'files', 'scroll', 'output', 'idle']) {
+for (const workload of ['idle', 'output', 'scroll', 'revisit', 'files', 'reflow', 'reflow', 'files', 'revisit', 'scroll', 'output', 'idle']) {
   const baseline = pairedBaselines[workload];
-  if (workload === 'files' && !baseline) continue;
+  if ((workload === 'files' || workload === 'revisit') && !baseline) continue;
   const first = !previousPairs.has(workload);
   let variants = ['candidate'];
   if (baseline) {
@@ -851,7 +918,7 @@ for (const workload of ['idle', 'output', 'scroll', 'files', 'reflow', 'reflow',
   }
   for (const variant of variants) {
     const sample = await trial(workload, variant, variant === 'baseline' ? baseline : binary,
-      undefined, (workload === 'reflow' || workload === 'files') && Boolean(reflowBaseline) && first);
+      undefined, ['reflow', 'files', 'revisit'].includes(workload) && Boolean(baseline) && first);
     report.trials.push(sample);
     await publish();
     console.log(`${variant} ${workload} ${sample.activeMs}ms, DOM nodes ${sample.beforeWorkload.dom.nodes}` +

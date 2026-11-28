@@ -463,7 +463,7 @@ export const Transcript = memo(function Transcript({
   const ungroupedTurns = useRef(null);
   if (!ungroupedTurns.current) ungroupedTurns.current = new Set(remembered?.ungroupedTurns);
   const [openGroups, setOpenGroups] = useState(() => new Set(remembered?.openGroups));
-  const [markdownCache] = useState(() => new Map());
+  const [markdownCache] = useState(() => ({ entries: new Map(), weight: 0 }));
   const [restore, setRestore] = useState(remembered?.anchor);
   const [liveTurnId, setLiveTurnId] = useState(activeTurnId);
   const [inspectedCard, setInspectedCard] = useState(null);

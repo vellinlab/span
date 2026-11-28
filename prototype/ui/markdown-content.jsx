@@ -36,20 +36,10 @@ const urls = Object.entries(urlAttributes);
 const runtime = { Fragment, jsx, jsxs, components, ignoreInvalidStyle: true, passKeys: true };
 const references = new Set(['definition', 'footnoteDefinition', 'linkReference', 'imageReference', 'footnoteReference']);
 const cacheEntries = 32;
-const cacheTextLimit = 2048;
-
-function prepareElement(node, index, parent) {
-  if (node.type === 'raw' && parent) {
-    // Preserve literal HTML as visible text and leave parsing to Markdown.
-    parent.children[index] = { type: 'text', value: node.value };
-  } else if (node.type === 'element') {
-    for (const [property, tags] of urls) {
-      if (Object.hasOwn(node.properties, property) && (!tags || tags.includes(node.tagName))) {
-        node.properties[property] = defaultUrlTransform(String(node.properties[property] || ''));
-      }
-    }
-  }
-}
+const cacheTextLimit = 12 * 1024;
+const cacheBudget = 48 * 1024;
+// Charge for retained React elements as well as the source text.
+const cacheElementWeight = 32;
 
 function hasReference(node) {
   if (references.has(node.type)) return true;
@@ -78,20 +68,40 @@ function renderMarkdown(text, inspect) {
   const tree = markdown.parse(text);
   inspect?.(tree);
   const result = markdown.runSync(tree, text);
-  visit(result, prepareElement);
-  return toJsxRuntime(result, runtime);
+  let elements = 0;
+  visit(result, (node, index, parent) => {
+    if (node.type === 'raw' && parent) {
+      // Preserve literal HTML as visible text and leave parsing to Markdown.
+      parent.children[index] = { type: 'text', value: node.value };
+    } else if (node.type === 'element') {
+      elements++;
+      for (const [property, tags] of urls) {
+        if (Object.hasOwn(node.properties, property) && (!tags || tags.includes(node.tagName))) {
+          node.properties[property] = defaultUrlTransform(String(node.properties[property] || ''));
+        }
+      }
+    }
+  });
+  return { content: toJsxRuntime(result, runtime), weight: text.length + elements * cacheElementWeight };
 }
 
 const MarkdownPart = memo(function MarkdownPart({ text, inspect, cache }) {
   const reusable = cache && !inspect && text.length <= cacheTextLimit;
-  const content = (reusable ? cache.get(text) : undefined) ?? renderMarkdown(text, inspect);
+  const part = (reusable ? cache.entries.get(text) : undefined) ?? renderMarkdown(text, inspect);
   useLayoutEffect(() => {
-    if (!reusable) return;
-    cache.delete(text);
-    cache.set(text, content);
-    if (cache.size > cacheEntries) cache.delete(cache.keys().next().value);
-  }, [cache, content, reusable, text]);
-  return content;
+    if (!reusable || part.weight > cacheBudget) return;
+    const { entries } = cache;
+    cache.weight -= entries.get(text)?.weight ?? 0;
+    entries.delete(text);
+    entries.set(text, part);
+    cache.weight += part.weight;
+    while (entries.size > cacheEntries || cache.weight > cacheBudget) {
+      const oldest = entries.keys().next().value;
+      cache.weight -= entries.get(oldest).weight;
+      entries.delete(oldest);
+    }
+  }, [cache, part, reusable, text]);
+  return part.content;
 });
 
 const emptyParts = [];
