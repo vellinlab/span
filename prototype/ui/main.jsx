@@ -139,6 +139,7 @@ function App() {
   const reasoningHadFocus = useRef(false);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
+  const reasoningReturnFocus = useRef(null);
   const composerActions = useRef(null);
   const commandSelection = useRef(null);
   const terminalToggle = useRef(null);
@@ -298,6 +299,12 @@ function App() {
     if (focused) (interactionRegion.current ?? input.current)?.focus({ preventScroll: true });
   }, [keepReasoning, reasoningOpen, showReasoning]);
 
+  useLayoutEffect(() => {
+    const trigger = reasoningReturnFocus.current;
+    reasoningReturnFocus.current = null;
+    if (!panel && trigger) (trigger.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
+  }, [panel]);
+
   const parkPreview = useCallback(value => {
     const reader = previewReader.current;
     const position = reader && previewPosition(reader);
@@ -414,7 +421,8 @@ function App() {
     panelTrigger.current = null;
     setPanel(null);
     if (restoreFocus && (trigger || document.activeElement?.closest('.agent-panel'))) {
-      (trigger?.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
+      if (trigger?.matches('.reasoning-strip')) reasoningReturnFocus.current = trigger;
+      else (trigger?.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
     }
   }
 
@@ -1134,6 +1142,7 @@ function App() {
               <div className="composer-overlay-anchor" aria-hidden="true" />
               <div className="composer-overlay">
                 <AgentPanel panel={panel} work={work} reasoning={reasoningDetails} reasoningArchived={reasoningArchived}
+                  reasoningProgress={reasoningExpanded ? liveReasoning : undefined}
                   onClose={closePanel} onGoalAction={onGoalAction} report={report} openSession={openRef} openTrace={openTrace}
                   openArtifact={openArtifact} openImage={previewImage} />
                 {suggestions.length > 0 && <div className="command-list popup-surface" id={commandListId} role="listbox" aria-label="会话命令">

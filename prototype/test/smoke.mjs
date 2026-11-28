@@ -651,9 +651,10 @@ try {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-steer-while-reading.png') });
   await liveReasoning.press('Enter');
   const reasoningPanel = page.getByRole('region', { name: '任务过程' });
-  await reasoningPanel.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
-  await reasoningPanel.getByText('再确认工具结果和最终回复的前后顺序。', { exact: true }).waitFor();
-  await reasoningPanel.getByText('确认目标卡片和输入区之间的间距。', { exact: false }).waitFor();
+  const reasoningBody = reasoningPanel.getByRole('group', { name: '任务过程详情' });
+  await reasoningBody.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
+  await reasoningBody.getByText('再确认工具结果和最终回复的前后顺序。', { exact: true }).waitFor();
+  await reasoningBody.getByText('确认目标卡片和输入区之间的间距。', { exact: false }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-expanded.png') });
   const summaryLayout = await reasoningPanel.evaluate(panel => {
     const [earlier, later] = panel.querySelectorAll('.reasoning-sections');
@@ -671,7 +672,6 @@ try {
   });
   assert.deepEqual(summaryLayout, { aligned: true, nested: true, groups: true, aboveStrip: true });
   await reasoningPanel.getByRole('button', { name: '关闭面板' }).press('Tab');
-  const reasoningBody = reasoningPanel.getByRole('group', { name: '任务过程详情' });
   assert.ok(await reasoningBody.evaluate(element => element === document.activeElement));
   await reasoningBody.press('Escape');
   await reasoningPanel.waitFor({ state: 'detached' });
@@ -695,6 +695,25 @@ try {
       box(card).bottom < box(form).top && box(panel).left === box(form).left && box(panel).top >= box(timeline).top + 34;
   }));
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-draft.png') });
+  const currentProgress = await liveReasoning.locator('bdi').textContent();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.25));
+  await page.waitForFunction(() => innerWidth === 592 && innerHeight === 416);
+  const compactProgress = reasoningPanel.locator('.reasoning-panel-progress');
+  await compactProgress.getByText(currentProgress, { exact: true }).waitFor();
+  await liveReasoning.waitFor({ state: 'hidden' });
+  assert.ok(await reasoningPanel.evaluate(panel => {
+    const above = panel.getBoundingClientRect().top - document.querySelector('.timeline').getBoundingClientRect().top;
+    return above >= 30 && panel.querySelector('.agent-panel-content').clientHeight >= 42;
+  }), 'Keep room for the conversation and the process details with the terminal open at 125%.');
+  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-125.png') });
+  await reasoningBody.press('Escape');
+  await liveReasoning.waitFor();
+  assert.ok(await liveReasoning.evaluate(element => element === document.activeElement));
+  await liveReasoning.press('Enter');
+  await compactProgress.waitFor();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+  await page.waitForFunction(() => innerWidth === 740 && innerHeight === 520);
+  await liveReasoning.waitFor();
   if (!process.env.SPAN_TEST_SSH_ALIAS) {
     const { tray, removeButtons } = await attachReviewFiles();
     const closeReasoning = reasoningPanel.getByRole('button', { name: '关闭面板' });

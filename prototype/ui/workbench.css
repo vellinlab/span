@@ -1216,6 +1216,7 @@ p { margin-block: 0 12px; }
   padding: 10px 13px 12px;
   scrollbar-color: #697477 transparent;
 }
+.reasoning-panel-progress { display: none; }
 /* Keep the detail's scroll offset when removing its live strip moves the panel. */
 .agent-panel[data-kind="reasoning"][data-archived] .agent-panel-content { overflow-anchor: none; }
 .agent-panel[data-kind="agents"] .agent-panel-content { padding-block: 8px; }
@@ -1301,6 +1302,24 @@ p { margin-block: 0 12px; }
   .composer-wrap:has(.composer-files):has(.goal-objective, .agent-panel[data-kind="reasoning"]) {
     & > .composer:not(:focus-within) textarea { min-height: 24px; max-height: 24px; }
   }
+}
+@container (max-height: 350px) {
+  .reasoning-strip[aria-expanded="true"] { display: none; }
+  .composer-wrap:has(#reasoning-panel) .composer:not(:focus-within) textarea {
+    min-height: 24px;
+    max-height: 24px;
+  }
+  .reasoning-panel-progress {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    margin-inline: 10px 8px;
+    color: var(--muted);
+    font-size: var(--text-meta);
+  }
+  .agent-panel[data-kind="reasoning"] > header strong { flex: none; }
 }
 .settings-grid, .usage-panel, .agent-groups, .delegation-form { display: grid; gap: 10px; }
 .settings-grid { grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px; row-gap: 6px; }

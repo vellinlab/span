@@ -280,7 +280,8 @@ function FeedbackPanel({ send }) {
   </form>;
 }
 
-export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, onGoalAction, report, openSession, openTrace, openArtifact, openImage }) {
+export function AgentPanel({ panel, work, reasoning, reasoningArchived, reasoningProgress,
+  onClose, onGoalAction, report, openSession, openTrace, openArtifact, openImage }) {
   const close = useRef(null);
   const content = useRef(null);
   const extensionSearch = useRef(null);
@@ -328,6 +329,10 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
         <ArrowLeft size={15} aria-hidden="true" />返回
       </button>}
       <strong title={panel.kind === 'subagent' ? title : undefined}>{title}</strong>
+      {reasoningProgress && <div className="reasoning-panel-progress" title={reasoningProgress.preview}>
+        <span className="reasoning-preview"><bdi>{reasoningProgress.preview}</bdi></span>
+        {reasoningProgress.final && <small className="reasoning-status">已完成</small>}
+      </div>}
       {usage && <small className="panel-meta" title={usage}>{usage}</small>}
       {reasoningArchived && <small className="panel-meta">已归档</small>}
       {usagePanel && <button type="button" className="panel-link usage-refresh" aria-disabled={work.usageRefreshing}
