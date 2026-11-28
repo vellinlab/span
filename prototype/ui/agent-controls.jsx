@@ -86,8 +86,11 @@ export function commandSuggestions(commands, draft, details) {
     return { name, title, Icon, description, detail: name === '/reasoning' ? effortNames[detail] ?? detail : detail };
   })
     .filter(({ name, title, description }) => {
-      if (name.includes(' ') !== hasArguments) return false;
-      return name.toLocaleLowerCase().startsWith(query) || (!hasArguments && draft.length > 1 &&
+      const command = name.toLocaleLowerCase();
+      const argumentStart = command.indexOf(' ');
+      if (argumentStart !== -1) return hasArguments ? command.startsWith(query) : command.slice(0, argumentStart) === query;
+      if (hasArguments) return false;
+      return command.startsWith(query) || (draft.length > 1 &&
         `${title ?? ''} ${description}`.toLocaleLowerCase().includes(query.slice(1)));
     }).sort((a, b) => (commandOrder.get(a.name) ?? commandOrder.size) - (commandOrder.get(b.name) ?? commandOrder.size));
 }

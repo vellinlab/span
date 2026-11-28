@@ -2053,9 +2053,8 @@ try {
   });
   const feedback = page.locator('.composer-status');
   await composer.fill('/copy');
-  const formats = page.getByLabel('会话命令');
-  await formats.getByRole('button', { name: '/copy 复制 Markdown', exact: true }).waitFor();
-  await formats.getByRole('button', { name: '/copy rich 复制富文本', exact: true }).waitFor();
+  await commandList.getByRole('option', { name: '/copy 复制 Markdown', exact: true }).waitFor();
+  await commandList.getByRole('option', { name: '/copy rich 复制富文本', exact: true }).waitFor();
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-copy-formats.png') });
   await composer.press('ArrowDown');
   await composer.press('Enter');
