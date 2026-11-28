@@ -37,7 +37,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       fontSize: 13,
       minimumContrastRatio: 4.5,
       theme: {
-        background: '#151617', foreground: '#dedede',
+        background: '#171817', foreground: '#dedede',
         cursor: '#bdd8c6', selectionBackground: '#43554b',
         black: '#262b2d', red: '#e17f79', green: '#9ecb9a', yellow: '#d7bd7c',
         blue: '#82acf0', magenta: '#b59acf', cyan: '#82c3c7', white: '#d6dcda',
