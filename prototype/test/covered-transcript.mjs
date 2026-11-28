@@ -191,7 +191,9 @@ async function checkPreviewSwitch(binary) {
       '核对 **工作区** 的终端和会话输出，确认重新打开文件时保留当前阅读位置。',
       '- 查看配置\n  - 保留列表层级\n  - 复查变更记录',
     ].join('\n\n'));
-    await writeFile(filename, `# 工作区复核记录\n\n${paragraphs.join('\n\n')}`);
+    await writeFile(filename, `# 工作区复核记录\n\n${paragraphs.join('\n\n')}\n\n` +
+      '[验收链接](https://example.test/span-preview)\n\n' +
+      '- [x] 保留复核状态\n\n```text\nspan_preview_clipboard\n```\n');
 
     const transcript = page.getByTestId('transcript');
     const composer = page.getByRole('textbox', { name: '消息' });
@@ -298,6 +300,20 @@ async function checkPreviewSwitch(binary) {
     await content.getByRole('heading', { name: '复核第 300 项', exact: true }).waitFor();
     assert.ok(await previewContent.evaluate(element => element.isConnected && element === document.activeElement));
     assert.equal(await content.evaluate(element => element.scrollTop), fileTop);
+    const task = content.getByRole('checkbox');
+    assert.ok(await task.isChecked() && await task.isDisabled());
+    await app.evaluate(({ shell }) => {
+      shell.openExternal = async url => { globalThis.previewLink = url; };
+    });
+    await content.getByRole('link', { name: '验收链接', exact: true }).press('Enter');
+    await content.getByRole('button', { name: '复制代码', exact: true }).press('Enter');
+    let actions;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      actions = await app.evaluate(({ clipboard }) => ({ link: globalThis.previewLink, code: clipboard.readText() }));
+      if (actions.link && actions.code.includes('span_preview_clipboard')) break;
+      await delay(25);
+    }
+    assert.deepEqual(actions, { link: 'https://example.test/span-preview', code: 'span_preview_clipboard\n' });
     await content.press('Escape');
     await preview.waitFor({ state: 'detached' });
     assert.ok(await file.evaluate(element => element === document.activeElement));

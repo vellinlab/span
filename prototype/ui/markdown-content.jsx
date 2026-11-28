@@ -1,4 +1,4 @@
-import { Fragment, memo, useLayoutEffect, useRef } from 'react';
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { jsx, jsxs } from 'react/jsx-runtime';
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
 import { urlAttributes } from 'html-url-attributes';
@@ -10,11 +10,13 @@ import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
 import { visit } from 'unist-util-visit';
 
+function openMarkdownLink(event, href) {
+  event.preventDefault();
+  if (/^https?:\/\//i.test(href ?? '')) window.span.openLink(href).catch(() => {});
+}
+
 const components = {
-  a: ({ href, children }) => <a href={href} onClick={event => {
-    event.preventDefault();
-    if (/^https?:\/\//i.test(href ?? '')) window.span.openLink(href).catch(() => {});
-  }}>{children}</a>,
+  a: ({ href, children }) => <a href={href} onClick={event => openMarkdownLink(event, href)}>{children}</a>,
   pre: ({ children }) => {
     const { props } = children;
     const language = props?.className?.replace(/^language-/, '') || '代码';
@@ -40,6 +42,8 @@ const cacheTextLimit = 12 * 1024;
 const cacheBudget = 48 * 1024;
 // Charge for retained React elements as well as the source text.
 const cacheElementWeight = 32;
+const parkedPreviewDelayMs = 5000;
+const largePreviewText = 16 * 1024;
 
 function hasReference(node) {
   if (references.has(node.type)) return true;
@@ -85,13 +89,108 @@ function renderMarkdown(text, inspect) {
   return { content: toJsxRuntime(result, runtime), weight: text.length + elements * cacheElementWeight };
 }
 
-export const FileMarkdownContent = memo(function FileMarkdownContent({ text, parked, released, onBodyReady }) {
-  // Keep the rendered elements for the currently selected file and release its DOM while parked.
+function snapshotChildren(element, complete) {
+  const result = [];
+  const pending = [{ next: element.firstChild, children: result }];
+  let idle;
+  const capture = deadline => {
+    // A very long list can be a single Markdown block. Yield between its individual nodes.
+    const end = performance.now() + (deadline.didTimeout ? 4 : Math.min(4, deadline.timeRemaining()));
+    while (pending.length && performance.now() < end) {
+      const parent = pending.at(-1);
+      const child = parent.next;
+      if (!child) {
+        pending.pop();
+        continue;
+      }
+      parent.next = child.nextSibling;
+      if (child.nodeType === Node.TEXT_NODE) parent.children.push(child.data);
+      else if (child.nodeType === Node.ELEMENT_NODE) {
+        const attributes = child.attributes.length
+          ? Array.from(child.attributes, ({ name, value, namespaceURI }) => [name, value, namespaceURI]) : null;
+        const content = [];
+        parent.children.push([child.namespaceURI, child.localName, attributes, content]);
+        if (child.firstChild) pending.push({ next: child.firstChild, children: content });
+      }
+    }
+    if (pending.length) idle = requestIdleCallback(capture, { timeout: 120 });
+    else complete(result);
+  };
+  idle = requestIdleCallback(capture, { timeout: 120 });
+  return () => cancelIdleCallback(idle);
+}
+
+function appendSnapshot(element, children) {
+  const document = element.ownerDocument;
+  for (const child of children) {
+    if (typeof child === 'string') element.append(document.createTextNode(child));
+    else {
+      const [namespace, tag, attributes, content] = child;
+      const node = document.createElementNS(namespace, tag);
+      if (attributes) for (const [name, value, attributeNamespace] of attributes) {
+        if (attributeNamespace) node.setAttributeNS(attributeNamespace, name, value);
+        else node.setAttribute(name, value);
+      }
+      appendSnapshot(node, content);
+      element.append(node);
+    }
+  }
+}
+
+function handlePreviewClick(event) {
+  const link = event.target.closest('a');
+  if (link) openMarkdownLink(event, link.getAttribute('href'));
+  else if (event.target.closest('.code-heading button')) {
+    const code = event.target.closest('.code-card')?.querySelector('pre')?.textContent ?? '';
+    window.span.copyText(code).catch(() => {});
+  }
+}
+
+export const FileMarkdownContent = memo(function FileMarkdownContent({ text, parked, preserveSelection, onBodyReady }) {
+  const [released, setReleased] = useState(false);
+  const body = useRef(null);
   const previous = useRef(null);
   const rendered = previous.current?.text === text ? previous.current
     : parked ? undefined : { text, content: renderMarkdown(text).content };
   useLayoutEffect(() => { if (rendered) previous.current = rendered; }, [rendered]);
-  return !released && rendered && <div className="prose" ref={onBodyReady}>{rendered.content}</div>;
+  useEffect(() => {
+    if (!parked) {
+      if (!released) return;
+      // Let the preview shell paint and take focus before mounting a large document.
+      let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setReleased(false)); });
+      return () => cancelAnimationFrame(frame);
+    }
+    if (released || preserveSelection || text.length < largePreviewText) return;
+    let cancelSnapshot;
+    const timer = setTimeout(() => {
+      if (!body.current || !rendered || rendered.nodes) {
+        setReleased(true);
+        return;
+      }
+      // Markdown has already rendered literal HTML as text. Save only the elements it created.
+      cancelSnapshot = snapshotChildren(body.current, nodes => {
+        rendered.nodes = nodes;
+        rendered.content = null;
+        setReleased(true);
+      });
+    }, parkedPreviewDelayMs);
+    return () => {
+      clearTimeout(timer);
+      cancelSnapshot?.();
+    };
+  }, [parked, preserveSelection, released, rendered, text]);
+  const attach = useCallback(element => {
+    body.current = element;
+    if (element && rendered?.nodes && !element.firstChild) {
+      const fragment = element.ownerDocument.createDocumentFragment();
+      appendSnapshot(fragment, rendered.nodes);
+      element.append(fragment);
+    }
+    onBodyReady(element);
+  }, [rendered, onBodyReady]);
+  if (released) return parked ? null : <p className="preview-resuming" role="status">正在恢复预览…</p>;
+  return rendered && <div className="prose" ref={attach}
+    onClick={rendered.nodes ? handlePreviewClick : undefined}>{rendered.content}</div>;
 });
 
 const MarkdownPart = memo(function MarkdownPart({ text, inspect, cache }) {

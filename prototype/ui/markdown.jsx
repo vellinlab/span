@@ -9,28 +9,9 @@ export function prepareMarkdown() {
 const FileMarkdownContent = lazy(() => prepareMarkdown().then(module => ({ default: module.FileMarkdownContent })));
 export const MarkdownCache = createContext(null);
 
-const parkedPreviewDelayMs = 5000;
-const largePreviewText = 16 * 1024;
-
-export const FileMarkdown = memo(function FileMarkdown({ text, parked, preserveSelection, onBodyReady }) {
-  const [released, setReleased] = useState(false);
-  useEffect(() => {
-    if (!parked) {
-      if (!released) return;
-      // Let the preview shell paint and take focus before mounting a large document.
-      let frame = requestAnimationFrame(() => {
-        frame = requestAnimationFrame(() => setReleased(false));
-      });
-      return () => cancelAnimationFrame(frame);
-    }
-    if (released || preserveSelection || text.length < largePreviewText) return;
-    // Brief trips back to the conversation keep the already mounted reader.
-    const timer = setTimeout(() => setReleased(true), parkedPreviewDelayMs);
-    return () => clearTimeout(timer);
-  }, [parked, preserveSelection, released, text]);
-  return <Suspense fallback={parked ? null : <div className="prose markdown-pending" aria-busy="true" />}>
-    {released && !parked && <p className="preview-resuming" role="status">正在恢复预览…</p>}
-    <FileMarkdownContent text={text} parked={parked} released={released} onBodyReady={onBodyReady} />
+export const FileMarkdown = memo(function FileMarkdown(props) {
+  return <Suspense fallback={props.parked ? null : <div className="prose markdown-pending" aria-busy="true" />}>
+    <FileMarkdownContent {...props} />
   </Suspense>;
 });
 
