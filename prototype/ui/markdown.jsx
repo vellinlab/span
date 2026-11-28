@@ -1,11 +1,11 @@
 import { createContext, lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 let markdownModule;
+let markdownViews;
 export function prepareMarkdown() {
-  return markdownModule ??= import('./markdown-content.jsx');
+  return markdownModule ??= import('./markdown-content.jsx').then(module => (markdownViews = module));
 }
 
-const MarkdownContent = lazy(() => prepareMarkdown().then(module => ({ default: module.MarkdownContent })));
 const FileMarkdownContent = lazy(() => prepareMarkdown().then(module => ({ default: module.FileMarkdownContent })));
 export const MarkdownCache = createContext(null);
 
@@ -34,11 +34,23 @@ export const FileMarkdown = memo(function FileMarkdown({ text, parked, preserveS
   </Suspense>;
 });
 
+function UnformattedMarkdown({ text }) {
+  return <div className="prose" style={{ whiteSpace: 'pre-wrap' }}>{text}</div>;
+}
+
 export const Markdown = memo(function Markdown({ text, streaming = false }) {
   const cache = useContext(MarkdownCache);
-  return <Suspense fallback={<div className="prose markdown-pending" aria-busy="true" />}>
-    <MarkdownContent text={text} streaming={streaming} cache={streaming ? null : cache} />
-  </Suspense>;
+  const [Content, setContent] = useState(() => markdownViews?.MarkdownContent);
+  useEffect(() => {
+    if (Content) return;
+    let mounted = true;
+    // Publish the renderer when the module arrives, even if a short placeholder already painted.
+    prepareMarkdown().then(module => module.MarkdownContent, () => UnformattedMarkdown)
+      .then(View => { if (mounted) setContent(() => View); });
+    return () => { mounted = false; };
+  }, [Content]);
+  return Content ? <Content text={text} streaming={streaming} cache={streaming ? null : cache} />
+    : <div className="prose markdown-pending" aria-busy="true" />;
 });
 
 const longReplyRefreshMs = 80;
