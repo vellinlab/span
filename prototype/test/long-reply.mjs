@@ -1013,11 +1013,44 @@ async function check(binary, label, trial) {
     await writeFile(join(profile, 'finish'), '');
     await transcript.getByText('长回复已全部生成。', { exact: true }).waitFor();
     if (grouped) {
-      const group = transcript.getByRole('button', { name: '40 条命令', exact: true });
-      await group.waitFor();
       await tailInView();
-      assert.equal(await group.getAttribute('aria-expanded'), 'false');
-      if (screenshot) await page.screenshot({ path: `${screenshot}-${label}-${trial}.png` });
+      const group = transcript.getByRole('button', { name: '40 条命令', exact: true });
+      if (label === 'candidate') {
+        const finished = transcript.getByRole('button', { name: '任务过程', exact: true }).last();
+        const lastCommand = transcript.getByText('workspace verify --live 40', { exact: true });
+        await finished.waitFor();
+        assert.equal(await finished.getAttribute('aria-expanded'), 'false');
+        assert.equal(await group.count(), 0);
+        assert.equal(await lastCommand.count(), 0);
+        if (screenshot) await page.screenshot({ path: `${screenshot}-${label}-${trial}.png` });
+        const offset = () => transcript.evaluate(element => element.scrollTop);
+        const move = async top => {
+          await transcript.evaluate((element, top) => { element.scrollTop = top ?? element.scrollHeight; }, top);
+          await settleFrame(page);
+        };
+        await finished.scrollIntoViewIfNeeded();
+        const processTop = await offset();
+        await finished.press('Enter');
+        await move();
+        await group.waitFor();
+        assert.equal(await group.getAttribute('aria-expanded'), 'false');
+        const groupTop = await offset();
+        await group.press('Enter');
+        assert.ok(await group.evaluate(button => button === document.activeElement));
+        await move();
+        await lastCommand.waitFor();
+        await move(groupTop);
+        await group.press('Enter');
+        await lastCommand.waitFor({ state: 'detached' });
+        await move(processTop);
+        await finished.press('Enter');
+        await group.waitFor({ state: 'detached' });
+        await move();
+      } else {
+        await group.waitFor();
+        assert.equal(await group.getAttribute('aria-expanded'), 'false');
+        if (screenshot) await page.screenshot({ path: `${screenshot}-${label}-${trial}.png` });
+      }
     }
     if (following) {
       await tailInView();

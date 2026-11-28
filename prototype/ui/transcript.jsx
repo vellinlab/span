@@ -490,8 +490,8 @@ export const Transcript = memo(function Transcript({
     getItemKey: layout.getItemKey, estimateSize: liveReasoningItem ? estimate : layout.estimateSize,
     rangeExtractor: target >= 0 ? rangeExtractor : defaultRangeExtractor,
     overscan: 6, paddingStart: 20, paddingEnd: 14,
-    anchorTo: 'end', followOnAppend: true,
-    // Keep prepend anchoring when the reader has paused following to inspect a card.
+    anchorTo: 'end', followOnAppend: !inspectedCard,
+    // Keep prepend anchoring and hold the disclosure when it reveals rows at the end.
     scrollEndThreshold: inspectedCard ? -1 : 40,
   });
   const virtualRows = virtual.getVirtualItems();
