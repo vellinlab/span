@@ -1655,9 +1655,10 @@ try {
   await inspectedImage.getByText('已查看图片', { exact: true }).waitFor();
   assert.ok(await inspectedImage.evaluate(rowIndex) > await groupAnswer.evaluate(rowIndex));
   const answerType = await groupAnswer.evaluate(messageType);
-  assert.ok(progressType.bodySize < answerType.bodySize && progressType.headingSize < answerType.headingSize &&
-    progressType.lineHeight < answerType.lineHeight && answerType.headingSize <= answerType.bodySize + 2,
-  `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
+  assert.equal(answerType.bodySize, 12);
+  assert.equal(progressType.bodySize, answerType.bodySize);
+  assert.ok(progressType.headingSize < answerType.headingSize && progressType.lineHeight < answerType.lineHeight,
+    `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
   assert.ok(progressIndex < await failedCommand.evaluate(rowIndex));
   assert.ok((await failedCommand.boundingBox()).y < (await groupAnswer.boundingBox()).y);
   await transcript.evaluate((element, top) => { element.scrollTop = top; }, processTop);
