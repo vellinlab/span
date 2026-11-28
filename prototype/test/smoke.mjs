@@ -99,6 +99,10 @@ try {
   });
   await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 20_000 });
   const transcript = page.getByTestId('transcript');
+  await page.waitForFunction(() => {
+    const timeline = document.querySelector('[data-testid="transcript"]');
+    return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
+  });
   assert.equal(Number(await transcript.getAttribute('data-items')), 21, 'Open on the first page of recent history.');
   const branch = page.locator('.topbar .branch');
   await branch.filter({ hasText: /^prototype\/web-workbench$/ }).waitFor();
