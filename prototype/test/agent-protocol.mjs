@@ -109,6 +109,24 @@ test('ACP history preserves user-visible content and turn boundaries while hidin
   ]);
 });
 
+test('ACP replay leaves every answer after the last tool call outside the process', () => {
+  const replay = acpReplay();
+  const text = (sessionUpdate, messageId, text) => replay.update({ sessionUpdate, messageId, content: { type: 'text', text } });
+  text('user_message_chunk', 'request', 'Verify the workspace.');
+  text('agent_message_chunk', 'progress', 'I will check the workspace.');
+  replay.update({ sessionUpdate: 'tool_call', toolCallId: 'workspace', kind: 'search', title: 'Workspace', status: 'in_progress' });
+  text('agent_message_chunk', 'answer', 'The workspace is verified.');
+  replay.update({ sessionUpdate: 'tool_call_update', toolCallId: 'workspace', status: 'completed' });
+  text('agent_message_chunk', 'followup', 'The report is attached.');
+  const rows = historyRows(replay.finish());
+  assert.deepEqual(rows.filter(row => row.kind === 'message').map(row => row.phase), ['commentary', 'final', 'final']);
+  const view = groupedTimelineLayout(timelineLayout(rows), undefined, new Set(), new Set());
+  assert.deepEqual(Array.from({ length: view.count }, (_, index) => {
+    const row = view.rowAt(rows, index);
+    return row.text ?? row.kind;
+  }), ['Verify the workspace.', 'turn-process', 'The workspace is verified.', 'The report is attached.']);
+});
+
 test('Claude commands remove only the bridge’s console wrapper from saved output', () => {
   const raw = '  Check the archive\n```\nKeep the embedded backticks';
   const fenced = '```console\n' + raw + '\n```';

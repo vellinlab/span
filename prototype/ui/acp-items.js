@@ -24,6 +24,7 @@ export function acpOperation(tool = {}, cwd) {
 export function acpTurn(id, notify, { childSession, consoleFences, projectTask } = {}) {
   const reply = new Map();
   const tools = new Map();
+  const seenCalls = new Set();
   const members = new Map();
   const thoughtIds = new Map();
   const artifacts = new Map();
@@ -32,6 +33,7 @@ export function acpTurn(id, notify, { childSession, consoleFences, projectTask }
   function tool(update) {
     if (!update.toolCallId) return;
     const key = 'tool:' + update.toolCallId;
+    seenCalls.add(key);
     const current = { ...tools.get(key), ...update };
     tools.set(key, current);
     const content = current.content?.map(part => textOf(part.content)).filter(Boolean).join('\n');
@@ -82,8 +84,10 @@ export function acpTurn(id, notify, { childSession, consoleFences, projectTask }
       case 'agent_message_chunk':
         if (text) {
           const messageId = 'message:' + key;
-          if (!reply.has(messageId)) reply.set(messageId, []);
-          reply.get(messageId).push(text);
+          if (!reply.has(messageId)) reply.set(messageId, { chunks: [] });
+          const message = reply.get(messageId);
+          message.chunks.push(text);
+          message.calls = seenCalls.size;
           notify({ kind: 'delta', delta: { id: messageId, turnId: id, kind: 'message', text } });
         } else if (update.content?.type === 'resource_link') {
           const { uri, name } = update.content;
@@ -113,9 +117,9 @@ export function acpTurn(id, notify, { childSession, consoleFences, projectTask }
   }
 
   function finish(cancelled = false) {
-    const final = [...reply.keys()].at(-1);
-    for (const [messageId, chunks] of reply) {
-      item({ kind: 'message', id: messageId, text: chunks.join(''), phase: messageId === final ? 'final' : 'commentary' }, true);
+    // Several saved assistant messages may belong to the answer after the last tool call.
+    for (const [messageId, { chunks, calls }] of reply) {
+      item({ kind: 'message', id: messageId, text: chunks.join(''), phase: calls === seenCalls.size ? 'final' : 'commentary' }, true);
     }
     for (const current of tools.values()) {
       const interrupted = cancelled && (current.status === 'pending' || current.status === 'in_progress');
