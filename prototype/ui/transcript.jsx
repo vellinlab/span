@@ -455,7 +455,7 @@ export const Transcript = memo(function Transcript({
   const followAfterFold = useRef(false);
   const viewportSize = useRef(null);
   const textAnchor = useRef(null);
-  const textReflowFrame = useRef(undefined);
+  const reflowFrame = useRef(undefined);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const inspect = useCallback((key, open) => {
     if (open) {
@@ -523,11 +523,12 @@ export const Transcript = memo(function Transcript({
     if (restore || !jumpToLatest.current || !rows.length) return;
     jumpToLatest.current = false;
     following.current = true;
+    textAnchor.current = undefined;
     releaseGroupAnchor();
     setInspectedCard(null);
     virtual.scrollToEnd();
     onScrollPosition(false);
-  }, [rows, virtual, jumpToLatest, onScrollPosition, restore, releaseGroupAnchor]);
+  }, [rows, virtual, jumpToLatest, onScrollPosition, restore, releaseGroupAnchor, showLatest]);
 
   useLayoutEffect(() => {
     if (liveTurnId === activeTurnId) {
@@ -631,7 +632,7 @@ export const Transcript = memo(function Transcript({
     viewportSize.current = { height: element.clientHeight, width: element.clientWidth };
     let readingWidth = columnWidth();
     const rememberPosition = () => {
-      if (textReflowFrame.current !== undefined) return;
+      if (reflowFrame.current !== undefined) return;
       textAnchor.current = following.current || latest.current?.restore ? undefined : readTextAnchor(element);
     };
     element.addEventListener('scrollend', rememberPosition);
@@ -642,13 +643,18 @@ export const Transcript = memo(function Transcript({
       const width = columnWidth();
       const rewrap = width !== readingWidth;
       readingWidth = width;
-      if (following.current && virtual.options.count && (height !== previous.height || rewrap)) virtual.scrollToEnd();
       const anchor = textAnchor.current;
-      if (!rewrap || following.current || latest.current?.restore || !anchor || textReflowFrame.current !== undefined) return;
-      // Let the virtualizer finish measuring resized rows before restoring the line inside a row.
-      textReflowFrame.current = requestAnimationFrame(() => {
-        textReflowFrame.current = undefined;
-        if (following.current || latest.current?.restore || textAnchor.current !== anchor ||
+      const followEnd = following.current && virtual.options.count && (height !== previous.height || rewrap);
+      if ((!followEnd && (!rewrap || !anchor || latest.current?.restore)) || reflowFrame.current !== undefined) return;
+      // Let the virtualizer finish measuring resized rows before using their new positions.
+      reflowFrame.current = requestAnimationFrame(() => {
+        reflowFrame.current = undefined;
+        if (latest.current?.restore) return;
+        if (following.current) {
+          virtual.scrollToEnd();
+          return;
+        }
+        if (!anchor || textAnchor.current !== anchor ||
           anchor.range.startContainer.nodeType !== Node.TEXT_NODE || !element.contains(anchor.range.startContainer)) return;
         const line = anchor.range.getBoundingClientRect();
         if (!line.height) return;
@@ -661,13 +667,13 @@ export const Transcript = memo(function Transcript({
     return () => {
       observer.disconnect();
       element.removeEventListener('scrollend', rememberPosition);
-      if (textReflowFrame.current !== undefined) cancelAnimationFrame(textReflowFrame.current);
-      textReflowFrame.current = undefined;
+      if (reflowFrame.current !== undefined) cancelAnimationFrame(reflowFrame.current);
+      reflowFrame.current = undefined;
     };
   }, [scroll, virtual]);
 
   function onScroll(event) {
-    if (restore || textReflowFrame.current !== undefined) return;
+    if (restore || reflowFrame.current !== undefined) return;
     const element = scroll.current;
     // A resize can scroll the list before its observer has restored the viewport.
     const size = viewportSize.current;

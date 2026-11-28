@@ -1148,7 +1148,11 @@ function App() {
                         composerFeedback?.scope === work.timelineScope() ? composerFeedback.text :
                         running && !showReasoning ? '正在处理' : ''}</span>
                   {showLatest && rows.length > 0 && <LatestMessageButton scroll={scroll} className="composer-control"
-                    onJump={() => { if (reasoningArchived) closePanel({ restoreFocus: false }); }} />}
+                    onJump={() => {
+                      jumpToLatest.current = true;
+                      setShowLatest(false);
+                      if (reasoningArchived) closePanel({ restoreFocus: false });
+                    }} />}
                   {connection === 'ready' && <AgentMenu api={api} hasGoal={Boolean(goal)} models={work.models}
                     modelId={work.options.model} modeId={work.options.mode} onSelect={onAgentMenuSelect} />}
                   {running && api?.turns.stop && <button ref={returnComposerFocus} type="button" className="send stop" aria-label="停止"
