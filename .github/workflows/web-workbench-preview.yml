@@ -234,16 +234,22 @@ jobs:
             "$PWD/verified-preview/preview/span-preview.exe" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
       - name: Prepare the baseline renderers for startup, terminal and conversation
         run: |
+          source_root=$(mktemp -d "$PWD/prototype/.ci-renderers.XXXXXX")
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" \
             terminal-window:"$TERMINAL_WINDOW_BASELINE" terminal-collapse:"$TERMINAL_COLLAPSE_BASELINE" \
             following-reply:"$FOLLOWING_REPLY_BASELINE" \
             streaming-output:"$STREAMING_OUTPUT_BASELINE" reasoning:"$REASONING_BASELINE" startup-loading:"$STARTUP_LOADING_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
-            source_dir=$(mktemp -d)
+            source_dir="$source_root/$target"
+            mkdir "$source_dir"
             git fetch --no-tags --depth=1 origin "$baseline"
             git archive "$baseline" prototype | tar -x -C "$source_dir"
-            npm --prefix "$source_dir/prototype" ci --no-audit --no-fund
+            # Node resolves the installed ancestor dependencies for an identical manifest and lockfile.
+            if ! cmp -s prototype/package.json "$source_dir/prototype/package.json" ||
+              ! cmp -s prototype/package-lock.json "$source_dir/prototype/package-lock.json"; then
+              npm --prefix "$source_dir/prototype" ci --no-audit --no-fund
+            fi
             npm --prefix "$source_dir/prototype" run build
             cp -R verified-preview/preview "$target"
             rm -r "$target/resources/app/dist"
