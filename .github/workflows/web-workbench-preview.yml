@@ -3,6 +3,10 @@ name: Span web workbench experiment
 on:
   push:
     branches: [prototype/web-workbench]
+    paths: ['prototype/**', '.github/workflows/web-workbench-preview.yml']
+  pull_request:
+    branches: [prototype/web-workbench]
+    paths: ['prototype/**', '.github/workflows/web-workbench-preview.yml']
   workflow_dispatch:
 
 permissions:

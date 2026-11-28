@@ -2,7 +2,12 @@ name: Build and release EL8 and Windows
 
 on:
   push:
+    branches: [main, 'perf/**']
+    tags: ['v*']
+    paths-ignore: ['**/*.md', 'docs/**', '.github/ISSUE_TEMPLATE/**']
   pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**', '.github/ISSUE_TEMPLATE/**']
   workflow_dispatch:
 
 permissions:
