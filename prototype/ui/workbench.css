@@ -1280,9 +1280,9 @@ p { margin-block: 0 12px; }
 }
 .goal-editor textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @container (max-height: 400px) {
-  .composer-wrap:has(.agent-panel:is([data-kind="goal"], [data-kind="reasoning"])) .composer:not(:focus-within) {
-    & textarea { max-height: 46px; }
-    & .composer-files { max-height: 28px; }
+  .composer-wrap:has(.agent-panel:is([data-kind="goal"], [data-kind="reasoning"])) .composer {
+    & textarea:not(:focus) { max-height: 46px; }
+    &:not(:focus-within) .composer-files { max-height: 28px; }
   }
   .goal-editor { padding-block: 6px; }
   .goal-editor textarea { padding-block: 4px; }
@@ -1300,14 +1300,14 @@ p { margin-block: 0 12px; }
     & > .composer { padding-block: 5px; }
   }
   .composer-wrap:has(.composer-files):has(.goal-objective, .agent-panel[data-kind="reasoning"]) {
-    & > .composer:not(:focus-within) textarea { min-height: 24px; max-height: 24px; }
+    & > .composer textarea:not(:focus) { min-height: 24px; max-height: 24px; }
   }
 }
 @container (max-height: 350px) {
   .reasoning-strip[aria-expanded="true"] { display: none; }
-  .composer-wrap:has(#reasoning-panel) .composer:not(:focus-within) textarea {
-    min-height: 24px;
-    max-height: 24px;
+  .composer-wrap:has(#reasoning-panel) .composer textarea {
+    max-height: 46px;
+    &:not(:focus) { min-height: 24px; max-height: 24px; }
   }
   .reasoning-panel-progress {
     display: flex;
@@ -1319,7 +1319,14 @@ p { margin-block: 0 12px; }
     color: var(--muted);
     font-size: var(--text-meta);
   }
+  .reasoning-panel-progress > svg { display: none; }
   .agent-panel[data-kind="reasoning"] > header strong { flex: none; }
+}
+@container (max-height: 350px) and (max-width: 440px) {
+  #reasoning-panel > header:has(.reasoning-panel-progress) > strong { display: none; }
+  .reasoning-panel-progress { margin-inline-start: 0; }
+  .reasoning-panel-progress > svg { display: block; }
+  .reasoning-panel-progress:has(.reasoning-status) > svg { color: var(--accent); }
 }
 .settings-grid, .usage-panel, .agent-groups, .delegation-form { display: grid; gap: 10px; }
 .settings-grid { grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px; row-gap: 6px; }

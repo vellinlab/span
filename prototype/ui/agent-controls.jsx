@@ -330,6 +330,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, reasonin
       </button>}
       <strong title={panel.kind === 'subagent' ? title : undefined}>{title}</strong>
       {reasoningProgress && <div className="reasoning-panel-progress" title={reasoningProgress.preview}>
+        <Brain size={14} aria-hidden="true" />
         <span className="reasoning-preview"><bdi>{reasoningProgress.preview}</bdi></span>
         {reasoningProgress.final && <small className="reasoning-status">已完成</small>}
       </div>}

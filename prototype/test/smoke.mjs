@@ -700,6 +700,8 @@ try {
   await page.waitForFunction(() => innerWidth === 592 && innerHeight === 416);
   const compactProgress = reasoningPanel.locator('.reasoning-panel-progress');
   await compactProgress.getByText(currentProgress, { exact: true }).waitFor();
+  await compactProgress.locator('svg').waitFor();
+  await reasoningPanel.locator('header > strong').waitFor({ state: 'hidden' });
   await liveReasoning.waitFor({ state: 'hidden' });
   assert.ok(await reasoningPanel.evaluate(panel => {
     const bounds = panel.getBoundingClientRect();
@@ -717,6 +719,11 @@ try {
     });
     await writeFile(screenshot.replace(/\.png$/, '-reasoning-compact-125.png'), Buffer.from(png, 'base64'));
   }
+  await composer.focus();
+  assert.equal(await draftHeight(), 46);
+  await page.getByRole('button', { name: '主机', exact: true }).focus();
+  assert.equal(await draftHeight(), 24);
+  assert.equal(await composer.inputValue(), longDraft);
   await reasoningBody.press('Escape');
   await liveReasoning.waitFor();
   assert.ok(await liveReasoning.evaluate(element => element === document.activeElement));
