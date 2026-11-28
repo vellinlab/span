@@ -345,21 +345,33 @@ export function mergeHistory(previous, history) {
   // The first history page already has an item index. Preserve it for later deltas.
   if (!previous.length) return history;
   if (!history.length) return previous;
-  const liveKeys = new Set(previous.map(row => row.itemKey ?? row.key));
-  const summaries = new Map(history.filter(row => row.kind === 'reasoning').map(row => [row.key, row]));
-  const completions = new Map(history.filter(row => row.completedRun).map(row => [row.key, row.completedRun]));
-  const sent = new Set(previous.filter(row => row.optimistic).map(row => row.clientId));
+  // Index the arriving page. The retained transcript can be much larger.
+  const savedRows = new Map();
+  for (const row of history) savedRows.set(row.key, row);
+  let replacements;
+  const duplicates = new Set();
+  const sent = new Set();
+  for (let index = 0; index < previous.length; index++) {
+    const row = previous[index];
+    if (row.optimistic && row.clientId) sent.add(row.clientId);
+    const key = row.itemKey ?? row.key;
+    const saved = savedRows.get(key);
+    if (!saved) continue;
+    duplicates.add(key);
+    let replacement;
+    if (saved.completedRun && !row.completedRun && !row.itemKey && row.final) {
+      replacement = { ...row, completedRun: saved.completedRun };
+    } else if (saved.kind === 'reasoning' && !row.final && row.key === key) {
+      replacement = { ...row, sections: mergeSections(row.sections, saved.sections), preview: row.preview || saved.preview };
+    }
+    if (replacement) (replacements ??= new Map()).set(index, replacement);
+  }
   // Backfill older history without moving the live fragments around intervening tool cards.
-  return [
-    ...history.filter(row => !liveKeys.has(row.key) && !(row.clientId && sent.has(row.clientId))),
-    ...previous.map(row => {
-      const completedRun = completions.get(row.itemKey ?? row.key);
-      if (completedRun && !row.completedRun && !row.itemKey && row.final) return { ...row, completedRun };
-      const saved = summaries.get(row.key);
-      if (!saved || row.final) return row;
-      return { ...row, sections: mergeSections(row.sections, saved.sections), preview: row.preview || saved.preview };
-    }),
-  ];
+  const older = history.filter(row => !duplicates.has(row.key) && !sent.has(row.clientId));
+  if (!older.length && !replacements) return previous;
+  const merged = older.concat(previous);
+  if (replacements) for (const [index, row] of replacements) merged[older.length + index] = row;
+  return merged;
 }
 
 function mergeSections(live, snapshot) {

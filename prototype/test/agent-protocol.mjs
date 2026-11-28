@@ -1075,6 +1075,24 @@ test('reasoning received during an open Markdown reply does not break its format
   assert.equal(rows[0].text, '**First and last**');
 });
 
+test('older pages preserve mounted rows and ignore copies of optimistic or rendered items', () => {
+  const answer = { kind: 'message', turnId: 'now', id: 'reply', phase: 'final', text: 'Current reply.' };
+  const current = historyRows([{ id: 'now', run: { id: 'now', status: 'completed' }, rows: [answer] }]);
+  const rendered = current[0];
+  assert.equal(mergeHistory(current, historyRows([
+    { id: 'now', run: { id: 'now', status: 'completed' }, rows: [answer] },
+  ])), current);
+  const pending = { kind: 'user', optimistic: true, key: 'sending', clientId: 'sending', text: 'Pending message.' };
+  const earlier = historyRows([{ id: 'old', run: { id: 'old', status: 'completed' }, rows: [
+    { kind: 'message', turnId: 'old', id: 'previous', text: 'Older reply.' },
+    { kind: 'user', turnId: 'old', id: 'restored', clientId: pending.clientId, text: pending.text },
+  ] }]);
+  const merged = mergeHistory([...current, pending], earlier);
+  assert.deepEqual(merged, [earlier[0], rendered, pending]);
+  assert.equal(merged[1], rendered);
+  assert.equal(merged[2], pending);
+});
+
 test('reasoning detail reads only its turn and retains the same view for unrelated output', () => {
   const delta = (kind, id, text, turnId = 'live') => ({ kind: 'delta', delta: { kind, id, text, turnId, section: 0 } });
   const earlier = applyTimeline([], [delta('reasoning', 'old', 'History', 'older')]);
