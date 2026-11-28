@@ -439,6 +439,16 @@ test('a completed answer folds the turn process while keeping results and errors
   const legacy = historyRows([{ id: turnId, run, rows: items.map(row => ({ ...row, phase: undefined })) }]);
   assert.deepEqual(ids(groupedTimelineLayout(timelineLayout(legacy), undefined, empty, empty), legacy),
     ['question', 'comment', 'turn-process', 'failure', 'change', 'partial', 'answer', 'artifact']);
+
+  const nextRun = { id: 'next', status: 'completed' };
+  const next = applyTimeline(rows, [
+    { kind: 'item', item: { ...items[1], turnId: nextRun.id }, final: true },
+    { kind: 'item', item: { ...items[7], turnId: nextRun.id }, final: true },
+    { kind: 'run', run: nextRun },
+  ]);
+  const processes = timelineLayout(next).processes;
+  assert.equal(processes.get(turnId), group);
+  assert.equal(processes.get(nextRun.id).members.size, 1);
 });
 
 test('finishing an already visible command reuses measurements until the live group folds', () => {

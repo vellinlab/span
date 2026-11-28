@@ -153,35 +153,38 @@ function canFoldProcess(row) {
   }
 }
 
-function completedProcesses(rows, previous) {
+function completedProcess(rows, end) {
+  const answer = rows[end];
+  if (!answer?.completedRun || !visibleRow(answer)) return;
+  const members = new Set();
+  let start = end;
+  let firstMember = end;
+  let hasProcess = answer.phase === 'final';
+  while (start > 0) {
+    const row = rows[start - 1];
+    if (row.turnId !== answer.turnId || (row.kind === 'message' && row.phase === 'final')) break;
+    start--;
+    if (canFoldProcess(row) && (row.itemKey ?? row.key) !== (answer.itemKey ?? answer.key)) {
+      members.add(start);
+      firstMember = start;
+      hasProcess ||= row.kind === 'reasoning' || row.kind === 'message';
+    }
+  }
+  // Legacy answers without phase information may still carry identifiable progress.
+  if (!hasProcess) {
+    members.clear();
+    firstMember = end;
+  }
+  return { kind: 'turn-process', key: JSON.stringify(['process', answer.turnId]),
+    turnId: answer.turnId, start: firstMember, end, members, durationMs: answer.completedRun.durationMs };
+}
+
+function completedProcesses(rows) {
   const processes = new Map();
-  for (const [end, answer] of rows.entries()) {
-    if (!answer.completedRun || !visibleRow(answer)) continue;
-    const members = new Set();
-    let start = end;
-    let firstMember = end;
-    let hasProcess = answer.phase === 'final';
-    while (start > 0) {
-      const row = rows[start - 1];
-      if (row.turnId !== answer.turnId || (row.kind === 'message' && row.phase === 'final')) break;
-      start--;
-      if (canFoldProcess(row) && (row.itemKey ?? row.key) !== (answer.itemKey ?? answer.key)) {
-        members.add(start);
-        firstMember = start;
-        hasProcess ||= row.kind === 'reasoning' || row.kind === 'message';
-      }
-    }
-    // Legacy answers without phase information may still carry identifiable progress.
-    if (!hasProcess) {
-      members.clear();
-      firstMember = end;
-    }
-    const earlier = previous?.get(answer.turnId);
-    const { durationMs } = answer.completedRun;
-    const unchanged = earlier?.start === firstMember && earlier.end === end && earlier.durationMs === durationMs &&
-      earlier.members.size === members.size && [...members].every(index => earlier.members.has(index));
-    processes.set(answer.turnId, unchanged ? earlier : { kind: 'turn-process', key: JSON.stringify(['process', answer.turnId]),
-      turnId: answer.turnId, start: firstMember, end, members, durationMs });
+  for (const [end, row] of rows.entries()) {
+    if (!row.completedRun) continue;
+    const process = completedProcess(rows, end);
+    if (process) processes.set(row.turnId, process);
   }
   return processes;
 }
@@ -708,16 +711,18 @@ export function applyTimeline(previous, events) {
   const groups = groupsByRows.get(previous);
   const processes = processesByRows.get(previous);
   let groupingChangedAt = Infinity;
-  let processesChanged = false;
+  let processChanges;
   const state = {
     get rows() { return rows; },
     positions,
     write(position, row) {
       const earlier = rows[position];
       const process = processes?.get(row.turnId);
-      if (row.completedRun !== earlier?.completedRun || (process && position <= process.end &&
-        (position === process.end ? visibleRow(row) !== visibleRow(earlier) : canFoldProcess(row) !== canFoldProcess(earlier)))) {
-        processesChanged = true;
+      if (processes && row.completedRun !== earlier?.completedRun) {
+        (processChanges ??= new Map()).set(row.turnId, position);
+      } else if (process && position <= process.end && !processChanges?.has(row.turnId) &&
+        (position === process.end ? visibleRow(row) !== visibleRow(earlier) : canFoldProcess(row) !== canFoldProcess(earlier))) {
+        (processChanges ??= new Map()).set(row.turnId, process.end);
       }
       if (row.kind === 'delegation' || earlier?.kind === 'delegation') members = undefined;
       if (row.kind === 'reasoning' && row.turnId === reasoningView?.turnId && (row.preview || earlier?.preview)) {
@@ -749,7 +754,16 @@ export function applyTimeline(previous, events) {
   if (reasoningView) reasoningViewByRows.set(rows, reasoningView);
   const mergedGroups = groupingChangedAt === Infinity ? groups : refreshActivityGroups(groups, rows, groupingChangedAt);
   if (mergedGroups) groupsByRows.set(rows, mergedGroups);
-  const nextProcesses = processesChanged ? completedProcesses(rows, processes) : processes;
+  let nextProcesses = processes;
+  if (processChanges) {
+    // Existing row indexes stay valid across a live batch. Only reloads and prepends rebuild the index.
+    nextProcesses = new Map(processes);
+    for (const [turnId, end] of processChanges) {
+      const process = completedProcess(rows, end);
+      if (process) nextProcesses.set(turnId, process);
+      else nextProcesses.delete(turnId);
+    }
+  }
   if (nextProcesses) processesByRows.set(rows, nextProcesses);
   // Reuse unchanged measurements and derive only new or changed row metadata.
   if (layout) {
