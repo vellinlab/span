@@ -262,6 +262,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     active.current = { ref: entry.ref, key: sessionKey(entry.ref) };
     setSession(entry);
     const runVersion = callbacks.current.run;
+    const includeRestored = Boolean(restoring && client.sessions.resumeWithoutCatalog);
     try {
       if (previous && sessionKey(previous) !== active.current.key) {
         client.sessions.release?.(previous).catch(() => {});
@@ -271,9 +272,8 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       selected = { ...entry, ...Object.fromEntries(Object.entries(state.session).filter(([, value]) => value != null)) };
       active.current = { ref: selected.ref, key: sessionKey(selected.ref) };
       setSession(current => ({ ...current, ...selected }));
-      if (!restoring || Boolean(selected.archived) === requestedArchiveView.current) {
-        const includeRestored = Boolean(restoring && client.sessions.resumeWithoutCatalog);
-        putSession(selected, includeRestored || (Boolean(opened) && !archived));
+      if (!includeRestored && (!restoring || Boolean(selected.archived) === requestedArchiveView.current)) {
+        putSession(selected, Boolean(opened) && !archived);
       }
       setOptions(state.options ?? {});
       if (state.models) setModels(state.models);
@@ -313,6 +313,8 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
         }
       }
       if (scope === layer.current) {
+        // A restored session may be absent from the catalog. Add it only after its history opens.
+        if (includeRestored && Boolean(selected.archived) === requestedArchiveView.current) putSession(selected, true);
         readPage({ items: pages.reverse().flat(), cursor: page.cursor }, runVersion, [...seen]);
         rememberWorkspace(config, selected.ref.id);
       }
