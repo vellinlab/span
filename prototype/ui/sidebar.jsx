@@ -6,7 +6,7 @@ const minimum = 190;
 export function Sidebar({ children }) {
   const [preferred, setPreferred] = useState(() => {
     const value = Number(localStorage.getItem(key));
-    return Number.isFinite(value) && value >= minimum ? value : null;
+    return Number.isFinite(value) && value >= minimum ? Math.round(value) : null;
   });
   const [viewport, setViewport] = useState(window.innerWidth);
   const [dragWidth, setDragWidth] = useState(null);
@@ -27,7 +27,7 @@ export function Sidebar({ children }) {
     else localStorage.setItem(key, String(value));
   }
 
-  return <aside className="sidebar" id="workbench-sidebar" style={{ width }}>
+  return <aside className="sidebar" id="workbench-sidebar" style={{ width: dragWidth ?? preferred ?? undefined }}>
     {children}
     <div className="sidebar-grip" role="separator" tabIndex={0} aria-label="调整侧栏宽度"
       aria-controls="workbench-sidebar" aria-orientation="vertical" aria-valuemin={minimum}

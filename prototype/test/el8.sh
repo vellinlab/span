@@ -106,7 +106,8 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs
     /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)" \
     /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)" \
     /artifacts/terminal-collapse-baseline/span-preview "$(cat /artifacts/terminal-collapse-baseline-commit.txt)" \
-    /artifacts/markdown-scroll-baseline/span-preview "$(cat /artifacts/markdown-scroll-baseline-commit.txt)" || resource_result=$?
+    /artifacts/markdown-scroll-baseline/span-preview "$(cat /artifacts/markdown-scroll-baseline-commit.txt)" \
+    /artifacts/terminal-reflow-baseline/span-preview "$(cat /artifacts/terminal-reflow-baseline-commit.txt)" || resource_result=$?
 result=0
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png || result=$?
 /artifacts/node prototype/test/catalog.mjs /artifacts/linux/span-preview /artifacts/el8-catalog.png

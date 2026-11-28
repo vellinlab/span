@@ -14,6 +14,7 @@ env:
   STREAMING_OUTPUT_BASELINE: 13b84174e13c50c9f17abb3ac50bd353e8115305
   STARTUP_LOADING_BASELINE: c46b1e8610b2d2bd6899b56dae390416d6c81ae0
   MARKDOWN_SCROLL_BASELINE: 459fad8be6e0144d8ef8cbc66b4d2cc0ffe822a3
+  TERMINAL_REFLOW_BASELINE: 465237544508957d7b634bce14338777ab3b2ccc
   TERMINAL_RENDERER_BASELINE: b4d95f68481e073da9fa4df344629a5b9d07f1b5
   TERMINAL_COVER_BASELINE: 6d3fe55dd6c192b162eec43c4f7bdb62c3db9b20
   TERMINAL_WINDOW_BASELINE: 127feffb69fbd7a752c49b7666f3198a3c0e8cb6
@@ -111,6 +112,7 @@ jobs:
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
             startup-loading:"$STARTUP_LOADING_BASELINE" \
             markdown-scroll:"$MARKDOWN_SCROLL_BASELINE" \
+            terminal-reflow:"$TERMINAL_REFLOW_BASELINE" \
             streaming-output:"$STREAMING_OUTPUT_BASELINE" \
             reasoning:"$REASONING_BASELINE" \
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
@@ -241,7 +243,8 @@ jobs:
             terminal-window:"$TERMINAL_WINDOW_BASELINE" terminal-collapse:"$TERMINAL_COLLAPSE_BASELINE" \
             following-reply:"$FOLLOWING_REPLY_BASELINE" \
             streaming-output:"$STREAMING_OUTPUT_BASELINE" reasoning:"$REASONING_BASELINE" \
-            startup-loading:"$STARTUP_LOADING_BASELINE" markdown-scroll:"$MARKDOWN_SCROLL_BASELINE"; do
+            startup-loading:"$STARTUP_LOADING_BASELINE" markdown-scroll:"$MARKDOWN_SCROLL_BASELINE" \
+            terminal-reflow:"$TERMINAL_REFLOW_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
             source_dir="$source_root/$target"
@@ -288,7 +291,8 @@ jobs:
             "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
             "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE" \
             "$PWD/terminal-collapse-baseline/span-preview.exe" "$TERMINAL_COLLAPSE_BASELINE" \
-            "$PWD/markdown-scroll-baseline/span-preview.exe" "$MARKDOWN_SCROLL_BASELINE" || resource_result=$?
+            "$PWD/markdown-scroll-baseline/span-preview.exe" "$MARKDOWN_SCROLL_BASELINE" \
+            "$PWD/terminal-reflow-baseline/span-preview.exe" "$TERMINAL_REFLOW_BASELINE" || resource_result=$?
           node prototype/test/catalog.mjs "$binary" "$PWD/windows-workbench-catalog.png"
           node prototype/test/covered-transcript.mjs "$binary" "" "" "$PWD/windows-workbench-preview-switch"
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-long-reply"

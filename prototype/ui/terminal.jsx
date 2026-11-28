@@ -208,7 +208,14 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
     const size = terminal.onResize(value => update('resize', value));
     const observer = new ResizeObserver(() => {
       fitPending = true;
-      if (hidden.current || frame !== undefined) return;
+      if (hidden.current) return;
+      // Fit the DOM grid after layout so it can paint with the resized window.
+      if (host.dataset.renderer === 'dom') {
+        fitWhenVisible();
+        return;
+      }
+      // Resizing the WebGL canvas can trigger a second resize observation.
+      if (frame !== undefined) return;
       frame = requestAnimationFrame(() => {
         frame = undefined;
         if (fitPending) fitWhenVisible();

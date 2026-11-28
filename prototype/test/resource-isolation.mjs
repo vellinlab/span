@@ -5,10 +5,11 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
+import { captureWindowDesktop, dragWindowEdge } from './window-edge.mjs';
 
 const [binary, reportPath, baselineBinary, baselineCommit, coveredBaseline, coveredBaselineCommit,
   minimizedBaseline, minimizedBaselineCommit, collapsedBaseline, collapsedBaselineCommit,
-  markdownBaseline, markdownBaselineCommit] = process.argv.slice(2);
+  markdownBaseline, markdownBaselineCommit, reflowBaseline, reflowBaselineCommit] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const initialSize = [880, 640];
 const activeWindowMs = 7500;
@@ -524,15 +525,108 @@ async function scroll(page) {
   return { wheelSteps: 36, offsets };
 }
 
-async function reflow(page, app) {
+async function reflow(page, app, screenshot) {
   const column = page.locator('.timeline .reading-column');
-  const start = await column.evaluate(element => element.clientWidth);
-  for (let index = 0; index < 24; index++) {
-    await resize(app, page, index % 2 === 0 ? [740, initialSize[1]] : initialSize);
-    if (index === 0) assert.ok(start - await column.evaluate(element => element.clientWidth) >= 80);
+  const screen = page.locator('.terminal-canvas .xterm-screen');
+  const observation = await screen.evaluateHandle(element => {
+    const samples = [];
+    let resizedAt;
+    let sequence = 0;
+    let width = element.getBoundingClientRect().width;
+    const remember = () => {
+      sequence++;
+      resizedAt = performance.now();
+    };
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return;
+      width = entry.contentRect.width;
+      if (resizedAt === undefined) return;
+      samples.push({ sequence, windowWidth: innerWidth, windowHeight: innerHeight, gridWidth: width,
+        viewportToGridMs: performance.now() - resizedAt });
+    });
+    window.addEventListener('resize', remember);
+    observer.observe(element);
+    return { samples, stop() { observer.disconnect(); window.removeEventListener('resize', remember); } };
+  });
+  const scenes = {};
+  try {
+    for (const [name, large, small] of [
+      ['rewrap', initialSize, [740, initialSize[1]]],
+      ['centered', [1240, 840], [1158, 748]],
+    ]) {
+      // xterm's cell size derives from a rounded canvas width. Enter the large
+      // endpoint from the same width used during the measured passes.
+      await resize(app, page, small);
+      await settle(page);
+      await resize(app, page, large);
+      await settle(page);
+      const start = await column.boundingBox();
+      const initialGrid = await screen.evaluate(element => element.offsetWidth);
+      let precedingGrid = initialGrid;
+      await observation.evaluate(probe => { probe.samples.length = 0; });
+      for (let index = 0; index < 16; index++) {
+        await resize(app, page, index % 2 === 0 ? small : large);
+        await page.waitForFunction(before => document.querySelector('.terminal-canvas .xterm-screen').offsetWidth !== before,
+          precedingGrid);
+        await settle(page);
+        precedingGrid = await screen.evaluate(element => element.offsetWidth);
+        if (index === 0) {
+          const next = await column.boundingBox();
+          if (name === 'rewrap') assert.ok(start.width - next.width >= 80);
+          else {
+            assert.ok(Math.abs(start.width - next.width) <= 2, 'Wide windows retain the reading width.');
+            assert.ok(start.x - next.x >= 20, 'The reading column moves as the window narrows.');
+          }
+        }
+      }
+      assert.equal(precedingGrid, initialGrid);
+      assert.ok(Math.abs(start.width - (await column.boundingBox()).width) <= 2);
+      const samples = await observation.evaluate(probe => probe.samples);
+      const lastByResize = new Map(samples.map(sample => [sample.sequence, sample]));
+      assert.ok(lastByResize.size >= 14, 'Observe both the window size and the terminal grid at most target widths.');
+      const ordered = [...lastByResize.values()].map(sample => sample.viewportToGridMs).sort((a, b) => a - b);
+      scenes[name] = { widthChanges: 16, extraGridUpdates: samples.length - lastByResize.size,
+        samples, viewportToGridP95Ms: ordered[Math.ceil(ordered.length * 0.95) - 1] };
+    }
+  } finally {
+    await observation.evaluate(probe => probe.stop());
+    await observation.dispose();
   }
-  assert.ok(Math.abs(start - await column.evaluate(element => element.clientWidth)) <= 2);
-  return { widthChanges: 24 };
+  await resize(app, page, initialSize);
+  await settle(page);
+  if (screenshot) {
+    const script = fileURLToPath(new URL('./terminal-echo.cjs', import.meta.url));
+    await terminalLine(page, `"${process.execPath}" "${script}"`, 'span_echo_ready');
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window.setPosition(20, 20);
+      window.focus();
+    });
+    await page.keyboard.press('g');
+    await page.waitForFunction(() => document.querySelector('.xterm-rows').textContent.includes('span_interaction_'));
+    await Promise.all([
+      dragWindowEdge(app, -140),
+      page.waitForFunction(width => innerWidth < width, initialSize[0]).then(handle => {
+        void handle.dispose();
+        return page.keyboard.press('a');
+      }),
+    ]);
+    await page.waitForFunction(() => document.querySelector('.xterm-rows > div').textContent.trim() === 'span_echo_a'
+      && innerWidth <= 744);
+    assert.ok(await screen.evaluate(element => element.offsetWidth < element.closest('.terminal-canvas').offsetWidth));
+    await page.keyboard.press('f');
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('.xterm-rows > div')].at(-1)?.textContent.trim() === '绘_echo_final');
+    await settle(page);
+    await captureWindowDesktop(app, screenshot);
+    await resize(app, page, [740, initialSize[1]]);
+    await page.keyboard.press('p');
+    await page.waitForFunction(() => document.querySelector('.xterm-rows').textContent.includes('REVERSE'));
+    await settle(page);
+    await page.screenshot({ path: screenshot.replace(/\.png$/, '-reference.png'), animations: 'disabled' });
+    await page.keyboard.press('q');
+  }
+  return scenes;
 }
 
 const exercise = { output, scroll, reflow };
@@ -619,7 +713,9 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
       samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true,
     });
     const startedAt = performance.now();
-    const events = await exercise[workload]?.(page, app) ?? {};
+    const screenshot = workload === 'reflow' && saveImage
+      ? reportPath.replace(/\.json$/, `-${variant}-terminal-reflow.png`) : undefined;
+    const events = await exercise[workload]?.(page, app, screenshot) ?? {};
     await delay(Math.max(0, activeWindowMs - (performance.now() - startedAt)));
     await settle(page);
     const activeMs = Math.round(performance.now() - startedAt);
@@ -653,7 +749,7 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
 const report = {
   platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
   window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, minimizedBaselineCommit, collapsedBaselineCommit,
-  markdownBaselineCommit,
+  markdownBaselineCommit, reflowBaselineCommit,
   trials: [], interaction: [], palettes: [], covered: [], minimized: [], collapsed: [],
 };
 const publish = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
@@ -667,17 +763,19 @@ for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimi
     console.log(`${variant} ${workload} terminal DOM batches: ${sample.events.batches}`);
   }
 }
-const pairedBaselines = { output: baselineBinary, scroll: markdownBaseline };
+const pairedBaselines = { output: baselineBinary, scroll: markdownBaseline, reflow: reflowBaseline };
 const previousPairs = new Set();
 for (const workload of ['idle', 'output', 'scroll', 'reflow', 'reflow', 'scroll', 'output', 'idle']) {
   const baseline = pairedBaselines[workload];
+  const first = !previousPairs.has(workload);
   let variants = ['candidate'];
   if (baseline) {
-    variants = previousPairs.has(workload) ? ['candidate', 'baseline'] : ['baseline', 'candidate'];
+    variants = first ? ['baseline', 'candidate'] : ['candidate', 'baseline'];
     previousPairs.add(workload);
   }
   for (const variant of variants) {
-    const sample = await trial(workload, variant, variant === 'baseline' ? baseline : binary);
+    const sample = await trial(workload, variant, variant === 'baseline' ? baseline : binary,
+      undefined, workload === 'reflow' && Boolean(reflowBaseline) && first);
     report.trials.push(sample);
     await publish();
     console.log(`${variant} ${workload} ${sample.activeMs}ms, DOM nodes ${sample.beforeWorkload.dom.nodes}` +
