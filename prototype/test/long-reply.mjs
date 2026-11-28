@@ -1030,10 +1030,17 @@ async function check(binary, label, trial) {
       selection.selectAllChildren(element);
       return selection.toString();
     }), '复核链接');
+    let afterGcMemory;
+    if (processHistory) {
+      await cdp.send('HeapProfiler.collectGarbage');
+      await settleFrame(page);
+      afterGcMemory = { ...await rendererMemory(app, rendererPid), usedHeapBytes: (await metrics()).JSHeapUsedSize };
+    }
     return { label, following, grouped, mutationBatches, maxBatchGapMs, typing, windowResize,
       startPssKiB: startMemory.pssKiB, endPssKiB: endMemory.pssKiB,
       startMemory: { ...startMemory, usedHeapBytes: start.JSHeapUsedSize },
       endMemory: { ...endMemory, usedHeapBytes: end.JSHeapUsedSize },
+      afterGcMemory,
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,
