@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
 
 const [binary, reportPath, baselineBinary, baselineCommit, coveredBaseline, coveredBaselineCommit,
-  minimizedBaseline, minimizedBaselineCommit, collapsedBaseline, collapsedBaselineCommit] = process.argv.slice(2);
+  minimizedBaseline, minimizedBaselineCommit, collapsedBaseline, collapsedBaselineCommit,
+  markdownBaseline, markdownBaselineCommit] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const initialSize = [880, 640];
 const activeWindowMs = 7500;
@@ -613,11 +614,21 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     await settle(page);
     const beforeWorkload = await capture();
     assert.ok(beforeWorkload.terminalElements > 0);
+    const sampleAllocations = workload === 'scroll' && Boolean(markdownBaseline);
+    if (sampleAllocations) await cdp.send('HeapProfiler.startSampling', {
+      samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true,
+    });
     const startedAt = performance.now();
     const events = await exercise[workload]?.(page, app) ?? {};
     await delay(Math.max(0, activeWindowMs - (performance.now() - startedAt)));
     await settle(page);
     const activeMs = Math.round(performance.now() - startedAt);
+    let sampledAllocatedBytes;
+    if (sampleAllocations) {
+      const { profile } = await cdp.send('HeapProfiler.stopSampling');
+      sampledAllocatedBytes = profile.samples.reduce((bytes, sample) => bytes + sample.size, 0);
+      assert.ok(sampledAllocatedBytes > 0, 'Sample allocations during the history scroll.');
+    }
     const active = await capture();
     await page.getByRole('button', { name: '关闭终端' }).click();
     await page.locator('.terminal-canvas').waitFor({ state: 'detached' });
@@ -628,7 +639,7 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     const settled = await capture();
     await cdp.send('HeapProfiler.collectGarbage');
     const diagnosticGc = await capture();
-    return { workload, variant, events, activeMs, beforeOpen, beforeWorkload, active, closed, settled, diagnosticGc };
+    return { workload, variant, events, activeMs, sampledAllocatedBytes, beforeOpen, beforeWorkload, active, closed, settled, diagnosticGc };
   } finally {
     try {
       await app?.close();
@@ -642,9 +653,9 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
 const report = {
   platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
   window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, minimizedBaselineCommit, collapsedBaselineCommit,
+  markdownBaselineCommit,
   trials: [], interaction: [], palettes: [], covered: [], minimized: [], collapsed: [],
 };
-const run = (workload, variant) => trial(workload, variant, variant === 'baseline' ? baselineBinary : binary);
 const publish = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
 for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimized', minimizedBaseline], ['collapsed', collapsedBaseline]]) {
   if (!hiddenBaseline) continue;
@@ -656,12 +667,17 @@ for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimi
     console.log(`${variant} ${workload} terminal DOM batches: ${sample.events.batches}`);
   }
 }
-let outputPair = 0;
+const pairedBaselines = { output: baselineBinary, scroll: markdownBaseline };
+const previousPairs = new Set();
 for (const workload of ['idle', 'output', 'scroll', 'reflow', 'reflow', 'scroll', 'output', 'idle']) {
-  const variants = workload === 'output' && baselineBinary
-    ? (outputPair++ === 0 ? ['baseline', 'candidate'] : ['candidate', 'baseline']) : ['candidate'];
+  const baseline = pairedBaselines[workload];
+  let variants = ['candidate'];
+  if (baseline) {
+    variants = previousPairs.has(workload) ? ['candidate', 'baseline'] : ['baseline', 'candidate'];
+    previousPairs.add(workload);
+  }
   for (const variant of variants) {
-    const sample = await run(workload, variant);
+    const sample = await trial(workload, variant, variant === 'baseline' ? baseline : binary);
     report.trials.push(sample);
     await publish();
     console.log(`${variant} ${workload} ${sample.activeMs}ms, DOM nodes ${sample.beforeWorkload.dom.nodes}` +

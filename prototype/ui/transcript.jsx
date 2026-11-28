@@ -8,7 +8,7 @@ import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from '
 import { transientAgentStatus } from './delegation.js';
 import { FileReferenceName, ImageReference, PathText } from './file-reference-name.jsx';
 import { attachmentName } from './file-references.js';
-import { Markdown, StreamingMarkdown } from './markdown.jsx';
+import { Markdown, MarkdownCache, StreamingMarkdown } from './markdown.jsx';
 import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, readTextPosition, rememberReaderPosition, TextReader } from './text-reader.jsx';
@@ -446,6 +446,7 @@ export const Transcript = memo(function Transcript({
   const ungroupedTurns = useRef(null);
   if (!ungroupedTurns.current) ungroupedTurns.current = new Set(remembered?.ungroupedTurns);
   const [openGroups, setOpenGroups] = useState(() => new Set(remembered?.openGroups));
+  const [markdownCache] = useState(() => new Map());
   const [restore, setRestore] = useState(remembered?.anchor);
   const [liveTurnId, setLiveTurnId] = useState(activeTurnId);
   const [inspectedCard, setInspectedCard] = useState(null);
@@ -701,26 +702,28 @@ export const Transcript = memo(function Transcript({
       const reader = event.target.closest('.diff-scroll, .output-scroll, .command-text, .plan-list');
       if (!reader || reader.scrollHeight <= reader.clientHeight) onScroll(event);
     }}>
-    {rows.length ? <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
-      {virtualRows.map(item => {
-        const row = layout.rowAt(rows, item.index);
-        const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + Number(Boolean(layout.nested?.has(item.index)));
-        const show = row.key !== liveReasoningItem && Boolean(visibleRow(row));
-        const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
-        const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);
-        return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
-          ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
-          {show && (row.kind === 'activity-group' || row.kind === 'turn-process' ? <ActivityGroup group={row} open={openGroups.has(row.key)}
-            toggle={toggleGroup} releaseAnchor={releaseGroupAnchor} />
-            : <TranscriptRow row={row} activePlan={activePlan} awaiting={row.final ? undefined : waiting?.get(row.key)}
-              liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
-              roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
-              streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll} outputPositions={outputPositions.current}
-              expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
-              toggle={toggle} openSession={openSession} openTrace={openTrace} openArtifact={openArtifact} openImage={openImage}
-              canOpenSession={canOpenSession} />)}
-        </div>;
-      })}
-    </div> : null}
+    {rows.length ? <MarkdownCache value={markdownCache}>
+      <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
+        {virtualRows.map(item => {
+          const row = layout.rowAt(rows, item.index);
+          const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + Number(Boolean(layout.nested?.has(item.index)));
+          const show = row.key !== liveReasoningItem && Boolean(visibleRow(row));
+          const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
+          const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);
+          return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
+            ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
+            {show && (row.kind === 'activity-group' || row.kind === 'turn-process' ? <ActivityGroup group={row} open={openGroups.has(row.key)}
+              toggle={toggleGroup} releaseAnchor={releaseGroupAnchor} />
+              : <TranscriptRow row={row} activePlan={activePlan} awaiting={row.final ? undefined : waiting?.get(row.key)}
+                liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}
+                roster={row.kind === 'delegation' ? delegatedMembers(rows) : undefined} currentKey={viewKey}
+                streaming={streaming} following={streaming && !showLatest && !inspectedCard} scroll={scroll} outputPositions={outputPositions.current}
+                expanded={expanded.current.get(row.key) ?? (activePlan && Boolean(row.steps?.length))}
+                toggle={toggle} openSession={openSession} openTrace={openTrace} openArtifact={openArtifact} openImage={openImage}
+                canOpenSession={canOpenSession} />)}
+          </div>;
+        })}
+      </div>
+    </MarkdownCache> : null}
   </div>;
 }, sameTranscriptProps);

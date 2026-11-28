@@ -13,6 +13,7 @@ env:
   REASONING_BASELINE: c265e68c8f3435cc8e7ef2c1e8f2ea8723fbe8f9
   STREAMING_OUTPUT_BASELINE: 13b84174e13c50c9f17abb3ac50bd353e8115305
   STARTUP_LOADING_BASELINE: c46b1e8610b2d2bd6899b56dae390416d6c81ae0
+  MARKDOWN_SCROLL_BASELINE: 459fad8be6e0144d8ef8cbc66b4d2cc0ffe822a3
   TERMINAL_RENDERER_BASELINE: b4d95f68481e073da9fa4df344629a5b9d07f1b5
   TERMINAL_COVER_BASELINE: 6d3fe55dd6c192b162eec43c4f7bdb62c3db9b20
   TERMINAL_WINDOW_BASELINE: 127feffb69fbd7a752c49b7666f3198a3c0e8cb6
@@ -109,6 +110,7 @@ jobs:
             following-reply:"$FOLLOWING_REPLY_BASELINE" \
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
             startup-loading:"$STARTUP_LOADING_BASELINE" \
+            markdown-scroll:"$MARKDOWN_SCROLL_BASELINE" \
             streaming-output:"$STREAMING_OUTPUT_BASELINE" \
             reasoning:"$REASONING_BASELINE" \
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
@@ -238,16 +240,26 @@ jobs:
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" \
             terminal-window:"$TERMINAL_WINDOW_BASELINE" terminal-collapse:"$TERMINAL_COLLAPSE_BASELINE" \
             following-reply:"$FOLLOWING_REPLY_BASELINE" \
-            streaming-output:"$STREAMING_OUTPUT_BASELINE" reasoning:"$REASONING_BASELINE" startup-loading:"$STARTUP_LOADING_BASELINE"; do
+            streaming-output:"$STREAMING_OUTPUT_BASELINE" reasoning:"$REASONING_BASELINE" \
+            startup-loading:"$STARTUP_LOADING_BASELINE" markdown-scroll:"$MARKDOWN_SCROLL_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
             source_dir="$source_root/$target"
             mkdir "$source_dir"
             git fetch --no-tags --depth=1 origin "$baseline"
             git archive "$baseline" prototype | tar -x -C "$source_dir"
-            # Node resolves the installed ancestor dependencies for an identical manifest and lockfile.
-            if ! cmp -s prototype/package.json "$source_dir/prototype/package.json" ||
-              ! cmp -s prototype/package-lock.json "$source_dir/prototype/package-lock.json"; then
+            # Reuse ancestor dependencies only when every installed package record matches.
+            if ! node - prototype/package-lock.json "$source_dir/prototype/package-lock.json" <<'NODE'
+          const { readFileSync } = require('node:fs');
+          const { isDeepStrictEqual } = require('node:util');
+          const layouts = process.argv.slice(2).map(file => {
+            const { lockfileVersion, packages } = JSON.parse(readFileSync(file, 'utf8'));
+            delete packages[''];
+            return { lockfileVersion, packages };
+          });
+          process.exitCode = isDeepStrictEqual(...layouts) ? 0 : 1;
+          NODE
+            then
               npm --prefix "$source_dir/prototype" ci --no-audit --no-fund
             fi
             npm --prefix "$source_dir/prototype" run build
@@ -275,7 +287,8 @@ jobs:
             "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
             "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
             "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE" \
-            "$PWD/terminal-collapse-baseline/span-preview.exe" "$TERMINAL_COLLAPSE_BASELINE" || resource_result=$?
+            "$PWD/terminal-collapse-baseline/span-preview.exe" "$TERMINAL_COLLAPSE_BASELINE" \
+            "$PWD/markdown-scroll-baseline/span-preview.exe" "$MARKDOWN_SCROLL_BASELINE" || resource_result=$?
           node prototype/test/catalog.mjs "$binary" "$PWD/windows-workbench-catalog.png"
           node prototype/test/covered-transcript.mjs "$binary" "" "" "$PWD/windows-workbench-preview-switch"
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-long-reply"

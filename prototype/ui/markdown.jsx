@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 let markdownModule;
 export function prepareMarkdown() {
@@ -6,10 +6,12 @@ export function prepareMarkdown() {
 }
 
 const MarkdownContent = lazy(prepareMarkdown);
+export const MarkdownCache = createContext(null);
 
 export const Markdown = memo(function Markdown({ text, streaming = false }) {
+  const cache = useContext(MarkdownCache);
   return <Suspense fallback={<div className="prose markdown-pending" aria-busy="true" />}>
-    <MarkdownContent text={text} streaming={streaming} />
+    <MarkdownContent text={text} streaming={streaming} cache={streaming ? null : cache} />
   </Suspense>;
 });
 

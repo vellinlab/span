@@ -2116,7 +2116,8 @@ try {
   await writeFile(join(reviewWorkspace, reviewName), '# 工作区索引');
   const reviewSteps = Array.from({ length: 36 }, (_, index) =>
     `${index + 1}. 确认文件名、目录与预览内容对应。`).join('\n');
-  await writeFile(join(reviewDirectory, reviewName), `# 窗口布局复核\n\n检查窄窗里的文件位置与阅读顺序。\n\n${reviewSteps}`);
+  await writeFile(join(reviewDirectory, reviewName),
+    `# 窗口布局复核\n\n检查窄窗里的文件位置与阅读顺序。\n\n${reviewSteps}\n\n${markup}`);
   await writeFile(join(reviewDirectory, notesName), `# 键盘操作记录\n\n通过键盘切换和关闭预览。\n\n${reviewSteps}`);
   await app.evaluate(({ dialog }, workspace) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
@@ -2151,6 +2152,10 @@ try {
     }), 'The nested folder uses a separate line below the file title and fits without clipping');
   };
   await preview.getByRole('heading', { name: '窗口布局复核' }).waitFor();
+  assert.ok((await previewContent.textContent()).includes('<script data-example>字面示例</script>'));
+  assert.equal(await previewContent.locator('script, img').count(), 0);
+  assert.ok(!(await previewContent.getByText('本地', { exact: true }).getAttribute('href')));
+  assert.equal(await previewContent.getByRole('link', { name: '文档' }).getAttribute('href'), 'https://example.com/guide');
   assert.equal(await reviewFile.getAttribute('aria-current'), 'true');
   assert.equal(await previewTitle.textContent(), reviewName);
   assert.equal(await previewFolder.textContent(), 'workbench-guides/interface-review');
