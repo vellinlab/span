@@ -42,7 +42,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const busy = useRef(false);
   const currentRun = useRef(null);
   const stopRequest = useRef(null);
-  const callbacks = useRef({ goal: 0, run: 0, catalog: 0 });
+  const callbacks = useRef({ goal: 0, run: 0, catalog: 0, pinned: 0 });
   const requestedArchiveView = useRef(false);
   const pendingPage = useRef(null);
   const pendingSend = useRef(null);
@@ -194,7 +194,10 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
         break;
       }
       case 'run':
-        if (publicationPaused.current && event.run.status !== 'running' && queue.current.events.length) updateRows();
+        if (event.run.status !== 'running') {
+          if (event.run.status === 'completed') queue.current.events.push(event);
+          if (queue.current.events.length) updateRows();
+        }
         changeRun(event.run);
         if (event.run.error) report(new Error(event.run.error));
         break;
@@ -312,12 +315,20 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
 
   async function list(client, showArchived, next) {
     requestedArchiveView.current = showArchived;
+    const pinnedVersion = next ? undefined : ++callbacks.current.pinned;
     const version = ++callbacks.current.catalog;
     const page = await client.sessions.list({ cursor: next ?? undefined, archived: showArchived });
     if (version !== callbacks.current.catalog || client !== agent.current) return [];
     setSessions(previous => next ? mergeSessions(previous, page.items) : page.items);
     setSessionCursor(page.cursor);
     setArchived(showArchived);
+    if (!next && !showArchived && client.sessions.listPinned) {
+      client.sessions.listPinned().then(pinned => {
+        if (pinned.length && pinnedVersion === callbacks.current.pinned && client === agent.current) {
+          setSessions(previous => mergeSessions(previous, pinned));
+        }
+      }).catch(() => {});
+    }
     return page.items;
   }
 
@@ -468,7 +479,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     }
   }
 
-  async function archiveSession() {
+  async function removeSession(permanently = false) {
     const client = agent.current;
     const ref = active.current?.ref;
     if (!ref) throw new Error('请先打开一个会话。');
@@ -477,16 +488,39 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     const archived = !session?.archived;
     busy.current = true;
     try {
-      await client.sessions.archive(ref, archived);
+      if (permanently) await client.sessions.delete(ref);
+      else await client.sessions.archive(ref, archived);
       if (scope !== layer.current || client !== agent.current) return false;
       clearSession();
       const key = sessionKey(ref);
-      setSessions(previous => previous.filter(entry => sessionKey(entry.ref) !== key || Boolean(entry.archived) === archived));
+      setSessions(previous => previous.filter(entry => sessionKey(entry.ref) !== key ||
+        (!permanently && Boolean(entry.archived) === archived)));
       setCatalogRevision(value => value + 1);
       list(client, requestedArchiveView.current).catch(error => {
         if (client === agent.current) report(error);
       });
       return true;
+    } finally {
+      if (scope === layer.current) busy.current = false;
+    }
+  }
+
+  async function pinSession() {
+    const client = agent.current;
+    const ref = active.current?.ref;
+    if (!ref || session?.archived) throw new Error('请先打开一个未归档的会话。');
+    if (!guard()) throw new Error('请等当前任务或连接完成。');
+    const scope = layer.current;
+    const pinned = !session.pinned;
+    busy.current = true;
+    try {
+      await client.sessions.pin(ref, pinned);
+      if (scope !== layer.current || client !== agent.current) return;
+      callbacks.current.pinned++;
+      setSession(previous => ({ ...previous, pinned }));
+      putSession({ ...session, ref, pinned }, pinned && !requestedArchiveView.current);
+      setCatalogRevision(value => value + 1);
+      return pinned;
     } finally {
       if (scope === layer.current) busy.current = false;
     }
@@ -721,6 +755,8 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       if (sessionKey(ref) === active.current?.key) setSession(previous => ({ ...previous, title }));
       putSession({ ref, title });
     }),
-    archive: archiveSession,
+    archive: () => removeSession(),
+    delete: () => removeSession(true),
+    pin: pinSession,
   };
 }

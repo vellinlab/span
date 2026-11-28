@@ -114,7 +114,8 @@ export function normalizeItem(item, turnId, ref) {
 export function normalizeRun(turn) {
   const status = agentStates[turn.status];
   return { id: turn.id, status: status === 'running' || status === 'failed' || status === 'cancelled'
-    ? status : 'completed', error: turn.error?.message };
+    ? status : 'completed', error: turn.error?.message,
+    ...(Number.isFinite(turn.durationMs) && { durationMs: turn.durationMs }) };
 }
 
 export function normalizeUsage(usage) {

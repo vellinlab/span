@@ -9,6 +9,7 @@ const reasoningViewByRows = new WeakMap();
 const layoutByRows = new WeakMap();
 const membersByRows = new WeakMap();
 const groupsByRows = new WeakMap();
+const processesByRows = new WeakMap();
 const groupedPrefixByExpansion = new WeakMap();
 const summaryTailsByRow = new WeakMap();
 const summaryRevisionsByRows = new WeakMap();
@@ -45,12 +46,12 @@ export function turnReasoningRows(rows, turnId) {
   return details;
 }
 
-export function sameTranscriptRows(previous, next, hiddenTurn) {
+export function sameTranscriptRows(previous, next, hiddenItem) {
   if (previous === next) return true;
   const revision = summaryRevisionsByRows.get(next);
-  if (!hiddenTurn || revision?.turnId !== hiddenTurn) return false;
+  if (!hiddenItem || revision?.item !== hiddenItem) return false;
   const earlier = summaryRevisionsByRows.get(previous);
-  return revision.base === (earlier?.turnId === hiddenTurn ? earlier.base : earlier?.id);
+  return revision.base === (earlier?.item === hiddenItem ? earlier.base : earlier?.id);
 }
 
 export function hasReasoningSection(row, index) {
@@ -138,9 +139,57 @@ function refreshActivityGroups(groups, rows, changed) {
   return keep === groups.length && !updates.length ? groups : [...groups.slice(0, keep), ...updates];
 }
 
-function createTimelineLayout(keys, sizes, reasoningTurns, groups) {
-  return { count: keys.length, keys, sizes, reasoningTurns, groups, getItemKey: index => keys[index],
-    estimateSize: (index, hiddenTurn) => hiddenTurn && reasoningTurns.get(index) === hiddenTurn ? 0 : sizes[index],
+function canFoldProcess(row) {
+  if (!row || !visibleRow(row)) return false;
+  const status = activityStatus(row);
+  if (status === 'failed' || status === 'cancelled' || status === 'blocked') return false;
+  switch (row.kind) {
+    case 'message': return row.phase === 'commentary' || row.phase === 'partial';
+    case 'reasoning': return true;
+    case 'command':
+    case 'tool':
+    case 'search': return row.final;
+    default: return false;
+  }
+}
+
+function completedProcesses(rows, previous) {
+  const processes = new Map();
+  for (const [end, answer] of rows.entries()) {
+    if (!answer.completedRun || !visibleRow(answer)) continue;
+    const members = new Set();
+    let start = end;
+    let firstMember = end;
+    let hasProcess = answer.phase === 'final';
+    while (start > 0) {
+      const row = rows[start - 1];
+      if (row.turnId !== answer.turnId || (row.kind === 'message' && row.phase === 'final')) break;
+      start--;
+      if (canFoldProcess(row) && (row.itemKey ?? row.key) !== (answer.itemKey ?? answer.key)) {
+        members.add(start);
+        firstMember = start;
+        hasProcess ||= row.kind === 'reasoning' || row.kind === 'message';
+      }
+    }
+    // Legacy answers without phase information may still carry identifiable progress.
+    if (!hasProcess) {
+      members.clear();
+      firstMember = end;
+    }
+    const earlier = previous?.get(answer.turnId);
+    const { durationMs } = answer.completedRun;
+    const unchanged = earlier?.start === firstMember && earlier.end === end && earlier.durationMs === durationMs &&
+      earlier.members.size === members.size && [...members].every(index => earlier.members.has(index));
+    processes.set(answer.turnId, unchanged ? earlier : { kind: 'turn-process', key: JSON.stringify(['process', answer.turnId]),
+      turnId: answer.turnId, start: firstMember, end, members, durationMs });
+  }
+  return processes;
+}
+
+function createTimelineLayout(keys, sizes, groups, processes) {
+  return { count: keys.length, keys, sizes, groups, processes, getItemKey: index => keys[index],
+    estimateSize: (index, hiddenItem) => hiddenItem && keys[index] === hiddenItem ? 0 : sizes[index],
+    sourceIndex: index => index,
     rowAt: (items, index) => items[index] };
 }
 
@@ -148,10 +197,8 @@ export function timelineLayout(rows) {
   let layout = layoutByRows.get(rows);
   if (!layout) {
     const keys = new Array(rows.length);
-    const reasoningTurns = new Map();
     const sizes = rows.map((row, index) => {
       keys[index] = row.key;
-      if (row.kind === 'reasoning') reasoningTurns.set(index, row.turnId);
       return estimateRow(row);
     });
     let groups = groupsByRows.get(rows);
@@ -159,32 +206,38 @@ export function timelineLayout(rows) {
       groups = activityGroups(rows);
       groupsByRows.set(rows, groups);
     }
-    layout = createTimelineLayout(keys, sizes, reasoningTurns, groups);
+    const processes = processesByRows.get(rows) ?? completedProcesses(rows);
+    processesByRows.set(rows, processes);
+    layout = createTimelineLayout(keys, sizes, groups, processes);
     layoutByRows.set(rows, layout);
   }
   return layout;
 }
 
-function updateTimelineLayout(layout, changes, groups) {
+function updateTimelineLayout(layout, changes, groups, processes) {
   if (!changes?.size) {
-    return groups === layout.groups ? layout : { ...layout, groups };
+    return groups === layout.groups && processes === layout.processes ? layout : { ...layout, groups, processes };
   }
   const keys = layout.keys.slice();
   const sizes = layout.sizes.slice();
-  let { reasoningTurns } = layout;
-  for (const [position, { key, size, reasoningTurn }] of changes) {
+  for (const [position, { key, size }] of changes) {
     keys[position] = key;
     sizes[position] = size;
-    if (reasoningTurn === reasoningTurns.get(position)) continue;
-    if (reasoningTurns === layout.reasoningTurns) reasoningTurns = new Map(reasoningTurns);
-    if (reasoningTurn === undefined) reasoningTurns.delete(position);
-    else reasoningTurns.set(position, reasoningTurn);
   }
-  return createTimelineLayout(keys, sizes, reasoningTurns, groups);
+  return createTimelineLayout(keys, sizes, groups, processes);
 }
 
 export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
-  const groups = layout.groups.filter(group => group.turnId !== liveTurnId && !ungroupedTurns.has(group.turnId));
+  const processes = layout.processes;
+  const groups = layout.groups.filter(group => {
+    if (group.turnId === liveTurnId || ungroupedTurns.has(group.turnId)) return false;
+    const process = processes.get(group.turnId);
+    return !process || group.end <= process.start || group.start >= process.end;
+  });
+  for (const process of processes.values()) {
+    if (process.turnId !== liveTurnId && process.members.size) groups.push(process);
+  }
+  groups.sort((a, b) => a.start - b.start);
   if (!groups.length) {
     groupedPrefixByExpansion.delete(openGroups);
     return layout;
@@ -199,13 +252,16 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
     for (const [index, group] of groups.entries()) {
       for (; nextRow < group.start; nextRow++) entries.push(nextRow);
       entries.push(group);
-      if (open[index]) {
-        for (; nextRow < group.end; nextRow++) {
-          nested.add(entries.length);
-          entries.push(nextRow);
-        }
+      if (!open[index] && !group.members) {
+        nextRow = group.end;
+        continue;
       }
-      nextRow = group.end;
+      for (; nextRow < group.end; nextRow++) {
+        const member = !group.members || group.members.has(nextRow);
+        if (member && !open[index]) continue;
+        if (member) nested.add(entries.length);
+        entries.push(nextRow);
+      }
     }
     prefix = { groups, open, entries, nested, offset: entries.length - nextRow };
     groupedPrefixByExpansion.set(openGroups, prefix);
@@ -220,13 +276,14 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
   prefix.source = layout;
   prefix.view = {
     count: layout.count + offset, nested,
+    sourceIndex: index => entryAt(index),
     getItemKey(index) {
       const entry = entryAt(index);
       return typeof entry === 'number' ? layout.getItemKey(entry) : entry?.key;
     },
-    estimateSize(index, hiddenTurn) {
+    estimateSize(index, hiddenItem) {
       const entry = entryAt(index);
-      return typeof entry === 'number' ? layout.estimateSize(entry, hiddenTurn) : 34;
+      return typeof entry === 'number' ? layout.estimateSize(entry, hiddenItem) : 34;
     },
     rowAt(rows, index) {
       const entry = entryAt(index);
@@ -237,9 +294,10 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
 }
 
 export function historyRows(turns, previous = []) {
-  const rows = applyTimeline(previous, turns.flatMap(turn => turn.rows.map(item => ({
-    kind: 'item', item, final: turn.run.status !== 'running',
-  }))));
+  const rows = applyTimeline(previous, turns.flatMap(turn => [
+    ...turn.rows.map(item => ({ kind: 'item', item, final: turn.run.status !== 'running' })),
+    { kind: 'run', run: turn.run },
+  ]));
   const emptyReasoning = row => row.kind === 'reasoning' && !visibleRow(row);
   return rows.some(emptyReasoning) ? rows.filter(row => !emptyReasoning(row)) : rows;
 }
@@ -250,11 +308,14 @@ export function mergeHistory(previous, history) {
   if (!history.length) return previous;
   const liveKeys = new Set(previous.map(row => row.itemKey ?? row.key));
   const summaries = new Map(history.filter(row => row.kind === 'reasoning').map(row => [row.key, row]));
+  const completions = new Map(history.filter(row => row.completedRun).map(row => [row.key, row.completedRun]));
   const sent = new Set(previous.filter(row => row.optimistic).map(row => row.clientId));
   // Backfill older history without moving the live fragments around intervening tool cards.
   return [
     ...history.filter(row => !liveKeys.has(row.key) && !(row.clientId && sent.has(row.clientId))),
     ...previous.map(row => {
+      const completedRun = completions.get(row.itemKey ?? row.key);
+      if (completedRun && !row.completedRun && !row.itemKey && row.final) return { ...row, completedRun };
       const saved = summaries.get(row.key);
       if (!saved || row.final) return row;
       return { ...row, sections: mergeSections(row.sections, saved.sections), preview: row.preview || saved.preview };
@@ -580,6 +641,33 @@ function addDelta(state, delta) {
   }
 }
 
+function completeAnswer({ rows, positions, write }, run) {
+  if (run.status !== 'completed') return;
+  let fallback;
+  let answer;
+  let foundTurn = false;
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index];
+    if (row.turnId !== run.id) {
+      if (foundTurn && row.turnId) break;
+      continue;
+    }
+    foundTurn = true;
+    if (row.kind !== 'message' || !row.final || !visibleRow(row)) continue;
+    if (row.phase === 'final') answer = row;
+    if (!row.phase) fallback ??= row;
+  }
+  answer ??= fallback;
+  if (!answer) return;
+  const key = answer.itemKey ?? answer.key;
+  const firstVisible = positions.get(key)?.find(index => visibleRow(rows[index]));
+  if (firstVisible === undefined) return;
+  const row = rows[firstVisible];
+  const durationMs = Number.isFinite(run.durationMs) && run.durationMs >= 0 ? run.durationMs : undefined;
+  if (row.completedRun && (durationMs === undefined || row.completedRun.durationMs === durationMs)) return;
+  write(firstVisible, { ...row, completedRun: { durationMs } });
+}
+
 export function applyTimeline(previous, events) {
   if (!events.length) return previous;
   let rows = previous;
@@ -618,12 +706,19 @@ export function applyTimeline(previous, events) {
   let members = membersByRows.get(previous);
   let reasoningView = reasoningViewByRows.get(previous);
   const groups = groupsByRows.get(previous);
+  const processes = processesByRows.get(previous);
   let groupingChangedAt = Infinity;
+  let processesChanged = false;
   const state = {
     get rows() { return rows; },
     positions,
     write(position, row) {
       const earlier = rows[position];
+      const process = processes?.get(row.turnId);
+      if (row.completedRun !== earlier?.completedRun || (process && position <= process.end &&
+        (position === process.end ? visibleRow(row) !== visibleRow(earlier) : canFoldProcess(row) !== canFoldProcess(earlier)))) {
+        processesChanged = true;
+      }
       if (row.kind === 'delegation' || earlier?.kind === 'delegation') members = undefined;
       if (row.kind === 'reasoning' && row.turnId === reasoningView?.turnId && (row.preview || earlier?.preview)) {
         reasoningView = undefined;
@@ -634,10 +729,8 @@ export function applyTimeline(previous, events) {
       if (groups && groupingChanged) groupingChangedAt = Math.min(groupingChangedAt, position);
       if (layout) {
         const size = estimateRow(row);
-        const reasoningTurn = row.kind === 'reasoning' ? row.turnId : undefined;
-        if (layout.keys[position] !== row.key || layout.sizes[position] !== size ||
-          layout.reasoningTurns.get(position) !== reasoningTurn) {
-          (layoutChanges ??= new Map()).set(position, { key: row.key, size, reasoningTurn });
+        if (layout.keys[position] !== row.key || layout.sizes[position] !== size) {
+          (layoutChanges ??= new Map()).set(position, { key: row.key, size });
         } else layoutChanges?.delete(position);
       }
       // A batch of late fragments can be discarded without publishing a new
@@ -649,28 +742,31 @@ export function applyTimeline(previous, events) {
   for (const event of events) {
     if (event.kind === 'item') addItem(state, event.item, event.final);
     else if (event.kind === 'delta') addDelta(state, event.delta);
+    else if (event.kind === 'run') completeAnswer(state, event.run);
   }
   positionsByRows.set(rows, index);
   if (rows === previous) return previous;
   if (reasoningView) reasoningViewByRows.set(rows, reasoningView);
   const mergedGroups = groupingChangedAt === Infinity ? groups : refreshActivityGroups(groups, rows, groupingChangedAt);
   if (mergedGroups) groupsByRows.set(rows, mergedGroups);
+  const nextProcesses = processesChanged ? completedProcesses(rows, processes) : processes;
+  if (nextProcesses) processesByRows.set(rows, nextProcesses);
   // Reuse unchanged measurements and derive only new or changed row metadata.
   if (layout) {
-    const nextLayout = updateTimelineLayout(layout, layoutChanges, mergedGroups);
+    const nextLayout = updateTimelineLayout(layout, layoutChanges, mergedGroups, nextProcesses);
     layoutByRows.set(rows, nextLayout);
     const { delta } = events[0];
-    const turnId = delta?.kind === 'reasoning' && delta.turnId;
-    if (layout === nextLayout && turnId && events.every(event =>
-      event.kind === 'delta' && event.delta.kind === 'reasoning' && event.delta.turnId === turnId)) {
-      // Matching revisions differ only in the hidden reasoning of this turn.
+    const item = delta?.kind === 'reasoning' && itemKey(delta);
+    if (layout === nextLayout && item && events.every(event =>
+      event.kind === 'delta' && event.delta.kind === 'reasoning' && event.delta.id === delta.id && event.delta.turnId === delta.turnId)) {
+      // Matching revisions differ only in the reasoning item shown in the fixed strip.
       // Symbols preserve the relationship without retaining earlier row arrays.
       let earlier = summaryRevisionsByRows.get(previous);
       if (!earlier) {
         earlier = { id: Symbol() };
         summaryRevisionsByRows.set(previous, earlier);
       }
-      summaryRevisionsByRows.set(rows, { id: Symbol(), turnId, base: earlier.turnId === turnId ? earlier.base : earlier.id });
+      summaryRevisionsByRows.set(rows, { id: Symbol(), item, base: earlier.item === item ? earlier.base : earlier.id });
     }
   }
   if (members) membersByRows.set(rows, members);

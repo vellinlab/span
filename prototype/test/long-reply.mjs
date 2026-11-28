@@ -420,10 +420,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
   await goal.getByText(goalText).waitFor();
   await composer.fill('验证高频推理摘要。');
   await composer.press('Enter');
-  const strip = page.getByRole('button', { name: '实时推理摘要' });
+  const strip = page.getByRole('button', { name: '实时任务进度' });
   const lastBatch = '步骤 072';
   await strip.getByText('开始复核长会话。').waitFor();
-  const panel = page.getByRole('region', { name: '推理摘要' });
+  const panel = page.getByRole('region', { name: '任务过程' });
   const detail = reasoningDetails ? panel.locator('.agent-panel-content') : null;
   const heading = panel.getByRole('heading', { name: '复核顺序' });
   let detailPosition;
@@ -719,9 +719,15 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     if (detail) await detail.waitFor({ state: 'detached' });
     await latest.click();
     const archive = transcript.locator('[data-card="reasoning"]').filter({ hasText: archived });
+    if (reasoningFollowing && label === 'candidate') {
+      const process = transcript.getByRole('button', { name: '任务过程', exact: true }).last();
+      await process.waitFor();
+      if (await process.getAttribute('aria-expanded') === 'false') await process.press('Enter');
+    }
     await archive.getByText(archived, { exact: false }).waitFor();
     if (reasoningFollowing && label === 'candidate') {
       const header = archive.locator('summary');
+      if (await latest.isVisible()) await latest.click();
       await latest.waitFor({ state: 'detached' });
       await settleFrame(page);
       const beforeOpen = await header.boundingBox();

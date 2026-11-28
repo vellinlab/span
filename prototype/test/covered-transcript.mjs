@@ -192,7 +192,7 @@ async function checkPreviewSwitch(binary) {
     const transcript = page.getByTestId('transcript');
     const composer = page.getByRole('textbox', { name: '消息' });
     const goal = page.locator('.goal-strip');
-    const strip = page.getByRole('button', { name: '实时推理摘要' });
+    const strip = page.getByRole('button', { name: '实时任务进度' });
     const detail = page.locator('#reasoning-panel .agent-panel-content');
     await transcript.getByText('第 160 项', { exact: false }).waitFor();
     await composer.fill('/goal 核对工作区的配置与命令输出');
@@ -298,7 +298,7 @@ async function checkPreviewSwitch(binary) {
     assert.match(selection.text, /^复核记录 \d+$/);
     await writeFile(join(profile, 'finish'), '');
     await strip.waitFor({ state: 'detached' });
-    const panel = page.getByRole('region', { name: '推理摘要' });
+    const panel = page.getByRole('region', { name: '任务过程' });
     await panel.getByText('已归档', { exact: true }).waitFor();
     const archivedObservers = await readObservers(0, 0);
     assert.deepEqual(await readSelection(), selection);

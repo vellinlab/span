@@ -1,11 +1,11 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
-  GitBranch, Image, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
+  Image, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
-import { agentCommands, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
+import { agentCommands, commandSuggestions, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
 import { memberName } from './agent-members.jsx';
 import { FileReferenceName, ImageReference } from './file-reference-name.jsx';
 import { imageFileName, maxFileReferences } from './file-references.js';
@@ -48,8 +48,9 @@ function workspaceRelativePath(cwd, filename) {
   return compare(path).startsWith(compare(root)) ? path.slice(root.length) : null;
 }
 
-const ComposerInput = memo(function ComposerInput({ input, value, placeholder, suggest, change, keyDown, paste }) {
+const ComposerInput = memo(function ComposerInput({ input, value, placeholder, suggest, change, keyDown, paste, commandsId, activeCommandId }) {
   return <textarea ref={input} rows={1} placeholder={placeholder} aria-label="消息" value={value}
+    aria-autocomplete="list" aria-controls={commandsId} aria-activedescendant={activeCommandId}
     onFocus={() => suggest(true)} onBlur={() => suggest(false)} onChange={change} onKeyDown={keyDown} onPaste={paste} />;
 });
 
@@ -81,6 +82,7 @@ function App() {
   const [pasting, setPasting] = useState(null);
   const [suggesting, setSuggesting] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
+  const commandListId = useId();
   const [panel, setPanel] = useState(null);
   const [terminal, setTerminal] = useState('closed');
   const [directory, setDirectory] = useState('');
@@ -175,8 +177,21 @@ function App() {
   const canAttach = localFiles && connection === 'ready' && !loading && !interaction && (!running || canSteer || canQueue);
   const pastingScreenshot = pasting === composerKey;
   const canSendDraft = Boolean(draft.trim() || files.length);
+  const commands = useMemo(() => agentCommands(api, work.models, work.options), [api, work.models, work.options]);
+  const { contextUsed, contextLimit } = work.usage.tokens ?? {};
+  const contextPercent = Number.isFinite(contextUsed) && Number.isFinite(contextLimit) && contextLimit > 0
+    ? Math.round(100 * contextUsed / contextLimit) : undefined;
+  const model = selectedModel();
   const suggestions = suggesting && !files.length && !panel && !interaction && draft.startsWith('/') && !draft.includes('\n')
-    ? agentCommands(api, work.models, work.options).filter(([command]) => command.startsWith(draft)).slice(0, 8) : [];
+    ? commandSuggestions(commands, draft, {
+      '/model': model?.label,
+      '/reasoning': model?.efforts.find(effort => effort.id === (work.options.effort ?? model.defaultEffort))?.label,
+      '/fast': work.options.tier === 'priority' || work.options.tier === 'fast' ? '已开启' : undefined,
+      '/plan': work.options.mode === 'plan' ? '已开启' : undefined,
+      '/compact': contextPercent === undefined ? undefined : `上下文 ${contextPercent}%`,
+      '/pin': session?.pinned ? '取消置顶' : undefined,
+    }) : [];
+  const activeCommand = suggestions.length ? commandIndex % suggestions.length : -1;
   const windowsWorkspace = config?.windows && !config.ssh && !config.demo ? config.cwd : undefined;
 
   useEffect(() => {
@@ -588,13 +603,20 @@ function App() {
           openSearch();
         }
         return true;
-      case '/status':
+      case '/status': {
+        const state = interaction ? (interaction.kind === 'approval' ? '等待审批' : '等待回答') : running ? '运行中' : connectionLabel;
+        const context = contextPercent === undefined ? undefined
+          : `${contextUsed.toLocaleString('zh-CN')} / ${contextLimit.toLocaleString('zh-CN')}（${contextPercent}%）`;
+        const limits = work.usage.limits?.map(limit => `${limit.label} 已用 ${limit.used}%`).join(' · ');
         showPanel('output', input.current, {
           title: '会话状态',
-          text: [sessionTitle(session), host, backendName, connectionLabel, routeLabels[route],
-            session?.cwd, work.options.model, run?.id].filter(Boolean).join('\n'),
+          text: [['会话', sessionTitle(session)], ['会话 ID', session?.ref.id], ['Agent', backendName], ['主机', host],
+            ['状态', state], ['传输', routeLabels[route]], ['工作目录', session?.cwd], ['模型', model?.label ?? work.options.model],
+            ['运行 ID', run?.id], ['上下文', context], ['账号额度', limits]]
+            .filter(([, value]) => value).map(([label, value]) => `${label}  ${value}`).join('\n'),
         });
         return true;
+      }
       case '/pwd':
         showPanel('output', input.current, { title: '工作目录', text: session?.cwd ?? (config.ssh ? host : config.cwd) });
         return true;
@@ -677,6 +699,40 @@ function App() {
       case '/archive':
         await work.archive();
         return true;
+      case '/pin': {
+        if (args) throw new Error('用法 /pin');
+        const scope = work.timelineScope();
+        const pinned = await work.pin();
+        if (pinned !== undefined && work.timelineScope() === scope) {
+          setComposerFeedback({ scope, text: pinned ? '已置顶会话' : '已取消置顶' });
+        }
+        return true;
+      }
+      case '/delete':
+        if (args) throw new Error('用法 /delete');
+        if (!session) throw new Error('请先打开一个会话。');
+        if (running || interaction) throw new Error('请先结束当前任务。');
+        if (window.confirm(`永久删除「${sessionTitle(session)}」及其子会话？此操作无法撤销。`)) {
+          if (!await work.delete()) return false;
+          closePanel({ restoreFocus: false });
+          if (readingOverlay || preview?.attachment) dismissPreview('composer');
+          else input.current?.focus({ preventScroll: true });
+        }
+        return true;
+      case '/feedback': {
+        if (args) throw new Error('用法 /feedback');
+        if (!session) throw new Error('请先打开一个会话。');
+        const scope = work.timelineScope();
+        const id = panelScope.current + 1;
+        showPanel('feedback', input.current, { title: '反馈', send: async reason => {
+          if (scope !== work.timelineScope() || id !== panelScope.current) return;
+          await work.withSession((client, ref) => client.sessions.feedback(ref, reason));
+          if (scope !== work.timelineScope() || id !== panelScope.current) return;
+          closePanel();
+          setComposerFeedback({ scope, text: '反馈已发送' });
+        } });
+        return true;
+      }
       case '/diff': {
         if (args === 'turn' || (!args && !api.repository)) {
           const change = rows.findLast(row => row.kind === 'patch' && (row.text || row.files?.length));
@@ -727,7 +783,7 @@ function App() {
     const followLatest = !running || transcriptIsAtEnd(scroll.current);
     setSuggesting(false);
     const command = text.startsWith('/') && text.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
-    const known = command && (agentCommands(api, work.models, work.options).some(([name]) => name === command[1]) ||
+    const known = command && (commands.some(([name]) => name === command[1]) ||
       (command[1] === '/diff' && rows.some(row => row.kind === 'patch')));
     let dispatched = false;
     try {
@@ -853,7 +909,8 @@ function App() {
       if (event.key === 'Tab' && event.shiftKey) return;
       event.preventDefault();
       if (event.key === 'Tab') {
-        setDraft(suggestions[commandIndex % suggestions.length][0] + ' ');
+        setDraft(suggestions[activeCommand].name + ' ');
+        setCommandIndex(0);
       } else {
         const step = event.key === 'ArrowDown' ? 1 : -1;
         setCommandIndex(index => (index + step + suggestions.length) % suggestions.length);
@@ -866,9 +923,8 @@ function App() {
         submit(draft, 'followUp');
         return;
       }
-      if (suggestions.length && (commandIndex || !suggestions.some(([name]) => name === draft))) {
-        const name = suggestions[commandIndex % suggestions.length][0];
-        submit(name);
+      if (activeCommand >= 0 && (activeCommand || !suggestions.some(({ name }) => name === draft))) {
+        submit(suggestions[activeCommand].name);
       } else {
         submit();
       }
@@ -890,6 +946,7 @@ function App() {
   const workspace = directoryName(session?.cwd) || (config?.ssh ? host : directoryName(cwd)) || '工作区';
   const name = sessionTitle(session);
   const branch = session?.branch;
+  const workspaceHint = [session?.cwd || cwd, branch && `Git 分支 · ${branch}`].filter(Boolean).join('\n');
   const connectionLabel = connectionLabels[connection];
   const connectionError = connection === 'offline' && error;
   const sessionActions = refKey && (api?.sessions.rename || api?.sessions.fork || api?.sessions.archive);
@@ -914,7 +971,7 @@ function App() {
       <div className="titlebar-content">
         <div className="titlebar-location">
           <div className="breadcrumb">
-            <span className="breadcrumb-workspace" title={session?.cwd || cwd}>
+            <span className="breadcrumb-workspace" title={workspaceHint}>
               <Folder size={15} aria-hidden="true" /><span>{workspace}</span>
             </span>
             <span aria-hidden="true" className="breadcrumb-separator">/</span>
@@ -924,7 +981,7 @@ function App() {
               archive={api.sessions.archive && archiveFromTitle} />
               : <strong title={name}>{name}</strong>}
           </div>
-          {branch && <div className="branch" title={branch}><GitBranch size={13} /><span>{branch}</span></div>}
+          {branch && <span className="branch" dir="auto" title={branch}>{branch}</span>}
         </div>
         {preview && (preview.parked || readingOverlay) && <button type="button" className="preview-toggle"
           aria-controls="file-preview" title={previewBlocked ? '处理请求后可继续预览' : undefined}
@@ -1011,7 +1068,7 @@ function App() {
             <div className="transcript-viewport">
               <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
                 rows={rows} cursor={work.cursor} historyPages={work.historyPages} loadOlder={work.loadOlder} loading={loading}
-                liveReasoningTurn={showReasoning ? liveReasoning.turnId : undefined} activeTurnId={run?.id} requests={work.requests}
+                liveReasoningItem={showReasoning ? liveReasoning.key : undefined} activeTurnId={run?.id} requests={work.requests}
                 jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
                 openArtifact={openArtifact} openImage={previewImage} openTrace={openTrace}
                 canOpenSession={!running && !loading && connection === 'ready'} />
@@ -1038,18 +1095,21 @@ function App() {
                 <AgentPanel panel={panel} work={work} reasoning={reasoningDetails} reasoningArchived={reasoningArchived}
                   onClose={closePanel} onGoalAction={onGoalAction} report={report} openSession={openRef} openTrace={openTrace}
                   openArtifact={openArtifact} openImage={previewImage} />
-                {suggestions.length > 0 && <div className="command-list popup-surface" aria-label="会话命令">
-                  {suggestions.map(([command, label], index) => <button type="button" key={command}
-                    ref={index === commandIndex % suggestions.length ? commandSelection : undefined}
-                    data-active={index === commandIndex % suggestions.length} onMouseDown={event => event.preventDefault()}
-                    onClick={() => submit(command)}>
-                    <code>{command}</code><span>{label}</span>
+                {suggestions.length > 0 && <div className="command-list popup-surface" id={commandListId} role="listbox" aria-label="会话命令">
+                  {suggestions.map(({ name, title, Icon, description, detail }, index) => <button type="button" role="option" tabIndex={-1}
+                    key={name} id={`${commandListId}-${index}`} ref={index === activeCommand ? commandSelection : undefined}
+                    aria-selected={index === activeCommand} onMouseDown={event => event.preventDefault()}
+                    onClick={() => submit(name)}>
+                    {Icon ? <Icon size={15} aria-hidden="true" /> : <span className="command-icon" aria-hidden="true" />}
+                    <span className="command-description"><strong>{title ?? name}</strong><small>{detail ?? description}</small></span>
+                    {title && <code>{name}</code>}
                   </button>)}
                 </div>}
               </div>
               <Interactions requests={work.requests} respond={work.respond} item={interactionItem} host={host}
                 focusTarget={interactionRegion} returnFocus={input} />
-              {showReasoning && <ReasoningStrip turnId={liveReasoning.turnId} preview={liveReasoning.preview}
+              {showReasoning && <ReasoningStrip turnId={liveReasoning.turnId} itemKey={liveReasoning.key}
+                preview={liveReasoning.preview} completed={liveReasoning.final}
                 expanded={reasoningExpanded} hadFocus={reasoningHadFocus} toggle={onReasoningToggle} />}
               {goal && <GoalStrip ref={returnComposerFocus} objective={goal.objective} status={goal.status}
                 activeWithoutTurn={api?.goal?.activeWithoutTurn}
@@ -1069,6 +1129,8 @@ function App() {
                 </ul>}
                 <ComposerInput input={input} value={draft}
                   placeholder={canSteer ? '追加指令…' : canQueue ? '排队跟进…' : session ? '继续这个会话…' : '描述要完成的任务…'}
+                  commandsId={activeCommand >= 0 ? commandListId : undefined}
+                  activeCommandId={activeCommand >= 0 ? `${commandListId}-${activeCommand}` : undefined}
                   suggest={setSuggesting} change={changeDraft} keyDown={onDraftKey} paste={onDraftPaste} />
                 <div className="composer-bar">
                   {localFiles && <button type="button" className="icon-button composer-attach" aria-label="添加本机文件"

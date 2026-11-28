@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
-import { Brain, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, ListChecks } from 'lucide-react';
 import { Markdown, StreamingMarkdown } from './markdown.jsx';
 import { hasReasoningSection } from './timeline.js';
 
@@ -46,7 +46,7 @@ export const ReasoningText = memo(function ReasoningText({ rows, scroll, archive
     <ReasoningSections key={row.key} row={row} scroll={scroll} />)}</div>;
 });
 
-export const ReasoningStrip = memo(function ReasoningStrip({ turnId, preview, expanded, toggle, hadFocus }) {
+export const ReasoningStrip = memo(function ReasoningStrip({ turnId, itemKey, preview, completed, expanded, toggle, hadFocus }) {
   const trigger = useRef(null);
   useLayoutEffect(() => {
     const button = trigger.current;
@@ -54,11 +54,14 @@ export const ReasoningStrip = memo(function ReasoningStrip({ turnId, preview, ex
       hadFocus.current = document.activeElement === button;
     };
   }, [hadFocus]);
+  const Icon = completed ? Check : ListChecks;
   return <button type="button" ref={trigger} className="reasoning-strip" data-card="live-reasoning" data-turn-id={turnId}
-    aria-label="实时推理摘要" aria-describedby="live-reasoning-preview" aria-expanded={expanded}
+    data-item-key={itemKey} data-completed={completed || undefined}
+    aria-label="实时任务进度" aria-describedby={completed ? 'live-reasoning-preview live-reasoning-status' : 'live-reasoning-preview'} aria-expanded={expanded}
     aria-controls={expanded ? 'reasoning-panel' : undefined} onClick={toggle}>
-    <Brain size={15} aria-hidden="true" /><span className="reasoning-label">推理摘要</span>
+    <Icon size={15} aria-hidden="true" />
     <span id="live-reasoning-preview" className="reasoning-preview" title={preview}><bdi>{preview}</bdi></span>
+    {completed && <span id="live-reasoning-status" className="reasoning-status">已完成</span>}
     <ChevronDown size={13} className="reasoning-chevron" aria-hidden="true" />
   </button>;
 });

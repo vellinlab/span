@@ -99,8 +99,9 @@ try {
   });
   await page.getByText('第 160 项', { exact: false }).waitFor({ timeout: 20_000 });
   const branch = page.locator('.topbar .branch');
-  await branch.getByText('prototype/web-workbench', { exact: true }).waitFor();
+  await branch.filter({ hasText: /^prototype\/web-workbench$/ }).waitFor();
   assert.equal(await branch.getAttribute('title'), 'prototype/web-workbench');
+  assert.equal(await branch.locator('svg').count(), 0);
   await page.waitForFunction(() => {
     const overlay = navigator.windowControlsOverlay;
     if (!overlay?.visible) return false;
@@ -587,10 +588,13 @@ try {
   await goalPanel.waitFor({ state: 'detached' });
   assert.ok(await composer.evaluate(field => field === document.activeElement));
   await composer.fill('/');
-  const commandList = page.locator('.command-list');
+  const commandList = page.getByRole('listbox', { name: '会话命令' });
   await commandList.waitFor();
+  assert.ok(await commandList.getByRole('option').count() > 8);
+  await commandList.getByRole('option').filter({ hasText: '/compact' }).waitFor();
+  await commandList.getByRole('option').filter({ hasText: '/review' }).waitFor();
   for (let index = 1, count = await commandList.locator('button').count(); index < count; index++) await composer.press('ArrowDown');
-  assert.ok(await commandList.locator('button[data-active="true"]').evaluate(button => {
+  assert.ok(await commandList.locator('button[aria-selected="true"]').evaluate(button => {
     const item = button.getBoundingClientRect(), list = button.parentElement.getBoundingClientRect();
     return item.top >= list.top && item.bottom <= list.bottom;
   }));
@@ -599,11 +603,15 @@ try {
   await page.waitForFunction(([width, height]) => Math.abs(innerWidth - width) <= 2 && Math.abs(innerHeight - height) <= 2, goalWindowSize);
   await composer.fill('验证流式会话与底部终端。');
   await composer.press('Enter');
-  const liveReasoning = page.getByRole('button', { name: '实时推理摘要' });
-  const archivedReasoning = transcript.locator('[data-card="reasoning"]').filter({ hasText: '推理摘要' });
+  const liveReasoning = page.getByRole('button', { name: '实时任务进度' });
+  const archivedReasoning = transcript.locator('[data-card="reasoning"]');
   const liveElement = await liveReasoning.elementHandle();
   const liveRect = await liveElement.evaluate(element => element.getBoundingClientRect().toJSON());
-  assert.equal(await archivedReasoning.count(), 0);
+  assert.ok(await liveElement.evaluate(element => {
+    const preview = element.querySelector('.reasoning-preview').textContent;
+    return [...document.querySelectorAll('.timeline [data-card="reasoning"] summary')]
+      .every(summary => !summary.textContent.includes(preview));
+  }));
   assert.equal(await page.locator('#reasoning-panel').count(), 0);
   const reasoningJump = page.getByRole('button', { name: '滚到最新消息' });
   await transcript.hover({ position: { x: 12, y: 80 } });
@@ -642,7 +650,7 @@ try {
   assert.ok(Math.abs(await transcript.evaluate(element => element.scrollTop) - reasoningAnchor) <= 2);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-steer-while-reading.png') });
   await liveReasoning.press('Enter');
-  const reasoningPanel = page.getByRole('region', { name: '推理摘要' });
+  const reasoningPanel = page.getByRole('region', { name: '任务过程' });
   await reasoningPanel.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
   await reasoningPanel.getByText('再确认工具结果和最终回复的前后顺序。', { exact: true }).waitFor();
   await reasoningPanel.getByText('确认目标卡片和输入区之间的间距。', { exact: false }).waitFor();
@@ -663,7 +671,7 @@ try {
   });
   assert.deepEqual(summaryLayout, { aligned: true, nested: true, groups: true, aboveStrip: true });
   await reasoningPanel.getByRole('button', { name: '关闭面板' }).press('Tab');
-  const reasoningBody = reasoningPanel.getByRole('group', { name: '推理摘要正文' });
+  const reasoningBody = reasoningPanel.getByRole('group', { name: '任务过程详情' });
   assert.ok(await reasoningBody.evaluate(element => element === document.activeElement));
   await reasoningBody.press('Escape');
   await reasoningPanel.waitFor({ state: 'detached' });
@@ -808,6 +816,7 @@ try {
   await transcript.getByText(steerWhileReading, { exact: true }).waitFor();
   const earlyReasoning = archivedReasoning.filter({ hasText: '再确认工具结果和最终回复的前后顺序。' });
   const lateReasoning = archivedReasoning.filter({ hasText: '确认目标卡片和输入区之间的间距。' });
+  await earlyReasoning.getByText('已完成', { exact: true }).waitFor();
   await earlyReasoning.locator('summary').click();
   await earlyReasoning.locator('ul ul').getByText('保留列表缩进', { exact: true }).waitFor();
   await lateReasoning.locator('summary').waitFor();
@@ -832,7 +841,7 @@ try {
   const settingsDraft = '检查设置关闭后，原草稿和选区都保留。';
   await composer.fill(settingsDraft);
   await composer.evaluate(element => element.setSelectionRange(2, 6));
-  await agentToggle.getByText('Agent', { exact: true }).waitFor();
+  assert.equal(await agentToggle.locator('.agent-menu-label:visible, .agent-menu-model:visible').count(), 1);
   await agentToggle.press('Enter');
   assert.equal(await createGoal.count(), 0, 'The Goal card is the sole entry point while an objective exists.');
   assert.equal(await usageEntry.locator('code').textContent(), '/usage');
@@ -1204,11 +1213,12 @@ try {
     const bounds = element.getBoundingClientRect();
     const breadcrumb = element.previousElementSibling;
     const title = breadcrumb.querySelector('strong');
-    return title.scrollWidth === title.clientWidth &&
-      bounds.left >= breadcrumb.getBoundingClientRect().right &&
+    const fits = bounds.left >= breadcrumb.getBoundingClientRect().right &&
       bounds.right <= element.parentElement.nextElementSibling.getBoundingClientRect().left &&
       bounds.bottom <= element.closest('.topbar').getBoundingClientRect().bottom;
-  }), 'The branch sits between the session title and window actions');
+    const branchInTooltip = breadcrumb.querySelector('.breadcrumb-workspace').title.includes(element.title);
+    return title.scrollWidth === title.clientWidth && (bounds.width ? fits : branchInTooltip);
+  }), 'The branch fits before the window actions or appears in the workspace tooltip.');
   assert.ok(await page.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
     const body = rect('.approval-body');
@@ -1251,7 +1261,12 @@ try {
   assert.ok(await composer.evaluate(element => document.activeElement === element));
   await latest.click();
   await page.getByText('审批回复：拒绝，已收到回答。', { exact: true }).waitFor();
+  const approvalProcess = transcript.getByRole('button', { name: '任务过程', exact: true }).last();
+  await approvalProcess.waitFor();
+  if (await approvalProcess.getAttribute('aria-expanded') === 'false') await approvalProcess.press('Enter');
+  await approvalContext.waitFor();
   assert.equal(await approvalContext.count(), 1);
+  await approvalProcess.press('Enter');
   if (fileContent) {
     await restorePreview.click();
     await preview.getByText('README.md', { exact: true }).waitFor();
@@ -1348,12 +1363,13 @@ try {
     return {
       width: element.clientWidth, available: location.clientWidth, path: workspace.title, title: element.title,
       workspaceNameHidden: getComputedStyle(workspace.lastElementChild).clipPath !== 'none',
-      branchNameHidden: getComputedStyle(branch.lastElementChild).clipPath !== 'none',
+      branchNameHidden: getComputedStyle(branch).display === 'none',
+      branchInTooltip: workspace.title.includes(branch.title),
       terminalFits: terminal.left >= location.getBoundingClientRect().right && terminal.right <= region.right,
     };
   });
   assert.equal(narrowTitle.title, longTitle);
-  assert.ok(narrowTitle.path && narrowTitle.terminalFits);
+  assert.ok(narrowTitle.path && narrowTitle.branchInTooltip && narrowTitle.terminalFits);
   const compactTitlebar = narrowTitle.available <= 280;
   assert.equal(narrowTitle.workspaceNameHidden, compactTitlebar);
   assert.equal(narrowTitle.branchNameHidden, compactTitlebar);
@@ -1502,13 +1518,15 @@ try {
   await composer.fill('验证连续工具活动。');
   await composer.press('Enter');
   const progressHeading = transcript.getByRole('heading', { name: '正在核对工作区', level: 1 });
-  const group = transcript.getByRole('button', { name: '6 条命令 · 2 次工具调用', exact: true });
+  const group = transcript.getByRole('button', { name: '任务过程', exact: true }).last();
   const groupAnswer = transcript.getByRole('heading', { name: '连续工具活动验收完成。', level: 2 });
   const firstCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git status --short -- review-1' });
   const failedCommand = transcript.locator('[data-card="command"]').filter({ hasText: 'git diff --check -- review-missing' });
   const change = transcript.locator('[data-card="patch"]').filter({ hasText: 'review-notes.md' });
-  await group.waitFor();
   await groupAnswer.waitFor();
+  await group.waitFor();
+  assert.equal(await group.getAttribute('aria-expanded'), 'false');
+  assert.equal(await progressHeading.count(), 0);
   assert.equal(await readFile(join(profile, 'stop-requests'), 'utf8'), '11');
   await rm(join(profile, 'hold-stop'));
   await change.waitFor();
@@ -1538,20 +1556,18 @@ try {
     await terminalPanel.waitFor({ state: 'hidden' });
   }
   await waitForTranscriptEnd();
+  await group.press('Enter');
+  await progressHeading.waitFor();
   const messageType = heading => {
     const prose = heading.closest('.prose');
-    const viewport = heading.closest('.timeline').getBoundingClientRect();
-    const block = prose.getBoundingClientRect();
     return {
       headingSize: parseFloat(getComputedStyle(heading).fontSize),
       lineHeight: parseFloat(getComputedStyle(prose).lineHeight),
-      inView: block.top >= viewport.top && block.bottom <= viewport.bottom,
-      offset: block.top - viewport.top,
     };
   };
   const progressType = await progressHeading.evaluate(messageType);
   const answerType = await groupAnswer.evaluate(messageType);
-  assert.ok(progressType.inView && answerType.inView && progressType.headingSize < answerType.headingSize &&
+  assert.ok(progressType.headingSize < answerType.headingSize &&
     progressType.lineHeight < answerType.lineHeight, `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
   assert.ok(await progressHeading.evaluate(heading => {
     const prose = heading.closest('.prose');
@@ -1563,7 +1579,7 @@ try {
   const groupBox = await group.boundingBox();
   const failureBox = await failedCommand.boundingBox();
   const answerBox = await groupAnswer.boundingBox();
-  assert.ok(progressBox.y < groupBox.y && groupBox.y < failureBox.y && failureBox.y < answerBox.y);
+  assert.ok(groupBox.y < progressBox.y && progressBox.y < failureBox.y && failureBox.y < answerBox.y);
   if (screenshot) {
     const progressBlock = await progressHeading.evaluateHandle(heading => heading.closest('.agent-commentary'));
     await progressBlock.evaluate(element => {
@@ -1580,6 +1596,9 @@ try {
     await waitForTranscriptEnd();
     await page.screenshot({ path: screenshot.replace(/\.png$/, '-commentary.png') });
   }
+  await group.press('Enter');
+  await progressHeading.waitFor({ state: 'detached' });
+  await waitForTranscriptEnd();
   if (showTerminalAfterReview) {
     await terminalToggle.click();
     await terminalPanel.waitFor();

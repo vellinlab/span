@@ -198,7 +198,7 @@ try {
   await open(true);
   await narrow();
   await send(initial);
-  const reasoning = page.getByRole('button', { name: '实时推理摘要' });
+  const reasoning = page.getByRole('button', { name: '实时任务进度' });
   await reasoning.getByText(reasoningStart, { exact: true }).waitFor();
   const position = await reasoning.boundingBox();
   releaseReasoning();
@@ -225,6 +225,7 @@ try {
 
   await open(false);
   await transcript().getByText(answer, { exact: true }).waitFor();
+  await transcript().getByRole('button', { name: '任务过程', exact: true }).last().press('Enter');
   await transcript().locator('[data-card="command"]').filter({ hasText: command }).waitFor();
   assert.equal(await transcript().getByText(initial, { exact: true }).count(), 1);
   await send(next);
@@ -294,6 +295,7 @@ try {
   await openChild().click();
   await childTranscript().getByText(childAnswer, { exact: true }).waitFor();
   await childTranscript().getByText(childPrompt, { exact: true }).waitFor();
+  await childTranscript().getByRole('button', { name: '任务过程', exact: true }).last().press('Enter');
   const restoredCommand = childTranscript().locator('[data-card="command"]').filter({ hasText: childCommand });
   await restoredCommand.locator('summary').press('Enter');
   const restoredOutput = restoredCommand.getByLabel('工具输出', { exact: true });

@@ -341,7 +341,7 @@ export default function (pi) {
     await page.getByRole('list', { name: '待发送的附件' }).getByText(referenceName, { exact: true }).waitFor();
   }
   await send(initialPrompt);
-  const reasoning = page.getByRole('button', { name: '实时推理摘要' });
+  const reasoning = page.getByRole('button', { name: '实时任务进度' });
   await reasoning.getByText('先核对 Pi 会话。', { exact: true }).waitFor();
   const bounds = await reasoning.boundingBox();
   releaseReasoning();
@@ -351,7 +351,7 @@ export default function (pi) {
   releaseTool();
   await reasoning.getByText(afterTool, { exact: true }).waitFor();
   assert.deepEqual(await reasoning.boundingBox(), bounds);
-  assert.equal(await transcript.locator('[data-card="reasoning"]').count(), 0);
+  assert.equal(await transcript.locator('[data-card="reasoning"]').filter({ hasText: afterTool }).count(), 0);
   releaseAnswer();
   await transcript.getByText(firstAnswer, { exact: true }).waitFor();
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
@@ -359,11 +359,13 @@ export default function (pi) {
   assert.equal(await transcript.getByText(initialPrompt, { exact: true }).count(), 1);
   const tool = transcript.locator('[data-card="command"]').filter({ hasText: 'echo pi tool result' });
   async function verifyArchive(log) {
+    const processEntry = log.getByRole('button', { name: '任务过程', exact: true }).first();
+    await processEntry.press('Enter');
     const summaries = log.locator('[data-card="reasoning"]');
     await summaries.getByText(afterTool, { exact: true }).waitFor();
     assert.equal(await summaries.count(), 2);
     assert.equal(await summaries.locator('.card-body').count(), 0);
-    const chronology = await log.locator('[data-card="reasoning"] .card-hint, [data-card="command"] .card-title').allTextContents();
+    const chronology = await log.locator('[data-card="reasoning"] .card-title, [data-card="command"] .card-title').allTextContents();
     assert.deepEqual(chronology, [beforeTool, 'echo pi tool result', afterTool]);
     const failed = log.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
     await failed.getByText('失败', { exact: true }).waitFor();
@@ -380,6 +382,7 @@ export default function (pi) {
         path.getBoundingClientRect().right < status.getBoundingClientRect().left;
     }));
     assert.equal(await failed.locator('.tool-context').count(), 0);
+    await processEntry.press('Enter');
   }
   async function verifyLatestReply(view, answer, fitsOnScreen) {
     await view.waitForFunction(({ answer, fitsOnScreen }) => {
@@ -411,6 +414,7 @@ export default function (pi) {
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-tool-target.png') });
   await failedTool.locator('summary').press('Enter');
   await targetDetails.waitFor({ state: 'detached' });
+  await transcript.getByRole('button', { name: '任务过程', exact: true }).first().press('Enter');
   await tool.locator('summary').click();
   await tool.getByText('pi tool result', { exact: true }).waitFor();
   await send('/usage');
@@ -631,6 +635,7 @@ export default function (pi) {
       return timeline === document.activeElement && timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
     });
     assert.equal(await parentLog.evaluate(element => element.scrollTop), parentOffset);
+    await trace.getByRole('button', { name: '任务过程', exact: true }).last().press('Enter');
     await liveCommand.locator('summary').press('Enter');
     assert.equal((await liveCommand.getByLabel('工具输出', { exact: true }).textContent()).trim(), 'span-pi-worker');
     assert.equal(await liveCommand.count(), 1);

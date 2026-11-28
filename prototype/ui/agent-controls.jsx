@@ -1,5 +1,8 @@
 import { memo, useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, ChartNoAxesColumnIncreasing, ChevronDown, ChevronRight, Goal, SlidersHorizontal, Users, X } from 'lucide-react';
+import {
+  Archive, ArrowLeft, BookOpen, Brain, ChartNoAxesColumnIncreasing, ChevronDown, ChevronRight, CircleGauge, ClipboardCheck,
+  GitFork, Goal, ListTree, MessageSquare, Pencil, Pin, Plug, SlidersHorizontal, Trash2, Users, X, Zap,
+} from 'lucide-react';
 import { AgentMemberList, AgentStatus, memberName } from './agent-members.jsx';
 import { sessionKey } from './agent.js';
 import { mergeAgentMember } from './delegation.js';
@@ -15,7 +18,7 @@ const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', waiting: '等待中', limited: '达到用量上限', unknown: '状态未知',
 };
 const number = new Intl.NumberFormat('zh-CN');
-const titles = { settings: '运行设置', goal: '会话目标', reasoning: '推理摘要', usage: '用量', agents: '代理与团队', output: '会话信息', diff: '工作区 Git 改动' };
+const titles = { settings: '运行设置', goal: '会话目标', reasoning: '任务过程', usage: '用量', agents: '代理与团队', output: '会话信息', diff: '工作区 Git 改动' };
 const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
 const supportsGoalAction = (capability, action) => !capability?.actions || capability.actions.includes(action);
 
@@ -45,6 +48,9 @@ export function commonAgentCommands(api, models, options) {
     ...(api.sessions.fork ? [['/fork', '复制当前会话']] : []),
     ...(api.sessions.rename ? [['/rename', '重命名当前会话']] : []),
     ...(api.sessions.archive ? [['/archive', '归档或恢复当前会话']] : []),
+    ...(api.sessions.pin ? [['/pin', '置顶或取消置顶当前会话']] : []),
+    ...(api.sessions.delete ? [['/delete', '确认并永久删除当前会话及其子会话']] : []),
+    ...(api.sessions.feedback ? [['/feedback', '发送关于当前会话的反馈']] : []),
     ...extensionKinds.filter(kind => kind !== 'skill' || !nativeSkills).map(kind => [
       { mcp: '/mcp', skill: '/skills', plugin: '/plugins', connector: '/apps', tool: '/tools' }[kind],
       `查看${extensionLabels[kind]}`,
@@ -58,6 +64,32 @@ export function agentCommands(api, models, options) {
   const names = new Set(common.map(([name]) => name));
   const native = (api?.commands ?? []).filter(command => !names.has('/' + command.id));
   return [...common, ...native.map(command => ['/' + command.id, command.description ?? command.label])];
+}
+
+// Put the frequently used controls before catalog and extension commands.
+const commandPresentation = {
+  '/model': ['模型', SlidersHorizontal], '/reasoning': ['推理强度', Brain], '/fast': ['快速', Zap],
+  '/plan': ['计划模式', ListTree], '/review': ['代码审查', ClipboardCheck], '/compact': ['压缩上下文', CircleGauge],
+  '/goal': ['目标', Goal], '/status': ['状态', CircleGauge], '/usage': ['用量', ChartNoAxesColumnIncreasing],
+  '/mcp': ['MCP', Plug], '/agents': ['子代理与团队', Users], '/fork': ['创建会话分支', GitFork],
+  '/rename': ['重命名', Pencil], '/pin': ['置顶会话', Pin], '/archive': ['归档', Archive],
+  '/delete': ['永久删除会话', Trash2], '/feedback': ['反馈', MessageSquare],
+};
+const commandOrder = new Map(Object.keys(commandPresentation).map((name, index) => [name, index]));
+
+export function commandSuggestions(commands, draft, details) {
+  const query = draft.toLocaleLowerCase();
+  const hasArguments = draft.includes(' ');
+  return commands.map(([name, description]) => {
+    const [title, Icon] = commandPresentation[name] ?? [];
+    const detail = details[name];
+    return { name, title, Icon, description, detail: name === '/reasoning' ? effortNames[detail] ?? detail : detail };
+  })
+    .filter(({ name, title, description }) => {
+      if (name.includes(' ') !== hasArguments) return false;
+      return name.toLocaleLowerCase().startsWith(query) || (!hasArguments && draft.length > 1 &&
+        `${title ?? ''} ${description}`.toLocaleLowerCase().includes(query.slice(1)));
+    }).sort((a, b) => (commandOrder.get(a.name) ?? commandOrder.size) - (commandOrder.get(b.name) ?? commandOrder.size));
 }
 
 const effortNames = {
@@ -503,6 +535,29 @@ function DiffPanel({ panel }) {
   </div>;
 }
 
+function FeedbackPanel({ send }) {
+  const [reason, setReason] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  return <form className="feedback-form" onSubmit={async event => {
+    event.preventDefault();
+    if (pending || !reason.trim()) return;
+    setPending(true);
+    setError('');
+    try { await send(reason.trim()); }
+    catch (failure) { setError(failure.message); }
+    finally { setPending(false); }
+  }}>
+    <label>反馈内容<textarea rows={3} maxLength={2000} value={reason} readOnly={pending}
+      onChange={event => setReason(event.target.value)} /></label>
+    <small>发送会话 ID 和填写的反馈，不附加诊断日志。</small>
+    {error && <p role="alert">{error}</p>}
+    <div className="panel-actions"><button type="submit" disabled={pending || !reason.trim()} className="primary">
+      {pending ? '正在发送…' : '发送反馈'}
+    </button></div>
+  </form>;
+}
+
 export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose, onGoalAction, report, openSession, openTrace, openArtifact, openImage }) {
   const close = useRef(null);
   const content = useRef(null);
@@ -531,7 +586,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
   const readingMemberHistory = panel.kind === 'subagent' && readingMember === panelId;
   const memberSession = panel.kind === 'subagent' && work.api?.delegation?.resumeMemberSession && panel.member.session;
   const canResumeMember = Boolean(memberSession && !work.loading && work.run?.status !== 'running' && work.connection === 'ready');
-  const detailsLabel = reasoningPanel ? '推理摘要正文' : usagePanel ? '用量明细' : agentsPanel ? '代理与团队明细'
+  const detailsLabel = reasoningPanel ? '任务过程详情' : usagePanel ? '用量明细' : agentsPanel ? '代理与团队明细'
     : panel.kind === 'diff' ? '差异明细'
       : panel.kind === 'output' || panel.kind === 'extensions' ? `${title}正文` : undefined;
   const id = panel.kind === 'goal' || reasoningPanel ? `${panel.kind}-panel` : undefined;
@@ -577,6 +632,7 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, onClose,
         openArtifact={openArtifact} openImage={openImage} />}
       {panel.kind === 'diff' && <DiffPanel key={panel.id} panel={panel} />}
       {panel.kind === 'output' && <pre className="panel-output">{panel.text}</pre>}
+      {panel.kind === 'feedback' && <FeedbackPanel key={panel.id} send={panel.send} />}
       {panel.kind === 'extensions' && <ExtensionList key={panel.id} panel={panel} search={extensionSearch} />}
     </div>}
   </section>;
@@ -721,7 +777,7 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
   const modelLabel = selectedModel?.label ?? (models.length ? '后端默认' : undefined);
   const modeLabel = modeId === 'default' ? undefined : api?.modes?.find(mode => mode.id === modeId)?.label;
   const label = [modelLabel, modeLabel].filter(Boolean).join(' · ');
-  const actions = entries.map(([, , name]) => name).join('、');
+  const description = [label, entries.map(([, , name]) => name).join('、')].filter(Boolean).join(' · ');
   function onKeyDown(event) {
     if (event.nativeEvent.isComposing || event.defaultPrevented) return;
     const { key } = event;
@@ -759,7 +815,7 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
     onKeyDown={onKeyDown}>
     <button ref={trigger} className="composer-control" type="button" aria-label="Agent 控件" aria-expanded={open}
       aria-controls={open ? menuId : undefined}
-      aria-description={actions} title={label ? `${label} · ${actions}` : actions}
+      aria-description={description} title={description}
       onClick={() => setOpen(value => !value)}>
       <span className="agent-menu-label">Agent</span>
       {label && <span className="agent-menu-model">{label}</span>}

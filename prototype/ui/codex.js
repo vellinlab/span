@@ -5,6 +5,7 @@ import { fileReferencePreview, fileReferenceText } from './file-references.js';
 import { historyRows, mergeHistory } from './timeline.js';
 
 const featureBackend = 'codex';
+const pinnedSection = 'Pinned';
 const permissions = [
   { id: 'workspace', label: '工作区', description: '在工作区内写入，额外权限需确认' },
   { id: 'readOnly', label: '只读', description: '只允许读取，不提升权限' },
@@ -130,10 +131,12 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
   const childThreads = new Map();
   const reviews = new Map();
   const reviewPageEdges = new Map();
+  let pinnedSectionId;
   const ref = id => ({ backend, location, id });
   const session = (thread, overrides = { cwd: undefined }) => ({
     ref: ref(thread.id), cwd: thread.cwd ?? overrides.cwd, title: thread.name,
     preview: fileReferencePreview(thread.preview), branch: thread.gitInfo?.branch, updatedAt: thread.updatedAt,
+    ...(thread.section !== undefined && { pinned: thread.section?.name === pinnedSection }),
   });
   function projectItem(item, turnId, threadId) {
     const row = normalizeItem(item, turnId, ref);
@@ -313,7 +316,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         break;
       case 'item/mcpToolCall/progress':
         notify(threadId, { kind: 'item', final: false, item: {
-          id: itemId, turnId: eventTurnId, kind: 'tool', text: params.message, status: 'running',
+          id: itemId, turnId: eventTurnId, kind: 'tool', progress: params.message, text: params.message, status: 'running',
         } });
         break;
       case 'turn/diff/updated':
@@ -425,6 +428,35 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
     return { items: (result.data ?? []).map(item => ({ ...session(item), archived })), cursor: result.nextCursor ?? null };
   }
 
+  async function findPinnedSection() {
+    if (pinnedSectionId) return pinnedSectionId;
+    let cursor;
+    const visited = new Set();
+    do {
+      const page = await request('threadSection/list', { cursor });
+      pinnedSectionId = page.data?.find(section => section.name === pinnedSection)?.id;
+      if (pinnedSectionId) return pinnedSectionId;
+      visited.add(cursor);
+      cursor = page.nextCursor;
+    } while (cursor && !visited.has(cursor));
+  }
+
+  async function listPinned() {
+    const sectionId = await findPinnedSection();
+    if (!sectionId) return [];
+    const items = [];
+    const visited = new Set();
+    let cursor;
+    do {
+      const page = await request('thread/list', { limit: 100, archived: false, sectionId, cursor,
+        sortKey: 'section_position', modelProviders: [], useStateDbOnly: true });
+      items.push(...(page.data ?? []).map(thread => ({ ...session(thread), pinned: true, archived: false })));
+      visited.add(cursor);
+      cursor = page.nextCursor;
+    } while (cursor && !visited.has(cursor));
+    return items;
+  }
+
   function reviewTransportId(thread, turnId) {
     const review = reviews.get(thread.id);
     return review?.id === turnId ? review.transportId ?? turnId : turnId;
@@ -473,6 +505,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         return normalizePage(page, thread.id, cursor);
       },
       ...(native && {
+        listPinned,
         async release(thread) {
           active.delete(thread.id);
           childThreads.delete(thread.id);
@@ -492,6 +525,15 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
         },
         rename: (thread, title) => request('thread/name/set', { threadId: thread.id, name: title }),
         archive: (thread, archived) => request(archived ? 'thread/archive' : 'thread/unarchive', { threadId: thread.id }),
+        async pin(thread, pinned) {
+          const sectionId = pinned ? await findPinnedSection() : null;
+          if (pinned && !sectionId) throw new Error('Codex 没有返回置顶分组。');
+          await request('thread/section/move', { threadId: thread.id, sectionId });
+        },
+        delete: thread => request('thread/delete', { threadId: thread.id }),
+        feedback: (thread, reason) => request('feedback/upload', {
+          threadId: thread.id, classification: 'bug', reason, includeLogs: false,
+        }),
       }),
     },
     turns: {

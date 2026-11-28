@@ -74,6 +74,7 @@ export function createAcpSubagents(root, { ref, notify }) {
     child.projection.finish(status !== 'completed');
     child.projection = undefined;
     child.run = { ...child.run, status: status === 'unknown' ? 'cancelled' : status };
+    child.events.push({ kind: 'run', run: child.run });
     child.member = { ...child.member, status };
     publish(child);
     announce(child, false);

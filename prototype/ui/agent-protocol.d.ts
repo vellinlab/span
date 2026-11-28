@@ -5,10 +5,10 @@ export type SessionRef = { backend: string; location: AgentLocation; id: string 
 export type Page<T> = { items: T[]; cursor: string | null };
 export type Session = {
   ref: SessionRef; title?: string; preview?: string; cwd?: string; branch?: string;
-  parent?: SessionRef; updatedAt?: number; archived?: boolean;
+  parent?: SessionRef; updatedAt?: number; archived?: boolean; pinned?: boolean;
 };
 export type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
-export type Run = { id: string; status: RunStatus; error?: string };
+export type Run = { id: string; status: RunStatus; error?: string; durationMs?: number };
 export type AgentTranscript = {
   rows: TimelineItem[]; run?: Run; cursor?: string | null; loadOlder?: () => void; loading?: boolean; error?: string;
 };
@@ -82,7 +82,7 @@ export type TimelineItem = ItemBase & (
   | { kind: 'plan'; text?: string; steps?: PlanStep[] }
   | { kind: 'command'; command?: string; cwd?: string; text?: string; exitCode?: number }
   | { kind: 'patch'; files: { path: string; action?: string; diff?: string }[]; text?: string }
-  | { kind: 'tool'; name: string; source?: string; target?: ToolTarget; query?: string; text?: string; errorMessage?: string }
+  | { kind: 'tool'; name: string; source?: string; target?: ToolTarget; query?: string; progress?: string; text?: string; errorMessage?: string }
   | { kind: 'delegation'; action: string; members: AgentMember[]; text?: string }
   | { kind: 'search'; query: string; url?: string; text?: string }
   | { kind: 'artifact'; artifacts: Artifact[]; text?: string }
@@ -158,6 +158,7 @@ export interface AgentAdapter {
   sessionModels?: boolean;
   sessions: {
     list(options: { cursor?: string; archived?: boolean }): Promise<Page<Session>>;
+    listPinned?(): Promise<Session[]>;
     search?(options: { query: string; cursor?: string; archived?: boolean }): Promise<Page<Session>>;
     start(options: { cwd?: string }): Promise<OpenSession>;
     resume(ref: SessionRef, limit: number): Promise<OpenSession>;
@@ -168,6 +169,9 @@ export interface AgentAdapter {
     rewind?(ref: SessionRef, checkpointId: string, mode: 'messages' | 'files' | 'both'): Promise<OpenSession>;
     rename?(ref: SessionRef, title: string): Promise<void>;
     archive?(ref: SessionRef, archived: boolean): Promise<void>;
+    pin?(ref: SessionRef, pinned: boolean): Promise<void>;
+    delete?(ref: SessionRef): Promise<void>;
+    feedback?(ref: SessionRef, reason: string): Promise<void>;
   };
   turns: {
     start(ref: SessionRef, input: Input[], options: RunOptions, clientId: string): Promise<Run>;

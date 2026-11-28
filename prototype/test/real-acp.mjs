@@ -223,7 +223,7 @@ try {
   };
   await send(initial);
   const transcript = page.getByTestId('transcript');
-  const reasoning = page.getByRole('button', { name: '实时推理摘要' });
+  const reasoning = page.getByRole('button', { name: '实时任务进度' });
   await reasoning.getByText(firstReasoning, { exact: true }).waitFor();
   const position = await reasoning.boundingBox();
   releaseReasoning();
@@ -253,10 +253,13 @@ try {
   await allow.press('Enter');
   await approval.waitFor({ state: 'detached' });
   const activity = transcript.locator('[data-card="command"]').filter({ hasText: command });
-  await activity.waitFor();
   await transcript.getByText(answer, { exact: true }).waitFor();
   assert.ok(toolResult.includes('span-acp-tool'));
   await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+  const processEntry = transcript.getByRole('button', { name: '任务过程', exact: true }).last();
+  await processEntry.press('Enter');
+  await activity.waitFor();
+  await processEntry.press('Enter');
   await send('/usage');
   const usage = page.getByRole('region', { name: '用量', exact: true });
   const currentUsage = usage.getByRole('region', { name: '会话用量', exact: true });
@@ -273,6 +276,7 @@ try {
   const reopened = page.getByTestId('transcript');
   await reopened.getByText(answer, { exact: true }).waitFor();
   assert.equal(await reopened.getByText(initial, { exact: true }).count(), 1);
+  await reopened.getByRole('button', { name: '任务过程', exact: true }).last().press('Enter');
   await reopened.locator('[data-card="command"]').filter({ hasText: command }).waitFor();
   await send('/plan');
   await send('/model');
@@ -307,7 +311,7 @@ try {
     assert.equal(await goalPanel().getByText('Token 预算').count(), 0);
     await goalPanel().getByRole('button', { name: '启动目标', exact: true }).press('Enter');
     await goalStrip().getByText('进行中', { exact: true }).waitFor();
-    await page.getByRole('button', { name: '实时推理摘要' }).getByText(goalReasoning, { exact: true }).waitFor();
+    await page.getByRole('button', { name: '实时任务进度' }).getByText(goalReasoning, { exact: true }).waitFor();
     await closeGoal();
     await goalPanel().waitFor({ state: 'detached' });
     assert.ok(await goalStrip().evaluate(element => {
@@ -317,7 +321,7 @@ try {
     }));
     if (!ssh) await verifyWorkspaceGroup();
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal.png') });
-    const goalProgress = page.getByRole('button', { name: '实时推理摘要' });
+    const goalProgress = page.getByRole('button', { name: '实时任务进度' });
     const goalPosition = await goalProgress.boundingBox();
     await page.getByPlaceholder('追加指令…').waitFor();
     await send(goalInstruction);
@@ -365,8 +369,12 @@ try {
     await card().getByRole('button', { name: `查看 ${taskTitle} 的会话记录`, exact: true }).press('Enter');
     const trace = page.getByTestId('subagent-transcript');
     await trace.getByText(childPrompt, { exact: true }).waitFor();
-    await trace.getByText(childReasoning, { exact: true }).waitFor();
     await trace.getByText(childAnswer, { exact: true }).waitFor();
+    const childProcess = trace.getByRole('button', { name: '任务过程', exact: true }).last();
+    if (await childProcess.getAttribute('aria-expanded', { timeout: 1000 }).catch(() => null) === 'false') {
+      await childProcess.press('Enter');
+    }
+    await trace.getByText(childReasoning, { exact: true }).waitFor();
     const tool = trace.locator('[data-card="tool"]');
     await tool.locator('summary').getByText('搜索文件', { exact: true }).waitFor();
     await tool.locator('summary').getByText(marker, { exact: true }).waitFor();

@@ -1,11 +1,12 @@
 import { memo, useId, useMemo, useRef, useState } from 'react';
-import { ChevronRight, Folder } from 'lucide-react';
+import { ChevronRight, Folder, Pin } from 'lucide-react';
 import { mergeSessions, sessionKey, sessionTitle } from './agent.js';
 import { catalogRowHeight, useCatalogViewport } from './catalog-viewport.js';
 import { directoryName, workspacePathKey } from './workspace-path.js';
 
 function catalogRows(sessions, project, projectIdentity, remote, archived, filter, collapsed, matches) {
   const groups = new Map();
+  const pinned = { entries: [] };
   const projectKey = projectIdentity && workspacePathKey(project);
   const identityKey = projectIdentity && workspacePathKey(projectIdentity);
   function groupFor(workspace) {
@@ -18,17 +19,20 @@ function catalogRows(sessions, project, projectIdentity, remote, archived, filte
   const local = filter ? sessions.filter(entry => [sessionTitle(entry), entry.ref.id, entry.cwd]
     .some(value => value?.toLocaleLowerCase().includes(filter))) : sessions;
   const entries = matches?.length ? mergeSessions(local, matches) : local;
-  for (const entry of entries) groupFor(entry.cwd || project || '工作区').entries.push({
-    key: sessionKey(entry.ref), title: sessionTitle(entry), entry,
-  });
+  for (const entry of entries) {
+    const group = entry.pinned && !archived && !filter ? pinned : groupFor(entry.cwd || project || '工作区');
+    group.entries.push({ key: sessionKey(entry.ref), title: sessionTitle(entry), entry });
+  }
 
   const rows = [];
   let position = 0;
-  for (const [identity, { workspace, entries }] of groups) {
+  const sections = pinned.entries.length ? [[null, pinned], ...groups] : groups;
+  for (const [identity, { workspace, entries }] of sections) {
     const parent = rows.length;
-    const key = JSON.stringify(['workspace', identity]);
+    const key = identity === null ? 'pinned' : JSON.stringify(['workspace', identity]);
     const expanded = entries.length ? !collapsed?.has(key) : undefined;
-    rows.push({ key, title: directoryName(workspace), workspace, expanded, position: ++position, siblings: groups.size,
+    rows.push({ key, title: identity === null ? '置顶' : directoryName(workspace), workspace, expanded,
+      pinned: identity === null, position: ++position, siblings: groups.size + Number(pinned.entries.length > 0),
       end: parent + 1 + (expanded ? entries.length : 0) });
     if (expanded) entries.forEach((entry, index) => rows.push({
       ...entry, parent, position: index + 1, siblings: entries.length,
@@ -45,7 +49,7 @@ const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selec
     title={row.workspace ?? row.title} style={top === undefined ? undefined : { transform: `translateY(${top}px)` }}>
     {!row.entry && <>
       <ChevronRight className="group-chevron" size={12} aria-hidden="true" />
-      <Folder size={15} aria-hidden="true" />
+      {row.pinned ? <Pin size={15} aria-hidden="true" /> : <Folder size={15} aria-hidden="true" />}
     </>}
     <span>{row.title}</span>
   </div>;

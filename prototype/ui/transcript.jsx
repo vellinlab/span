@@ -1,7 +1,7 @@
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
-  ArrowDown, ArrowUpRight, Brain, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
+  ArrowDown, ArrowUpRight, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
   CircleHelp, Folder, Image, ListChecks, Search, ShieldAlert, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
@@ -114,7 +114,7 @@ function CommandText({ command, titleRef, force }) {
 }
 
 function Card({ icon: Icon, type, title, status, recordedStatus, statusText, statusNote, awaiting, hint, path, failurePreview,
-  revealDiagnostic, expanded, toggle, scroll, reasoningTurn, children }) {
+  revealDiagnostic, expanded, toggle, scroll, reasoningItem, children }) {
   const titleRef = useRef(null);
   const reveal = useRef(null);
   const trackReasoningFocus = useCallback(element => {
@@ -128,10 +128,10 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
       queueMicrotask(() => {
         if (!timeline.isConnected || document.activeElement !== document.body) return;
         const strip = viewport.parentElement.querySelector('[data-card="live-reasoning"]');
-        if (strip?.dataset.turnId === reasoningTurn) strip.focus({ preventScroll: true });
+        if (strip?.dataset.itemKey === reasoningItem) strip.focus({ preventScroll: true });
       });
     };
-  }, [reasoningTurn]);
+  }, [reasoningItem]);
   useLayoutEffect(() => {
     const details = reveal.current;
     if (!details) return;
@@ -164,7 +164,7 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
       {statusLabel && statusNote && <span aria-hidden="true">·</span>}
       {statusNote && <span>{statusNote}</span>}
     </span>}</>;
-  return <div className="activity" ref={reasoningTurn ? trackReasoningFocus : undefined} data-card={type}
+  return <div className="activity" ref={reasoningItem ? trackReasoningFocus : undefined} data-card={type}
     data-failed={failed || undefined} data-awaiting={awaiting}>
     {children ? <details open={expanded} onToggle={event => {
       const details = event.currentTarget;
@@ -182,7 +182,7 @@ function Card({ icon: Icon, type, title, status, recordedStatus, statusText, sta
 }
 
 const cardIcons = {
-  reasoning: Brain, plan: ListChecks, command: Terminal, patch: FileCode2, tool: Wrench,
+  reasoning: ListChecks, plan: ListChecks, command: Terminal, patch: FileCode2, tool: Wrench,
   search: Search, delegation: Users, artifact: Image, notice: GitBranch,
 };
 
@@ -218,8 +218,11 @@ const TranscriptRow = memo(function TranscriptRow({
   let status = activityStatus(row);
   switch (row.kind) {
     case 'reasoning':
-      title = '推理摘要';
-      if (!expanded) hint = row.preview;
+      title = row.preview;
+      if (row.final) {
+        status = 'completed';
+        statusText = '已完成';
+      }
       detail = () => <ReasoningText rows={[row]} />;
       break;
     case 'plan':
@@ -248,6 +251,7 @@ const TranscriptRow = memo(function TranscriptRow({
       const hasContext = Boolean(row.text || row.cwd);
       const firstBreak = command?.search(/[\r\n]/) ?? -1;
       title = firstBreak < 0 ? command || '执行命令' : `${command.slice(0, firstBreak).trimEnd() || '执行命令'} …`;
+      if (status === 'completed') statusText = '已完成';
       if (row.exitCode != null && row.exitCode !== 0) {
         statusNote = `退出码 ${row.exitCode}`;
       }
@@ -265,7 +269,8 @@ const TranscriptRow = memo(function TranscriptRow({
       break;
     case 'tool': {
       title = row.name || '调用工具';
-      hint = row.query ? (expanded ? undefined : row.query) : row.source;
+      hint = row.query ? (expanded ? undefined : row.query) : status === 'running' ? row.progress ?? row.source : row.source;
+      if (status === 'completed') statusText = '已完成';
       const targetPath = row.target?.kind === 'path' ? row.target.path : undefined;
       if (!row.query) path = targetPath;
       if (targetPath || row.query || row.text || row.errorMessage) detail = () => <>
@@ -323,26 +328,36 @@ const TranscriptRow = memo(function TranscriptRow({
       break;
   }
 
-  const icon = row.kind === 'tool' && row.query ? Search : cardIcons[row.kind] ?? CodeXml;
+  const icon = row.kind === 'reasoning' && row.final ? Check : row.kind === 'tool' && row.query ? Search : cardIcons[row.kind] ?? CodeXml;
   return <Card type={row.kind} icon={icon} status={status} recordedStatus={recordedStatus}
     statusText={statusText} statusNote={statusNote} awaiting={status === 'failed' ? undefined : awaiting}
     failurePreview={expanded ? undefined : activityFailurePreview(row, status)}
     revealDiagnostic={row.kind === 'tool' && status === 'failed' && Boolean(row.errorMessage)}
     title={title} hint={hint} path={path} expanded={expanded} scroll={scroll}
-    reasoningTurn={row.kind === 'reasoning' ? row.turnId : undefined} toggle={open => toggle(row.key, open)}>{detail}</Card>;
+    reasoningItem={row.kind === 'reasoning' ? row.key : undefined} toggle={open => toggle(row.key, open)}>{detail}</Card>;
 });
 
 const ActivityGroup = memo(function ActivityGroup({ group, open, toggle, releaseAnchor }) {
+  const process = group.kind === 'turn-process';
   const count = group.end - group.start;
   const tools = count - group.commands;
   const Icon = tools ? Wrench : Terminal;
-  const label = tools ? `${group.commands ? `${group.commands} 条命令 · ` : ''}${tools} 次工具调用`
+  const label = process ? '任务过程' : tools ? `${group.commands ? `${group.commands} 条命令 · ` : ''}${tools} 次工具调用`
     : `${count} 条命令`;
-  return <div className="activity" data-card="activity-group">
+  let duration;
+  if (process && group.durationMs !== undefined) {
+    const seconds = Math.floor(group.durationMs / 1000);
+    duration = seconds === 0 ? '不到 1 秒' : [
+      [Math.floor(seconds / 3600), '小时'], [Math.floor(seconds / 60) % 60, '分'], [seconds % 60, '秒'],
+    ].filter(([value]) => value).map(([value, unit]) => `${value} ${unit}`).join(' ');
+  }
+  return <div className={process ? 'activity turn-process' : 'activity'} data-card={group.kind}>
     <button type="button" className="card-heading" aria-expanded={open}
       onClick={event => toggle(group.key, !open, event.currentTarget)} onBlur={releaseAnchor}>
-      <ChevronRight size={13} className="card-chevron" /><Icon size={15} className="card-icon" />
+      <ChevronRight size={13} className="card-chevron" aria-hidden="true" />
+      {!process && <Icon size={15} className="card-icon" aria-hidden="true" />}
       <span className="card-title">{label}</span>
+      {duration && <span className="process-duration">用时 {duration}</span>}
     </button>
   </div>;
 });
@@ -392,11 +407,11 @@ function readTextAnchor(element) {
   }
 }
 
-function anchorIndex(rows, layout, anchor, reasoningTurn) {
+function anchorIndex(rows, layout, anchor, reasoningItem) {
   let fallback = -1;
   for (let index = 0; index < layout.count; index++) {
     const row = layout.rowAt(rows, index);
-    if (row.turnId !== anchor.turnId || (row.kind === 'reasoning' && row.turnId === reasoningTurn) || !visibleRow(row)) continue;
+    if (row.turnId !== anchor.turnId || row.key === reasoningItem || !visibleRow(row)) continue;
     if (row.key === anchor.key || row.key === anchor.itemKey) return index;
     if (fallback === -1) fallback = index;
   }
@@ -407,11 +422,11 @@ function sameTranscriptProps(previous, next) {
   const keys = Object.keys(next);
   return keys.length === Object.keys(previous).length && keys.every(key => Object.hasOwn(previous, key) && (
     Object.is(previous[key], next[key]) || (key === 'rows' && !next.jumpToLatest.current &&
-      sameTranscriptRows(previous.rows, next.rows, next.liveReasoningTurn))));
+      sameTranscriptRows(previous.rows, next.rows, next.liveReasoningItem))));
 }
 
 export const Transcript = memo(function Transcript({
-  rows, liveReasoningTurn, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
+  rows, liveReasoningItem, activeTurnId, viewKey, remembered, remember, historyPages, cursor, loadOlder, loading, jumpToLatest, scroll,
   onScrollPosition, openSession, openTrace, openArtifact, openImage, canOpenSession, showLatest, requests,
   label = '会话记录', testId = 'transcript',
 }) {
@@ -458,8 +473,8 @@ export const Transcript = memo(function Transcript({
   const rawLayout = timelineLayout(rows);
   const layout = useMemo(() => groupedTimelineLayout(rawLayout, liveTurnId, ungroupedTurns.current, openGroups),
     [rawLayout, liveTurnId, openGroups]);
-  const target = restore && !loading ? anchorIndex(rows, layout, restore, liveReasoningTurn) : -1;
-  const estimate = useCallback(index => layout.estimateSize(index, liveReasoningTurn), [layout, liveReasoningTurn]);
+  const target = restore && !loading ? anchorIndex(rows, layout, restore, liveReasoningItem) : -1;
+  const estimate = useCallback(index => layout.estimateSize(index, liveReasoningItem), [layout, liveReasoningItem]);
   const rangeExtractor = useCallback(range => {
     const indexes = defaultRangeExtractor(range);
     if (target < indexes[0]) return [target, ...indexes];
@@ -468,7 +483,7 @@ export const Transcript = memo(function Transcript({
   }, [target]);
   const virtual = useVirtualizer({
     count: layout.count, getScrollElement: () => scroll.current,
-    getItemKey: layout.getItemKey, estimateSize: liveReasoningTurn ? estimate : layout.estimateSize,
+    getItemKey: layout.getItemKey, estimateSize: liveReasoningItem ? estimate : layout.estimateSize,
     rangeExtractor: target >= 0 ? rangeExtractor : defaultRangeExtractor,
     overscan: 6, paddingStart: 20, paddingEnd: 14,
     anchorTo: 'end', followOnAppend: true,
@@ -527,6 +542,7 @@ export const Transcript = memo(function Transcript({
       const focus = element.ownerDocument.activeElement;
       const selection = element.ownerDocument.getSelection();
       const selecting = selection?.type === 'Range';
+      const process = rawLayout.processes.get(liveTurnId);
       const groups = rawLayout.groups.filter(group => group.turnId === liveTurnId);
       // Leave an inspected turn intact. Reflowing cards can move the point the user is reading.
       const focusedActivity = focus?.closest('.message:is([data-kind="command"], [data-kind="tool"])');
@@ -536,6 +552,17 @@ export const Transcript = memo(function Transcript({
         ungroupedTurns.current.add(liveTurnId);
       } else if (groups.length) {
         followAfterFold.current = true;
+      }
+      if (process?.members.size) {
+        const inspecting = [...element.querySelectorAll('.message[data-empty="false"]')].some(item => {
+          if (!process.members.has(layout.sourceIndex(Number(item.dataset.index)))) return false;
+          if (item.contains(focus) || (selecting && selection.containsNode(item, true))) return true;
+          if (!viewport) return false;
+          const rect = item.getBoundingClientRect();
+          return rect.bottom > viewport.top && rect.top < viewport.bottom;
+        });
+        if (inspecting) setOpenGroups(previous => new Set(previous).add(process.key));
+        else if (following.current) followAfterFold.current = true;
       }
 
       // Inspect the existing body before applying the collapsed default for an inactive turn.
@@ -659,12 +686,12 @@ export const Transcript = memo(function Transcript({
       {virtualRows.map(item => {
         const row = layout.rowAt(rows, item.index);
         const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + Number(Boolean(layout.nested?.has(item.index)));
-        const show = !(row.kind === 'reasoning' && row.turnId === liveReasoningTurn) && Boolean(visibleRow(row));
+        const show = row.key !== liveReasoningItem && Boolean(visibleRow(row));
         const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
         const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);
         return <div className="message" key={item.key} data-index={item.index} data-kind={row.kind} data-empty={!show}
           ref={virtual.measureElement} style={{ transform: `translateY(${item.start}px)`, '--depth': depth }}>
-          {show && (row.kind === 'activity-group' ? <ActivityGroup group={row} open={openGroups.has(row.key)}
+          {show && (row.kind === 'activity-group' || row.kind === 'turn-process' ? <ActivityGroup group={row} open={openGroups.has(row.key)}
             toggle={toggleGroup} releaseAnchor={releaseGroupAnchor} />
             : <TranscriptRow row={row} activePlan={activePlan} awaiting={row.final ? undefined : waiting?.get(row.key)}
               liveDelegation={row.kind === 'delegation' && Boolean(liveTurnId && row.turnId === liveTurnId)}

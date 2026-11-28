@@ -294,9 +294,9 @@ test('appended reasoning uses the loaded history metrics and preserves the previ
   assert.equal(layout.count, 2);
   assert.equal(layout.getItemKey(0), historyKey);
   assert.equal(layout.getItemKey(1), current[1].key);
-  assert.equal(layout.estimateSize(0, 'live'), 92);
+  assert.equal(layout.estimateSize(0, current[1].key), 92);
   assert.equal(layout.estimateSize(1), 34);
-  assert.equal(layout.estimateSize(1, 'live'), 0);
+  assert.equal(layout.estimateSize(1, current[1].key), 0);
 });
 
 test('only finished failures with short plain-text output add a diagnostic line', () => {
@@ -378,6 +378,49 @@ test('live commands reuse earlier group mappings until a history change affects 
   assert.deepEqual(revisedLayout.groups.map(group => group.turnId), ['live']);
   assert.equal(groupedTimelineLayout(revisedLayout, 'live', plain, open), revisedLayout);
   assert.equal(opened.rowAt(saved, 0), initial.groups[0]);
+});
+
+test('a completed answer folds the turn process while keeping results and errors visible', () => {
+  const turnId = 'turn';
+  const item = (id, kind, fields = {}) => ({ turnId, id, kind, ...fields });
+  const items = [
+    item('question', 'user', { text: 'Verify.' }),
+    item('comment', 'message', { phase: 'commentary', text: 'Checking.' }),
+    item('tool', 'tool', { status: 'completed', name: 'Read' }),
+    item('failure', 'command', { status: 'completed', exitCode: 1 }),
+    item('reason', 'reasoning', { sections: ['Verified the result.'] }),
+    item('change', 'patch', { files: [{ path: 'readme.md' }] }),
+    item('partial', 'message', { phase: 'partial', text: 'Intermediate result.' }),
+    item('answer', 'message', { phase: 'final', text: 'Done.' }),
+    item('artifact', 'artifact', { artifacts: [{ id: 'file', name: 'report.md', kind: 'file' }] }),
+  ];
+  const live = applyTimeline([], items.map(item => ({ kind: 'item', item, final: true })));
+  const run = { id: turnId, status: 'completed', durationMs: 198000 };
+  const rows = applyTimeline(live, [{ kind: 'run', run }]);
+  const layout = timelineLayout(rows);
+  const empty = new Set();
+  const ids = (view, source) => Array.from({ length: view.count }, (_, index) => {
+    const row = view.rowAt(source, index);
+    return row.id ?? row.kind;
+  });
+  assert.equal(groupedTimelineLayout(layout, turnId, empty, empty), layout);
+  const collapsed = groupedTimelineLayout(layout, undefined, empty, empty);
+  assert.deepEqual(ids(collapsed, rows), ['question', 'turn-process', 'failure', 'change', 'answer', 'artifact']);
+  const group = collapsed.rowAt(rows, 1);
+  assert.equal(group.durationMs, 198000);
+  const open = groupedTimelineLayout(layout, undefined, empty, new Set([group.key]));
+  assert.deepEqual(ids(open, rows), ['question', 'turn-process', ...items.slice(1).map(row => row.id)]);
+  const restored = historyRows([{ id: turnId, run, rows: items }]);
+  assert.deepEqual(ids(groupedTimelineLayout(timelineLayout(restored), undefined, empty, empty), restored), ids(collapsed, rows));
+
+  const revised = applyTimeline(rows, [{ kind: 'item', item: { ...items[2], status: 'failed' }, final: true }]);
+  assert.deepEqual(ids(groupedTimelineLayout(timelineLayout(revised), undefined, empty, empty), revised),
+    ['question', 'turn-process', 'tool', 'failure', 'change', 'answer', 'artifact']);
+  const interrupted = historyRows([{ id: turnId, run: { ...run, status: 'cancelled' }, rows: items }]);
+  assert.equal(timelineLayout(interrupted).processes.size, 0);
+  const legacy = historyRows([{ id: turnId, run, rows: items.map(row => ({ ...row, phase: undefined })) }]);
+  assert.deepEqual(ids(groupedTimelineLayout(timelineLayout(legacy), undefined, empty, empty), legacy),
+    ['question', 'comment', 'turn-process', 'failure', 'change', 'partial', 'answer', 'artifact']);
 });
 
 test('finishing an already visible command reuses measurements until the live group folds', () => {
@@ -520,7 +563,12 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
   };
   const responses = {
     initialize: {},
-    'thread/list': { data: [{ id: 'thread', cwd: '/work', name: 'Review' }], nextCursor: 'opaque' },
+    'thread/list': params => params.sectionId
+      ? { data: [{ id: 'older', cwd: '/work', name: 'Pinned review' }], nextCursor: null }
+      : { data: [{ id: 'thread', cwd: '/work', name: 'Review' }], nextCursor: 'opaque' },
+    'threadSection/list': ({ cursor }) => cursor
+      ? { data: [{ id: 'pinned-section', name: 'Pinned' }], nextCursor: null }
+      : { data: [{ id: 'custom-section', name: 'Work' }], nextCursor: 'sections-next' },
     'thread/resume': { thread: { id: 'thread' }, initialTurnsPage: { data: [], nextCursor: 'old' } },
     'thread/fork': { thread: { id: 'copy', cwd: '/work' } },
     'thread/goal/set': { goal: { objective: 'Ship', status: 'active', tokenBudget: 100 } },
@@ -557,6 +605,23 @@ test('Codex adapter translates RPC, streams summaries, and routes different inte
     });
     assert.equal(filtered.cursor, 'opaque');
     assert.equal(filtered.items[0].archived, true);
+    const pinned = await agent.sessions.listPinned();
+    assert.deepEqual(pinned.map(entry => [entry.ref.id, entry.pinned]), [['older', true]]);
+    assert.deepEqual(requests.at(-1)[1].packet.params, { limit: 100, archived: false, sectionId: 'pinned-section',
+      cursor: undefined, sortKey: 'section_position', modelProviders: [], useStateDbOnly: true });
+    await agent.sessions.pin(ref, true);
+    assert.equal(requests.at(-1)[1].packet.method, 'thread/section/move');
+    assert.deepEqual(requests.at(-1)[1].packet.params, { threadId: ref.id, sectionId: 'pinned-section' });
+    await agent.sessions.pin(ref, false);
+    assert.deepEqual(requests.at(-1)[1].packet.params, { threadId: ref.id, sectionId: null });
+    await agent.sessions.feedback(ref, 'Test feedback');
+    assert.equal(requests.at(-1)[1].packet.method, 'feedback/upload');
+    assert.deepEqual(requests.at(-1)[1].packet.params, {
+      threadId: ref.id, classification: 'bug', reason: 'Test feedback', includeLogs: false,
+    });
+    await agent.sessions.delete({ ...ref, id: 'disposable-test-thread' });
+    assert.equal(requests.at(-1)[1].packet.method, 'thread/delete');
+    assert.deepEqual(requests.at(-1)[1].packet.params, { threadId: 'disposable-test-thread' });
     const opened = await agent.sessions.resume(ref, 20);
     assert.equal(opened.history.cursor, 'old');
     const copy = await agent.sessions.fork(ref);
@@ -829,7 +894,7 @@ test('timeline preserves interleaved tools, reconciles message chunks, and keeps
   assert.equal(rows[3].preview, 'Checking alignment');
   assert.equal(rows[1].text + rows[4].text, 'Start. Finish.');
   const layout = timelineLayout(rows);
-  assert.deepEqual([0, 2, 3].map(index => layout.estimateSize(index, 't')), [0, 34, 0]);
+  assert.deepEqual([0, 2, 3].map(index => layout.estimateSize(index, rows[3].key)), [34, 34, 0]);
   const updated = applyTimeline(rows, [delta('reasoning', 'second', '.')]);
   assert.equal(timelineLayout(updated), layout);
   assert.equal(turnReasoning(updated, 't').preview, 'Checking alignment.');
@@ -1046,21 +1111,21 @@ test('the visible transcript can reuse rows across consecutive updates to a hidd
 
   assert.equal(timelineLayout(second), layout);
   assert.equal(turnReasoning(second, 'live').preview, 'Current progress. Step one. Step two');
-  assert.ok(sameTranscriptRows(original, second, 'live'));
-  assert.ok(sameTranscriptRows(otherBranch, second, 'live'));
+  assert.ok(sameTranscriptRows(original, second, original[1].key));
+  assert.ok(sameTranscriptRows(otherBranch, second, original[1].key));
   assert.equal(sameTranscriptRows(original, second, undefined), false);
-  assert.equal(sameTranscriptRows(original, second, 'past'), false);
+  assert.equal(sameTranscriptRows(original, second, original[0].key), false);
 
   const olderUpdate = applyTimeline(second, [reasoning('past', '. New detail')]);
   const newerUpdate = applyTimeline(olderUpdate, [reasoning('live', '. Step three')]);
-  assert.equal(sameTranscriptRows(second, newerUpdate, 'live'), false);
-  assert.ok(sameTranscriptRows(olderUpdate, newerUpdate, 'live'));
+  assert.equal(sameTranscriptRows(second, newerUpdate, original[1].key), false);
+  assert.ok(sameTranscriptRows(olderUpdate, newerUpdate, original[1].key));
 
   const withNewRow = applyTimeline(second, [reasoning('live', 'Another summary', 'extra')]);
-  assert.equal(sameTranscriptRows(second, withNewRow, 'live'), false);
+  assert.equal(sameTranscriptRows(second, withNewRow, original[1].key), false);
   const withMessage = applyTimeline(second, [reasoning('live', '. Step three'), reply('the answer is visible.')]);
   assert.equal(timelineLayout(withMessage), layout);
-  assert.equal(sameTranscriptRows(second, withMessage, 'live'), false);
+  assert.equal(sameTranscriptRows(second, withMessage, original[1].key), false);
 });
 
 test('the server user echo merges into the optimistic row without moving it', () => {
