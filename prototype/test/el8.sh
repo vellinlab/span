@@ -106,9 +106,10 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs
     /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)" \
     /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)" \
     /artifacts/terminal-collapse-baseline/span-preview "$(cat /artifacts/terminal-collapse-baseline-commit.txt)" || resource_result=$?
-/artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
+result=0
+/artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png || result=$?
 /artifacts/node prototype/test/catalog.mjs /artifacts/linux/span-preview /artifacts/el8-catalog.png
-SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench-local.png webgl
+SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench-local.png webgl || result=$?
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/covered-transcript.mjs \
     /artifacts/linux/span-preview /artifacts/covered-baseline/span-preview \
     /artifacts/hidden-timeline-baseline/span-preview /artifacts/el8-workbench-preview-switch | tee /artifacts/covered-transcript.json
@@ -129,7 +130,6 @@ SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffini
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/streaming-output-baseline/span-preview /artifacts/el8-streaming-tool-output \
     --tool-output | tee /artifacts/streaming-output.json
-result=0
 SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/reasoning-baseline/span-preview /artifacts/el8-reasoning-stream \

@@ -257,7 +257,8 @@ jobs:
           node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
           binary="$PWD/verified-preview/preview/span-preview.exe"
           node prototype/test/startup-loading.mjs "$binary" "" "$PWD/windows-workbench-startup.png" | tee windows-workbench-startup.json
-          node prototype/test/smoke.mjs "$binary" "$PWD/windows-workbench.png"
+          transcript_result=0
+          node prototype/test/smoke.mjs "$binary" "$PWD/windows-workbench.png" || transcript_result=$?
           resource_result=0
           node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
             "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
@@ -270,7 +271,6 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "$PWD/following-reply-baseline/span-preview.exe" --following | tee windows-workbench-following-reply.json
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-grouped-history" --grouped-history
           node prototype/test/long-reply.mjs "$binary" "$PWD/streaming-output-baseline/span-preview.exe" --tool-output | tee windows-workbench-streaming-output.json
-          transcript_result=0
           SPAN_TEST_DEVICE_SCALE=1.25 node prototype/test/long-reply.mjs \
             "$binary" "$PWD/reasoning-baseline/span-preview.exe" "$PWD/windows-workbench-reasoning-stream-125" --reasoning \
             | tee windows-workbench-reasoning-stream-125.json || transcript_result=$?
