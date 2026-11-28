@@ -1613,6 +1613,8 @@ try {
   if (showTerminalAfterReview) {
     await terminalToggle.click();
     await terminalPanel.waitFor();
+    // Reposition the test viewport after resizing it. The inspected process can leave following paused.
+    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await waitForTranscriptEnd();
   }
   assert.ok(await failureSummary.evaluate(summary => {
