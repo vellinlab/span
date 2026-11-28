@@ -275,7 +275,25 @@ async function checkPreviewSwitch(binary) {
     await previewBody.dispose();
     const parkedElements = await previewContent.evaluate(element => element.querySelectorAll('*').length);
     assert.equal(parkedElements, 0);
+    const firstResumeFrame = await previewContent.evaluateHandle(element => ({
+      ready: new Promise(resolve => {
+        const panel = element.closest('.preview');
+        const observer = new MutationObserver(() => {
+          if (panel.hidden) return;
+          observer.disconnect();
+          requestAnimationFrame(() => resolve({
+            pending: element.querySelector('[role="status"]')?.textContent === '正在恢复预览…',
+            focused: element === document.activeElement,
+            hasBody: Boolean(element.querySelector('.prose')),
+          }));
+        });
+        observer.observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+      }),
+    }));
     await page.getByRole('button', { name: '继续预览', exact: true }).press('Enter');
+    const firstResume = await firstResumeFrame.evaluate(frame => frame.ready);
+    await firstResumeFrame.dispose();
+    assert.deepEqual(firstResume, { pending: true, focused: true, hasBody: false });
     await content.waitFor();
     await content.getByRole('heading', { name: '复核第 300 项', exact: true }).waitFor();
     assert.ok(await previewContent.evaluate(element => element.isConnected && element === document.activeElement));
@@ -348,7 +366,7 @@ async function checkPreviewSwitch(binary) {
     const replacement = await readReplacement.evaluate(read => read());
     await readReplacement.dispose();
     assert.deepEqual(replacement, { previousRows: 0, previousMounted: false });
-    return { fileTop, transcriptTop, detailTop, previewElements, parkedElements,
+    return { fileTop, transcriptTop, detailTop, previewElements, parkedElements, firstResume,
       reasoningObservers: { opened: openedObservers, closed: closedObservers, reopened: reopenedObservers, archived: archivedObservers },
       replacement };
   } finally {

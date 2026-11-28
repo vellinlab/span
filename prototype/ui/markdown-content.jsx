@@ -85,13 +85,13 @@ function renderMarkdown(text, inspect) {
   return { content: toJsxRuntime(result, runtime), weight: text.length + elements * cacheElementWeight };
 }
 
-export const FileMarkdownContent = memo(function FileMarkdownContent({ text, parked, released }) {
+export const FileMarkdownContent = memo(function FileMarkdownContent({ text, parked, released, onBodyReady }) {
   // Keep the rendered elements for the currently selected file and release its DOM while parked.
   const previous = useRef(null);
   const rendered = previous.current?.text === text ? previous.current
     : parked ? undefined : { text, content: renderMarkdown(text).content };
   useLayoutEffect(() => { if (rendered) previous.current = rendered; }, [rendered]);
-  return !released && rendered && <div className="prose">{rendered.content}</div>;
+  return !released && rendered && <div className="prose" ref={onBodyReady}>{rendered.content}</div>;
 });
 
 const MarkdownPart = memo(function MarkdownPart({ text, inspect, cache }) {

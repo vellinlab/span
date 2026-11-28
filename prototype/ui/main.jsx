@@ -306,6 +306,10 @@ function App() {
     setPreview({ ...value, parked: true, position, preserveSelection });
   }, []);
 
+  const restoreMarkdownPosition = useCallback(body => {
+    if (body && !preview?.parked && preview?.position) restorePreviewPosition(body.parentElement, preview.position);
+  }, [preview?.parked, preview?.position]);
+
   useLayoutEffect(() => {
     const focus = previewFocus.current;
     previewFocus.current = null;
@@ -329,7 +333,9 @@ function App() {
         interactionRegion.current?.focus({ preventScroll: true });
       }
     } else if (focus === 'content' || (readingOverlay && !previewRegion.current?.contains(document.activeElement))) {
-      if (focus === 'content' && preview.position && previewReader.current) restorePreviewPosition(previewReader.current, preview.position);
+      if (focus === 'content' && preview.kind !== 'markdown' && preview.position && previewReader.current) {
+        restorePreviewPosition(previewReader.current, preview.position);
+      }
       const target = preview.attachment ? '.preview-close' : '.preview-content';
       previewRegion.current?.querySelector(target)?.focus({ preventScroll: true });
     }
@@ -1219,7 +1225,7 @@ function App() {
                 setPreview(current => current?.scope === preview.scope ? { ...current, blob: undefined, imageError: true } : current);
               }} />
               : preview.kind === 'markdown' ? <FileMarkdown text={preview.data} parked={Boolean(preview.parked)}
-                preserveSelection={preview.preserveSelection} /> : <pre>{preview.data}</pre>}
+                preserveSelection={preview.preserveSelection} onBodyReady={restoreMarkdownPosition} /> : <pre>{preview.data}</pre>}
           </div>
         </aside>}
       </div>
