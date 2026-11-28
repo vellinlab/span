@@ -99,6 +99,13 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/startup-loading.mjs \
     | tee /artifacts/startup-loading.json
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/terminal-pressure.mjs /artifacts/linux/resources/app/bin/span-workbench-core \
     /artifacts/span-workbench-pty-baseline | tee /artifacts/terminal-pressure.json
+resource_result=0
+taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs \
+    /artifacts/linux/span-preview /artifacts/resource-isolation.json \
+    /artifacts/terminal-baseline/span-preview "$(cat /artifacts/terminal-baseline-commit.txt)" \
+    /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)" \
+    /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)" \
+    /artifacts/terminal-collapse-baseline/span-preview "$(cat /artifacts/terminal-collapse-baseline-commit.txt)" || resource_result=$?
 /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench.png
 /artifacts/node prototype/test/catalog.mjs /artifacts/linux/span-preview /artifacts/el8-catalog.png
 SPAN_TEST_SSH_ALIAS= /artifacts/node prototype/test/smoke.mjs /artifacts/linux/span-preview /artifacts/el8-workbench-local.png webgl
@@ -141,14 +148,8 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     --reasoning-index | tee /artifacts/reasoning-index.json || result=$?
 if ((result == 0)); then
     tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
+    result=$resource_result
 fi
-taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs \
-    /artifacts/linux/span-preview /artifacts/resource-isolation.json \
-    /artifacts/terminal-baseline/span-preview "$(cat /artifacts/terminal-baseline-commit.txt)" \
-    /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)" \
-    /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)" \
-    /artifacts/terminal-collapse-baseline/span-preview "$(cat /artifacts/terminal-collapse-baseline-commit.txt)" || result=$?
-
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &
 for _ in {1..50}; do [[ -S "$widget_socket" ]] && break; sleep 0.1; done

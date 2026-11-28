@@ -258,6 +258,12 @@ jobs:
           binary="$PWD/verified-preview/preview/span-preview.exe"
           node prototype/test/startup-loading.mjs "$binary" "" "$PWD/windows-workbench-startup.png" | tee windows-workbench-startup.json
           node prototype/test/smoke.mjs "$binary" "$PWD/windows-workbench.png"
+          resource_result=0
+          node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
+            "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
+            "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
+            "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE" \
+            "$PWD/terminal-collapse-baseline/span-preview.exe" "$TERMINAL_COLLAPSE_BASELINE" || resource_result=$?
           node prototype/test/catalog.mjs "$binary" "$PWD/windows-workbench-catalog.png"
           node prototype/test/covered-transcript.mjs "$binary" "" "" "$PWD/windows-workbench-preview-switch"
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-long-reply"
@@ -276,12 +282,8 @@ jobs:
             | tee windows-workbench-reasoning-index.json || reasoning_result=$?
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
-          node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
-            "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
-            "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
-            "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE" \
-            "$PWD/terminal-collapse-baseline/span-preview.exe" "$TERMINAL_COLLAPSE_BASELINE"
           if ((reasoning_result != 0)); then exit "$reasoning_result"; fi
+          if ((resource_result != 0)); then exit "$resource_result"; fi
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Compare native Windows wheel rendering with and without animation
         if: ${{ !cancelled() && (steps.desktop_checks.outcome == 'success' || steps.desktop_checks.outcome == 'failure') }}

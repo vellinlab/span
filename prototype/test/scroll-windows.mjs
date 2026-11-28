@@ -146,11 +146,9 @@ async function trial(disableAnimation) {
     const isolatedTrace = await readTrace();
     const terminalLines = await terminalLine() - terminalStart;
     assert.ok(terminalStart > 0 && terminalLines > 0, 'PTY output must continue throughout the scrolling comparison.');
-    for (let index = 0; index < 4; index++) {
-      const direction = index % 2 === 0 ? -1 : 1;
-      const target = reference[direction < 0 ? 2 : 5];
+    async function measureBurst(direction, target, intervalMs) {
       const startingOffset = await scrollTop();
-      const result = await driver.request(`observe ${target.frame} ${direction} 3 ${burstIntervalMs}`);
+      const result = await driver.request(`observe ${target.frame} ${direction} 3 ${intervalMs}`);
       await delay(Math.max(0, dispatchIntervalMs - (result.expected ?? dispatchIntervalMs)));
       const offset = await scrollTop();
       const settledFrame = await driver.request('frame');
@@ -163,10 +161,29 @@ async function trial(disableAnimation) {
       const expectedDelta = single ? single.delta * 3 : null;
       const received = single && events.every(event => event.direction === direction && event.mode === single.mode) &&
         Math.abs(delta - expectedDelta) < 0.01;
-      bursts.push({ direction, ...result, startingOffset, offset, expectedOffset: target.top, settledFrame, exact,
-        delta, expectedDelta, received: Boolean(received), events });
-      // Keep an unsettled burst from changing the starting point for the next sweep.
-      if (direction === 1 && !exact) await restoreReference();
+      return { direction, intervalMs, ...result, startingOffset, offset, expectedOffset: target.top,
+        settledFrame, exact, delta, expectedDelta, received: Boolean(received), events };
+    }
+    async function resetBurst(position) {
+      await timeline.evaluate((element, offset) => { element.scrollTop = offset; }, position.top);
+      await delay(dispatchIntervalMs);
+      assert.ok(Math.abs(await scrollTop() - position.top) <= 1, 'Restore the calibrated burst start.');
+      assert.equal(await driver.request('frame'), position.frame, 'Restore the desktop pixels before repeating a burst.');
+    }
+    const inputRetries = [];
+    for (let index = 0; index < 4; index++) {
+      const direction = index % 2 === 0 ? -1 : 1;
+      const position = direction < 0 ? { top, frame: start } : reference[2];
+      const target = reference[direction < 0 ? 2 : 5];
+      let burst = await measureBurst(direction, target, burstIntervalMs);
+      if (!burst.received) {
+        // Preserve the delivered deltas when Windows does not deliver the calibrated input.
+        inputRetries.push(burst);
+        await resetBurst(position);
+        burst = await measureBurst(direction, target, burstIntervalMs + 12);
+      }
+      bursts.push(burst);
+      if (!burst.exact && index < 3) await resetBurst(target);
     }
     const renderer = await app.evaluate(({ BrowserWindow, app }) => {
       const pid = BrowserWindow.getAllWindows()[0].webContents.getOSProcessId();
@@ -184,7 +201,7 @@ async function trial(disableAnimation) {
       rendererWorkingSetKiB: renderer.workingSetSize, rendererPrivateKiB: renderer.privateBytes,
       firstPixelP95Ms: percentile(samples, 'first'), exactPixelP95Ms: percentile(samples, 'expected'),
       matched: samples.filter(item => item.expected != null).length,
-      samples, bursts, trace: isolatedTrace,
+      samples, bursts, inputRetries, trace: isolatedTrace,
     };
   } finally {
     driver?.close();
