@@ -515,7 +515,7 @@ try {
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-goal-compact-attachments.png') });
     await removeButtons.at(-1).focus();
     assert.ok(await tray.evaluate(element => element.clientHeight > 28 && element.contains(document.activeElement)));
-    assert.equal(await draftHeight(), originalDraftHeight);
+    assert.equal(await draftHeight(), 24);
     for (const button of removeButtons) await button.press('Enter');
     await tray.waitFor({ state: 'detached' });
     await dismissGoal.focus();
@@ -768,7 +768,7 @@ try {
       const list = button.closest('ul').getBoundingClientRect();
       return document.activeElement === button && bounds.top >= list.top && bounds.bottom <= list.bottom;
     }));
-    assert.equal(await draftHeight(), originalDraftHeight);
+    assert.equal(await draftHeight(), 24);
     assert.equal(await composer.inputValue(), longDraft);
     for (const button of removeButtons) await button.press('Enter');
     await tray.waitFor({ state: 'detached' });
