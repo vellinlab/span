@@ -1115,10 +1115,11 @@ try {
   await liveReasoning.getByText(approvalSummary, { exact: true }).waitFor();
   const approvalContext = archivedReasoning.filter({ hasText: approvalSummary });
   assert.equal(await approvalContext.count(), 0);
-  await transcript.evaluate(async element => {
-    await new Promise(requestAnimationFrame);
-    await new Promise(requestAnimationFrame);
-    element.scrollTop = 300;
+  await transcript.hover({ position: { x: 12, y: 24 } });
+  await page.mouse.wheel(0, -640);
+  await page.waitForFunction(() => {
+    const element = document.querySelector('.timeline');
+    return element.scrollHeight - element.clientHeight - element.scrollTop >= 400;
   });
   const latest = page.getByRole('button', { name: '滚到最新消息' });
   await latest.waitFor();
