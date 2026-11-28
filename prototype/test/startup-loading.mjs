@@ -100,6 +100,11 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
 
     // Enabling Debugger reports previously parsed scripts without needing instrumentation in either renderer.
     const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const readyMetrics = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(({ name, value }) => [name, value]));
+    const rendererReady = { usedHeapBytes: readyMetrics.JSHeapUsedSize, totalHeapBytes: readyMetrics.JSHeapTotalSize,
+      cpuMs: readyMetrics.ProcessTime * 1000 };
+    assert.ok(rendererReady.usedHeapBytes > 0);
     const modules = new Set();
     cdp.on('Debugger.scriptParsed', ({ url }) => {
       if (/^file:.*\/dist\/assets\/[^/]+\.js$/.test(url)) modules.add(url);
@@ -151,7 +156,7 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
       assert.ok([...modules].some(url => /\/pi-/.test(url)));
     }
     assert.deepEqual(errors, []);
-    return { label, firstOnDisplay, ...paint, renderer, chromiumProcesses, scripts, fonts,
+    return { label, firstOnDisplay, ...paint, renderer, rendererReady, chromiumProcesses, scripts, fonts,
       firstPanelMs, reopenPanelMs, inspectorLoaded,
       scriptBytes: scripts.reduce((sum, script) => sum + script.bytes, 0) };
   } finally {
