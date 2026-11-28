@@ -42,7 +42,36 @@ async function chromiumStartupStats(app, rendererPid) {
   }));
 }
 
-async function check(binary, label, display, firstOnDisplay, exercise) {
+async function openUsagePanel(page, composer) {
+  await composer.fill('/usage');
+  const frame = await composer.evaluateHandle(element => {
+    return {
+      seen: new Promise(resolve => {
+        let start;
+        element.addEventListener('keydown', () => { start = performance.now(); }, { capture: true, once: true });
+        const observer = new MutationObserver(() => {
+          if (start === undefined || !document.querySelector('.agent-panel[data-kind="usage"] .usage-panel')) return;
+          observer.disconnect();
+          requestAnimationFrame(() => resolve(performance.now() - start));
+        });
+        observer.observe(document.querySelector('.composer-overlay'), { subtree: true, childList: true });
+      }),
+    };
+  });
+  await composer.press('Enter');
+  const panel = page.getByRole('region', { name: '用量', exact: true });
+  await panel.locator('.usage-panel').waitFor();
+  const pressToPanelFrameMs = await frame.evaluate(result => result.seen);
+  await frame.dispose();
+  const close = panel.getByRole('button', { name: '关闭面板' });
+  assert.ok(await close.evaluate(button => button === document.activeElement), 'Focus the inspector close button on open');
+  await close.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  assert.ok(await composer.evaluate(element => element === document.activeElement), 'Restore the draft focus after opening the inspector');
+  return pressToPanelFrameMs;
+}
+
+async function check(binary, label, display, firstOnDisplay, exercise, captureBaseline) {
   const profile = await mkdtemp(join(tmpdir(), 'span-startup-'));
   let app;
   try {
@@ -82,7 +111,7 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
     }));
     assert.ok(scripts.length > 0, 'Observe the packaged entry script before checking optional modules.');
     if (label === 'candidate') {
-      assert.equal(scripts.some(script => /^(?:pi|markdown-content)-/.test(script.name)), false);
+      assert.equal(scripts.some(script => /^(?:pi|markdown-content|agent-inspector)-/.test(script.name)), false);
     }
     await cdp.send('DOM.enable');
     await cdp.send('CSS.enable');
@@ -94,13 +123,18 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
         assert.ok(result.fonts.length, `Observe the actual fonts in ${selector}`);
         return [name, result.fonts];
       })));
-    if (screenshot && firstOnDisplay && label === 'baseline') {
+    if (screenshot && captureBaseline) {
       await page.screenshot({ path: screenshot.replace(/\.png$/, '-baseline.png') });
     }
 
+    const composer = page.getByRole('textbox', { name: '消息' });
+    if (screenshot && exercise) await page.screenshot({ path: screenshot });
+    const firstPanelMs = await openUsagePanel(page, composer);
+    const inspectorLoaded = [...modules].some(url => /\/agent-inspector-/.test(url));
+    if (label === 'candidate') assert.ok(inspectorLoaded, 'Load the inspector only after the user opens it');
+    const reopenPanelMs = await openUsagePanel(page, composer);
+
     if (exercise) {
-      if (screenshot) await page.screenshot({ path: screenshot });
-      const composer = page.getByRole('textbox', { name: '消息' });
       await composer.fill('整理检查结果，给出可复查的步骤。');
       await composer.press('Enter');
       const reply = page.getByTestId('transcript').locator('.agent-reply');
@@ -118,10 +152,20 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
     }
     assert.deepEqual(errors, []);
     return { label, firstOnDisplay, ...paint, renderer, chromiumProcesses, scripts, fonts,
+      firstPanelMs, reopenPanelMs, inspectorLoaded,
       scriptBytes: scripts.reduce((sum, script) => sum + script.bytes, 0) };
   } finally {
     await app?.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 3 });
+  }
+}
+
+async function measureTrials(order, trials, display, freshDisplay = false) {
+  for (const [index, label] of order.entries()) {
+    const first = !trials.some(trial => trial.label === label);
+    const exercise = label === 'candidate' && first;
+    trials.push(await check(label === 'candidate' ? candidate : baseline, label, display,
+      freshDisplay ? index === 0 : undefined, exercise, label === 'baseline' && first));
   }
 }
 
@@ -135,10 +179,7 @@ async function measureFreshDisplay(order, trials) {
       exited.then(() => { throw new Error('Xvfb exited before publishing its display.'); }),
     ]);
     const target = ':' + display.toString().trim();
-    for (const [index, label] of order.entries()) {
-      const exercise = label === 'candidate' && !trials.some(trial => trial.label === 'candidate');
-      trials.push(await check(label === 'candidate' ? candidate : baseline, label, target, index === 0, exercise));
-    }
+    await measureTrials(order, trials, target, true);
   } finally {
     server.kill();
     await exited;
@@ -146,10 +187,9 @@ async function measureFreshDisplay(order, trials) {
 }
 
 const trials = [];
-if (baseline) {
+if (baseline && linux) {
   await measureFreshDisplay(['baseline', 'candidate', 'candidate', 'baseline'], trials);
   await measureFreshDisplay(['candidate', 'baseline', 'baseline', 'candidate'], trials);
-} else {
-  trials.push(await check(candidate, 'candidate', process.env.DISPLAY, undefined, true));
-}
+} else if (baseline) await measureTrials(['baseline', 'candidate', 'candidate', 'baseline'], trials);
+else await measureTrials(['candidate'], trials, process.env.DISPLAY);
 console.log(JSON.stringify({ platform: process.platform, trials }, null, 2));

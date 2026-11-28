@@ -12,6 +12,7 @@ env:
   FOLLOWING_REPLY_BASELINE: 28b8963cefc13f084686e0d29127ee4232f4f824
   REASONING_BASELINE: c265e68c8f3435cc8e7ef2c1e8f2ea8723fbe8f9
   STREAMING_OUTPUT_BASELINE: 13b84174e13c50c9f17abb3ac50bd353e8115305
+  STARTUP_LOADING_BASELINE: c46b1e8610b2d2bd6899b56dae390416d6c81ae0
   TERMINAL_RENDERER_BASELINE: b4d95f68481e073da9fa4df344629a5b9d07f1b5
   TERMINAL_COVER_BASELINE: 6d3fe55dd6c192b162eec43c4f7bdb62c3db9b20
   TERMINAL_WINDOW_BASELINE: 127feffb69fbd7a752c49b7666f3198a3c0e8cb6
@@ -107,7 +108,7 @@ jobs:
             long-reply:3b8abac80eb31c73f4360a0721bb5c8823ab575e \
             following-reply:"$FOLLOWING_REPLY_BASELINE" \
             hidden-timeline:6de67d5933a3c733bfad6c2988de39e29719c60c \
-            startup-loading:d5dc91b0fc082d3de69b1ef9bab8ab32e9fd56af \
+            startup-loading:"$STARTUP_LOADING_BASELINE" \
             streaming-output:"$STREAMING_OUTPUT_BASELINE" \
             reasoning:"$REASONING_BASELINE" \
             reasoning-details:4bbac893fab99dc4af1947521f0d27eb05c2b26a \
@@ -182,7 +183,7 @@ jobs:
 
   windows:
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 25
     defaults:
       run:
         shell: bash
@@ -231,12 +232,12 @@ jobs:
           bash prototype/test/install-pi.sh "$PWD/pi-test"
           SPAN_TEST_PI_TEAMS="$PWD/pi-test/team-state-fixture" node prototype/test/real-pi.mjs \
             "$PWD/verified-preview/preview/span-preview.exe" "$PWD/pi-test/node_modules/.bin/pi.cmd" "$PWD/windows-workbench-pi.png"
-      - name: Prepare the baseline renderers for terminal, replies, command output and reasoning
+      - name: Prepare the baseline renderers for startup, terminal and conversation
         run: |
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" \
             terminal-window:"$TERMINAL_WINDOW_BASELINE" terminal-collapse:"$TERMINAL_COLLAPSE_BASELINE" \
             following-reply:"$FOLLOWING_REPLY_BASELINE" \
-            streaming-output:"$STREAMING_OUTPUT_BASELINE" reasoning:"$REASONING_BASELINE"; do
+            streaming-output:"$STREAMING_OUTPUT_BASELINE" reasoning:"$REASONING_BASELINE" startup-loading:"$STARTUP_LOADING_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
             source_dir=$(mktemp -d)
@@ -250,13 +251,17 @@ jobs:
             if [[ "$target" == reasoning-baseline ]]; then
               cp "$source_dir/prototype/desktop/preload.cjs" "$target/resources/app/desktop/"
             fi
+            if [[ "$target" == startup-loading-baseline ]]; then
+              printf '%s\n' "$baseline" > windows-workbench-startup-baseline-commit.txt
+            fi
           done
       - name: Verify the extracted Windows preview and native ConPTY
         id: desktop_checks
         run: |
           node prototype/test/terminal-pressure.mjs prototype/core/target/release/span-workbench-core.exe
           binary="$PWD/verified-preview/preview/span-preview.exe"
-          node prototype/test/startup-loading.mjs "$binary" "" "$PWD/windows-workbench-startup.png" | tee windows-workbench-startup.json
+          node prototype/test/startup-loading.mjs "$binary" "$PWD/startup-loading-baseline/span-preview.exe" \
+            "$PWD/windows-workbench-startup.png" | tee windows-workbench-startup.json
           transcript_result=0
           node prototype/test/smoke.mjs "$binary" "$PWD/windows-workbench.png" || transcript_result=$?
           resource_result=0
@@ -301,6 +306,7 @@ jobs:
             span-web-windows-x86_64.zip
             windows-workbench*.png
             windows-workbench-startup.json
+            windows-workbench-startup-baseline-commit.txt
             windows-workbench-reasoning-*.json
             windows-workbench-process-history.json
             windows-workbench-resource-isolation.json
