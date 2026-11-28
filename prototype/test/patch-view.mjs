@@ -204,7 +204,8 @@ async function check(binary, legacy, screenshot) {
     await assert.rejects(page.evaluate(() => window.span.copyText({ text: '无效测试文本' })), /无效的剪贴板文本/);
     assert.equal(await readClipboard(), reply);
     await composer.fill('/d');
-    await page.getByRole('button', { name: /\/diff 查看工作区 Git 改动/ }).waitFor();
+    await page.getByRole('listbox', { name: '会话命令' })
+      .getByRole('option', { name: '/diff 查看工作区 Git 改动', exact: true }).waitFor();
     await composer.fill('/diff');
     await composer.press('Enter');
     const workspaceDiff = page.getByRole('region', { name: '工作区 Git 改动' });
