@@ -71,6 +71,33 @@ async function openUsagePanel(page, composer) {
   return pressToPanelFrameMs;
 }
 
+async function sendFirstMessage(page, composer) {
+  const prompt = '整理检查结果，给出可复查的步骤。';
+  await composer.fill(prompt);
+  const frame = await composer.evaluateHandle((element, text) => ({
+    seen: new Promise(resolve => {
+      let start;
+      element.addEventListener('keydown', event => {
+        if (event.key === 'Enter') start = performance.now();
+      }, { capture: true, once: true });
+      const viewport = document.querySelector('.transcript-viewport');
+      const observer = new MutationObserver(() => {
+        if (start === undefined || viewport.querySelector('.user-message')?.textContent !== text) return;
+        observer.disconnect();
+        requestAnimationFrame(() => resolve(performance.now() - start));
+      });
+      observer.observe(viewport, { subtree: true, childList: true });
+    }),
+  }), prompt);
+  try {
+    await composer.press('Enter');
+    await page.getByTestId('transcript').getByText(prompt, { exact: true }).waitFor();
+    return await frame.evaluate(result => result.seen);
+  } finally {
+    await frame.dispose();
+  }
+}
+
 async function check(binary, label, display, firstOnDisplay, exercise, captureBaseline) {
   const profile = await mkdtemp(join(tmpdir(), 'span-startup-'));
   let app;
@@ -116,7 +143,7 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
     }));
     assert.ok(scripts.length > 0, 'Observe the packaged entry script before checking optional modules.');
     if (label === 'candidate') {
-      assert.equal(scripts.some(script => /^(?:pi|markdown-content|agent-inspector)-/.test(script.name)), false);
+      assert.equal(scripts.some(script => /^(?:pi|markdown-content|agent-inspector|transcript)-/.test(script.name)), false);
     }
     await cdp.send('DOM.enable');
     await cdp.send('CSS.enable');
@@ -138,10 +165,12 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
     const inspectorLoaded = [...modules].some(url => /\/agent-inspector-/.test(url));
     if (label === 'candidate') assert.ok(inspectorLoaded, 'Load the inspector only after the user opens it');
     const reopenPanelMs = await openUsagePanel(page, composer);
+    const transcriptLoaded = () => [...modules].some(url => /\/transcript-/.test(url));
+    if (label === 'candidate') assert.equal(transcriptLoaded(), false, 'Usage can open without loading the transcript');
+    const firstMessageMs = await sendFirstMessage(page, composer);
+    if (label === 'candidate') assert.ok(transcriptLoaded(), 'The first message loads the transcript');
 
     if (exercise) {
-      await composer.fill('整理检查结果，给出可复查的步骤。');
-      await composer.press('Enter');
       const reply = page.getByTestId('transcript').locator('.agent-reply');
       await reply.getByRole('table').waitFor();
       assert.ok([...modules].some(url => /\/markdown-content-/.test(url)));
@@ -157,7 +186,7 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
     }
     assert.deepEqual(errors, []);
     return { label, firstOnDisplay, ...paint, renderer, rendererReady, chromiumProcesses, scripts, fonts,
-      firstPanelMs, reopenPanelMs, inspectorLoaded,
+      firstPanelMs, reopenPanelMs, firstMessageMs, inspectorLoaded,
       scriptBytes: scripts.reduce((sum, script) => sum + script.bytes, 0) };
   } finally {
     await app?.close();

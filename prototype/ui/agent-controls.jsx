@@ -4,7 +4,7 @@ import {
   GitFork, Goal, ListTree, MessageSquare, Pencil, Pin, Plug, SlidersHorizontal, Trash2, Users, X, Zap,
 } from 'lucide-react';
 import { ReasoningText } from './reasoning.jsx';
-import { LatestMessageButton } from './transcript.jsx';
+import { LatestMessageButton } from './transcript-navigation.jsx';
 
 let inspectorView;
 let inspectorRequest;

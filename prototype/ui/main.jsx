@@ -17,7 +17,7 @@ import { SessionActions } from './session-actions.jsx';
 import { SessionCatalog } from './session-catalog.jsx';
 import { useCatalogSearch } from './use-catalog-search.js';
 import { Sidebar } from './sidebar.jsx';
-import { LatestMessageButton, Transcript, transcriptIsAtEnd } from './transcript.jsx';
+import { DeferredTranscript, LatestMessageButton, prepareTranscript, transcriptIsAtEnd } from './transcript-navigation.jsx';
 import { turnReasoning, turnReasoningRows } from './timeline.js';
 import { useAgent } from './use-agent.js';
 import { draftKey, useDrafts } from './use-drafts.js';
@@ -499,7 +499,10 @@ function App() {
   const openTrace = useCallback((member, trigger) => latestWork.current.openMemberTrace(member, trigger), []);
   const openCatalogSession = useCallback(entry => latestWork.current.openSession(entry), []);
   const changeDraft = useCallback(event => {
-    composerActions.current.setDraft(event.target.value);
+    const text = event.target.value;
+    const content = text.trimStart();
+    if (content && !content.startsWith('/')) prepareTranscript();
+    composerActions.current.setDraft(text);
     setSuggesting(true);
     setCommandIndex(0);
   }, []);
@@ -837,7 +840,10 @@ function App() {
       }
       const nativePrompt = known && !api.execute && api.commands?.some(item => '/' + item.id === command[1])
         && !commonAgentCommands(api, work.models, work.options).some(([name]) => name === command[1]);
-      if (!known || nativePrompt) prepareMarkdown().catch(() => {});
+      if (!known || nativePrompt) {
+        prepareTranscript();
+        prepareMarkdown().catch(() => {});
+      }
       const sent = known && !nativePrompt ? await runCommand(command[1], command[2] ?? '', submitted)
         : await work.send(text, effectiveOptions(), delivery, {
           files, followLatest,
@@ -1098,12 +1104,15 @@ function App() {
           onFocusCapture={event => { conversationFocus.current = new WeakRef(event.target); }}>
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
             <div className="transcript-viewport">
-              <Transcript key={refKey} viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
-                rows={rows} cursor={work.cursor} historyCursors={work.historyCursors} loadOlder={work.loadOlder} loading={loading}
-                liveReasoningItem={showReasoning ? liveReasoning.key : undefined} activeTurnId={run?.id} requests={work.requests}
-                jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
-                openArtifact={openArtifact} openImage={previewImage} openTrace={openTrace}
-                canOpenSession={!running && !loading && connection === 'ready'} />
+              {hasSession || loading || rows.length > 0 ?
+                <DeferredTranscript key={refKey} fallback={<div className="timeline" aria-busy="true" />}
+                  viewKey={refKey} remembered={rememberedReading} remember={rememberReadingView}
+                  rows={rows} cursor={work.cursor} historyCursors={work.historyCursors} loadOlder={work.loadOlder} loading={loading}
+                  liveReasoningItem={showReasoning ? liveReasoning.key : undefined} activeTurnId={run?.id} requests={work.requests}
+                  jumpToLatest={jumpToLatest} scroll={scroll} showLatest={showLatest} onScrollPosition={setShowLatest} openSession={openRef}
+                  openArtifact={openArtifact} openImage={previewImage} openTrace={openTrace}
+                  canOpenSession={!running && !loading && connection === 'ready'} />
+                : <div className="timeline" role="log" aria-label="会话记录" aria-live="off" data-testid="transcript" data-items={0} />}
             </div>
             <div className="composer-wrap reading-column">
               {!rows.length && !session && !loading && !error && <div className="welcome"><h1>开始新会话</h1></div>}

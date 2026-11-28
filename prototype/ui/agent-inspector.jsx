@@ -7,7 +7,7 @@ import { PathText } from './file-reference-name.jsx';
 import { PatchView } from './patch-view.jsx';
 import { TextReader } from './text-reader.jsx';
 import { delegatedMembers } from './timeline.js';
-import { Transcript } from './transcript.jsx';
+import { DeferredTranscript, prepareTranscript } from './transcript-navigation.jsx';
 import { observeWindowHidden } from './window-visibility.js';
 
 const number = new Intl.NumberFormat('zh-CN');
@@ -271,6 +271,7 @@ function SubagentTranscript({ panel, delegation, scroll, showLatest, onScrollPos
   const jumpToLatest = useRef(true);
   const { member, session } = panel;
   useEffect(() => {
+    prepareTranscript();
     try { return delegation.watchTranscript(session, member.id, setView); }
     catch (error) { setError(error.message); }
   }, [delegation, member.id, session]);
@@ -279,7 +280,8 @@ function SubagentTranscript({ panel, delegation, scroll, showLatest, onScrollPos
   </p>;
   return <>
     {view.error && <p className="subagent-empty" role="status">{view.error}</p>}
-    <Transcript rows={view.rows} viewKey={sessionKey(member.session) || JSON.stringify([sessionKey(session), member.id])}
+    <DeferredTranscript rows={view.rows} viewKey={sessionKey(member.session) || JSON.stringify([sessionKey(session), member.id])}
+      fallback={<p className="subagent-empty" role="status">正在读取子代理记录…</p>}
       scroll={scroll} jumpToLatest={jumpToLatest}
       label="子代理会话记录" testId="subagent-transcript" activeTurnId={view.run?.status === 'running' ? view.run.id : undefined}
       cursor={view.cursor} loadOlder={view.loadOlder} loading={view.loading}

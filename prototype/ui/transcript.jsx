@@ -1,7 +1,7 @@
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
-  ArrowDown, ArrowUpRight, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
+  ArrowUpRight, Check, ChevronRight, Circle, CircleAlert, CircleDot, CodeXml, FileCode2, FileText, GitBranch,
   CircleHelp, Folder, Image, ListChecks, Search, ShieldAlert, Terminal, Users, Wrench,
 } from 'lucide-react';
 import { AgentMemberList, agentStatusLabels as statusLabels, memberName } from './agent-members.jsx';
@@ -13,6 +13,7 @@ import { PatchView } from './patch-view.jsx';
 import { ReasoningText } from './reasoning.jsx';
 import { CopyTextButton, readTextPosition, rememberReaderPosition, TextReader } from './text-reader.jsx';
 import { activityFailurePreview, activityStatus, delegatedMembers, groupedTimelineLayout, itemKey, sameTranscriptRows, timelineLayout, visibleRow } from './timeline.js';
+import { transcriptIsAtEnd } from './transcript-navigation.jsx';
 
 const stepIcons = { completed: Check, running: CircleDot, pending: Circle };
 const waitingLabels = { approval: '待审批', input: '待回答' };
@@ -383,19 +384,6 @@ function firstVisibleMessage(element, viewport) {
     const content = item.firstElementChild?.getBoundingClientRect();
     if (content && content.bottom > viewport.top && content.top < viewport.bottom) return item;
   }
-}
-
-export function transcriptIsAtEnd(element) {
-  return element.scrollHeight - element.clientHeight - element.scrollTop < 40;
-}
-
-export function LatestMessageButton({ scroll, className, label = '滚到最新消息', onJump }) {
-  return <button type="button" className={`jump-latest ${className}`} title={label} aria-label={label} onClick={() => {
-    onJump?.();
-    const timeline = scroll.current;
-    timeline.scrollTop = timeline.scrollHeight;
-    timeline.focus({ preventScroll: true });
-  }}><ArrowDown size={15} aria-hidden="true" /><span>最新消息</span></button>;
 }
 
 function readAnchor(element, rows, layout) {
