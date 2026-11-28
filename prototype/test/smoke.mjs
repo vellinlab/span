@@ -727,6 +727,27 @@ try {
   await reasoningBody.press('Escape');
   await liveReasoning.waitFor();
   assert.ok(await liveReasoning.evaluate(element => element === document.activeElement));
+  const compactTerminalHeight = await page.locator('.terminal-panel').evaluate(panel => panel.clientHeight);
+  await goal.press('Enter');
+  await goal.waitFor({ state: 'hidden' });
+  await goalPanel.locator('header .goal-panel-status').getByText('进行中', { exact: true }).waitFor();
+  await composer.focus();
+  assert.equal(await draftHeight(), 46);
+  assert.ok(await goalPanel.evaluate(panel => {
+    const above = panel.getBoundingClientRect().top - document.querySelector('.timeline').getBoundingClientRect().top;
+    const details = panel.querySelector('.agent-panel-content');
+    const line = parseFloat(getComputedStyle(details.querySelector('.goal-objective')).lineHeight);
+    return above >= 34 && details.clientHeight - 4 >= line;
+  }), 'Keep the Goal and conversation readable with a long draft and a visible terminal at 125%.');
+  await editGoal.press('Enter');
+  await goalInput.fill(longGoal);
+  assert.ok(await goalInput.evaluate(field => field === document.activeElement && field.clientHeight >= 42));
+  await goalInput.press('Escape');
+  await goalPanel.waitFor({ state: 'detached' });
+  assert.ok(await goal.evaluate(button => button === document.activeElement));
+  assert.equal(await draftHeight(), 24);
+  assert.equal(await composer.inputValue(), longDraft);
+  assert.equal(await page.locator('.terminal-panel').evaluate(panel => panel.clientHeight), compactTerminalHeight);
   await liveReasoning.press('Enter');
   await compactProgress.waitFor();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));

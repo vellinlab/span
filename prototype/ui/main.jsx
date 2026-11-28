@@ -139,7 +139,7 @@ function App() {
   const reasoningHadFocus = useRef(false);
   const panelScope = useRef(0);
   const panelTrigger = useRef(null);
-  const reasoningReturnFocus = useRef(null);
+  const panelReturnFocus = useRef(null);
   const composerActions = useRef(null);
   const commandSelection = useRef(null);
   const terminalToggle = useRef(null);
@@ -300,8 +300,8 @@ function App() {
   }, [keepReasoning, reasoningOpen, showReasoning]);
 
   useLayoutEffect(() => {
-    const trigger = reasoningReturnFocus.current;
-    reasoningReturnFocus.current = null;
+    const trigger = panelReturnFocus.current;
+    panelReturnFocus.current = null;
     if (!panel && trigger) (trigger.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
   }, [panel]);
 
@@ -430,7 +430,7 @@ function App() {
     panelTrigger.current = null;
     setPanel(null);
     if (restoreFocus && (trigger || document.activeElement?.closest('.agent-panel'))) {
-      if (trigger?.matches('.reasoning-strip')) reasoningReturnFocus.current = trigger;
+      if (trigger?.matches('.reasoning-strip, .goal-strip')) panelReturnFocus.current = trigger;
       else (trigger?.isConnected ? trigger : input.current)?.focus({ preventScroll: true });
     }
   }

@@ -32,6 +32,7 @@ function AgentInspector(props) {
 const statuses = {
   active: '进行中', paused: '已暂停', complete: '已完成', blocked: '受阻', waiting: '等待中', limited: '达到用量上限', unknown: '状态未知',
 };
+const goalStatusLabel = (status, activeWithoutTurn) => status === 'active' && activeWithoutTurn ? '已启用' : statuses[status];
 const titles = { settings: '运行设置', goal: '会话目标', reasoning: '任务过程', usage: '用量', agents: '代理与团队', output: '会话信息', diff: '工作区 Git 改动' };
 const extensionLabels = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
 const supportsGoalAction = (capability, action) => !capability?.actions || capability.actions.includes(action);
@@ -334,6 +335,9 @@ export function AgentPanel({ panel, work, reasoning, reasoningArchived, reasonin
         <span className="reasoning-preview"><bdi>{reasoningProgress.preview}</bdi></span>
         {reasoningProgress.final && <small className="reasoning-status">已完成</small>}
       </div>}
+      {goal && <small className="goal-panel-status" data-status={goal.status}>
+        {goalStatusLabel(goal.status, work.api?.goal?.activeWithoutTurn)}
+      </small>}
       {usage && <small className="panel-meta" title={usage}>{usage}</small>}
       {reasoningArchived && <small className="panel-meta">已归档</small>}
       {usagePanel && <button type="button" className="panel-link usage-refresh" aria-disabled={work.usageRefreshing}
@@ -457,7 +461,7 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
 });
 
 export const GoalStrip = memo(function GoalStrip({ ref, objective, status, activeWithoutTurn, expanded, toggle }) {
-  const label = status === 'active' && activeWithoutTurn ? '已启用' : statuses[status];
+  const label = goalStatusLabel(status, activeWithoutTurn);
   return <button ref={ref} type="button" className="goal-strip" title={objective} aria-label="会话目标"
     aria-describedby="goal-strip-status goal-strip-objective" aria-expanded={expanded}
     aria-controls={expanded ? 'goal-panel' : undefined} data-status={status} onClick={toggle}>

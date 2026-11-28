@@ -1262,7 +1262,7 @@ p { margin-block: 0 12px; }
   padding: 10px 13px 12px;
   scrollbar-color: #697477 transparent;
 }
-.reasoning-panel-progress { display: none; }
+.reasoning-panel-progress, .goal-panel-status { display: none; }
 /* Keep the detail's scroll offset when removing its live strip moves the panel. */
 .agent-panel[data-kind="reasoning"][data-archived] .agent-panel-content { overflow-anchor: none; }
 .agent-panel[data-kind="agents"] .agent-panel-content { padding-block: 8px; }
@@ -1373,6 +1373,31 @@ p { margin-block: 0 12px; }
   .reasoning-panel-progress { margin-inline-start: 0; }
   .reasoning-panel-progress > svg { display: block; }
   .reasoning-panel-progress:has(.reasoning-status) > svg { color: var(--accent); }
+}
+/* Reclaim space from the composer when the docked terminal leaves a short conversation. */
+@container (max-height: 300px) {
+  .conversation:not(.conversation-empty) .composer-wrap:not(:has(.approval)) {
+    padding-block: 3px 6px;
+    & > .composer { padding-block: 4px; }
+    & > .composer .composer-files:not(:focus-within) { max-height: 28px; }
+    & > .composer textarea { min-height: 24px; max-height: 46px; }
+    & > .composer textarea:not(:focus) { max-height: 24px; }
+    & > .reasoning-strip { height: 24px; margin-block-end: 3px; }
+    & > .goal-strip { min-height: 28px; padding-block: 2px; margin-block-end: 4px; }
+  }
+  .goal-strip[aria-expanded="true"] { display: none; }
+  .goal-panel-status {
+    display: inline;
+    margin-inline: 8px auto;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .goal-panel-status[data-status="blocked"] { color: var(--failure); }
+  .composer-wrap:has(.composer textarea:focus) .agent-panel[data-kind="goal"]:has(.goal-objective) {
+    --panel-height: clamp(104px, 100% - 90px, 400px);
+  }
+  .agent-panel[data-kind="goal"]:has(.goal-editor) { --panel-height: clamp(120px, 100% - 37px, 400px); }
+  .goal-editor { padding-block: 4px; }
 }
 .settings-grid, .usage-panel, .agent-groups, .delegation-form { display: grid; gap: 10px; }
 .settings-grid { grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px; row-gap: 6px; }
