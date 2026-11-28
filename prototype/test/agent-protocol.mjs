@@ -13,7 +13,8 @@ import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFile
 import { watchPiTeamTranscript } from '../ui/pi-teams.js';
 import { rememberWorkspace, savedSession, startupWorkspace } from '../ui/recent-workspaces.js';
 import { indexOutput, indexText, LINES_PER_PAGE, readOutputRange, readTextPage } from '../ui/text-pages.js';
-import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, hasReasoningSection, historyRows, mergeHistory, sameTranscriptRows, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
+import { activityFailurePreview, applyTimeline, delegatedMembers, groupedTimelineLayout, hasReasoningSection, historyRows,
+  itemKey, mergeHistory, sameTranscriptRows, timelineLayout, turnReasoning, turnReasoningRows, visibleRow } from '../ui/timeline.js';
 import { workspacePathKey } from '../ui/workspace-path.js';
 
 const local = { kind: 'local' };
@@ -1091,6 +1092,20 @@ test('older pages preserve mounted rows and ignore copies of optimistic or rende
   assert.deepEqual(merged, [earlier[0], rendered, pending]);
   assert.equal(merged[1], rendered);
   assert.equal(merged[2], pending);
+});
+
+test('replaying saved turns can still reconcile a pending message with its saved copy', () => {
+  const pending = { kind: 'user', optimistic: true, key: 'pending', clientId: 'pending', text: 'Check the workspace.' };
+  const saved = { kind: 'user', id: 'user', clientId: pending.clientId, turnId: 'saved', text: pending.text };
+  const reply = { kind: 'message', id: 'reply', turnId: 'saved', phase: 'final', text: 'Workspace checked.' };
+  const next = historyRows([{ id: 'saved', run: { id: 'saved', status: 'completed', durationMs: 2500 },
+    rows: [saved, reply] }], [pending]);
+  assert.equal(next.length, 2);
+  assert.equal(next[0].key, pending.key);
+  assert.equal(next[0].optimistic, undefined);
+  assert.equal(next[0].itemKey, itemKey(saved));
+  assert.equal(next[1].completedRun.durationMs, 2500);
+  assert.equal(pending.optimistic, true);
 });
 
 test('reasoning detail reads only its turn and retains the same view for unrelated output', () => {

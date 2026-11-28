@@ -333,10 +333,14 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
 }
 
 export function historyRows(turns, previous = []) {
-  const rows = applyTimeline(previous, turns.flatMap(turn => [
-    ...turn.rows.map(item => ({ kind: 'item', item, final: turn.run.status !== 'running' })),
-    { kind: 'run', run: turn.run },
-  ]));
+  const rows = turns.length ? reduceTimeline(previous, state => {
+    // Replay the saved turns without building a second array of per-item events.
+    for (const turn of turns) {
+      const final = turn.run.status !== 'running';
+      for (const item of turn.rows) addItem(state, item, final);
+      completeAnswer(state, turn.run);
+    }
+  }) : previous;
   const emptyReasoning = row => row.kind === 'reasoning' && !visibleRow(row);
   return rows.some(emptyReasoning) ? rows.filter(row => !emptyReasoning(row)) : rows;
 }
@@ -608,9 +612,9 @@ function addItem(state, item, final) {
   if (item.kind === 'reasoning') return addReasoning(state, item, final, false);
   const { rows, positions, write } = state;
   const key = itemKey(item);
-  const indexes = positions.get(key) ?? [];
-  const first = indexes[0];
-  if (item.kind === 'user' && first === undefined) {
+  const indexes = positions.get(key);
+  const first = indexes?.[0];
+  if (item.kind === 'user' && first === undefined && state.hasOptimisticInput) {
     const index = rows.findIndex(row => row.optimistic && (item.clientId
       ? row.clientId === item.clientId
       : row.text === item.text && (!row.turnId || row.turnId === item.turnId)
@@ -721,6 +725,16 @@ function completeAnswer({ rows, positions, write }, run) {
 
 export function applyTimeline(previous, events) {
   if (!events.length) return previous;
+  return reduceTimeline(previous, state => {
+    for (const event of events) {
+      if (event.kind === 'item') addItem(state, event.item, event.final);
+      else if (event.kind === 'delta') addDelta(state, event.delta);
+      else if (event.kind === 'run') completeAnswer(state, event.run);
+    }
+  }, events);
+}
+
+function reduceTimeline(previous, apply, events) {
   let rows = previous;
   let index = positionsByRows.get(previous);
   let ownsIndex = !index;
@@ -760,8 +774,10 @@ export function applyTimeline(previous, events) {
   const processes = processesByRows.get(previous);
   let groupingChangedAt = Infinity;
   let processChanges;
+  let hasOptimisticInput;
   const state = {
     get rows() { return rows; },
+    get hasOptimisticInput() { return hasOptimisticInput ??= previous.some(row => row.optimistic); },
     positions,
     write(position, row) {
       const earlier = rows[position];
@@ -776,10 +792,12 @@ export function applyTimeline(previous, events) {
       if (row.kind === 'reasoning' && row.turnId === reasoningView?.turnId && (row.preview || earlier?.preview)) {
         reasoningView = undefined;
       }
-      const activity = routineActivity(row);
-      const groupingChanged = activity !== routineActivity(earlier) ||
-        (activity && (row.key !== earlier.key || !sameActivityScope(row, earlier)));
-      if (groups && groupingChanged) groupingChangedAt = Math.min(groupingChangedAt, position);
+      if (groups) {
+        const activity = routineActivity(row);
+        const groupingChanged = activity !== routineActivity(earlier) ||
+          (activity && (row.key !== earlier.key || !sameActivityScope(row, earlier)));
+        if (groupingChanged) groupingChangedAt = Math.min(groupingChangedAt, position);
+      }
       if (layout) {
         const size = estimateRow(row);
         if (layout.keys[position] !== row.key || layout.sizes[position] !== size) {
@@ -792,11 +810,7 @@ export function applyTimeline(previous, events) {
       rows[position] = row;
     },
   };
-  for (const event of events) {
-    if (event.kind === 'item') addItem(state, event.item, event.final);
-    else if (event.kind === 'delta') addDelta(state, event.delta);
-    else if (event.kind === 'run') completeAnswer(state, event.run);
-  }
+  apply(state);
   positionsByRows.set(rows, index);
   if (rows === previous) return previous;
   if (reasoningView) reasoningViewByRows.set(rows, reasoningView);
@@ -817,7 +831,7 @@ export function applyTimeline(previous, events) {
   if (layout) {
     const nextLayout = updateTimelineLayout(layout, layoutChanges, mergedGroups, nextProcesses);
     layoutByRows.set(rows, nextLayout);
-    const { delta } = events[0];
+    const delta = events?.[0]?.delta;
     const item = delta?.kind === 'reasoning' && itemKey(delta);
     if (layout === nextLayout && item && events.every(event =>
       event.kind === 'delta' && event.delta.kind === 'reasoning' && event.delta.id === delta.id && event.delta.turnId === delta.turnId)) {
