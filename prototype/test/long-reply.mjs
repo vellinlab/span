@@ -438,7 +438,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
   await strip.getByText('开始复核长会话。').waitFor();
   const panel = page.getByRole('region', { name: label === 'candidate' ? '任务过程' : '推理摘要' });
   const detail = reasoningDetails ? panel.locator('.agent-panel-content') : null;
-  const heading = panel.getByRole('heading', { name: '复核顺序' });
+  const heading = detail?.getByRole('heading', { name: '复核顺序' });
   let detailPosition;
   let detailOffsetBeforeArchive;
   let initialHeading;
@@ -452,10 +452,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     }) : null;
     await strip.press('Enter');
     await heading.waitFor();
-    await panel.locator('ul ul').getByText('保留两级缩进', { exact: true }).waitFor();
+    await detail.locator('ul ul').getByText('保留两级缩进', { exact: true }).waitFor();
     if (reasoningIndex) {
-      await panel.getByRole('heading', { name: '已核对记录 8', exact: true }).waitFor();
-      await panel.getByText('开始复核长会话。', { exact: true }).waitFor();
+      await detail.getByRole('heading', { name: '已核对记录 8', exact: true }).waitFor();
+      await detail.getByText('开始复核长会话。', { exact: true }).waitFor();
     }
     detailPosition = await heading.boundingBox();
     if (deferredDetails) {
@@ -535,7 +535,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
     await strip.getByText(lastBatch, { exact: false }).waitFor();
     if (reasoningFollowing) {
-      await panel.getByText(lastBatch, { exact: false }).waitFor();
+      await detail.getByText(lastBatch, { exact: false }).waitFor();
       await revealBottom();
     }
     await settleFrame(page);
@@ -582,20 +582,20 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
         if (deferredDetails) assert.equal(bodyUpdates, 0);
         else assert.ok(bodyUpdates > 0, 'The baseline must render updates below the viewport.');
         await detail.evaluate(element => { element.scrollTop = element.scrollHeight; });
-        await panel.getByText(lastBatch, { exact: false }).waitFor();
+        await detail.getByText(lastBatch, { exact: false }).waitFor();
       }
       if (deferredDetails) await revealBottom();
       await writeFile(join(profile, 'follow-detail'), '');
       if (reasoningFollowing) {
         if (label === 'candidate') {
-          await panel.locator('ol > li').filter({ hasText: /^\s*$/ }).waitFor({ state: 'attached' });
+          await detail.locator('ol > li').filter({ hasText: /^\s*$/ }).waitFor({ state: 'attached' });
           await strip.getByText(lastBatch, { exact: false }).waitFor();
           assert.deepEqual(await strip.boundingBox(), geometry);
           assert.equal(await position(), before);
         }
         await writeFile(join(profile, 'follow-detail-content'), '');
       }
-      await panel.getByText('步骤 073', { exact: false }).waitFor();
+      await detail.getByText('步骤 073', { exact: false }).waitFor();
       if (label === 'candidate') await strip.getByText('收尾复核完成。步骤 073', { exact: true }).waitFor();
       if (deferredDetails) await revealBottom();
       if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-tail.png` });
@@ -643,7 +643,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     }
     if (reasoningFollowing) {
       await writeFile(join(profile, 'reference-prefix'), '');
-      await panel.getByText('[迟到引用]', { exact: true }).waitFor();
+      await detail.getByText('[迟到引用]', { exact: true }).waitFor();
       if (label === 'candidate') {
         const ending = 'آخر خطوة: مراجعة النتائج.';
         await strip.getByText(ending, { exact: false }).waitFor();
@@ -662,7 +662,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
         if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-rtl.png` });
       }
       await writeFile(join(profile, 'reference-definition'), '');
-      const link = panel.getByRole('link', { name: '迟到引用', exact: true });
+      const link = detail.getByRole('link', { name: '迟到引用', exact: true });
       await link.waitFor();
       assert.equal(await link.getAttribute('href'), 'https://example.com/span/reference');
       if (label === 'candidate') {
