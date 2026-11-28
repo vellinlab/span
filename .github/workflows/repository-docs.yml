@@ -3,10 +3,10 @@ name: Check repository documentation
 on:
   push:
     branches: [main]
-    paths: ['README.md', 'CONTRIBUTING.md', 'docs/**', '.github/ISSUE_TEMPLATE/**', '.github/workflows/repository-docs.yml']
+    paths: ['README*.md', 'CONTRIBUTING.md', 'docs/**', '.github/ISSUE_TEMPLATE/**', '.github/workflows/repository-docs.yml']
   pull_request:
     branches: [main]
-    paths: ['README.md', 'CONTRIBUTING.md', 'docs/**', '.github/ISSUE_TEMPLATE/**', '.github/workflows/repository-docs.yml']
+    paths: ['README*.md', 'CONTRIBUTING.md', 'docs/**', '.github/ISSUE_TEMPLATE/**', '.github/workflows/repository-docs.yml']
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ jobs:
           from pathlib import Path
           from urllib.parse import unquote, urlsplit
 
-          guides = (Path("README.md"), Path("CONTRIBUTING.md"), *Path("docs").glob("*.md"))
+          guides = (*Path(".").glob("README*.md"), Path("CONTRIBUTING.md"), *Path("docs").glob("*.md"))
           for guide in guides:
               text = guide.read_text(encoding="utf-8")
               links = re.findall(r"\]\(([^\s)]+)\)", text)

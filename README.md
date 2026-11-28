@@ -6,7 +6,8 @@
     <a href="https://github.com/vellinlab/span/releases/latest">下载稳定版</a> ·
     <a href="docs/usage.md">使用指南</a> ·
     <a href="https://github.com/vellinlab/span/issues/new/choose">反馈问题</a> ·
-    <a href="CONTRIBUTING.md">参与贡献</a>
+    <a href="CONTRIBUTING.md">参与贡献</a> ·
+    <a href="README.en.md">English</a>
   </p>
 </div>
 
