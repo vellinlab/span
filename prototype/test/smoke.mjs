@@ -1947,8 +1947,11 @@ try {
   await cardAgent.press('Enter');
   const taskNote = trace.locator('.user-message').filter({ hasText: '复核工作台键盘导航。' });
   await taskNote.waitFor();
-  await trace.getByText('检查窄窗口与返回焦点。', { exact: true }).waitFor();
   await trace.getByText('子代理的会话记录。', { exact: true }).waitFor();
+  const childProcess = trace.getByRole('button', { name: '任务过程', exact: true });
+  const childProgress = trace.getByText('检查窄窗口与返回焦点。', { exact: true });
+  assert.equal(await childProcess.getAttribute('aria-expanded'), 'false');
+  assert.equal(await childProgress.count(), 0);
   const traceBounds = await panel.boundingBox();
   assert.ok(Math.abs(traceBounds.x - rosterBounds.x) <= 1 && Math.abs(traceBounds.width - rosterBounds.width) <= 1,
     'The roster and the child transcript should occupy the same horizontal space');
@@ -1960,6 +1963,10 @@ try {
   assert.ok(await panel.evaluate(element => element.getBoundingClientRect().height <= 244),
     'The child panel should fit the short transcript instead of using its full height.');
   assert.equal(await trace.getByText('已记录首轮检查。', { exact: true }).count(), 0);
+  await childProcess.press('Enter');
+  await childProgress.waitFor();
+  await childProcess.press('Enter');
+  await childProgress.waitFor({ state: 'detached' });
   await trace.hover();
   await page.mouse.wheel(0, -240);
   await trace.getByText('已记录首轮检查。', { exact: true }).waitFor();
