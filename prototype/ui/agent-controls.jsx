@@ -440,6 +440,7 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
       aria-controls={open ? menuId : undefined}
       aria-description={description} title={description}
       onClick={() => setOpen(value => !value)}>
+      <SlidersHorizontal className="agent-menu-icon" size={16} aria-hidden="true" />
       <span className="agent-menu-label">Agent</span>
       {label && <span className="agent-menu-model">{label}</span>}
       <ChevronDown className="agent-menu-chevron" size={12} aria-hidden="true" />

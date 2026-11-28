@@ -1,8 +1,8 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowUp, ChevronDown, FileText, Folder, FolderOpen,
-  Image, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
+  Image, Network, PanelLeftClose, PanelLeftOpen, PanelRight, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
 import { agentCommands, commandSuggestions, commonAgentCommands, AgentMenu, AgentPanel, GoalStrip } from './agent-controls.jsx';
@@ -30,14 +30,8 @@ const connectionLabels = { ready: '已连接', connecting: '正在连接', offli
 const routeLabels = { shared: '共享后台', stdio: '独立进程', fixture: '演示数据', remote: '远程服务' };
 const extensionCommands = { '/mcp': 'mcp', '/skills': 'skill', '/plugins': 'plugin', '/apps': 'connector', '/tools': 'tool' };
 const extensionTitles = { mcp: 'MCP 服务器', skill: '技能', plugin: '插件', connector: '连接器', tool: '工具' };
-const previewOverlayQuery = window.matchMedia('(max-width: 1020px)');
-
-function subscribePreviewOverlay(onChange) {
-  previewOverlayQuery.addEventListener('change', onChange);
-  return () => previewOverlayQuery.removeEventListener('change', onChange);
-}
-
-const isPreviewOverlay = () => previewOverlayQuery.matches;
+// Readable side-by-side minimum for the conversation and file preview together.
+const splitWorkspaceWidth = 620;
 
 function workspaceRelativePath(cwd, filename) {
   const windows = windowsPath.test(cwd);
@@ -115,7 +109,21 @@ function App() {
   const [directory, setDirectory] = useState('');
   const [entries, setEntries] = useState([]);
   const [preview, setPreview] = useState(null);
-  const previewOverlay = useSyncExternalStore(subscribePreviewOverlay, isPreviewOverlay);
+  const workspaceArea = useRef(null);
+  const [previewOverlay, setPreviewOverlay] = useState(false);
+  useLayoutEffect(() => {
+    const element = workspaceArea.current;
+    let overlay = element.clientWidth < splitWorkspaceWidth;
+    setPreviewOverlay(overlay);
+    const observer = new ResizeObserver(([entry]) => {
+      const next = entry.contentRect.width < splitWorkspaceWidth;
+      if (next === overlay) return;
+      overlay = next;
+      setPreviewOverlay(next);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const jumpToLatest = useRef(true);
   const input = useRef(null);
   const choosingFiles = useRef(false);
@@ -339,7 +347,8 @@ function App() {
       if (previewRegion.current?.contains(document.activeElement)) {
         interactionRegion.current?.focus({ preventScroll: true });
       }
-    } else if (focus === 'content' || (readingOverlay && !previewRegion.current?.contains(document.activeElement))) {
+    } else if (focus === 'content' || (readingOverlay && !previewRegion.current?.contains(document.activeElement) &&
+      !document.activeElement?.matches('.sidebar-grip'))) {
       if (focus === 'content' && preview.kind !== 'markdown' && preview.position && previewReader.current) {
         restorePreviewPosition(previewReader.current, preview.position);
       }
@@ -1014,6 +1023,7 @@ function App() {
   const name = sessionTitle(session);
   const branch = session?.branch;
   const workspaceHint = [session?.cwd || cwd, branch && `Git 分支 · ${branch}`].filter(Boolean).join('\n');
+  const previewToggleLabel = preview?.parked ? '继续预览' : '返回会话';
   const connectionLabel = connectionLabels[connection];
   const connectionError = connection === 'offline' && error;
   const sessionActions = refKey && (api?.sessions.rename || api?.sessions.fork || api?.sessions.archive);
@@ -1051,8 +1061,11 @@ function App() {
           {branch && <span className="branch" dir="auto" title={branch}>{branch}</span>}
         </div>
         {preview && (preview.parked || readingOverlay) && <button type="button" className="preview-toggle"
-          aria-controls="file-preview" title={previewBlocked ? '处理请求后可继续预览' : undefined}
-          disabled={previewBlocked} onClick={togglePreview}>{preview.parked ? '继续预览' : '返回会话'}</button>}
+          aria-label={previewToggleLabel} aria-controls="file-preview"
+          title={previewBlocked ? '处理请求后可继续预览' : previewToggleLabel}
+          disabled={previewBlocked} onClick={togglePreview}>
+          <PanelRight size={16} aria-hidden="true" /><span>{previewToggleLabel}</span>
+        </button>}
         <button ref={terminalToggle} className="icon-button terminal-toggle" aria-label="切换终端" aria-keyshortcuts="Control+Shift+J"
           title={`${terminalVisible ? '收起终端' : terminal === 'closed' ? '打开终端' : '展开终端'} (Ctrl+Shift+J)`}
           aria-controls={terminal === 'closed' ? undefined : 'workbench-terminal'}
@@ -1116,7 +1129,7 @@ function App() {
           <button aria-pressed={tab === 'files'} onClick={() => selectSidebarTab('files')}><Folder size={16} />文件</button>
         </nav>
       </Sidebar>}
-      <div className="workspace-area" data-preview-overlay={previewOverlay || undefined}>
+      <div ref={workspaceArea} className="workspace-area" data-preview-overlay={previewOverlay || undefined}>
         <main className="main" inert={readingOverlay}
           onFocusCapture={event => { conversationFocus.current = new WeakRef(event.target); }}>
           <div className={`conversation${rows.length || session || loading ? '' : ' conversation-empty'}`}>
@@ -1199,7 +1212,8 @@ function App() {
                     aria-description="切换 Agent 与主机"
                     title={[backendName, host, connectionLabel, routeLabels[route], '切换 Agent 与主机'].filter(Boolean).join(' · ')}
                     onClick={showConnection}>
-                    <i className={connection} /><span>{backendName} · {host}</span><ChevronDown size={12} />
+                    <Network className="connection-icon" size={16} aria-hidden="true" />
+                    <i className={connection} /><span>{backendName} · {host}</span><ChevronDown className="connection-chevron" size={12} />
                   </button>
                   <span className="composer-status" role="status">{connection !== 'ready' ? connectionLabel :
                     interaction ? interaction.kind === 'approval' ? '等待审批' : '等待回答' :

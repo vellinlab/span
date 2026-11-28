@@ -1944,6 +1944,46 @@ try {
     await imageReleases.dispose();
     assert.ok(await sentImage.evaluate(element => document.activeElement === element));
     assert.equal(await transcript.evaluate(element => element.scrollTop), readingTop);
+
+    await sentImage.press('Enter');
+    await waitForImage();
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window.setContentSize(1090, 720);
+      window.webContents.setZoomFactor(1.25);
+    });
+    await page.waitForFunction(() => {
+      const main = document.querySelector('main');
+      return innerWidth > 830 && innerWidth < 920 && !main.inert && main.clientWidth >= 360 && main.clientWidth < 456;
+    });
+    await page.locator('.composer-bar .connection-icon').waitFor();
+    await page.locator('.agent-menu-icon').waitFor();
+    const splitDraft = '缩放后仍可在文件预览旁输入。';
+    await composer.fill(splitDraft);
+    assert.ok(await composer.evaluate(input => {
+      const bar = input.nextElementSibling;
+      const preview = document.querySelector('#file-preview');
+      const main = input.closest('main').getBoundingClientRect();
+      const within = bar.getBoundingClientRect();
+      return preview.clientWidth >= 250 && Math.abs(preview.getBoundingClientRect().left - main.right) <= 1 &&
+        [...bar.querySelectorAll('button')].every(button => {
+          const bounds = button.getBoundingClientRect();
+          const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+          return bounds.left >= within.left && bounds.right <= within.right + 1 && button.contains(hit);
+        });
+    }));
+    if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-split-view-125.png') });
+    await grip.press('End');
+    await page.locator('main[inert]').waitFor();
+    assert.ok(await grip.evaluate(element => element === document.activeElement));
+    await page.keyboard.press('Home');
+    await page.locator('main:not([inert])').waitFor();
+    await grip.dblclick();
+    await closeImage.press('Escape');
+    await preview.waitFor({ state: 'detached' });
+    assert.equal(await composer.inputValue(), splitDraft);
+    await composer.fill('');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
     await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), previousSize);
   }
   await page.waitForFunction(() => document.querySelector('.composer textarea').value === '');

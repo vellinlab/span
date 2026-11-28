@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
 const key = 'span.sidebar.width';
-const minimum = 190;
+const smallestWidth = 120;
 
 export function Sidebar({ children }) {
   const [preferred, setPreferred] = useState(() => {
     const value = Number(localStorage.getItem(key));
-    return Number.isFinite(value) && value >= minimum ? Math.round(value) : null;
+    return Number.isFinite(value) && value >= smallestWidth ? Math.round(value) : null;
   });
   const [viewport, setViewport] = useState(window.innerWidth);
   const [dragWidth, setDragWidth] = useState(null);
@@ -16,9 +16,13 @@ export function Sidebar({ children }) {
     window.addEventListener('resize', resize);
     return () => window.removeEventListener('resize', resize);
   }, []);
-  const maximum = Math.max(minimum, Math.min(600, Math.floor(viewport * 0.42)));
+  // Match the viewport limits that CSS applies during the window resize.
+  const compact = viewport <= 680;
+  const minimum = compact ? Math.round(Math.max(smallestWidth, Math.min(148, viewport * 0.5 - 63))) : 190;
+  const viewportLimit = Math.min(600, Math.floor(viewport * 0.42));
+  const maximum = Math.max(minimum, compact ? Math.min(viewportLimit, viewport - 366) : viewportLimit);
   const clamp = value => Math.round(Math.max(minimum, Math.min(maximum, value)));
-  const defaultWidth = Math.max(205, Math.min(270, viewport * 0.2));
+  const defaultWidth = compact ? Math.min(205, viewport * 0.42 - 80) : Math.max(205, Math.min(270, viewport * 0.2));
   const width = clamp(dragWidth ?? preferred ?? defaultWidth);
 
   function save(value) {
