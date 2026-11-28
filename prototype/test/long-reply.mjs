@@ -420,10 +420,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
   await goal.getByText(goalText).waitFor();
   await composer.fill('验证高频推理摘要。');
   await composer.press('Enter');
-  const strip = page.getByRole('button', { name: '实时任务进度' });
+  const strip = page.getByRole('button', { name: label === 'candidate' ? '实时任务进度' : '实时推理摘要' });
   const lastBatch = '步骤 072';
   await strip.getByText('开始复核长会话。').waitFor();
-  const panel = page.getByRole('region', { name: '任务过程' });
+  const panel = page.getByRole('region', { name: label === 'candidate' ? '任务过程' : '推理摘要' });
   const detail = reasoningDetails ? panel.locator('.agent-panel-content') : null;
   const heading = panel.getByRole('heading', { name: '复核顺序' });
   let detailPosition;

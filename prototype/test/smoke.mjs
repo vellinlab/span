@@ -2027,7 +2027,10 @@ try {
         element.scrollLeft = 0;
         return atEnd;
       }), 'The horizontal scroller reaches the full command.');
-      await readingTitle.evaluate(element => {
+      await readingTitle.evaluate(async element => {
+        // Let the resized transcript reach its new end before starting a separate scroll.
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
         const timeline = element.closest('.timeline');
         timeline.scrollTop += element.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 14;
       });
