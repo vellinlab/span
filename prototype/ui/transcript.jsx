@@ -454,6 +454,8 @@ export const Transcript = memo(function Transcript({
   const following = useRef(true);
   const followAfterFold = useRef(false);
   const viewportSize = useRef(null);
+  const textAnchor = useRef(null);
+  const textReflowFrame = useRef(undefined);
   const [, updateExpansion] = useReducer(version => version + 1, 0);
   const inspect = useCallback((key, open) => {
     if (open) {
@@ -628,9 +630,9 @@ export const Transcript = memo(function Transcript({
     const columnWidth = () => element.firstElementChild?.getBoundingClientRect().width;
     viewportSize.current = { height: element.clientHeight, width: element.clientWidth };
     let readingWidth = columnWidth();
-    let anchor;
     const rememberPosition = () => {
-      anchor = following.current || latest.current?.restore ? undefined : readTextAnchor(element);
+      if (textReflowFrame.current !== undefined) return;
+      textAnchor.current = following.current || latest.current?.restore ? undefined : readTextAnchor(element);
     };
     element.addEventListener('scrollend', rememberPosition);
     const observer = new ResizeObserver(() => {
@@ -641,31 +643,36 @@ export const Transcript = memo(function Transcript({
       const rewrap = width !== readingWidth;
       readingWidth = width;
       if (following.current && virtual.options.count && (height !== previous.height || rewrap)) virtual.scrollToEnd();
-      if (!rewrap || following.current || latest.current?.restore || !anchor ||
-        element.scrollTop !== anchor.scrollTop || anchor.range.startContainer.nodeType !== Node.TEXT_NODE ||
-        !element.contains(anchor.range.startContainer)) return;
-      // The virtualizer can preserve the row, while the first visible line moves inside it.
-      const line = anchor.range.getBoundingClientRect();
-      if (!line.height) return;
-      const delta = line.top - element.getBoundingClientRect().top - anchor.top;
-      if (Math.abs(delta) > 1) {
-        element.scrollTop += delta;
+      const anchor = textAnchor.current;
+      if (!rewrap || following.current || latest.current?.restore || !anchor || textReflowFrame.current !== undefined) return;
+      // Let the virtualizer finish measuring resized rows before restoring the line inside a row.
+      textReflowFrame.current = requestAnimationFrame(() => {
+        textReflowFrame.current = undefined;
+        if (following.current || latest.current?.restore || textAnchor.current !== anchor ||
+          anchor.range.startContainer.nodeType !== Node.TEXT_NODE || !element.contains(anchor.range.startContainer)) return;
+        const line = anchor.range.getBoundingClientRect();
+        if (!line.height) return;
+        const delta = line.top - element.getBoundingClientRect().top - anchor.top;
+        if (Math.abs(delta) > 1) element.scrollTop += delta;
         anchor.scrollTop = element.scrollTop;
-      }
+      });
     });
     observer.observe(element);
     return () => {
       observer.disconnect();
       element.removeEventListener('scrollend', rememberPosition);
+      if (textReflowFrame.current !== undefined) cancelAnimationFrame(textReflowFrame.current);
+      textReflowFrame.current = undefined;
     };
   }, [scroll, virtual]);
 
   function onScroll(event) {
-    if (restore) return;
+    if (restore || textReflowFrame.current !== undefined) return;
     const element = scroll.current;
     // A resize can scroll the list before its observer has restored the viewport.
     const size = viewportSize.current;
     if (element.clientHeight !== size?.height || element.clientWidth !== size.width) return;
+    if (textAnchor.current && textAnchor.current.scrollTop !== element.scrollTop) textAnchor.current = undefined;
     const atBottom = transcriptIsAtEnd(element);
     following.current = atBottom;
     if (atBottom && inspectedCard) setInspectedCard(null);
