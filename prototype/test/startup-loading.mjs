@@ -81,6 +81,16 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
     if (label === 'candidate') {
       assert.equal(scripts.some(script => /^(?:pi|markdown-content)-/.test(script.name)), false);
     }
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    const { root } = await cdp.send('DOM.getDocument');
+    const fonts = Object.fromEntries(await Promise.all(Object.entries({ brand: '.brand strong', heading: '.welcome h1' })
+      .map(async ([name, selector]) => {
+        const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+        const result = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+        assert.ok(result.fonts.length, `Observe the actual fonts in ${selector}`);
+        return [name, result.fonts];
+      })));
     if (screenshot && firstOnDisplay && label === 'baseline') {
       await page.screenshot({ path: screenshot.replace(/\.png$/, '-baseline.png') });
     }
@@ -104,7 +114,7 @@ async function check(binary, label, display, firstOnDisplay, exercise) {
       assert.ok([...modules].some(url => /\/pi-/.test(url)));
     }
     assert.deepEqual(errors, []);
-    return { label, firstOnDisplay, ...paint, renderer, chromiumProcesses, scripts,
+    return { label, firstOnDisplay, ...paint, renderer, chromiumProcesses, scripts, fonts,
       scriptBytes: scripts.reduce((sum, script) => sum + script.bytes, 0) };
   } finally {
     await app?.close();

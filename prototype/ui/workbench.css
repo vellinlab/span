@@ -1400,7 +1400,7 @@ summary.extension-heading { cursor: pointer; }
 .preview-close { width: 26px; height: 26px; }
 .terminal-panel {
   /* Keep the shell usable at the minimum window height while leaving room for the conversation. */
-  flex: 0 0 clamp(96px, calc(100vh - 424px), min(29vh, 300px));
+  flex: 0 0 clamp(106px, calc(100vh - 414px), min(29vh, 300px));
   min-width: 0;
   border-top: 1px solid var(--line);
 }

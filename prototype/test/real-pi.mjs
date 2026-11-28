@@ -717,8 +717,11 @@ export default function (pi) {
     await worker.getByRole('button', { name: '查看 native-reviewer 的会话记录', exact: true }).click();
     const trace = native.page.getByTestId('subagent-transcript');
     await trace.getByText(workerPrompt, { exact: false }).waitFor();
-    await trace.locator('[data-card="reasoning"]').getByText(workerReasoning, { exact: true }).waitFor();
     await trace.getByText(workerAnswer, { exact: true }).waitFor();
+    const workerProcess = trace.getByRole('button', { name: '任务过程', exact: true });
+    assert.equal(await workerProcess.getAttribute('aria-expanded'), 'false');
+    await workerProcess.press('Enter');
+    await trace.locator('[data-card="reasoning"]').getByText(workerReasoning, { exact: true }).waitFor();
     const detailBounds = await native.page.getByRole('region', { name: 'native-reviewer', exact: true }).boundingBox();
     assert.ok(Math.abs(detailBounds.x - rosterBounds.x) <= 1 && Math.abs(detailBounds.width - rosterBounds.width) <= 1,
       'The desktop roster and member transcript should keep the same horizontal bounds');

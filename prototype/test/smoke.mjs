@@ -1219,7 +1219,7 @@ try {
     const branchInTooltip = breadcrumb.querySelector('.breadcrumb-workspace').title.includes(element.title);
     return title.scrollWidth === title.clientWidth && (bounds.width ? fits : branchInTooltip);
   }), 'The branch fits before the window actions or appears in the workspace tooltip.');
-  assert.ok(await page.evaluate(() => {
+  const compactApproval = await page.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
     const body = rect('.approval-body');
     const command = document.querySelector('.approval-operation pre').firstChild;
@@ -1229,12 +1229,18 @@ try {
     const commandStart = firstLine.getBoundingClientRect();
     const refuse = rect('.approval-actions button');
     const hit = document.elementFromPoint(refuse.left + refuse.width / 2, refuse.top + refuse.height / 2);
-    return rect('.timeline').height >= 44 && rect('.approval-context').bottom <= body.bottom &&
-      commandStart.top >= body.top && commandStart.bottom <= body.bottom + 1 &&
-      rect('.approval').bottom < rect('.goal-strip').top && rect('.goal-strip').bottom < rect('.composer').top &&
-      rect('.terminal-canvas').height >= 70 &&
-      rect('.composer').bottom <= rect('.terminal-panel').top && Boolean(hit?.closest('.approval-actions button'));
-  }), 'History, approval scope, the first command line, actions, the long draft and terminal fit at the minimum window size');
+    return {
+      history: rect('.timeline').height,
+      terminal: rect('.terminal-canvas').height,
+      scope: rect('.approval-context').bottom <= body.bottom,
+      command: commandStart.top >= body.top && commandStart.bottom <= body.bottom + 1,
+      order: rect('.approval').bottom < rect('.goal-strip').top && rect('.goal-strip').bottom < rect('.composer').top &&
+        rect('.composer').bottom <= rect('.terminal-panel').top,
+      action: Boolean(hit?.closest('.approval-actions button')),
+    };
+  });
+  assert.ok(compactApproval.history >= 44 && compactApproval.terminal >= 70 && compactApproval.scope && compactApproval.command &&
+    compactApproval.order && compactApproval.action, `Approval layout at the minimum window size: ${JSON.stringify(compactApproval)}`);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-approval-compact.png') });
   const approvalDetails = approval.getByRole('group', { name: '操作详情' });
   await approval.focus();
