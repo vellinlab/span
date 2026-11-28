@@ -309,7 +309,9 @@ async function checkPreviewSwitch(binary) {
     await content.getByRole('button', { name: '复制代码', exact: true }).press('Enter');
     let actions;
     for (let attempt = 0; attempt < 40; attempt++) {
-      actions = await app.evaluate(({ clipboard }) => ({ link: globalThis.previewLink, code: clipboard.readText() }));
+      actions = await app.evaluate(async ({ clipboard }) => ({
+        link: globalThis.previewLink, code: (await clipboard.readText()).replaceAll('\r\n', '\n'),
+      }));
       if (actions.link && actions.code.includes('span_preview_clipboard')) break;
       await delay(25);
     }
