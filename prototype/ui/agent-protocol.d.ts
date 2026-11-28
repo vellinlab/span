@@ -157,6 +157,8 @@ export interface AgentAdapter {
   /** Models come from the active session and are cleared when leaving it. */
   sessionModels?: boolean;
   sessions: {
+    /** A saved reference can resume independently of the catalog. */
+    resumeWithoutCatalog?: boolean;
     list(options: { cursor?: string; archived?: boolean }): Promise<Page<Session>>;
     listPinned?(): Promise<Session[]>;
     search?(options: { query: string; cursor?: string; archived?: boolean }): Promise<Page<Session>>;

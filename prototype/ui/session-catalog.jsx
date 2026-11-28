@@ -56,7 +56,7 @@ const CatalogRow = memo(function CatalogRow({ row, id, index, top, active, selec
 });
 
 export const SessionCatalog = memo(function SessionCatalog({
-  sessions, project, projectIdentity, remote, scope, archived, query, selected, disabled, more, searchResult, open, loadMore, scrollPosition,
+  sessions, project, projectIdentity, remote, scope, archived, pending, query, selected, disabled, more, searchResult, open, loadMore, scrollPosition,
 }) {
   const filter = query.toLocaleLowerCase();
   const scrollScope = JSON.stringify([scope, archived, query]);
@@ -148,14 +148,14 @@ export const SessionCatalog = memo(function SessionCatalog({
     if (!mountedGroups.has(group)) mountedGroups.set(group, []);
     if (parent !== undefined) mountedGroups.get(group).push(index);
   }
-  let empty = archived && !filter ? '没有归档会话' : '';
+  let empty = pending ? '正在加载会话…' : archived ? '没有归档会话' : '';
   if (filter) {
     if (searchResult?.pending) empty = '正在搜索会话…';
     else if (searchResult?.unavailable) empty = '请连接 Agent 后搜索历史会话';
     else empty = more && !searchResult ? '已加载的会话中没有匹配项' : '没有匹配的会话';
   }
   return <div className="side-list workspaces" data-testid="session-catalog" ref={scroll} data-items={rows.length}
-    aria-busy={searchResult?.pending || undefined}>
+    aria-busy={(filter ? searchResult?.pending : pending) || undefined}>
     {rows.length > 0 && <div className="catalog-tree" role="tree" aria-label={archived ? '已归档会话' : '工作区会话'} tabIndex={0}
       aria-activedescendant={active === undefined ? undefined : `${prefix}-${active}`}
       onFocus={() => {
@@ -191,7 +191,7 @@ export const SessionCatalog = memo(function SessionCatalog({
       <p role="status" title={searchResult.error}>搜索失败</p>
       <button type="button" onClick={loadMore}>重试</button>
     </div> : <>
-      {!rows.length && empty && <p className="search-empty" role="status">{empty}</p>}
+      {(!rows.length || (pending && !sessions.length && !filter)) && empty && <p className="search-empty" role="status">{empty}</p>}
       {more && <button className="load-more" type="button" disabled={searchResult?.pending} onClick={loadMore}>
         {searchResult ? '加载更多结果' : '加载更多会话'}
       </button>}

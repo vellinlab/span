@@ -482,6 +482,7 @@ function createCodex(backend, { generation, cwd, location, onEvent }) {
       window.span.request('agent.close', { generation }).catch(() => {});
     },
     sessions: {
+      resumeWithoutCatalog: native,
       list: listSessions,
       search: native ? listSessions : undefined,
       async start({ cwd }) {

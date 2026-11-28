@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 import { acpReplay } from '../ui/acp-items.js';
 import { createAcpTaskTraces } from '../ui/acp-task-traces.js';
 import acpHttp from '../desktop/acp-http.cjs';
-import { agentBackends, createAgent, sessionKey } from '../ui/agent.js';
+import { agentBackends, createAgent, mergeStartupSessions, sessionKey } from '../ui/agent.js';
 import { normalizeItem } from '../ui/codex-items.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from '../ui/delegation.js';
 import { attachmentArtifacts, fileReferencePreview, fileReferenceText, parseFileReferences } from '../ui/file-references.js';
@@ -629,6 +629,18 @@ test('session identities are scoped by backend and host, and the factory rejects
   assert.equal(new Set(refs.map(sessionKey)).size, refs.length);
   assert.deepEqual(agentBackends.map(item => item.id), ['codex', 'clue', 'pi', 'opencode', 'kilo', 'claude']);
   await assert.rejects(createAgent('missing', { location: local }), /不支持/);
+});
+
+test('a late first catalog page keeps newly created and restored sessions without losing metadata', () => {
+  const restored = { ...session('codex', local), id: 'restored' };
+  const fresh = { ref: { ...restored, id: 'fresh' }, preview: 'New draft' };
+  const current = { ref: restored, title: 'Edited while loading', cwd: undefined, pinned: false };
+  const listed = { ref: restored, title: 'Old name', cwd: '/work', pinned: true };
+  const otherHost = { ref: { ...restored, location: remote }, title: 'Remote' };
+  assert.deepEqual(mergeStartupSessions([otherHost, listed], [fresh, current], sessionKey(restored)), [
+    fresh, otherHost, { ...current, cwd: '/work' },
+  ]);
+  assert.deepEqual(mergeStartupSessions([otherHost], [fresh, current], sessionKey(restored)), [fresh, otherHost, current]);
 });
 
 test('workspace recovery keeps session IDs scoped to their Agent and location', () => {

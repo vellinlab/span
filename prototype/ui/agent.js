@@ -40,3 +40,17 @@ export function sessionTitle(entry) {
 export function mergeSessions(previous, next) {
   return [...new Map([...previous, ...next].map(entry => [sessionKey(entry.ref), entry])).values()];
 }
+
+export function mergeStartupSessions(listed, observed, restoredKey) {
+  // The user can send, rename or pin before the first catalog reply arrives.
+  const newer = new Map(observed.map(item => [sessionKey(item.ref), item]));
+  const rows = listed.map(item => {
+    const key = sessionKey(item.ref);
+    const entry = newer.get(key);
+    newer.delete(key);
+    return entry ? { ...item, ...Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined)) } : item;
+  });
+  const restored = newer.get(restoredKey);
+  newer.delete(restoredKey);
+  return [...newer.values(), ...rows, ...(restored ? [restored] : [])];
+}

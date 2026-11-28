@@ -1073,7 +1073,7 @@ function App() {
         {tab === 'sessions' && <SessionCatalog sessions={sessions} project={config && (config.ssh || cwd || '工作区')}
           projectIdentity={windowsWorkspace && workspaceIdentity?.cwd === cwd ? workspaceIdentity.identity : undefined}
           remote={Boolean(config?.ssh)} scope={JSON.stringify([config?.backend, config?.ssh || cwd])}
-          archived={work.archived} query={catalogQuery} selected={refKey}
+          archived={work.archived} pending={work.catalogLoading} query={catalogQuery} selected={refKey}
           disabled={running || loading || connection !== 'ready'} more={Boolean(catalogSearch ? catalogSearch.cursor : work.sessionCursor)}
           searchResult={catalogSearch} open={openCatalogSession} loadMore={loadCatalogPage}
           scrollPosition={catalogQuery ? searchScroll : catalogScroll} />}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createAgent, mergeSessions, sessionKey } from './agent.js';
+import { createAgent, mergeSessions, mergeStartupSessions, sessionKey } from './agent.js';
 import { reconcileRoster, recordRosterUpdate, updateRoster } from './delegation.js';
 import { attachmentArtifacts } from './file-references.js';
 import { rememberWorkspace, savedSession } from './recent-workspaces.js';
@@ -17,6 +17,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   const [route, setRoute] = useState('');
   const [sessions, setSessions] = useState([]);
   const [sessionCursor, setSessionCursor] = useState(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [archived, setArchived] = useState(false);
   const [session, setSession] = useState(null);
@@ -269,8 +270,11 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       if (scope !== layer.current) return;
       selected = { ...entry, ...Object.fromEntries(Object.entries(state.session).filter(([, value]) => value != null)) };
       active.current = { ref: selected.ref, key: sessionKey(selected.ref) };
-      setSession(selected);
-      putSession(selected, Boolean(opened) && !archived);
+      setSession(current => ({ ...current, ...selected }));
+      if (!restoring || Boolean(selected.archived) === requestedArchiveView.current) {
+        const includeRestored = Boolean(restoring && client.sessions.resumeWithoutCatalog);
+        putSession(selected, includeRestored || (Boolean(opened) && !archived));
+      }
       setOptions(state.options ?? {});
       if (state.models) setModels(state.models);
 
@@ -327,13 +331,30 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     }
   }
 
-  async function list(client, showArchived, next) {
+  async function list(client, showArchived, next, startup) {
     requestedArchiveView.current = showArchived;
     const pinnedVersion = next ? undefined : ++callbacks.current.pinned;
     const version = ++callbacks.current.catalog;
-    const page = await client.sessions.list({ cursor: next ?? undefined, archived: showArchived });
-    if (version !== callbacks.current.catalog || client !== agent.current) return [];
-    setSessions(previous => next ? mergeSessions(previous, page.items) : page.items);
+    const current = () => version === callbacks.current.catalog && client === agent.current;
+    if (!next) setCatalogLoading(true);
+    let page;
+    try {
+      page = await client.sessions.list({ cursor: next ?? undefined, archived: showArchived });
+    } catch (error) {
+      if (current()) throw error;
+      return [];
+    } finally {
+      if (current()) setCatalogLoading(false);
+    }
+    if (!current()) return [];
+    if (startup?.savedKey) {
+      const entry = page.items.find(item => sessionKey(item.ref) === startup.savedKey);
+      if (entry) setSession(selected => sessionKey(selected?.ref) === startup.savedKey ? { ...entry, ...selected } : selected);
+    }
+    setSessions(previous => {
+      if (next) return mergeSessions(previous, page.items);
+      return startup && previous.length ? mergeStartupSessions(page.items, previous, startup.savedKey) : page.items;
+    });
     setSessionCursor(page.cursor);
     setArchived(showArchived);
     if (!next && !showArchived && client.sessions.listPinned) {
@@ -355,6 +376,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
     setRoute('');
     setSessions([]);
     setSessionCursor(null);
+    setCatalogLoading(false);
     setArchived(false);
     setModels([]);
     setUsage({});
@@ -390,13 +412,20 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
       client.models?.().then(value => {
         if (isCurrent()) setModels(value);
       }).catch(() => {});
-      const items = await list(client, false).catch(error => {
+      const readCatalog = startup => list(client, false, undefined, startup).catch(error => {
         if (isCurrent()) report(error);
         return [];
       });
+      const saved = previousId && { ref: { backend: config.backend, location, id: previousId } };
+      if (!config.demo && client.sessions.resumeWithoutCatalog) {
+        const opening = saved ? loadSession(client, saved, { restoring: isCurrent }) : undefined;
+        setConnection('ready');
+        await Promise.all([opening, readCatalog({ savedKey: sessionKey(saved?.ref) })]);
+        return;
+      }
+      const items = await readCatalog();
       if (!isCurrent()) return;
-      const selected = config.demo ? items[0] : previousId && (items.find(item => item.ref.id === previousId) ??
-        { ref: { backend: config.backend, location, id: previousId } });
+      const selected = config.demo ? items[0] : saved && (items.find(item => item.ref.id === previousId) ?? saved);
       if (selected && !active.current && !busy.current) {
         const opening = loadSession(client, selected, { restoring: config.demo ? undefined : isCurrent });
         setConnection('ready');
@@ -746,7 +775,7 @@ export function useAgent(config, { report, clearError, adoptDraft, jumpToLatest,
   }
 
   return {
-    api, connection, route, sessions, sessionCursor, catalogRevision, archived, session, rows, cursor, historyCursors, loading, run, stopping, requests,
+    api, connection, route, sessions, sessionCursor, catalogLoading, catalogRevision, archived, session, rows, cursor, historyCursors, loading, run, stopping, requests,
     goal, usage, usageRefreshing, teams, members, models, options, setOptions, loadOlder, open, reset, send, goalAction, refreshUsage, special,
     prepareConnection, timelineScope: () => layer.current,
     refreshDelegation, delegate, manageTeam,
