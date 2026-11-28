@@ -3,13 +3,30 @@ import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
 
 const [candidate, baseline, screenshot] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const clockTicks = linux ? Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' })) : undefined;
+
+function largestFileMappings(smaps) {
+  // Rank named mappings, which can also contain private copy-on-write pages.
+  const files = new Map();
+  let file;
+  for (const line of smaps.split('\n')) {
+    const mapping = line.match(/^[\da-f]+-[\da-f]+\s+\S+\s+[\da-f]+\s+[\da-f]+:[\da-f]+\s+\d+\s*(.*)$/);
+    if (mapping) {
+      file = mapping[1].startsWith('/') ? basename(mapping[1]) : undefined;
+    } else if (file && line.startsWith('Pss:')) {
+      const pssKiB = Number.parseInt(line.slice(4), 10);
+      if (pssKiB > 0) files.set(file, (files.get(file) ?? 0) + pssKiB);
+    }
+  }
+  return [...files].sort((left, right) => right[1] - left[1]).slice(0, 8)
+    .map(([file, pssKiB]) => ({ file, pssKiB }));
+}
 
 async function processStats(pid) {
   const memory = await readFile(`/proc/${pid}/smaps_rollup`, 'utf8');
@@ -38,6 +55,18 @@ async function chromiumStartupStats(app, rendererPid) {
     } catch (error) {
       if (process.pid === rendererPid || !['ENOENT', 'ESRCH'].includes(error.code)) throw error;
       return { ...process, exitedDuringSampling: true };
+    }
+  }));
+}
+
+async function chromiumFileMappings(processes) {
+  if (!linux) return undefined;
+  return Promise.all(processes.filter(process => !process.exitedDuringSampling).map(async ({ pid, type }) => {
+    try {
+      return { pid, type, files: largestFileMappings(await readFile(`/proc/${pid}/smaps`, 'utf8')) };
+    } catch (error) {
+      if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error;
+      return { pid, type, exitedDuringSampling: true };
     }
   }));
 }
@@ -132,6 +161,7 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
     const rendererReady = { usedHeapBytes: readyMetrics.JSHeapUsedSize, totalHeapBytes: readyMetrics.JSHeapTotalSize,
       cpuMs: readyMetrics.ProcessTime * 1000 };
     assert.ok(rendererReady.usedHeapBytes > 0);
+    const fileMappings = await chromiumFileMappings(chromiumProcesses);
     const modules = new Set();
     cdp.on('Debugger.scriptParsed', ({ url }) => {
       if (/^file:.*\/dist\/assets\/[^/]+\.js$/.test(url)) modules.add(url);
@@ -142,8 +172,9 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
       return { name: path.split(/[/\\]/).at(-1), bytes: (await stat(path)).size };
     }));
     assert.ok(scripts.length > 0, 'Observe the packaged entry script before checking optional modules.');
+    const transcriptChunk = /(?:^|\/)transcript-(?!navigation-)[^/]+\.js$/;
     if (label === 'candidate') {
-      assert.equal(scripts.some(script => /^(?:pi|markdown-content|agent-inspector|transcript)-/.test(script.name)), false);
+      assert.equal(scripts.some(script => /^(?:pi|markdown-content|agent-inspector)-/.test(script.name) || transcriptChunk.test(script.name)), false);
     }
     await cdp.send('DOM.enable');
     await cdp.send('CSS.enable');
@@ -165,9 +196,9 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
     const inspectorLoaded = [...modules].some(url => /\/agent-inspector-/.test(url));
     if (label === 'candidate') assert.ok(inspectorLoaded, 'Load the inspector only after the user opens it');
     const reopenPanelMs = await openUsagePanel(page, composer);
-    const transcriptLoaded = () => [...modules].some(url => /\/transcript-/.test(url));
+    const transcriptLoaded = () => [...modules].some(url => transcriptChunk.test(url));
     if (label === 'candidate') assert.equal(transcriptLoaded(), false, 'Usage can open without loading the transcript');
-    const firstMessageMs = await sendFirstMessage(page, composer);
+    const firstMessageFrameMs = await sendFirstMessage(page, composer);
     if (label === 'candidate') assert.ok(transcriptLoaded(), 'The first message loads the transcript');
 
     if (exercise) {
@@ -185,8 +216,8 @@ async function check(binary, label, display, firstOnDisplay, exercise, captureBa
       assert.ok([...modules].some(url => /\/pi-/.test(url)));
     }
     assert.deepEqual(errors, []);
-    return { label, firstOnDisplay, ...paint, renderer, rendererReady, chromiumProcesses, scripts, fonts,
-      firstPanelMs, reopenPanelMs, firstMessageMs, inspectorLoaded,
+    return { label, firstOnDisplay, ...paint, renderer, rendererReady, chromiumProcesses, fileMappings, scripts, fonts,
+      firstPanelMs, reopenPanelMs, firstMessageFrameMs, inspectorLoaded,
       scriptBytes: scripts.reduce((sum, script) => sum + script.bytes, 0) };
   } finally {
     await app?.close();
