@@ -1,7 +1,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ArrowUp, ChevronDown, ChevronLeft, FileText, Folder, FolderOpen,
+  ArrowUp, ChevronDown, FileText, Folder, FolderOpen,
   Image, PanelLeftClose, PanelLeftOpen, Paperclip, Search, Square, SquarePen, SquareTerminal, X,
 } from 'lucide-react';
 import { agentBackends, sessionKey, sessionTitle } from './agent.js';
@@ -21,6 +21,7 @@ import { LatestMessageButton, Transcript, transcriptIsAtEnd } from './transcript
 import { turnReasoning, turnReasoningRows } from './timeline.js';
 import { useAgent } from './use-agent.js';
 import { draftKey, useDrafts } from './use-drafts.js';
+import { WorkspaceFiles } from './workspace-files.jsx';
 import { directoryName, windowsPath } from './workspace-path.js';
 import './workbench.css';
 
@@ -328,12 +329,12 @@ function App() {
   }, [previewCwd, loadPreview]);
   const previewImage = config?.ssh || !window.span.previewImage ? undefined : openImage;
 
-  function openDirectory(path) {
+  const openDirectory = useCallback(path => {
     previewScope.current++;
     directoryFocus.current = true;
     setEntries([]);
     setDirectory(path);
-  }
+  }, []);
 
   function selectSidebarTab(next) {
     if (next === tab) return;
@@ -1041,20 +1042,8 @@ function App() {
           <div className="file-directory" ref={directoryLabel} tabIndex={-1} title={config?.ssh ? undefined : directoryPath}>
             {config?.ssh ? '仅支持预览本地文件' : directoryTitle}
           </div>
-          <div className="side-list file-list">
-            {directory && <button className="file-up" onClick={() => openDirectory(parentDirectory)}>
-              <ChevronLeft size={15} aria-hidden="true" /><span>上一级</span>
-            </button>}
-            {!config?.ssh && entries.map(entry => {
-              const path = directory ? `${directory}/${entry.name}` : entry.name;
-              const current = !preview?.parked && preview?.root === cwd && preview?.path === path;
-              return <button key={entry.name} aria-label={entry.name} aria-current={current || undefined} title={entry.name}
-                onClick={() => entry.directory ? openDirectory(path) : readPreview(cwd, path)}>
-                {entry.directory ? <><Folder size={15} aria-hidden="true" /><span>{entry.name}</span></>
-                  : <><FileText size={15} aria-hidden="true" /><FileReferenceName name={entry.name} path={entry.name} /></>}
-              </button>;
-            })}
-          </div>
+          {!config?.ssh && <WorkspaceFiles key={directoryPath} entries={entries} cwd={cwd} directory={directory} parent={parentDirectory}
+            preview={preview} openDirectory={openDirectory} openFile={readPreview} />}
         </>}
         <nav className="sidebar-tools" aria-label="工作台面板">
           <button aria-pressed={tab === 'sessions'} onClick={() => selectSidebarTab('sessions')}><SquarePen size={16} />会话</button>

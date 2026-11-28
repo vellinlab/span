@@ -2250,6 +2250,46 @@ try {
   assert.equal(await previewTitle.textContent(), reviewName);
   console.log('Verified changing directory or leaving the files tab discards a pending preview without replacing the open file.');
   console.log('Verified folder context, current-file styling, filename suffix, scroll reset, and keyboard navigation in the file preview.');
+
+  await previewContent.press('Escape');
+  const denseDirectory = join(reviewWorkspace, 'dense-files');
+  await mkdir(denseDirectory);
+  await writeFile(join(denseDirectory, '验收-1999.txt'), '最后一个文件可以打开。');
+  // Reload the real workspace listing, then return a large snapshot through the desktop bridge.
+  await sidebar.getByRole('button', { name: '会话', exact: true }).click();
+  await sidebar.getByRole('button', { name: '文件', exact: true }).click();
+  const denseFolder = sidebar.getByRole('button', { name: 'dense-files', exact: true });
+  await denseFolder.waitFor();
+  await app.evaluate(({ BrowserWindow }) => {
+    const { ipc } = BrowserWindow.getAllWindows()[0].webContents;
+    ipc.handleOnce('span:request', (_event, method, params) => {
+      if (method !== 'files.list' || params?.path !== 'dense-files') throw new Error('Expected the large directory request');
+      return Array.from({ length: 2000 }, (_, index) => ({
+        name: '验收-' + String(index).padStart(4, '0') + '.txt', directory: false,
+      }));
+    });
+  });
+  await denseFolder.press('Enter');
+  const denseList = sidebar.locator('.file-list[data-items="2001"]');
+  const firstFile = denseList.getByRole('button', { name: '验收-0000.txt', exact: true });
+  const secondFile = denseList.getByRole('button', { name: '验收-0001.txt', exact: true });
+  const lastFile = denseList.getByRole('button', { name: '验收-1999.txt', exact: true });
+  await firstFile.focus();
+  assert.ok(await denseList.evaluate(list => list.querySelectorAll('button').length <= Math.ceil(list.clientHeight / 32) + 16));
+  await denseList.evaluate(list => { list.scrollTop = list.scrollHeight; });
+  await lastFile.waitFor();
+  assert.equal(await firstFile.getAttribute('tabindex'), '-1');
+  await page.keyboard.press('Tab');
+  assert.ok(await secondFile.evaluate(file => file === document.activeElement));
+  await secondFile.press('End');
+  assert.ok(await lastFile.evaluate(file => file === document.activeElement && file.closest('.file-list').scrollTop > 60000));
+  await lastFile.press('Enter');
+  await previewContent.getByText('最后一个文件可以打开。', { exact: true }).waitFor();
+  await previewContent.press('Escape');
+  assert.ok(await lastFile.evaluate(file => file === document.activeElement));
+  await lastFile.press('Home');
+  assert.ok(await upDirectory.evaluate(button => button === document.activeElement));
+  console.log('Verified viewport file mounting, keyboard navigation past unmounted rows, and preview focus in a 2,000-file directory.');
 } finally {
   await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 3 });

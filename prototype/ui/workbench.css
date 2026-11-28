@@ -306,7 +306,9 @@ p { margin-block: 0 12px; }
   font-size: 12px;
   line-height: 18px;
 }
-.side-list.file-list button { position: relative; }
+.file-list { overflow-anchor: none; }
+.file-list-rows { position: relative; }
+.file-list-rows > button { position: absolute; inset-inline: 0; height: var(--file-row-height); }
 .file-list button:focus-visible { outline-offset: -2px; }
 .file-list .file-up { color: var(--muted); font-size: 12px; }
 .host-form { display: grid; gap: 12px; margin: 12px 0; }

@@ -629,6 +629,75 @@ async function reflow(page, app, screenshot) {
   return scenes;
 }
 
+async function directoryList(app, page, capture, variant, screenshot) {
+  const list = page.locator('.file-list');
+  const count = 2000;
+  await app.evaluate(({ BrowserWindow }, count) => {
+    const { ipc } = BrowserWindow.getAllWindows()[0].webContents;
+    let release;
+    let receive;
+    globalThis.spanDirectoryRequested = new Promise(resolve => { receive = resolve; });
+    const result = new Promise(resolve => { release = resolve; });
+    const items = Array.from({ length: count }, (_, index) => ({
+      name: `验收-${String(index).padStart(4, '0')} · 工作区目录复核记录.txt`, directory: false,
+    }));
+    globalThis.spanReleaseDirectory = () => {
+      const at = performance.timeOrigin + performance.now();
+      release(items);
+      return at;
+    };
+    ipc.handleOnce('span:request', (_event, method, params) => {
+      if (method !== 'files.list' || params?.path !== '') throw Error('Expected the workspace file list');
+      receive(true);
+      return result;
+    });
+  }, count);
+  await page.getByRole('button', { name: '文件', exact: true }).click();
+  await list.waitFor({ state: 'attached' });
+  const requested = await app.evaluate(() => Promise.race([
+    globalThis.spanDirectoryRequested,
+    new Promise(resolve => setTimeout(resolve, 5000).unref()),
+  ]));
+  assert.ok(requested, 'Observe the directory request before delivering the list.');
+  await settle(page);
+  const beforeWorkload = await capture();
+  const firstRow = await list.evaluateHandle(element => {
+    const committed = new Promise(resolve => {
+      const observer = new MutationObserver(() => {
+        if (!element.querySelector('button')) return;
+        observer.disconnect();
+        resolve(performance.timeOrigin + performance.now());
+      });
+      observer.observe(element, { childList: true, subtree: true });
+    });
+    return { committed };
+  });
+  const startedAt = await app.evaluate(() => globalThis.spanReleaseDirectory());
+  await list.getByRole('button', { name: /^验收-0000 / }).waitFor({ timeout: 10_000 });
+  const mounted = await firstRow.evaluate(probe => probe.committed);
+  await firstRow.dispose();
+  await settle(page);
+  const active = await capture();
+  const events = await list.evaluate(element => ({
+    mountedButtons: element.querySelectorAll('button').length, viewportHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert.equal(events.scrollHeight, count * 32);
+  if (variant === 'candidate') assert.ok(events.mountedButtons <= Math.ceil(events.viewportHeight / 32) + 16);
+  else assert.equal(events.mountedButtons, count);
+  const activeMs = Math.round(mounted - startedAt);
+  if (screenshot) await page.screenshot({ path: screenshot });
+  await list.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await list.getByRole('button', { name: /^验收-1999 / }).waitFor();
+  await page.getByRole('button', { name: '会话', exact: true }).click();
+  await list.waitFor({ state: 'detached' });
+  await settle(page);
+  const closed = await capture();
+  await delay(2000);
+  const settled = await capture();
+  return { activeMs, events: { ...events, entries: count }, beforeOpen: beforeWorkload, beforeWorkload, active, closed, settled };
+}
+
 const exercise = { output, scroll, reflow };
 
 async function snapshot(app, page, cdp, pid) {
@@ -699,6 +768,12 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     ]);
     await cdp.send('Performance.enable');
     const capture = () => snapshot(app, page, cdp, pid);
+    if (workload === 'files') {
+      const screenshot = saveImage ? reportPath.replace(/\.json$/, `-${variant}-directory.png`) : undefined;
+      const sample = await directoryList(app, page, capture, variant, screenshot);
+      await cdp.send('HeapProfiler.collectGarbage');
+      return { workload, variant, ...sample, diagnosticGc: await capture() };
+    }
     const beforeOpen = await capture();
     await openTerminal();
     if (workload === 'covered' || workload === 'minimized' || workload === 'collapsed') {
@@ -749,7 +824,7 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
 const report = {
   platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
   window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, minimizedBaselineCommit, collapsedBaselineCommit,
-  markdownBaselineCommit, reflowBaselineCommit,
+  markdownBaselineCommit, reflowBaselineCommit, fileListBaselineCommit: reflowBaselineCommit,
   trials: [], interaction: [], palettes: [], covered: [], minimized: [], collapsed: [],
 };
 const publish = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
@@ -763,10 +838,11 @@ for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimi
     console.log(`${variant} ${workload} terminal DOM batches: ${sample.events.batches}`);
   }
 }
-const pairedBaselines = { output: baselineBinary, scroll: markdownBaseline, reflow: reflowBaseline };
+const pairedBaselines = { output: baselineBinary, scroll: markdownBaseline, reflow: reflowBaseline, files: reflowBaseline };
 const previousPairs = new Set();
-for (const workload of ['idle', 'output', 'scroll', 'reflow', 'reflow', 'scroll', 'output', 'idle']) {
+for (const workload of ['idle', 'output', 'scroll', 'files', 'reflow', 'reflow', 'files', 'scroll', 'output', 'idle']) {
   const baseline = pairedBaselines[workload];
+  if (workload === 'files' && !baseline) continue;
   const first = !previousPairs.has(workload);
   let variants = ['candidate'];
   if (baseline) {
@@ -775,7 +851,7 @@ for (const workload of ['idle', 'output', 'scroll', 'reflow', 'reflow', 'scroll'
   }
   for (const variant of variants) {
     const sample = await trial(workload, variant, variant === 'baseline' ? baseline : binary,
-      undefined, workload === 'reflow' && Boolean(reflowBaseline) && first);
+      undefined, (workload === 'reflow' || workload === 'files') && Boolean(reflowBaseline) && first);
     report.trials.push(sample);
     await publish();
     console.log(`${variant} ${workload} ${sample.activeMs}ms, DOM nodes ${sample.beforeWorkload.dom.nodes}` +
