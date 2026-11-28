@@ -211,7 +211,7 @@ fn catalog(cwd: &Path, title: &str, params: &Value, mode: &str, is_archived: boo
     json!({"data":entries[start..end],"nextCursor":(end < entries.len()).then(|| end.to_string())})
 }
 
-fn history(grouped: bool) -> Vec<Value> {
+fn history(grouped: bool, processes: bool) -> Vec<Value> {
     (1..=160)
         .map(|number| {
             let reply = match number % 8 {
@@ -250,12 +250,22 @@ fn history(grouped: bool) -> Vec<Value> {
                 let activities = (0..144).map(|index| {
                     let id = format!("history-{number}-{index}");
                     if index % 24 >= 18 {
-                        json!({"id":id,"type":"commandExecution","status":"completed","exitCode":0,
+                        let exit = if processes && index == 142 { 1 } else { 0 };
+                        json!({"id":id,"type":"commandExecution","status":"completed","exitCode":exit,
                             "command":format!("workspace verify --record {number}-{index:03}")})
+                    } else if processes {
+                        json!({"id":id,"type":"agentMessage","phase":"commentary",
+                            "text":format!("复核第 {number} 项的步骤 {index:03}。")})
                     } else {
                         json!({"id":id,"type":"agentMessage","text":"已复核工作区响应与会话记录。"})
                     }
                 });
+                if processes {
+                    let result = items.len() - 1;
+                    items[result]["phase"] = json!("final_answer");
+                    items.splice(result..result, activities);
+                    return json!({"id":format!("review-{number}"),"status":"completed","durationMs":198000,"items":items});
+                }
                 items.splice(0..0, activities);
             }
             json!({"id":format!("review-{number}"),"status":"completed","items":items})
@@ -647,9 +657,14 @@ pub fn run() -> Result<()> {
     let output = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
     let cwd = env::current_dir()?;
     let catalog_mode = env::var("SPAN_PREVIEW_CATALOG_FIXTURE").unwrap_or_default();
-    let grouped = env::var_os("SPAN_PREVIEW_STREAM_GATE")
-        .is_some_and(|path| PathBuf::from(path).join("grouped-history").is_file());
-    let history = history(grouped);
+    let gate = env::var_os("SPAN_PREVIEW_STREAM_GATE").map(PathBuf::from);
+    let grouped = gate
+        .as_ref()
+        .is_some_and(|path| path.join("grouped-history").is_file());
+    let processes = gate
+        .as_ref()
+        .is_some_and(|path| path.join("process-history").is_file());
+    let history = history(grouped, processes);
     let child_turn = json!({"id":"child-turn","status":"completed","items":[
         {"type":"userMessage","id":"child-task","content":[{"type":"text","text":"复核工作台键盘导航。"}]},
         {"type":"reasoning","id":"child-reasoning","summary":["检查窄窗口与返回焦点。"]},

@@ -146,6 +146,10 @@ SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffini
 taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
     /artifacts/linux/span-preview /artifacts/reasoning-index-baseline/span-preview /artifacts/el8-reasoning-index \
     --reasoning-index | tee /artifacts/reasoning-index.json || result=$?
+SPAN_INPUT_OBSERVER_CPU="$(python3.9 -c 'import os; print(max(os.sched_getaffinity(0)))')" \
+taskset -c "$pressure_cpu" /artifacts/node prototype/test/long-reply.mjs \
+    /artifacts/linux/span-preview /artifacts/streaming-output-baseline/span-preview /artifacts/el8-process-history \
+    --process-history | tee /artifacts/process-history.json || result=$?
 if ((result == 0)); then
     tar -czf /artifacts/span-web-el8-x86_64.tar.gz -C /artifacts linux
     result=$resource_result

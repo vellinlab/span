@@ -12,7 +12,8 @@ import { _electron as electron } from 'playwright';
 import { captureWindowDesktop, dragWindowEdge } from './window-edge.mjs';
 
 const following = process.argv.includes('--following');
-const grouped = process.argv.includes('--grouped-history');
+const processHistory = process.argv.includes('--process-history');
+const grouped = processHistory || process.argv.includes('--grouped-history');
 const toolOutput = process.argv.includes('--tool-output');
 const reasoningFollowing = process.argv.includes('--reasoning-following');
 const reasoningIndex = process.argv.includes('--reasoning-index');
@@ -337,6 +338,18 @@ async function prepareInputSampling(app, page, composer, area, desktop) {
   };
 }
 
+async function rendererMemory(app, rendererPid) {
+  if (!linux) {
+    const memory = await app.evaluate(({ app }, pid) => app.getAppMetrics().find(metric => metric.pid === pid)?.memory,
+      rendererPid);
+    assert.ok(memory?.workingSetSize > 0 && memory.privateBytes > 0);
+    return { workingSetKiB: memory.workingSetSize, privateKiB: memory.privateBytes };
+  }
+  const memory = await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8');
+  const kib = field => Number(memory.match(new RegExp(`^${field}:\\s+(\\d+)`, 'm'))[1]);
+  return { pssKiB: kib('Pss'), rssKiB: kib('Rss'), privateDirtyKiB: kib('Private_Dirty') };
+}
+
 async function checkToolOutput(app, page, composer, profile, rendererPid, label, trial) {
   await composer.fill('验证流式命令输出。');
   await composer.press('Enter');
@@ -379,23 +392,14 @@ async function checkToolOutput(app, page, composer, profile, rendererPid, label,
     }));
     const position = await offsets();
     assert.equal(position.log, 90);
-    async function rendererMemory() {
-      if (!linux) return app.evaluate(({ app }, pid) => {
-        const { memory } = app.getAppMetrics().find(process => process.pid === pid);
-        return { workingSetKiB: memory.workingSetSize, privateKiB: memory.privateBytes };
-      }, rendererPid);
-      const memory = await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8');
-      const kib = name => Number(memory.match(new RegExp(`^${name}:\\s+(\\d+) kB$`, 'm'))[1]);
-      return { pssKiB: kib('Pss'), rssKiB: kib('Rss'), privateDirtyKiB: kib('Private_Dirty') };
-    }
-    const startMemory = await rendererMemory();
+    const startMemory = await rendererMemory(app, rendererPid);
     const start = await metrics();
     await writeFile(join(profile, 'append'), '');
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
     await delay(160);
     await settleFrame(page);
     const end = await metrics();
-    const endMemory = await rendererMemory();
+    const endMemory = await rendererMemory(app, rendererPid);
     assert.deepEqual(await offsets(), position);
     await command.getByText('16385–20073 行', { exact: true }).waitFor();
     await output.evaluate(element => { element.scrollTop = element.scrollHeight; });
@@ -522,21 +526,10 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     await cdp.send('Performance.enable');
     const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
       .map(({ name, value }) => [name, value]));
-    const processMemory = async () => {
-      if (!linux) {
-        const memory = await app.evaluate(({ app }, pid) => app.getAppMetrics().find(metric => metric.pid === pid)?.memory,
-          rendererPid);
-        assert.ok(memory?.workingSetSize > 0 && memory.privateBytes > 0);
-        return { workingSetKiB: memory.workingSetSize, privateKiB: memory.privateBytes };
-      }
-      const memory = await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8');
-      const kib = field => Number(memory.match(new RegExp(`^${field}:\\s+(\\d+)`, 'm'))[1]);
-      return { pssKiB: kib('Pss'), rssKiB: kib('Rss'), privateDirtyKiB: kib('Private_Dirty') };
-    };
     const memorySample = (process, performance) => ({
       ...process, usedHeapBytes: performance.JSHeapUsedSize, domNodes: performance.Nodes,
     });
-    const startMemory = await processMemory();
+    const startMemory = await rendererMemory(app, rendererPid);
     const start = await metrics();
     await writeFile(join(profile, 'append'), '');
     const [typing] = await Promise.all([sampleInput?.(), waitForMarker(join(profile, 'appended'))]);
@@ -547,7 +540,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
     }
     await settleFrame(page);
     const end = await metrics();
-    const endMemory = await processMemory();
+    const endMemory = await rendererMemory(app, rendererPid);
     let diagnosticMemory;
     if (linux && reasoningIndex) {
       await cdp.send('HeapProfiler.collectGarbage');
@@ -555,7 +548,7 @@ async function checkReasoning(app, page, composer, transcript, profile, renderer
       diagnosticMemory = {
         before: memorySample(startMemory, start),
         after: memorySample(endMemory, end),
-        afterGc: memorySample(await processMemory(), await metrics()),
+        afterGc: memorySample(await rendererMemory(app, rendererPid), await metrics()),
       };
     }
     const { connected, updates } = await mutating.evaluate(read => read());
@@ -810,6 +803,7 @@ async function check(binary, label, trial) {
   try {
     if (following) await writeFile(join(profile, 'fast'), '');
     if (grouped || reasoningIndex) await writeFile(join(profile, 'grouped-history'), '');
+    if (processHistory) await writeFile(join(profile, 'process-history'), '');
     if (streamedReasoning && !reasoningDetails) await writeFile(join(profile, 'check-goal-editor'), '');
     if (reasoningDetails) await writeFile(join(profile, reasoningFollowing ? 'reasoning-following' : 'reasoning-details'), '');
     if (reasoningIndex) await writeFile(join(profile, 'reasoning-index'), '');
@@ -848,7 +842,27 @@ async function check(binary, label, trial) {
       const viewport = await readViewport();
       return { viewport, ...await checkReasoning(app, page, composer, transcript, profile, rendererPid, label, trial) };
     }
-    if (grouped) {
+    if (processHistory) {
+      const group = transcript.getByRole('button', { name: /任务过程.*用时 3 分 18 秒/ }).last();
+      const progress = transcript.getByText('复核第 160 项的步骤 000。', { exact: true });
+      const failure = transcript.getByText('workspace verify --record 160-142', { exact: true });
+      await group.waitFor();
+      await failure.waitFor();
+      assert.equal(await group.getAttribute('aria-expanded'), 'false');
+      assert.equal(await progress.count(), 0);
+      if (label === 'candidate') assert.equal(await group.innerText(), '用时 3 分 18 秒');
+      if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-closed.png` });
+      await group.scrollIntoViewIfNeeded();
+      await group.press('Enter');
+      await progress.waitFor();
+      assert.equal(await group.getAttribute('aria-expanded'), 'true');
+      assert.ok(await group.evaluate(element => element === document.activeElement));
+      if (screenshot && trial === 0) await page.screenshot({ path: `${screenshot}-${label}-opened.png` });
+      await group.press('Enter');
+      await progress.waitFor({ state: 'detached' });
+      assert.equal(await group.getAttribute('aria-expanded'), 'false');
+      await failure.waitFor();
+    } else if (grouped) {
       const group = transcript.getByRole('button', { name: '6 条命令', exact: true }).last();
       const titleOffset = () => group.evaluate(button =>
         button.getBoundingClientRect().top - button.closest('.timeline').getBoundingClientRect().top);
@@ -904,10 +918,10 @@ async function check(binary, label, trial) {
     await initialTail.waitFor();
     await tailInView();
     let sampleInput;
-    if (linux && baseline) {
+    if (baseline && (linux || processHistory)) {
       const box = await composer.boundingBox();
       const area = { x: Math.ceil(box.x), y: Math.ceil(box.y), width: 56, height: 24 };
-      if (following || grouped) desktop = await observeDesktopDraft(app, area);
+      if (linux && (following || grouped)) desktop = await observeDesktopDraft(app, area);
       sampleInput = await prepareInputSampling(app, page, composer, area, desktop);
     }
     await settleFrame(page);
@@ -941,9 +955,7 @@ async function check(binary, label, trial) {
     await cdp.send('Performance.enable');
     const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics
       .map(({ name, value }) => [name, value]));
-    const pss = async () => linux ? Number((await readFile(`/proc/${rendererPid}/smaps_rollup`, 'utf8'))
-      .match(/^Pss:\s+(\d+) kB$/m)[1]) : undefined;
-    const startPssKiB = await pss();
+    const startMemory = await rendererMemory(app, rendererPid);
     const start = await metrics();
     const fragment = transcript.getByText(lastFragment, { exact: true });
     await writeFile(join(profile, 'append'), '');
@@ -954,7 +966,7 @@ async function check(binary, label, trial) {
     }
     await settleFrame(page);
     const end = await metrics();
-    const endPssKiB = await pss();
+    const endMemory = await rendererMemory(app, rendererPid);
     const { mutationBatches, maxBatchGapMs } = await observation.evaluate(read => read());
     await observation.dispose();
     if (typing) assert.equal(await composer.inputValue(), 'MM');
@@ -1018,7 +1030,10 @@ async function check(binary, label, trial) {
       selection.selectAllChildren(element);
       return selection.toString();
     }), '复核链接');
-    return { label, following, grouped, mutationBatches, maxBatchGapMs, startPssKiB, endPssKiB, typing, windowResize,
+    return { label, following, grouped, mutationBatches, maxBatchGapMs, typing, windowResize,
+      startPssKiB: startMemory.pssKiB, endPssKiB: endMemory.pssKiB,
+      startMemory: { ...startMemory, usedHeapBytes: start.JSHeapUsedSize },
+      endMemory: { ...endMemory, usedHeapBytes: end.JSHeapUsedSize },
       rendererCpuMs: (end.ProcessTime - start.ProcessTime) * 1000,
       mainThreadCpuMs: (end.ThreadTime - start.ThreadTime) * 1000,
       scriptMs: (end.ScriptDuration - start.ScriptDuration) * 1000,
@@ -1038,5 +1053,6 @@ for (let trial = 0; trial < (baseline ? 2 : 1); trial++) {
   if (baseline && alternate && trial === 1) trials.push(await check(baseline, 'baseline', trial));
 }
 const scenario = toolOutput ? 'tool-output' : reasoningFollowing ? 'reasoning-following' :
-  reasoningIndex ? 'reasoning-index' : reasoningDetails ? 'reasoning-details' : streamedReasoning ? 'reasoning' : undefined;
+  reasoningIndex ? 'reasoning-index' : reasoningDetails ? 'reasoning-details' : streamedReasoning ? 'reasoning' :
+  processHistory ? 'process-history' : undefined;
 console.log(JSON.stringify({ platform: process.platform, scenario, deviceScaleFactor, trials }, null, 2));

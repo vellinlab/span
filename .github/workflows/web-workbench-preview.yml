@@ -270,19 +270,22 @@ jobs:
           node prototype/test/long-reply.mjs "$binary" "$PWD/following-reply-baseline/span-preview.exe" --following | tee windows-workbench-following-reply.json
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-grouped-history" --grouped-history
           node prototype/test/long-reply.mjs "$binary" "$PWD/streaming-output-baseline/span-preview.exe" --tool-output | tee windows-workbench-streaming-output.json
-          reasoning_result=0
+          transcript_result=0
           SPAN_TEST_DEVICE_SCALE=1.25 node prototype/test/long-reply.mjs \
             "$binary" "$PWD/reasoning-baseline/span-preview.exe" "$PWD/windows-workbench-reasoning-stream-125" --reasoning \
-            | tee windows-workbench-reasoning-stream-125.json || reasoning_result=$?
+            | tee windows-workbench-reasoning-stream-125.json || transcript_result=$?
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-details" --reasoning-details \
-            | tee windows-workbench-reasoning-details.json || reasoning_result=$?
+            | tee windows-workbench-reasoning-details.json || transcript_result=$?
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-following" --reasoning-following \
-            | tee windows-workbench-reasoning-following.json || reasoning_result=$?
+            | tee windows-workbench-reasoning-following.json || transcript_result=$?
           node prototype/test/long-reply.mjs "$binary" "" "$PWD/windows-workbench-reasoning-index" --reasoning-index \
-            | tee windows-workbench-reasoning-index.json || reasoning_result=$?
+            | tee windows-workbench-reasoning-index.json || transcript_result=$?
+          node prototype/test/long-reply.mjs "$binary" "$PWD/streaming-output-baseline/span-preview.exe" \
+            "$PWD/windows-workbench-process-history" --process-history \
+            | tee windows-workbench-process-history.json || transcript_result=$?
           node prototype/test/patch-view.mjs "$binary" "$PWD/windows-workbench-patch.png"
           node prototype/test/output-view.mjs "$binary" "$PWD/windows-workbench-output.png"
-          if ((reasoning_result != 0)); then exit "$reasoning_result"; fi
+          if ((transcript_result != 0)); then exit "$transcript_result"; fi
           if ((resource_result != 0)); then exit "$resource_result"; fi
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Compare native Windows wheel rendering with and without animation
@@ -299,6 +302,7 @@ jobs:
             windows-workbench*.png
             windows-workbench-startup.json
             windows-workbench-reasoning-*.json
+            windows-workbench-process-history.json
             windows-workbench-resource-isolation.json
             windows-workbench-following-reply.json
             windows-workbench-streaming-output.json
