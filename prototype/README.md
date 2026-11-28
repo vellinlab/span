@@ -51,4 +51,6 @@ EL8 预览默认关闭滚轮动画。希望使用平滑滚动时，可以用 `sp
 
 Codex 会话搜索查询当前主机的历史目录，并沿用当前的归档范围。App Server 的标题匹配区分大小写。侧栏也按标题、原始 ID 和工作区筛选已加载的会话。适配器未声明后端搜索时，通过逐页加载扩大筛选范围。 [Codex App Server 搜索参数](https://learn.chatgpt.com/docs/app-server#list-threads-with-pagination--filters)
 
-`npm run check` 运行协议和时间线测试。Electron 打包、EL8/Windows 冒烟、以及使用真实 App Server 验证本机和 SSH 连接由 `web-workbench-preview.yml` 运行。
+`npm run check` 运行协议和时间线测试。Electron 打包、EL8/Windows 冒烟、以及使用真实 App Server 验证本机和 SSH 连接由 GitHub Actions 运行。
+
+在对应运行页的 **Artifacts** 查看产物。`span-web-el8-screenshots` 和 `span-web-windows-screenshots` 提供界面截图，`*-reports` 提供验收和性能数据。需要安装时，选择对应平台的 RPM、ZIP 或便携归档，并先确认该次运行的验收结果。 [Electron 预览验收](https://github.com/vellinlab/span/actions/workflows/web-workbench-preview.yml)

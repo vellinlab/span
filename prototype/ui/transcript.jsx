@@ -485,6 +485,7 @@ export const Transcript = memo(function Transcript({
   const [inspectedCard, setInspectedCard] = useState(null);
   const latest = useRef(null);
   const following = useRef(true);
+  const positioningAtEnd = useRef(false);
   const followAfterFold = useRef(false);
   const viewportSize = useRef(null);
   const textAnchor = useRef(null);
@@ -557,6 +558,7 @@ export const Transcript = memo(function Transcript({
     if (restore || !jumpToLatest.current || !rows.length) return;
     jumpToLatest.current = false;
     following.current = true;
+    positioningAtEnd.current = true;
     textAnchor.current = undefined;
     releaseGroupAnchor();
     setInspectedCard(null);
@@ -674,6 +676,7 @@ export const Transcript = memo(function Transcript({
     let readingWidth = columnWidth();
     const rememberPosition = () => {
       if (reflowFrame.current !== undefined) return;
+      positioningAtEnd.current = false;
       textAnchor.current = following.current || latest.current?.restore ? undefined : readTextAnchor(element);
     };
     element.addEventListener('scrollend', rememberPosition);
@@ -713,8 +716,14 @@ export const Transcript = memo(function Transcript({
     };
   }, [scroll, virtual]);
 
+  function handleScrollInput() {
+    positioningAtEnd.current = false;
+    releaseGroupAnchor();
+  }
+
   function onScroll(event) {
-    if (restore || reflowFrame.current !== undefined) return;
+    // Initial row measurements can scroll past the history threshold on the way to the latest reply.
+    if (restore || positioningAtEnd.current || reflowFrame.current !== undefined) return;
     const element = scroll.current;
     // A resize can scroll the list before its observer has restored the viewport.
     const size = viewportSize.current;
@@ -729,9 +738,9 @@ export const Transcript = memo(function Transcript({
 
   return <div className="timeline" ref={scroll} role="log" aria-label={label} aria-live="off" tabIndex={-1} data-testid={testId}
     data-items={rows.length} data-reading-history={showLatest && !restore ? 'true' : undefined} onScroll={onScroll}
-    onPointerDownCapture={releaseGroupAnchor} onKeyDownCapture={releaseGroupAnchor}
+    onPointerDownCapture={handleScrollInput} onKeyDownCapture={handleScrollInput}
     onWheel={event => {
-      releaseGroupAnchor();
+      handleScrollInput();
       if (event.deltaY && reflowFrame.current !== undefined) {
         cancelAnimationFrame(reflowFrame.current);
         reflowFrame.current = undefined;
