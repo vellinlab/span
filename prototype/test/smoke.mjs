@@ -1629,10 +1629,11 @@ try {
   await progressHeading.waitFor();
   await progressDetail.waitFor();
   const messageType = heading => {
-    const prose = heading.closest('.prose');
+    const prose = getComputedStyle(heading.closest('.prose'));
     return {
       headingSize: parseFloat(getComputedStyle(heading).fontSize),
-      lineHeight: parseFloat(getComputedStyle(prose).lineHeight),
+      bodySize: parseFloat(prose.fontSize),
+      lineHeight: parseFloat(prose.lineHeight),
     };
   };
   const progressType = await progressHeading.evaluate(messageType);
@@ -1654,8 +1655,9 @@ try {
   await inspectedImage.getByText('已查看图片', { exact: true }).waitFor();
   assert.ok(await inspectedImage.evaluate(rowIndex) > await groupAnswer.evaluate(rowIndex));
   const answerType = await groupAnswer.evaluate(messageType);
-  assert.ok(progressType.headingSize < answerType.headingSize &&
-    progressType.lineHeight < answerType.lineHeight, `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
+  assert.ok(progressType.bodySize < answerType.bodySize && progressType.headingSize < answerType.headingSize &&
+    progressType.lineHeight < answerType.lineHeight && answerType.headingSize <= answerType.bodySize + 2,
+  `Expected a clear reading hierarchy in view. ${JSON.stringify({ progressType, answerType })}`);
   assert.ok(progressIndex < await failedCommand.evaluate(rowIndex));
   assert.ok((await failedCommand.boundingBox()).y < (await groupAnswer.boundingBox()).y);
   await transcript.evaluate((element, top) => { element.scrollTop = top; }, processTop);
