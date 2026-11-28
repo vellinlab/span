@@ -494,7 +494,7 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, w
       await readme.click();
       await waitForPreview();
       await checkCover();
-      const windowWidths = [800, 740];
+      const windowWidths = [770, 740];
       for (const width of windowWidths) {
         await resize(app, page, [width, initialSize[1]]);
         await settle(page);
@@ -502,10 +502,14 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, w
         assert.deepEqual(await dimensions(), beforeCover, 'Resizing under the preview must preserve the painted grid');
       }
       await closePreview();
+      const expectedWidth = beforeCover[0] - (coveredSize[0] - windowWidths.at(-1));
       await page.waitForFunction(width => document.querySelector('.terminal-canvas .xterm-screen').offsetWidth <= width,
-        beforeCover[0] - 80);
+        expectedWidth + 16);
       await waitForOutput();
-      resizeWhileCovered = { windowWidths, originalGrid: beforeCover, revealedGrid: await dimensions() };
+      const revealedGrid = await dimensions();
+      assert.ok(Math.abs(revealedGrid[0] - expectedWidth) <= 16,
+        `The revealed grid should match the narrower terminal: ${revealedGrid[0]} vs ${expectedWidth} pixels.`);
+      resizeWhileCovered = { windowWidths, originalGrid: beforeCover, revealedGrid };
     }
     await terminalLine(page, linux ? `printf '%s_%s\\n' span_covered still_open` : 'echo span_covered_still_open', 'span_covered_still_open');
     assert.equal(await observation.evaluate(state => state.finish().generations), 1);

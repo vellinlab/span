@@ -579,9 +579,14 @@ fn long_reply(
     let mut answer =
         String::from("## 长回复的开头\n\n[复核链接](https://example.com/span)和正文可以选择。\n\n");
     for index in 1..=144 {
+        let anchor = if index == 80 {
+            "保持当前阅读位置。"
+        } else {
+            ""
+        };
         writeln!(
             answer,
-            "**第 {index:03} 项。** 检查缩进、滚动位置和长行换行。工作台会保留这段选区和原始的代码。\n"
+            "**第 {index:03} 项。** 检查缩进、滚动位置和长行换行。工作台会保留这段选区和原始的代码。{anchor}\n"
         )
         .unwrap();
     }
