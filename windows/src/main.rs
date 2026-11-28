@@ -2,8 +2,12 @@
 
 mod agent;
 mod agent_attachments;
+#[path = "../../src/agent_backend.rs"]
+mod agent_backend;
 #[path = "../../src/agent_execution.rs"]
 mod agent_execution;
+#[path = "../../src/agent_interaction.rs"]
+mod agent_interaction;
 mod agent_settings;
 #[path = "../../src/clipboard_markup.rs"]
 #[allow(dead_code)]
@@ -37,6 +41,7 @@ mod unified_diff;
 #[cfg(feature = "visual-check")]
 mod visual_check;
 
+use agent_backend::Backend;
 use futures::channel::mpsc;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::{
@@ -112,6 +117,7 @@ struct Tab {
     host_name: Option<String>,
     terminal: TerminalState,
     agent: Option<agent::Agent>,
+    agent_generation: u64,
     show_agent: bool,
     show_drawer: bool,
     file_panel: Option<file_panel::Panel>,
@@ -275,6 +281,7 @@ enum Message {
     Sidebar(SidebarPage),
     Files(TerminalId, file_panel::Action),
     Agent(TerminalId, agent::Action),
+    AgentWire(TerminalId, u64, agent::Action),
     Select(TerminalId),
     Close(TerminalId),
     CloseWindow,
@@ -406,10 +413,30 @@ impl Span {
             host_name,
             terminal,
             agent: None,
+            agent_generation: 0,
             show_agent: false,
             show_drawer: false,
             file_panel: None,
         });
+    }
+
+    fn new_agent_tab(
+        &mut self,
+        parent: TerminalId,
+        backend: Backend,
+        start: bool,
+    ) -> Task<Message> {
+        let Some(tab) = self.terminals.iter().find(|tab| tab.id == parent) else {
+            return Task::none();
+        };
+        self.open(tab.host.clone(), tab.host_name.clone());
+        let tab = self.terminals.last_mut().expect("new terminal tab");
+        tab.show_agent = true;
+        let events = start_agent_for(tab, self.home.clone(), backend);
+        if start && let Some(agent) = tab.agent.as_mut() {
+            let _ = agent.update(agent::Action::New);
+        }
+        events
     }
 
     fn cancel_file_suggestions(&mut self) {
@@ -545,6 +572,42 @@ impl Span {
                         .update(action)
                         .map(move |action| Message::Files(id, action));
                 }
+            }
+            Message::AgentWire(id, generation, action) => {
+                if self
+                    .terminals
+                    .iter()
+                    .any(|tab| tab.id == id && tab.agent_generation == generation)
+                {
+                    return self.handle_message(Message::Agent(id, action));
+                }
+            }
+            Message::Agent(id, agent::Action::New)
+                if self.terminals.iter().any(|tab| {
+                    tab.id == id && tab.agent.as_ref().is_some_and(agent::Agent::has_thread)
+                }) =>
+            {
+                let backend = self
+                    .terminals
+                    .iter()
+                    .find(|tab| tab.id == id)
+                    .and_then(|tab| tab.agent.as_ref())
+                    .map_or(Backend::default(), agent::Agent::backend);
+                return self.new_agent_tab(id, backend, true);
+            }
+            Message::Agent(id, agent::Action::Backend(backend)) => {
+                let Some(tab) = self.terminals.iter_mut().find(|tab| tab.id == id) else {
+                    return Task::none();
+                };
+                if let Some(agent) = tab.agent.as_ref() {
+                    if agent.backend() == backend {
+                        return Task::none();
+                    }
+                    if agent.has_thread() {
+                        return self.new_agent_tab(id, backend, false);
+                    }
+                }
+                return start_agent_for(tab, self.home.clone(), backend);
             }
             Message::Agent(id, action) => {
                 let Some(tab) = self.terminals.iter_mut().find(|tab| tab.id == id) else {
@@ -1167,8 +1230,18 @@ impl Span {
 }
 
 fn start_agent(tab: &mut Tab, home: Option<PathBuf>) -> Task<Message> {
+    let backend = tab
+        .agent
+        .as_ref()
+        .map_or(Backend::default(), agent::Agent::backend);
+    start_agent_for(tab, home, backend)
+}
+
+fn start_agent_for(tab: &mut Tab, home: Option<PathBuf>, backend: Backend) -> Task<Message> {
     let id = tab.id;
-    let (agent, events) = agent::Agent::new(tab.host.clone(), home);
+    tab.agent_generation = tab.agent_generation.wrapping_add(1);
+    let generation = tab.agent_generation;
+    let (agent, events) = agent::Agent::new(tab.host.clone(), home, backend);
     tab.agent = Some(agent);
-    events.map(move |action| Message::Agent(id, action))
+    events.map(move |action| Message::AgentWire(id, generation, action))
 }

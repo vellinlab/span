@@ -1,5 +1,5 @@
 use super::{Action, Agent, Request, action};
-use crate::theme;
+use crate::{agent_interaction::GoalVisibility, theme};
 use iced::widget::{button, column, container, float, row, text, text_editor, tooltip};
 use iced::{Bottom, Center, Element, Fill, Task, Vector};
 use serde_json::{Value, json};
@@ -70,6 +70,7 @@ struct Goal {
     objective: String,
     preview: String,
     status: String,
+    elapsed: Option<String>,
 }
 
 pub(super) struct Draft {
@@ -80,6 +81,7 @@ pub(super) struct Draft {
 #[derive(Default)]
 pub(super) struct State {
     current: Option<Goal>,
+    visibility: GoalVisibility,
     pub draft: Option<Draft>,
     pub suggestions: Vec<Command>,
     pub selected: usize,
@@ -89,10 +91,15 @@ pub(super) struct State {
 impl State {
     pub fn update(&mut self, value: &Value) {
         self.revision = self.revision.wrapping_add(1);
-        self.read(value);
+        self.read(value, false);
     }
 
-    fn read(&mut self, value: &Value) {
+    pub(super) fn dismiss_card(&mut self) {
+        self.visibility.dismiss();
+    }
+
+    fn read(&mut self, value: &Value, restored: bool) {
+        self.visibility.read(value, restored);
         self.current = value["objective"].as_str().map(|objective| {
             let objective: String = objective.chars().take(MAX_OBJECTIVE).collect();
             let mut preview = objective.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -105,6 +112,9 @@ impl State {
                 objective,
                 preview,
                 status: value["status"].as_str().unwrap_or_default().into(),
+                elapsed: value["timeUsedSeconds"]
+                    .as_u64()
+                    .map(crate::agent_interaction::elapsed),
             }
         });
     }
@@ -183,6 +193,9 @@ impl State {
     }
 
     pub fn summary(&self) -> Option<Element<'_, Action>> {
+        if !self.visibility.is_visible() {
+            return None;
+        }
         let goal = self.current.as_ref()?;
         let (status, color) = match goal.status.as_str() {
             "active" => ("Active", theme::BLUE),
@@ -202,6 +215,14 @@ impl State {
                             .size(13)
                             .wrapping(text::Wrapping::WordOrGlyph)
                             .width(Fill),
+                        text(goal.elapsed.as_deref().unwrap_or_default())
+                            .size(12)
+                            .color(theme::MUTED),
+                        theme::WorkspaceIcon::Close.control(
+                            "Hide goal card",
+                            Some(Action::GoalDismissCard),
+                            false,
+                        ),
                     ]
                     .spacing(8)
                     .align_y(Center),
@@ -269,10 +290,17 @@ impl Agent {
     pub(super) fn goal_response(&mut self, pending: Pending, result: &Value) {
         if pending.revision == self.goals.revision {
             if matches!(pending.operation, Operation::Refresh | Operation::Status) {
-                self.goals.read(&result["goal"]);
+                self.goals
+                    .read(&result["goal"], pending.operation == Operation::Refresh);
             } else {
                 self.goals.update(&result["goal"]);
             }
+        }
+        if matches!(
+            pending.operation,
+            Operation::Status | Operation::Save | Operation::Change
+        ) {
+            self.goals.visibility.reveal();
         }
         match pending.operation {
             Operation::Status if self.goals.current.is_none() => {
@@ -466,8 +494,42 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn completed_goal_card_can_be_hidden_without_removing_the_goal() {
+        let (mut agent, _) = Agent::new(None, None, Default::default());
+        let (sender, mut requests) = mpsc::channel(8);
+        agent.connection = Some(sender);
+        agent.pending.clear();
+        agent.thread = Some("fixture".into());
+
+        let mut goal = json!({"objective":"Ship the feature","status":"active","createdAt":1});
+        agent.goals.read(&goal, true);
+        assert!(agent.goals.summary().is_some());
+
+        goal["status"] = json!("complete");
+        agent.goals.update(&goal);
+        assert!(agent.goals.summary().is_some());
+        let _ = agent.update(Action::GoalDismissCard);
+        agent.goals.update(&goal);
+        assert!(agent.goals.summary().is_none());
+        assert_eq!(agent.goals.current.as_ref().unwrap().status, "complete");
+        assert!(requests.try_recv().is_err());
+
+        agent.goals = State::default();
+        agent.refresh_goal("fixture");
+        let refresh = requests.try_recv().unwrap();
+        agent.packet(json!({"id":refresh["id"],"result":{"goal":goal}}));
+        assert!(agent.goals.summary().is_none());
+
+        let _ = agent.update(Action::GoalSelect(Command::Status));
+        let status = requests.try_recv().unwrap();
+        assert_eq!(status["method"], "thread/goal/get");
+        agent.packet(json!({"id":status["id"],"result":{"goal":goal}}));
+        assert!(agent.goals.summary().is_some());
+    }
+
+    #[test]
     fn goal_palette_saves_to_the_thread_and_preserves_a_rejected_draft() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Default::default());
         let (sender, mut requests) = mpsc::channel(8);
         agent.connection = Some(sender);
         agent.pending.clear();

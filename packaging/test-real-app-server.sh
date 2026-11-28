@@ -2,8 +2,14 @@
 set -euo pipefail
 
 span="$1"
-codex="$2"
+executable="$2"
+backend="${3:-codex}"
+case "$backend" in
+    codex|clue) ;;
+    *) printf 'Unknown App Server backend %s\n' "$backend" >&2; exit 2 ;;
+esac
 fixture="$(mktemp -d)"
+agent_home="$fixture/$backend"
 app_pid=
 widget_pid=
 display_pid=
@@ -17,8 +23,8 @@ cleanup() {
             grep -E '"type":"fileChange"|"method":"turn/diff/updated"' \
                 "$fixture/wire.log" | tail -n 12 >&2 || true
         fi
-        if [[ -d "$CODEX_HOME/log" ]]; then
-            find "$CODEX_HOME/log" -type f -exec tail -n 50 {} \; >&2
+        if [[ -d "$agent_home/log" ]]; then
+            find "$agent_home/log" -type f -exec tail -n 50 {} \; >&2
         fi
     fi
     for pid in "$app_pid" "$widget_pid" "$display_pid" "$gateway_pid"; do
@@ -32,19 +38,19 @@ cleanup() {
 trap 'cleanup "$?"' EXIT
 
 export HOME="$fixture/home" XDG_CONFIG_HOME="$fixture/config" XDG_DATA_HOME="$fixture/data"
-export CODEX_HOME="$fixture/codex" TMPDIR="$fixture/tmp" GDK_BACKEND=x11
+export CODEX_HOME="$fixture/codex" CLUE_HOME="$fixture/clue" TMPDIR="$fixture/tmp" GDK_BACKEND=x11
 export GTK_IM_MODULE=gtk-im-context-simple
 unset NO_AT_BRIDGE
-mkdir -p "$HOME" "$CODEX_HOME" "$TMPDIR" "$fixture/workspace" "$fixture/bin"
+mkdir -p "$HOME" "$agent_home" "$TMPDIR" "$fixture/workspace" "$fixture/bin"
 git init --quiet "$fixture/workspace"
-export SPAN_TEST_CODEX="$codex" SPAN_TEST_WIRE_LOG="$fixture/wire.log"
+export SPAN_TEST_APP_SERVER="$executable" SPAN_TEST_WIRE_LOG="$fixture/wire.log"
 export PATH="$fixture/bin:$PATH"
-cat > "$fixture/bin/codex" <<'SCRIPT'
+cat > "$fixture/bin/$backend" <<'SCRIPT'
 #!/bin/bash
 set -o pipefail
-"$SPAN_TEST_CODEX" "$@" | tee -a "$SPAN_TEST_WIRE_LOG"
+"$SPAN_TEST_APP_SERVER" "$@" | tee -a "$SPAN_TEST_WIRE_LOG"
 SCRIPT
-chmod +x "$fixture/bin/codex"
+chmod +x "$fixture/bin/$backend"
 
 wait_for() {
     local check="$1"
@@ -60,7 +66,7 @@ wait_for() {
 python3.9 packaging/test-responses-gateway.py "$fixture/port" >"$fixture/gateway.log" 2>&1 &
 gateway_pid=$!
 wait_for test -s "$fixture/port"
-cat > "$CODEX_HOME/config.toml" <<CONFIG
+cat > "$agent_home/config.toml" <<CONFIG
 model = "span-ci-model"
 model_provider = "span_ci"
 [features]
@@ -89,6 +95,11 @@ open_span() {
     app_pid=$!
     timeout 20s xdotool search --sync --onlyvisible --pid "$app_pid" --name '^Span$' windowfocus
     widget click '切换 Codex 会话／终端'
+    if [[ $backend == clue ]]; then
+        xdotool key --clearmodifiers ctrl+shift+h
+        widget click '会话后端 · Clue'
+        widget state '打开会话' sensitive
+    fi
 }
 send() {
     widget set-text '消息输入框' "$1"
@@ -143,4 +154,4 @@ widget click '打开会话'
 widget contains 'Fixture file created.'
 send 'Continue the existing fixture session.'
 widget contains 'Fixture session continued.'
-printf '%s\n' 'The EL8 Span RPM opened, handled command approval, displayed a file diff, and resumed the same session with a real App Server.'
+printf 'The EL8 Span RPM handled approval, displayed a diff and resumed the same session with %s.\n' "$backend"

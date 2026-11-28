@@ -1,5 +1,6 @@
-use crate::agent_activity::{self, Activity, Record};
+use crate::agent_activity::{Activity, Record};
 use crate::agent_attachments::{Attachments, Prepared};
+use crate::agent_backend::Backend;
 use crate::agent_catalog::{self, Catalog, ThreadState};
 use crate::agent_commands::Commands;
 use crate::agent_diff::{DiffCard, FoldedDiff};
@@ -7,6 +8,7 @@ use crate::agent_extensions::{
     self, Action as ExtensionAction, Extensions, Request as ExtensionRequest,
     Section as ExtensionSection,
 };
+use crate::agent_interaction::{GoalVisibility, Reasoning};
 use crate::agent_options::{Options, Selection};
 use crate::agent_render::{self, Context};
 use crate::agent_rpc::Rpc;
@@ -146,6 +148,10 @@ pub struct Agent {
     pub panel: gtk::Box,
     connection: Box<dyn Fn() -> Result<Option<crate::ssh::ChannelBuf>, String>>,
     reveal: Box<dyn Fn()>,
+    new_tab: Box<dyn Fn(Backend, bool)>,
+    backend: Cell<Backend>,
+    backend_title: gtk::Label,
+    start_requested: Cell<bool>,
     preview: Offer,
     rpc: RefCell<Option<Rc<Rpc>>>,
     pending: RefCell<HashMap<u64, Request>>,
@@ -179,6 +185,10 @@ pub struct Agent {
     catalog: Catalog,
     extensions: Rc<Extensions>,
     questions: RefCell<HashMap<Value, gtk::Box>>,
+    question_list: gtk::Box,
+    question_panel: gtk::ScrolledWindow,
+    reasoning: RefCell<Reasoning>,
+    compactions: RefCell<HashSet<String>>,
     diff: RefCell<Option<TurnDiff>>,
     scroll: gtk::ScrolledWindow,
     scroll_scheduled: Rc<Cell<bool>>,
@@ -196,6 +206,9 @@ pub struct Agent {
     plan_badge: gtk::Label,
     special_turn: Cell<bool>,
     goal: gtk::Label,
+    goal_card: gtk::Box,
+    goal_visibility: RefCell<GoalVisibility>,
+    goal_elapsed: gtk::Label,
     goal_mode: Cell<bool>,
     goal_mode_bar: gtk::Box,
     placeholder: gtk::Label,
@@ -220,10 +233,12 @@ pub struct Agent {
 impl Agent {
     pub fn new(
         host: &str,
+        backend: Backend,
         initial_directory: Option<&std::path::Path>,
         connection: impl Fn() -> Result<Option<crate::ssh::ChannelBuf>, String> + 'static,
         toggle_terminal: impl Fn() + 'static,
         reveal: impl Fn() + 'static,
+        new_tab: impl Fn(Backend, bool) + 'static,
         preview: Offer,
     ) -> Rc<Self> {
         let panel = column(0);
@@ -231,7 +246,7 @@ impl Agent {
 
         let toolbar = row(6);
         toolbar.style_context().add_class("agent-toolbar");
-        let title = gtk::Label::new(Some("Codex"));
+        let title = gtk::Label::new(Some(backend.label()));
         title.style_context().add_class("agent-toolbar-title");
         toolbar.pack_start(&title, false, false, 0);
         let host_label = gtk::Label::builder()
@@ -248,7 +263,7 @@ impl Agent {
         );
         terminal.connect_clicked(move |_| toggle_terminal());
         toolbar.pack_end(&terminal, false, false, 0);
-        let catalog = Catalog::new(host);
+        let catalog = Catalog::new(host, backend);
         let extensions = Extensions::new(host);
         let copy_id = icons::button(Icon::Copy, "复制会话 ID", "复制会话 ID");
         copy_id.set_no_show_all(true);
@@ -336,7 +351,7 @@ impl Agent {
         timeline.add_overlay(&older);
         panel.pack_start(&timeline, true, true, 0);
 
-        let composer = crate::reading_column::new(0);
+        let composer = crate::reading_column::new(6);
         composer.style_context().add_class("agent-composer");
         let card = column(5);
         card.style_context().add_class("agent-compose-card");
@@ -355,11 +370,37 @@ impl Agent {
         let goal = gtk::Label::builder()
             .xalign(0.0)
             .wrap(true)
-            .lines(3)
+            .lines(2)
             .ellipsize(pango::EllipsizeMode::End)
-            .no_show_all(true)
             .build();
-        goal.style_context().add_class("agent-goal");
+        let goal_card = row(9);
+        goal_card.set_no_show_all(true);
+        goal_card.style_context().add_class("agent-goal");
+        goal_card.pack_start(&goal, true, true, 0);
+        let dismiss_goal = icons::button(Icon::Close, "收起目标卡片", "收起目标卡片");
+        dismiss_goal.set_focus_on_click(false);
+        dismiss_goal.show();
+        goal_card.pack_end(&dismiss_goal, false, false, 0);
+        let goal_elapsed = gtk::Label::new(None);
+        goal_elapsed.style_context().add_class("agent-status");
+        goal_card.pack_end(&goal_elapsed, false, false, 0);
+        goal.show();
+        goal_elapsed.show();
+
+        let question_list = column(8);
+        let question_panel = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .propagate_natural_height(true)
+            .max_content_height(240)
+            .max_content_width(760)
+            .overlay_scrolling(false)
+            .build();
+        question_panel.style_context().add_class("agent-scroll");
+        question_panel.add(&question_list);
+        question_panel.show_all();
+        question_panel.hide();
+        question_panel.set_no_show_all(true);
         let goal_mode_bar = row(6);
         goal_mode_bar.style_context().add_class("agent-goal-mode");
         goal_mode_bar.set_no_show_all(true);
@@ -447,8 +488,6 @@ impl Agent {
         inputs.pack_end(&primary, false, false, 0);
         inputs.pack_end(&stop_button, false, false, 0);
         inputs.pack_end(&usage.widget, false, false, 0);
-        card.pack_start(&task_status.widget, false, false, 0);
-        card.pack_start(&goal, false, false, 0);
         card.pack_start(&quotes.widget, false, false, 0);
         card.pack_start(&goal_mode_bar, false, false, 0);
         card.pack_start(&editor, false, false, 0);
@@ -478,6 +517,9 @@ impl Agent {
                 }
             }
         });
+        composer.add(&task_status.widget);
+        composer.add(&goal_card);
+        composer.add(&question_panel);
         composer.add(&focus_area);
         panel.pack_end(&composer, false, false, 0);
 
@@ -485,6 +527,10 @@ impl Agent {
             panel,
             connection: Box::new(connection),
             reveal: Box::new(reveal),
+            new_tab: Box::new(new_tab),
+            backend: Cell::new(backend),
+            backend_title: title,
+            start_requested: Cell::new(false),
             preview,
             rpc: RefCell::new(None),
             pending: RefCell::new(HashMap::new()),
@@ -525,6 +571,10 @@ impl Agent {
             catalog,
             extensions,
             questions: RefCell::new(HashMap::new()),
+            question_list,
+            question_panel,
+            reasoning: RefCell::new(Reasoning::default()),
+            compactions: RefCell::new(HashSet::new()),
             diff: RefCell::new(None),
             scroll,
             scroll_scheduled: Rc::new(Cell::new(false)),
@@ -542,6 +592,9 @@ impl Agent {
             plan_badge,
             special_turn: Cell::new(false),
             goal,
+            goal_card,
+            goal_visibility: RefCell::new(GoalVisibility::default()),
+            goal_elapsed,
             goal_mode: Cell::new(false),
             goal_mode_bar,
             placeholder,
@@ -568,6 +621,13 @@ impl Agent {
                 && agent.cancel_goal_draft()
             {
                 agent.input.grab_focus();
+            }
+        });
+        let weak = Rc::downgrade(&agent);
+        dismiss_goal.connect_clicked(move |_| {
+            if let Some(agent) = weak.upgrade() {
+                agent.goal_visibility.borrow_mut().dismiss();
+                agent.goal_card.hide();
             }
         });
         agent.bind();
@@ -816,6 +876,15 @@ impl Agent {
     }
 
     fn bind_catalog(self: &Rc<Self>) {
+        for (backend, button) in &self.catalog.backends {
+            let backend = *backend;
+            let weak = Rc::downgrade(self);
+            button.connect_clicked(move |_| {
+                if let Some(agent) = weak.upgrade() {
+                    agent.select_backend(backend);
+                }
+            });
+        }
         let weak = Rc::downgrade(self);
         self.catalog.search.connect_search_changed(move |_| {
             if let Some(agent) = weak.upgrade() {
@@ -872,21 +941,48 @@ impl Agent {
         let weak = Rc::downgrade(self);
         self.catalog.new_thread.connect_clicked(move |_| {
             if let Some(agent) = weak.upgrade() {
-                if agent.active.get()
-                    || agent.uploading.get()
-                    || agent.opening.get()
-                    || !agent.questions.borrow().is_empty()
-                {
-                    agent.catalog.show_status("请先结束当前任务或回答提问");
-                    return;
+                if agent.thread.borrow().is_some() {
+                    (agent.new_tab)(agent.backend.get(), true);
+                } else {
+                    (agent.reveal)();
+                    agent.start_new();
                 }
-                (agent.reveal)();
-                agent.resume.set_text("");
-                agent.settings.show();
-                agent.update_controls();
-                agent.cwd.grab_focus();
             }
         });
+    }
+
+    fn select_backend(self: &Rc<Self>, backend: Backend) {
+        if self.backend.get() == backend {
+            return;
+        }
+        if self.thread.borrow().is_some()
+            || self.last_thread.borrow().is_some()
+            || self.opening.get()
+        {
+            (self.new_tab)(backend, false);
+            return;
+        }
+        self.backend.set(backend);
+        self.backend_title.set_text(backend.label());
+        self.catalog.set_backend(backend);
+        self.disconnect("正在连接会话后端…");
+        self.catalog.loading(true);
+        self.show_catalog(false);
+    }
+
+    pub fn working_directory(&self) -> Option<PathBuf> {
+        let cwd = self.cwd.text();
+        (!cwd.trim().is_empty()).then(|| PathBuf::from(cwd.trim()))
+    }
+
+    pub fn start_new(self: &Rc<Self>) {
+        if self.rpc.borrow().is_some() && !self.initialized.get() {
+            self.resume.set_text("");
+            self.start_requested.set(true);
+        } else if !self.opening.get() {
+            self.resume.set_text("");
+            self.open();
+        }
     }
 
     pub fn catalog_panel(&self) -> &gtk::Box {
@@ -1117,7 +1213,7 @@ impl Agent {
             }
         };
         let weak = Rc::downgrade(self);
-        let rpc = match Rpc::start(socket.as_deref(), move |result| {
+        let rpc = match Rpc::start(socket.as_deref(), self.backend.get(), move |result| {
             if let Some(agent) = weak.upgrade() {
                 agent.receive(result);
             }
@@ -1132,7 +1228,7 @@ impl Agent {
         };
         self.context.borrow_mut().socket = socket;
         self.rpc.replace(Some(rpc));
-        self.show_status("正在连接 Codex…");
+        self.show_status(&format!("正在连接 {}…", self.backend.get().label()));
         self.update_controls();
         self.request(Request::Initialize { browse }, "initialize", json!({
             "clientInfo":{"name":env!("CARGO_PKG_NAME"),"title":crate::APP_NAME,"version":env!("CARGO_PKG_VERSION")},
@@ -1287,6 +1383,9 @@ impl Agent {
             let status = turn["status"].as_str();
             let live = status == Some("inProgress") && !prepend;
             for item in array(&turn["items"]) {
+                if !prepend && status == Some("inProgress") && item["type"] == "reasoning" {
+                    self.reasoning.borrow_mut().complete(item);
+                }
                 if let Some(record) = Record::from_item(item) {
                     if live {
                         activity
@@ -1530,7 +1629,7 @@ impl Agent {
                 self.read_quota();
                 self.load_catalog(None);
                 self.extensions.load_visible();
-                if browse {
+                if browse && !self.start_requested.replace(false) {
                     self.show_status("选择会话或新建");
                 } else {
                     self.open_thread();
@@ -2058,7 +2157,8 @@ impl Agent {
         self.history_window.clear();
         self.reset_slash_state();
         self.goal_pending.set(false);
-        self.goal.hide();
+        self.goal_card.hide();
+        self.goal_visibility.replace(GoalVisibility::default());
         self.follow_tail.set(true);
         self.turn_copy.borrow_mut().clear();
         self.past_activity.borrow_mut().clear();
@@ -2069,7 +2169,8 @@ impl Agent {
         self.activity.take();
         self.diff.take();
         self.approvals.borrow_mut().clear();
-        self.questions.borrow_mut().clear();
+        self.clear_questions();
+        self.clear_progress();
         self.history_cursor.take();
         self.history_anchor.take();
         self.archive_page.take();
@@ -2098,7 +2199,7 @@ impl Agent {
         self.opening.set(false);
         self.initialized.set(false);
         self.goal_pending.set(false);
-        self.goal.hide();
+        self.goal_card.hide();
         self.extensions.disconnected(message);
         self.catalog_fetch.take();
         self.uploading.set(false);
@@ -2123,9 +2224,9 @@ impl Agent {
         for (_, approval) in self.approvals.borrow_mut().drain() {
             self.history.remove(&approval);
         }
-        for (_, question) in self.questions.borrow_mut().drain() {
-            self.history.remove(&question);
-        }
+        self.clear_questions();
+        self.clear_progress();
+        self.start_requested.set(false);
         self.copy_id.hide();
         self.show_status(message);
         self.update_controls();
@@ -2151,6 +2252,27 @@ impl Agent {
             "item/started" | "item/completed" => {
                 let item = &params["item"];
                 if let Some(turn) = params["turnId"].as_str() {
+                    if self.is_active_turn(turn) {
+                        match (item["type"].as_str(), method) {
+                            (Some("contextCompaction"), "item/started") => {
+                                if let Some(id) = item["id"].as_str() {
+                                    self.compactions.borrow_mut().insert(id.into());
+                                }
+                                self.update_task_status();
+                            }
+                            (Some("contextCompaction"), _) => {
+                                if let Some(id) = item["id"].as_str() {
+                                    self.compactions.borrow_mut().remove(id);
+                                }
+                                self.update_task_status();
+                            }
+                            (Some("reasoning"), "item/completed") => {
+                                self.reasoning.borrow_mut().complete(item);
+                                self.update_task_status();
+                            }
+                            _ => {}
+                        }
+                    }
                     self.record_item(turn, item);
                 }
                 if method == "item/completed" {
@@ -2172,11 +2294,12 @@ impl Agent {
                 }
             }
             "item/reasoning/summaryTextDelta" => {
-                if let (Some(turn), Some((id, index, delta))) = (
-                    params["turnId"].as_str(),
-                    agent_activity::summary_delta(params),
-                ) {
-                    self.update_activity(turn, |activity| activity.summary(id, index, delta));
+                if params["turnId"]
+                    .as_str()
+                    .is_some_and(|turn| self.is_active_turn(turn))
+                {
+                    self.reasoning.borrow_mut().delta(params);
+                    self.update_task_status();
                 }
             }
             "item/fileChange/patchUpdated" => {
@@ -2188,6 +2311,9 @@ impl Agent {
                 }
             }
             "turn/started" => {
+                if self.turn.borrow().as_deref() != params["turn"]["id"].as_str() {
+                    self.clear_progress();
+                }
                 self.active.set(true);
                 self.task_status
                     .sync_from_server(params["turn"]["startedAt"].as_u64());
@@ -2239,9 +2365,8 @@ impl Agent {
                 for (_, approval) in self.approvals.borrow_mut().drain() {
                     self.history.remove(&approval);
                 }
-                for (_, question) in self.questions.borrow_mut().drain() {
-                    self.history.remove(&question);
-                }
+                self.clear_questions();
+                self.clear_progress();
                 let diff = self.diff.take();
                 if !diff.is_some_and(|entry| turn["id"].as_str() == Some(entry.id.as_str())) {
                     let mut changes = String::new();
@@ -2268,9 +2393,7 @@ impl Agent {
                 if let Some(approval) = self.approvals.borrow_mut().remove(&params["requestId"]) {
                     self.history.remove(&approval);
                 }
-                if let Some(question) = self.questions.borrow_mut().remove(&params["requestId"]) {
-                    self.history.remove(&question);
-                }
+                self.remove_question(&params["requestId"]);
                 self.update_task_status();
             }
             "error" => {
@@ -2299,28 +2422,7 @@ impl Agent {
     }
 
     fn record_item(&self, turn: &str, item: &Value) {
-        let mut earlier = Vec::new();
-        if item["type"] == "reasoning"
-            && let Some(id) = item["id"].as_str()
-        {
-            let past = self.past_activity.borrow();
-            let before = if self
-                .activity
-                .borrow()
-                .as_ref()
-                .is_some_and(|(_, group)| group.has_item(id))
-            {
-                past.len()
-            } else {
-                past.iter()
-                    .rposition(|group| group.has_item(id))
-                    .unwrap_or(0)
-            };
-            for group in &past[..before] {
-                group.extend_summary(id, &mut earlier);
-            }
-        }
-        if let Some(record) = Record::after(item, &earlier) {
+        if let Some(record) = Record::from_item(item) {
             self.update_record(turn, record);
         }
     }
@@ -2637,14 +2739,35 @@ impl Agent {
         }
     }
 
+    fn remove_question(&self, id: &Value) -> bool {
+        let mut questions = self.questions.borrow_mut();
+        let Some(card) = questions.remove(id) else {
+            return false;
+        };
+        self.question_list.remove(&card);
+        self.question_panel.set_visible(!questions.is_empty());
+        true
+    }
+
+    fn clear_questions(&self) {
+        for (_, card) in self.questions.borrow_mut().drain() {
+            self.question_list.remove(&card);
+        }
+        self.question_panel.hide();
+    }
+
+    fn clear_progress(&self) {
+        self.reasoning.replace(Reasoning::default());
+        self.compactions.borrow_mut().clear();
+    }
+
     fn server_request(self: &Rc<Self>, method: &str, id: Value, params: &Value) {
         if method == "item/tool/requestUserInput" {
             let weak = Rc::downgrade(self);
             let request = id.clone();
             let card = crate::agent_question::card(params, move |answers| {
                 if let Some(agent) = weak.upgrade() {
-                    if let Some(card) = agent.questions.borrow_mut().remove(&request) {
-                        agent.history.remove(&card);
+                    if agent.remove_question(&request) {
                         if let Some(rpc) = agent.rpc.borrow().as_ref() {
                             rpc.reply(request.clone(), answers);
                         }
@@ -2654,11 +2777,11 @@ impl Agent {
             });
             if let Some(card) = card {
                 if let Some(previous) = self.questions.borrow_mut().insert(id, card.clone()) {
-                    self.history.remove(&previous);
+                    self.question_list.remove(&previous);
                 }
-                self.close_activity(None);
-                self.close_reply();
-                self.append(&card);
+                self.question_list.add(&card);
+                card.show_all();
+                self.question_panel.show();
                 self.update_task_status();
                 return;
             }
@@ -2943,12 +3066,17 @@ impl Agent {
             return;
         }
         let activity = self.activity.borrow();
+        let reasoning = self.reasoning.borrow();
         let message = if self.interrupting.get() {
             "正在中断"
         } else if !self.approvals.borrow().is_empty() {
             "等待你的确认"
         } else if !self.questions.borrow().is_empty() {
             "等待你的回复"
+        } else if !self.compactions.borrow().is_empty() {
+            "正在压缩上下文…"
+        } else if let Some(summary) = reasoning.current() {
+            summary
         } else if self.live.borrow().is_some() {
             "正在生成回复"
         } else {

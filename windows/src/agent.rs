@@ -1,4 +1,6 @@
 use crate::agent_attachments::{self, Attachment, Prepared};
+use crate::agent_backend::Backend;
+use crate::agent_interaction::Reasoning;
 use crate::{agent_execution, agent_settings, codex_rpc, theme};
 use futures::channel::mpsc;
 use iced::keyboard::{Key, key::Named};
@@ -28,6 +30,8 @@ mod copy;
 pub(crate) use copy::Format as CopyFormat;
 #[path = "agent_goal.rs"]
 mod goal;
+#[path = "agent_question.rs"]
+mod question;
 #[path = "agent_transcript.rs"]
 mod transcript;
 #[cfg(feature = "visual-check")]
@@ -37,12 +41,14 @@ pub(crate) use goal::VisualGoal;
 pub enum Action {
     Event(codex_rpc::Event),
     New,
+    Backend(Backend),
     Resume(String),
     More(u64, String),
     Draft(text_editor::Action),
     GoalSelect(goal::Command),
     GoalAdvance(i8),
     GoalDismiss,
+    GoalDismissCard,
     Paste,
     AttachImage,
     Prepared(Uuid, Result<Option<Prepared>, String>),
@@ -57,6 +63,9 @@ pub enum Action {
     Link(String),
     Toggle(String),
     Approve(Value, bool),
+    QuestionChoice(Value, usize, usize),
+    QuestionText(Value, usize, String),
+    QuestionSubmit(Value),
     Retry,
     ToggleTerminalDrawer,
 }
@@ -90,18 +99,21 @@ enum Kind {
 #[derive(Clone, Copy)]
 enum Activity {
     Command,
-    Reasoning,
+    Compaction,
     Changes,
 }
 
 impl Activity {
     fn icon(self) -> svg::Handle {
         static COMMAND: OnceLock<svg::Handle> = OnceLock::new();
-        static REASONING: OnceLock<svg::Handle> = OnceLock::new();
+        static COMPACTION: OnceLock<svg::Handle> = OnceLock::new();
         static CHANGES: OnceLock<svg::Handle> = OnceLock::new();
         let (handle, path) = match self {
             Self::Command => (&COMMAND, "M3 5h18v14H3z M7 9l3 3-3 3m6 0h4"),
-            Self::Reasoning => (&REASONING, "M2.5 12h5l3-7 3.5 14 3-7h5"),
+            Self::Compaction => (
+                &COMPACTION,
+                "M4 4h4m-4 0v16m0 0h4m12-16h-4m4 0v16m0 0h-4M9 10h6m-6 4h6",
+            ),
             Self::Changes => (&CHANGES, "M6 3h8l4 4v14H6z M9 11h6m-3-3v6m-3 3h6"),
         };
         handle
@@ -131,6 +143,7 @@ struct Approval {
 
 pub struct Agent {
     connection: Option<mpsc::Sender<Value>>,
+    backend: Backend,
     pending: HashMap<u64, Request>,
     request_id: u64,
     catalog: Vec<Entry>,
@@ -151,6 +164,10 @@ pub struct Agent {
     in_flight: bool,
     turn: Option<String>,
     approval: Option<Approval>,
+    questions: Vec<question::Form>,
+    reasoning: Reasoning,
+    compactions: HashSet<String>,
+    start_requested: bool,
     settings: agent_settings::Settings,
     model_provider: Option<String>,
     status: Option<String>,
@@ -159,10 +176,15 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new(host: Option<String>, cwd: Option<PathBuf>) -> (Self, Task<Action>) {
-        let (connection, events) = codex_rpc::connect(host, cwd.clone());
+    pub fn new(
+        host: Option<String>,
+        cwd: Option<PathBuf>,
+        backend: Backend,
+    ) -> (Self, Task<Action>) {
+        let (connection, events) = codex_rpc::connect(host, cwd.clone(), backend);
         let mut agent = Self {
             connection: Some(connection),
+            backend,
             pending: HashMap::new(),
             request_id: 0,
             catalog: Vec::new(),
@@ -183,9 +205,13 @@ impl Agent {
             in_flight: false,
             turn: None,
             approval: None,
+            questions: Vec::new(),
+            reasoning: Reasoning::default(),
+            compactions: HashSet::new(),
+            start_requested: false,
             settings: agent_settings::Settings::default(),
             model_provider: None,
-            status: Some("Connecting to Codex…".into()),
+            status: Some(format!("Connecting to {}…", backend.label())),
             copied: None,
             copy_request: None,
         };
@@ -243,6 +269,14 @@ impl Agent {
         self.request(Request::Models, "model/list", params);
     }
 
+    pub fn backend(&self) -> Backend {
+        self.backend
+    }
+
+    pub fn has_thread(&self) -> bool {
+        self.thread.is_some()
+    }
+
     fn can_open(&self) -> bool {
         self.connection.is_some()
             && !self.in_flight
@@ -256,6 +290,21 @@ impl Agent {
         self.pending
             .values()
             .any(|request| matches!(request, Request::History | Request::Open))
+    }
+
+    fn start_thread(&mut self) {
+        self.request(
+            Request::Open,
+            "thread/start",
+            json!({
+                "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"workspace-write"
+            }),
+        );
+    }
+
+    fn clear_progress(&mut self) {
+        self.reasoning = Reasoning::default();
+        self.compactions.clear();
     }
 
     fn more_history(&mut self) {
@@ -283,14 +332,21 @@ impl Agent {
                 self.in_flight = false;
                 self.turn = None;
                 self.approval = None;
+                self.questions.clear();
+                self.clear_progress();
+                self.start_requested = false;
                 self.submitted_draft = None;
                 self.status = Some(reason);
             }
-            Action::New if self.can_open() => {
-                self.request(Request::Open, "thread/start", json!({
-                    "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"workspace-write"
-                }));
+            Action::New
+                if self
+                    .pending
+                    .values()
+                    .any(|request| *request == Request::Initialize) =>
+            {
+                self.start_requested = true;
             }
+            Action::New if self.can_open() => self.start_thread(),
             Action::Resume(id) if self.can_open() => {
                 if self.thread.as_deref() != Some(&id) {
                     self.request(
@@ -313,6 +369,7 @@ impl Agent {
             Action::GoalSelect(command) => return self.select_goal(command),
             Action::GoalAdvance(delta) => self.goals.advance(delta),
             Action::GoalDismiss => return self.dismiss_goal(),
+            Action::GoalDismissCard => self.goals.dismiss_card(),
             Action::Paste
                 if self.preparing.is_none()
                     && !(self.goals.draft.is_some() && self.goal_pending()) =>
@@ -363,6 +420,28 @@ impl Agent {
                 let decision = if agree { "accept" } else { "decline" };
                 if self.send(json!({"id":id,"result":{"decision":decision}})) {
                     self.approval = None;
+                }
+            }
+            Action::QuestionChoice(id, index, choice) => {
+                if let Some(form) = self.questions.iter_mut().find(|form| form.id == id) {
+                    form.select(index, choice);
+                }
+            }
+            Action::QuestionText(id, index, input) => {
+                if let Some(form) = self.questions.iter_mut().find(|form| form.id == id) {
+                    form.edit(index, input);
+                }
+            }
+            Action::QuestionSubmit(id) => {
+                let result = self
+                    .questions
+                    .iter()
+                    .find(|form| form.id == id)
+                    .and_then(question::Form::response);
+                if let Some(result) = result
+                    && self.send(json!({"id": id, "result": result}))
+                {
+                    self.questions.retain(|form| form.id != id);
                 }
             }
             Action::Copy(id, format) if self.copy_request.is_none() => {
@@ -588,6 +667,9 @@ impl Agent {
                     self.settings.supports_fast = agent_execution::supports_turn_speed(result);
                     self.status = None;
                     self.load_catalog();
+                    if std::mem::take(&mut self.start_requested) {
+                        self.start_thread();
+                    }
                 }
             }
             Request::List => {
@@ -616,6 +698,8 @@ impl Agent {
                 self.copied = None;
                 self.copy_request = None;
                 self.items.clear();
+                self.questions.clear();
+                self.clear_progress();
                 self.goals = goal::State::default();
                 self.attachments.clear();
                 self.preparing = None;
@@ -698,6 +782,9 @@ impl Agent {
         let turn_id = turn["id"].as_str();
         let first_item = self.items.len();
         for item in values(&turn["items"]) {
+            if restore_active && turn["status"] == "inProgress" && item["type"] == "reasoning" {
+                self.reasoning.complete(item);
+            }
             if item["id"].as_str().is_some_and(|id| !existing.contains(id)) {
                 self.item(item, turn_id, true);
             }
@@ -742,7 +829,19 @@ impl Agent {
     }
 
     fn server_request(&mut self, method: &str, params: &Value, id: &Value) {
-        let same_thread = params["threadId"].as_str() == self.thread.as_deref();
+        let same_thread =
+            self.thread.is_some() && params["threadId"].as_str() == self.thread.as_deref();
+        if same_thread
+            && method == "item/tool/requestUserInput"
+            && let Some(form) = question::Form::new(id.clone(), params)
+        {
+            if let Some(existing) = self.questions.iter_mut().find(|form| form.id == *id) {
+                *existing = form;
+            } else {
+                self.questions.push(form);
+            }
+            return;
+        }
         let supported = matches!(
             method,
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval"
@@ -766,6 +865,9 @@ impl Agent {
             return;
         }
         let turn_id = params["turnId"].as_str();
+        let active = self.in_flight
+            && turn_id.is_some()
+            && (self.turn.is_none() || turn_id == self.turn.as_deref());
         match method {
             "thread/goal/updated" | "thread/goal/cleared" => self.goals.update(&params["goal"]),
             "thread/tokenUsage/updated" => {
@@ -777,6 +879,9 @@ impl Agent {
                 );
             }
             "turn/started" => {
+                if self.turn.as_deref() != params["turn"]["id"].as_str() {
+                    self.clear_progress();
+                }
                 self.in_flight = true;
                 self.turn = params["turn"]["id"].as_str().map(str::to_owned);
             }
@@ -794,14 +899,45 @@ impl Agent {
                 }
                 self.in_flight = false;
                 self.approval = None;
+                self.questions.clear();
+                self.clear_progress();
                 if let Some(error) = params["turn"]["error"]["message"].as_str() {
                     self.status = Some(error.into());
                 } else if self.title == "New session" {
                     self.load_catalog();
                 }
             }
-            "item/started" => self.item(&params["item"], turn_id, false),
-            "item/completed" => self.item(&params["item"], turn_id, true),
+            "item/started" | "item/completed" => {
+                let item = &params["item"];
+                let complete = method == "item/completed";
+                if active {
+                    match item["type"].as_str() {
+                        Some("reasoning") if complete => self.reasoning.complete(item),
+                        Some("contextCompaction") => {
+                            if let Some(id) = item["id"].as_str() {
+                                if complete {
+                                    self.compactions.remove(id);
+                                } else {
+                                    self.compactions.insert(id.into());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                self.item(item, turn_id, complete);
+            }
+            "serverRequest/resolved" => {
+                let id = &params["requestId"];
+                self.questions.retain(|form| &form.id != id);
+                if self
+                    .approval
+                    .as_ref()
+                    .is_some_and(|approval| &approval.id == id)
+                {
+                    self.approval = None;
+                }
+            }
             "item/commandExecution/outputDelta" => {
                 if let (Some(id), Some(delta)) =
                     (params["itemId"].as_str(), params["delta"].as_str())
@@ -824,21 +960,7 @@ impl Agent {
                     self.upsert(id, turn_id, Kind::Reply, "", delta, true, false);
                 }
             }
-            "item/reasoning/summaryTextDelta" => {
-                if let (Some(id), Some(delta)) =
-                    (params["itemId"].as_str(), params["delta"].as_str())
-                {
-                    self.upsert(
-                        id,
-                        turn_id,
-                        Kind::Activity(Activity::Reasoning),
-                        "Reasoning summary",
-                        delta,
-                        true,
-                        false,
-                    );
-                }
-            }
+            "item/reasoning/summaryTextDelta" if active => self.reasoning.delta(params),
             "turn/diff/updated" => {
                 if let (Some(id), Some(diff)) = (params["turnId"].as_str(), params["diff"].as_str())
                 {
@@ -894,22 +1016,16 @@ impl Agent {
                     false,
                 );
             }
-            Some("reasoning") if complete => {
-                let text = values(&value["summary"])
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-                if !text.trim().is_empty() {
-                    self.upsert(
-                        id,
-                        turn_id,
-                        Kind::Activity(Activity::Reasoning),
-                        "Reasoning summary",
-                        &text,
-                        false,
-                        true,
-                    );
-                }
+            Some("contextCompaction") if complete => {
+                self.upsert(
+                    id,
+                    turn_id,
+                    Kind::Activity(Activity::Compaction),
+                    "Context compacted",
+                    "",
+                    false,
+                    true,
+                );
             }
             _ => {}
         }
@@ -1065,12 +1181,27 @@ impl Agent {
             list = list.push(item);
         }
         let header = if self.connection.is_some() {
-            action("New session", self.can_open().then_some(Action::New), false)
+            action(
+                "New session",
+                (self.has_thread() || self.can_open()).then_some(Action::New),
+                false,
+            )
         } else {
             action("Reconnect", Some(Action::Retry), true)
         };
+        let mut backends = row![].spacing(5);
+        for backend in Backend::ALL {
+            backends = backends.push(
+                button(text(backend.label()).size(13))
+                    .on_press(Action::Backend(backend))
+                    .width(Fill)
+                    .padding([6, 10])
+                    .style(move |_, status| theme::tab(self.backend == backend, status)),
+            );
+        }
         column![
-            text("Codex sessions").size(14).font(theme::SEMIBOLD),
+            text("会话后端").size(13).color(theme::MUTED),
+            backends,
             header,
             scrollable(list).height(Fill),
         ]
@@ -1086,10 +1217,10 @@ impl Agent {
                 .as_deref()
                 .unwrap_or("Start a session or open one from the sidebar.");
             return column![
-                self.header("Codex", drawer),
+                self.header(self.backend.label(), drawer),
                 container(
                     column![
-                        text("Codex").size(28).font(theme::SEMIBOLD),
+                        text(self.backend.label()).size(28).font(theme::SEMIBOLD),
                         text(hint).size(15).color(theme::MUTED)
                     ]
                     .spacing(12)
@@ -1164,7 +1295,7 @@ impl Agent {
             .placeholder(if drafting_goal.is_some() {
                 "What should this session accomplish?"
             } else {
-                "Message Codex"
+                "输入消息，或添加附件"
             })
             .on_action(Action::Draft)
             .height(56)
@@ -1225,9 +1356,6 @@ impl Agent {
         }
         if let Some(status) = &self.status {
             composer = composer.push(text(status).size(13).color(theme::MUTED));
-        }
-        if let Some(goal) = self.goals.summary() {
-            composer = composer.push(goal);
         }
         if drafting_goal.is_some() {
             composer = composer.push(self.goal_draft_header()).push(editor).push(
@@ -1324,18 +1452,43 @@ impl Agent {
         composer: iced::widget::Column<'a, Action>,
         drawer: bool,
     ) -> Element<'a, Action> {
+        let mut footer = column![].spacing(6);
+        let progress = if !self.questions.is_empty() {
+            Some("Waiting for your answer")
+        } else if !self.compactions.is_empty() {
+            Some("Compacting context…")
+        } else if self.in_flight {
+            self.reasoning.current().or(Some("Working…"))
+        } else {
+            None
+        };
+        if let Some(progress) = progress {
+            footer = footer.push(
+                text(progress)
+                    .size(13)
+                    .color(theme::MUTED)
+                    .wrapping(text::Wrapping::None)
+                    .shaping(text::Shaping::Advanced),
+            );
+        }
+        if let Some(goal) = self.goals.summary() {
+            footer = footer.push(goal);
+        }
+        if let Some(question) = self.questions.first() {
+            footer = footer.push(question.view());
+        }
+        footer = footer.push(
+            container(composer)
+                .padding(11)
+                .width(Fill)
+                .style(|_| theme::composer()),
+        );
         column![
             self.header(&self.title, drawer),
             scroll,
-            container(
-                container(composer)
-                    .padding(11)
-                    .width(Fill)
-                    .max_width(760)
-                    .style(|_| theme::composer())
-            )
-            .padding([10, 24])
-            .center_x(Fill),
+            container(container(footer).max_width(760).width(Fill))
+                .padding([10, 24])
+                .center_x(Fill),
         ]
         .height(Fill)
         .into()
@@ -1392,8 +1545,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn answer_options_are_replied_to_the_original_request() {
+        let (mut agent, _) = Agent::new(None, None, Backend::Clue);
+        let (sender, mut receiver) = mpsc::channel(4);
+        agent.connection = Some(sender);
+        agent.thread = Some("clue-fixture".into());
+        let id = json!("question");
+        agent.server_request(
+            "item/tool/requestUserInput",
+            &json!({
+                "threadId":"clue-fixture",
+                "questions":[{
+                    "id":"environment", "header":"Deploy", "question":"Which environment?",
+                    "options":[{"label":"Staging", "description":"Use the test environment"}],
+                    "isOther":true
+                }]
+            }),
+            &id,
+        );
+        assert_eq!(agent.questions.len(), 1);
+        let _ = agent.update(Action::QuestionSubmit(id.clone()));
+        assert!(receiver.try_recv().is_err());
+        let _ = agent.update(Action::QuestionChoice(id.clone(), 0, 0));
+        let _ = agent.update(Action::QuestionSubmit(id.clone()));
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            json!({
+                "id":id, "result":{"answers":{"environment":{"answers":["Staging"]}}}
+            })
+        );
+        assert!(agent.questions.is_empty());
+    }
+
+    #[test]
+    fn reasoning_and_compaction_status_stay_outside_the_tool_timeline() {
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
+        agent.thread = Some("fixture".into());
+        agent.notification(
+            "turn/started",
+            &json!({"threadId":"fixture","turn":{"id":"turn"}}),
+        );
+        for (index, title) in ["First summary", "Latest summary"].into_iter().enumerate() {
+            agent.notification(
+                "item/reasoning/summaryTextDelta",
+                &json!({
+                    "threadId":"fixture","turnId":"turn","itemId":"reason",
+                    "summaryIndex":index,"delta":format!("**{title}**")
+                }),
+            );
+        }
+        assert_eq!(agent.reasoning.current(), Some("Latest summary"));
+        assert!(agent.items.is_empty());
+        let params = json!({"threadId":"fixture","turnId":"turn",
+            "item":{"id":"compact","type":"contextCompaction"}});
+        agent.notification("item/started", &params);
+        assert!(agent.compactions.contains("compact"));
+        assert!(agent.items.is_empty());
+        agent.notification("item/completed", &params);
+        assert!(agent.compactions.is_empty());
+        assert_eq!(agent.items[0].title, "Context compacted");
+    }
+
+    #[test]
     fn image_only_draft_is_kept_on_error_and_released_on_acceptance() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         let (sender, mut requests) = mpsc::channel(8);
         agent.connection = Some(sender);
         agent.pending.clear();
@@ -1432,7 +1647,7 @@ mod tests {
 
     #[test]
     fn active_follow_up_does_not_apply_next_turn_settings() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         let (sender, mut requests) = mpsc::channel(8);
         agent.connection = Some(sender);
         agent.pending.clear();
@@ -1481,7 +1696,7 @@ mod tests {
 
     #[test]
     fn command_output_streams_into_one_row_and_keeps_the_final_snapshot() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         agent.thread = Some("fixture".into());
         for chunk in ["working\n", "finished\n"] {
             agent.notification(
@@ -1512,7 +1727,7 @@ mod tests {
 
     #[test]
     fn resume_history_and_delta_completion_keep_item_order() {
-        let (mut agent, _) = Agent::new(None, None);
+        let (mut agent, _) = Agent::new(None, None, Backend::Codex);
         agent.response(
             Request::Open,
             &json!({

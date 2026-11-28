@@ -18,8 +18,10 @@ if os.environ.get("SPAN_TEST_GDK_GL_DEFAULT") == "1":
     assert "GDK_GL" not in os.environ
 
 home = Path(os.environ.get("SPAN_BENCH_FIXTURE_HOME", os.environ["HOME"]))
-control_socket = Path(os.environ.get("CODEX_HOME", home / ".codex")) / "app-server-control/app-server-control.sock"
-thread = "preview-thread"
+clue = Path(sys.argv[0]).name == "clue"
+home_key, default_dir = ("CLUE_HOME", ".clue") if clue else ("CODEX_HOME", ".codex")
+control_socket = Path(os.environ.get(home_key, home / default_dir)) / "app-server-control/app-server-control.sock"
+thread = "clue-preview-thread" if clue else "preview-thread"
 saved_thread = "stored-deployment"
 turn = "preview-turn"
 item = "preview-message"
@@ -142,6 +144,13 @@ shared = args == ["shared-stdio"]
 assert shared or (args == ["app-server"] and not control_socket.exists())
 plugin_installed = False
 connector_enabled = True
+def wait_for_bench(name):
+    for _ in range(750):
+        if (home / name).exists():
+            return
+        time.sleep(0.02)
+    raise TimeoutError(name)
+
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
@@ -215,7 +224,12 @@ for line in sys.stdin:
             if params.get("objective") == "Goal rejected by fixture":
                 send({"id": request_id, "error": {"code": -32602, "message": "Fixture goal rejected"}})
                 continue
-            goal = {"objective": params.get("objective") or goal["objective"], "status": params["status"]}
+            goal = {"objective": params.get("objective") or goal["objective"], "status": params["status"],
+                    "timeUsedSeconds": 3723}
+            goal_file.write_text(json.dumps(goal))
+        if method == "thread/goal/get" and goal and (home / "agent-complete-goal").exists():
+            (home / "agent-complete-goal").unlink()
+            goal["status"] = "complete"
             goal_file.write_text(json.dumps(goal))
         if method == "thread/goal/clear":
             assert params["origin"] == "user" and goal
@@ -227,6 +241,9 @@ for line in sys.stdin:
         assert params["sandbox"] == "workspace-write"
         assert params["approvalPolicy"] == "on-request"
         started_thread = "new-slash-fixture" if shared else thread
+        if not clue and not shared and (home / "agent-replied").exists() and not (home / "agent-answered").exists():
+            started_thread = "new-during-question"
+            (home / "agent-new-during-question").touch()
         turns = []
         if os.environ.get("SPAN_BENCH_HISTORY") == "1":
             label = "会话性能测量"
@@ -293,6 +310,9 @@ for line in sys.stdin:
             "primary": {"usedPercent": 17, "windowDurationMins": 300},
             "secondary": {"usedPercent": 31, "windowDurationMins": 10080}}}})
     elif method == "thread/list":
+        if clue:
+            send({"id": request_id, "result": {"data": [entry(thread, "Clue fixture thread", "Projects/Clue")]}})
+            continue
         assert params["limit"] == 30 and params["sortKey"] == "updated_at"
         if os.environ.get("SPAN_BENCH_CATALOG_PAGES") == "1" and not params["searchTerm"]:
             page = int(params.get("cursor") or 0)
@@ -366,6 +386,10 @@ for line in sys.stdin:
         send({"method": "turn/started", "params": {"threadId": saved_thread, "turn": run}})
         item = ({"id": special, "type": "exitedReviewMode", "review": "Native review completed."}
                 if review else {"id": special, "type": "contextCompaction"})
+        if not review:
+            send({"method": "item/started", "params": {
+                "threadId": saved_thread, "turnId": special, "item": item}})
+            wait_for_bench("slash-compact-observed")
         send({"method": "item/completed", "params": {
             "threadId": saved_thread, "turnId": special, "item": item}})
         send({"method": "turn/completed", "params": {"threadId": saved_thread,
@@ -412,11 +436,11 @@ for line in sys.stdin:
         send({"id": request_id, "result": {"turnId": interruptible_turn}})
         send({"method": "item/reasoning/summaryTextDelta", "params": {
             "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-reasoning",
-            "summaryIndex": 0, "delta": " Reasoning continues below the follow-up."}})
+            "summaryIndex": 2, "delta": "Reasoning continues after the follow-up."}})
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": interruptible_turn,
               "item": {"id": "comparison-reasoning", "type": "reasoning",
-                       "summary": ["Reasoning before the follow-up. Thinking after the progress update. "
-                                   "Reasoning continues below the follow-up."]}}})
+                       "summary": ["Reasoning before the follow-up.", "Thinking after the progress update.",
+                                   "Reasoning continues after the follow-up."]}}})
         (home / "agent-steered").touch()
     elif method == "turn/start":
         assert params["summary"] == "auto"
@@ -445,13 +469,6 @@ for line in sys.stdin:
             event = {"threadId": thread, "turnId": identifier}
             send({"id": request_id, "result": {"turn": {"id": identifier, "status": "inProgress"}}})
             (home / "bench-hidden-started").touch()
-
-            def wait_for_bench(name):
-                for _ in range(750):
-                    if (home / name).exists():
-                        return
-                    time.sleep(0.02)
-                raise TimeoutError(name)
 
             wait_for_bench("bench-hidden-unmapped")
             offscreen = os.environ.get("SPAN_BENCH_OFFSCREEN_PROSE") == "1"
@@ -600,7 +617,7 @@ for line in sys.stdin:
                            "text": "I found the comparison data."}}})
             send({"method": "item/reasoning/summaryTextDelta", "params": {
                 "threadId": thread, "turnId": interruptible_turn, "itemId": "comparison-reasoning",
-                "summaryIndex": 0, "delta": " Thinking after the progress update."}})
+                "summaryIndex": 1, "delta": "**Thinking after the progress update.**"}})
             send({"method": "item/completed", "params": {"threadId": thread, "turnId": interruptible_turn,
                   "item": {"id": "comparison-check", "type": "commandExecution",
                            "command": "printf comparison", "status": "completed", "exitCode": 0}}})
@@ -659,7 +676,9 @@ for line in sys.stdin:
         send({"id": "preview-question", "method": "item/tool/requestUserInput", "params": {
             "threadId": thread, "turnId": turn, "itemId": "question", "questions": [
                 {"id": "environment", "header": "Deployment", "question": "Which deployment environment?",
-                 "isOther": False, "isSecret": False, "options": None}]}})
+                 "isOther": True, "isSecret": False, "options": [
+                     {"label": "Staging", "description": "Use the test environment"},
+                     {"label": "Production", "description": "Use the production environment"}]}]}})
     elif request_id == "preview-question":
         assert request["result"] == {"answers": {"environment": {"answers": ["Staging"]}}}
         (home / "generated-preview.html").write_text("""<!doctype html><html><head>

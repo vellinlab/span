@@ -1,3 +1,4 @@
+use crate::agent_backend::Backend;
 use async_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use futures::channel::mpsc;
 use futures::{SinkExt, StreamExt, future};
@@ -9,22 +10,17 @@ use tokio::process::Command;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
 const MAX_PACKET: usize = 64 * 1024 * 1024;
-const ROUTE: &str = r#"bash -lc '
-if [ -S "${CODEX_HOME:-$HOME/.codex}/app-server-control/app-server-control.sock" ]; then
-    printf "span-codex-shared\n"
-    exec codex app-server proxy
-fi
-printf "span-codex-stdio\n"
-exec codex app-server
-'"#;
-
 #[derive(Clone, Debug)]
 pub enum Event {
     Packet(Value),
     Disconnected(String),
 }
 
-pub fn connect(host: Option<String>, cwd: Option<PathBuf>) -> (mpsc::Sender<Value>, Task<Event>) {
+pub fn connect(
+    host: Option<String>,
+    cwd: Option<PathBuf>,
+    backend: Backend,
+) -> (mpsc::Sender<Value>, Task<Event>) {
     let (requests, receiver) = mpsc::channel(32);
     let events = stream::channel(32, move |mut output| async move {
         #[cfg(feature = "visual-check")]
@@ -32,10 +28,10 @@ pub fn connect(host: Option<String>, cwd: Option<PathBuf>) -> (mpsc::Sender<Valu
             crate::visual_check::serve(receiver, &mut output).await;
             return;
         }
-        let reason = serve(host, cwd, receiver, &mut output)
+        let reason = serve(host, cwd, backend, receiver, &mut output)
             .await
             .err()
-            .unwrap_or_else(|| "Codex ended the connection.".into());
+            .unwrap_or_else(|| format!("{} ended the connection.", backend.label()));
         let _ = output.send(Event::Disconnected(reason)).await;
     });
     (requests, Task::stream(events))
@@ -44,6 +40,7 @@ pub fn connect(host: Option<String>, cwd: Option<PathBuf>) -> (mpsc::Sender<Valu
 async fn serve(
     host: Option<String>,
     cwd: Option<PathBuf>,
+    backend: Backend,
     mut requests: mpsc::Receiver<Value>,
     output: &mut mpsc::Sender<Event>,
 ) -> Result<(), String> {
@@ -51,10 +48,11 @@ async fn serve(
 
     let mut command = if let Some(host) = &host {
         let mut ssh = Command::new(crate::ssh::PROGRAM);
-        ssh.args(crate::ssh::BACKGROUND).args(["--", host, ROUTE]);
+        let remote = format!("bash -lc '{}'", backend.server_script());
+        ssh.args(crate::ssh::BACKGROUND).args(["--", host, &remote]);
         ssh
     } else {
-        let mut codex = Command::new("codex.exe");
+        let mut codex = Command::new(backend.executable());
         codex.arg("app-server");
         if let Some(cwd) = cwd {
             codex.current_dir(cwd);
@@ -69,7 +67,7 @@ async fn serve(
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| format!("Could not start Codex: {error}"))?;
+        .map_err(|error| format!("Could not start {}: {error}", backend.label()))?;
     let mut reader = BufReader::new(process.stdout.take().expect("stdout pipe"));
     let mut writer = process.stdin.take().expect("stdin pipe");
 
@@ -202,7 +200,7 @@ mod tests {
                     let host = crate::ssh_check::host(variable);
                     let (mut requests, input) = mpsc::channel(4);
                     let (mut output, mut events) = mpsc::channel(4);
-                    let rpc = serve(Some(host), None, input, &mut output);
+                    let rpc = serve(Some(host), None, Backend::Codex, input, &mut output);
                     let exchange = async move {
                         for (id, method, result) in [
                             (

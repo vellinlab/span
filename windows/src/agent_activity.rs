@@ -7,12 +7,29 @@ use iced::{Center, Color, Element, Fill, Theme};
 const MAX_PREVIEW_LINES: usize = 160;
 const MAX_PREVIEW_BYTES: usize = 16 * 1024;
 
-pub(super) fn view<'a>(item: &'a Item, kind: Activity, theme: &'a Theme) -> Element<'a, Action> {
+pub(super) fn view<'a>(item: &'a Item, kind: Activity, _theme: &'a Theme) -> Element<'a, Action> {
     let title = if item.title.is_empty() {
         "Run command"
     } else {
         &item.title
     };
+    if matches!(kind, Activity::Compaction) {
+        return container(
+            row![
+                svg(kind.icon())
+                    .width(14)
+                    .height(14)
+                    .style(|_, _| svg::Style {
+                        color: Some(theme::ACTIVITY),
+                    }),
+                text(title).size(13).color(theme::ACTIVITY),
+            ]
+            .spacing(8)
+            .align_y(Center),
+        )
+        .padding([4, 8])
+        .into();
+    }
     let toggle = button(
         row![
             svg(kind.icon())
@@ -49,15 +66,7 @@ pub(super) fn view<'a>(item: &'a Item, kind: Activity, theme: &'a Theme) -> Elem
     if !item.expanded {
         return toggle.into();
     }
-    let detail = match kind {
-        Activity::Reasoning => item.parsed.as_ref().map_or_else(
-            || text(&item.value).color(theme::MUTED).size(14).into(),
-            |document| {
-                theme::reading_markdown(document.items(), 14, theme::MUTED, theme).map(Action::Link)
-            },
-        ),
-        Activity::Command | Activity::Changes => output_card(item, kind),
-    };
+    let detail = output_card(item, kind);
     let indent = container(
         row![
             rule::vertical(1).style(theme::rule),

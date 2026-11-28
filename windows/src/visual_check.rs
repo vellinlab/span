@@ -23,6 +23,8 @@ const THREAD: &str = "visual-check";
 const OBJECTIVE: &str = "Reduce response latency for long Windows sessions.";
 const INITIAL_ITEMS: usize = 320;
 const EARLIER_ITEMS: usize = 32;
+const INITIAL_ROWS: usize = INITIAL_ITEMS * 3 / 4;
+const EARLIER_ROWS: usize = EARLIER_ITEMS * 3 / 4;
 const COPY_INTRO: &str = "Progress: the preview has finished.";
 const COPY_MARKDOWN: &str = "### Build report\n\n| 检查 | 状态 |\n| --- | --- |\n| 终端 | **通过** |\n\n[Details](https://example.invalid/build-report)\n\n```powershell\nspan check --preview\n```";
 const ACTIVITY_DIFF: &str = "diff --git a/src/preview.rs b/src/preview.rs\n--- a/src/preview.rs\n+++ b/src/preview.rs\n@@ -14,3 +14,4 @@ fn render() {\n-    let frame = redraw();\n+    let frame = cache.get_or_draw();\n+    frame.keep_position();\n     show(frame);\n }\n";
@@ -172,7 +174,7 @@ impl Check {
         }
         match (event, self.step) {
             (Event::Observe, Step::Open) => match probe {
-                Some((_, view, INITIAL_ITEMS, true)) => {
+                Some((_, view, INITIAL_ROWS, true)) => {
                     assert!(view.from_bottom < 1.0);
                     assert!(view.from_top > 1_000.0);
                     self.step = Step::CaptureLatest;
@@ -237,7 +239,7 @@ impl Check {
                 .chain(observe())
             }
             (Event::Observe, Step::WaitForHistory { end }) => match probe {
-                Some((_, view, items, false)) if items == INITIAL_ITEMS + EARLIER_ITEMS => {
+                Some((_, view, items, false)) if items == INITIAL_ROWS + EARLIER_ROWS => {
                     let actual = view.from_bottom;
                     if view.from_top < 200.0 {
                         return observe();
@@ -253,7 +255,7 @@ impl Check {
                 let scale = frame.scale_factor;
                 assert_ne!(self.first_frame, self.save("earlier.png", frame));
                 let metrics = json!({
-                    "initial_items": INITIAL_ITEMS,
+                    "initial_items": INITIAL_ROWS,
                     "loaded_items": self.items,
                     "offset_before": end,
                     "offset_after": actual,

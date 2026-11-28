@@ -1,3 +1,4 @@
+use crate::agent_backend::Backend;
 use crate::agent_render;
 use crate::icons::{self, Icon};
 use gtk::prelude::*;
@@ -84,6 +85,7 @@ pub struct Catalog {
     pub more: gtk::Button,
     pub refresh: gtk::Button,
     pub new_thread: gtk::Button,
+    pub backends: [(Backend, gtk::Button); 2],
     status: gtk::Label,
     list: gtk::ListBox,
     entries: RefCell<Vec<Entry>>,
@@ -99,7 +101,7 @@ struct SessionRow {
 }
 
 impl Catalog {
-    pub fn new(host: &str) -> Self {
+    pub fn new(host: &str, backend: Backend) -> Self {
         let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
         column.style_context().add_class("agent-catalog");
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -112,6 +114,22 @@ impl Catalog {
         new_thread.style_context().add_class("quiet-button");
         header.pack_end(&new_thread, false, false, 0);
         column.add(&header);
+        let chooser = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        chooser.style_context().add_class("agent-backend-picker");
+        let backends = Backend::ALL.map(|choice| {
+            let button = gtk::Button::with_label(choice.label());
+            button.style_context().add_class("quiet-button");
+            button.set_tooltip_text(Some("切换会话后端"));
+            if let Some(accessible) = button.accessible() {
+                accessible.set_name(&format!("会话后端 · {}", choice.label()));
+            }
+            if choice == backend {
+                button.style_context().add_class("selected");
+            }
+            chooser.pack_start(&button, true, true, 0);
+            (choice, button)
+        });
+        column.add(&chooser);
 
         let search = gtk::SearchEntry::builder()
             .placeholder_text("搜索会话标题")
@@ -154,6 +172,7 @@ impl Catalog {
             more,
             refresh,
             new_thread,
+            backends,
             status,
             list,
             entries: RefCell::new(Vec::new()),
@@ -203,6 +222,17 @@ impl Catalog {
         }
         self.more.set_sensitive(false);
         self.show_status("正在读取会话…");
+    }
+
+    pub fn set_backend(&self, backend: Backend) {
+        for (choice, button) in &self.backends {
+            let style = button.style_context();
+            if *choice == backend {
+                style.add_class("selected");
+            } else {
+                style.remove_class("selected");
+            }
+        }
     }
 
     pub fn set_current(&self, id: Option<&str>, state: ThreadState) {

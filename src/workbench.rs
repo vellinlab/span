@@ -1,3 +1,4 @@
+use crate::agent_backend::Backend;
 use crate::agent_extensions::Section as ExtensionSection;
 use crate::browser::Browser;
 use crate::host_dialog;
@@ -344,7 +345,36 @@ impl Workbench {
     }
 
     fn open_session(self: &Rc<Self>, launch: Launch, quick_connect: bool) {
-        let session = Session::new(launch, Rc::downgrade(&self.preview), quick_connect);
+        self.add_session(launch, quick_connect, None, Backend::default(), false);
+    }
+
+    fn add_session(
+        self: &Rc<Self>,
+        launch: Launch,
+        quick_connect: bool,
+        parent: Option<&Session>,
+        backend: Backend,
+        start_thread: bool,
+    ) {
+        let workbench = Rc::downgrade(self);
+        let session = Session::new(
+            launch,
+            Rc::downgrade(&self.preview),
+            quick_connect,
+            parent,
+            backend,
+            move |parent, backend, start| {
+                if let Some(workbench) = workbench.upgrade() {
+                    workbench.add_session(
+                        parent.launch.clone(),
+                        false,
+                        Some(parent),
+                        backend,
+                        start,
+                    );
+                }
+            },
+        );
         let tab = row(7);
         tab.style_context().add_class("tab-label");
         let label = text_label(session.launch.label(), "tab-title");
@@ -413,7 +443,14 @@ impl Workbench {
         self.views.set_visible_child_name("terminal");
         self.tabs.set_current_page(Some(position));
         self.start(&session);
-        session.terminal.grab_focus();
+        if parent.is_some() {
+            session.show_agent();
+            if start_thread {
+                session.agent().start_new();
+            }
+        } else {
+            session.terminal.grab_focus();
+        }
     }
 
     fn start(self: &Rc<Self>, session: &Rc<Session>) {
