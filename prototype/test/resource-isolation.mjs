@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright';
 
 const [binary, reportPath, baselineBinary, baselineCommit, coveredBaseline, coveredBaselineCommit,
-  minimizedBaseline, minimizedBaselineCommit] = process.argv.slice(2);
+  minimizedBaseline, minimizedBaselineCommit, collapsedBaseline, collapsedBaselineCommit] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const initialSize = [880, 640];
 const activeWindowMs = 7500;
@@ -328,15 +328,19 @@ async function observeTerminalReveal(app, area) {
   }, { area: { ...marker, x: area.x + marker.x, y: area.y + marker.y }, marker, clickAt, closedAt, outputAt });
 }
 
-async function hiddenOutput(app, page, { profile, capture, variant, saveImage, minimized }) {
+async function hiddenOutput(app, page, { profile, capture, variant, saveImage, workload }) {
+  const minimized = workload === 'minimized';
+  const collapsed = workload === 'collapsed';
+  const coveredByPreview = workload === 'covered';
   const script = fileURLToPath(new URL('./terminal-covered-output.cjs', import.meta.url));
   const gate = join(profile, 'begin-terminal-output');
-  await terminalLine(page, `"${process.execPath}" "${script}" "${gate}"`, 'span_covered_ready');
+  await terminalLine(page, `"${process.execPath}" "${script}" "${gate}"${collapsed ? ' --bulk' : ''}`, 'span_covered_ready');
+  const toggleTerminal = page.getByRole('button', { name: '切换终端' });
   const screen = page.locator('.terminal-canvas .xterm-screen');
   const readyRow = page.locator('.xterm-rows > div', { hasText: 'span_covered_ready' });
   const dimensions = () => screen.evaluate(element => [element.offsetWidth, element.offsetHeight]);
   const beforeCover = await dimensions();
-  const area = !minimized && await screen.evaluate(element => {
+  const area = coveredByPreview && await screen.evaluate(element => {
     const bounds = element.getBoundingClientRect();
     return { x: Math.ceil(bounds.left), y: Math.ceil(bounds.top), width: 146, height: Math.floor(bounds.height) - 1 };
   });
@@ -363,6 +367,7 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     let batches = 0;
     let tail = '';
     let packets = 0;
+    let bytes = 0;
     let received = false;
     const generations = new Set();
     const stopWindow = window.span.onWindowHidden(hidden => { windowHidden = hidden; });
@@ -377,7 +382,9 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       if (packet.event !== 'terminal') return;
       generations.add(packet.generation);
       packets++;
-      const text = tail + atob(packet.data);
+      const decoded = atob(packet.data);
+      bytes += decoded.length;
+      const text = tail + decoded;
       received ||= text.includes('span_covered_done');
       tail = text.slice(-32);
     });
@@ -385,7 +392,7 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       get windowHidden() { return windowHidden; },
       get received() { return received; },
       begin() { observer.observe(rows, { childList: true, subtree: true, characterData: true }); },
-      finish() { observer.disconnect(); return { batches, packets, generations: generations.size }; },
+      finish() { observer.disconnect(); return { batches, packets, bytes, generations: generations.size }; },
       armReveal() {
         const preview = document.getElementById('file-preview');
         const button = preview.querySelector('.preview-close');
@@ -422,13 +429,17 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
       await page.waitForFunction(state => state.windowHidden === true, observation, { polling: 50 });
       assert.ok(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMinimized()));
+    } else if (collapsed) {
+      await toggleTerminal.click();
+      await screen.waitFor({ state: 'hidden' });
+      assert.equal(await screen.count(), 1);
     } else {
       await page.getByRole('button', { name: '文件', exact: true }).click();
       await readme.click();
       await waitForPreview();
       await checkCover();
     }
-    assert.deepEqual(await dimensions(), beforeCover);
+    if (!collapsed) assert.deepEqual(await dimensions(), beforeCover);
     await observation.evaluate(state => state.begin());
     const before = await capture();
     await writeFile(gate, '');
@@ -438,12 +449,13 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     const events = await observation.evaluate(state => state.finish());
     assert.ok(events.packets > 0);
     assert.equal(events.generations, 1);
+    if (collapsed) assert.ok(events.bytes > 256 * 1024, 'The hidden stream exceeded the PTY window and kept receiving data');
     if (!minimized || variant === 'candidate') {
       assert.equal(events.batches, 0);
       assert.equal(await readyRow.count(), 1, 'The hidden terminal keeps its previous DOM until reveal');
     }
     let readReveal;
-    if (!minimized) {
+    if (coveredByPreview) {
       readReveal = await observeTerminalReveal(app, area);
       await observation.evaluate(state => state.armReveal());
     }
@@ -451,7 +463,8 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
     if (minimized) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
       await page.waitForFunction(state => state.windowHidden === false, observation, { polling: 50 });
-    } else await closePreview();
+    } else if (collapsed) await toggleTerminal.click();
+    else await closePreview();
     await waitForOutput();
     const assertionAt = performance.timeOrigin + performance.now();
     const revealDomMs = assertionAt - revealStarted;
@@ -468,10 +481,10 @@ async function hiddenOutput(app, page, { profile, capture, variant, saveImage, m
       assert.ok(revealStages.notifications > 0, 'The frame observer must receive a notification as the preview closes');
       console.log(`${variant} terminal reveal: ${JSON.stringify(revealStages)}`);
     }
-    const restored = minimized ? 'restored' : 'revealed';
+    const restored = collapsed ? 'reopened' : minimized ? 'restored' : 'revealed';
     if (saveImage) await page.screenshot({ path: reportPath.replace(/\.json$/, `-${variant}-terminal-${restored}.png`) });
     let resizeWhileCovered;
-    if (!minimized && variant === 'candidate') {
+    if (coveredByPreview && variant === 'candidate') {
       await readme.click();
       await waitForPreview();
       await checkCover();
@@ -593,8 +606,8 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     const capture = () => snapshot(app, page, cdp, pid);
     const beforeOpen = await capture();
     await openTerminal();
-    if (workload === 'covered' || workload === 'minimized') {
-      return await hiddenOutput(app, page, { profile, capture, variant, saveImage, minimized: workload === 'minimized' });
+    if (workload === 'covered' || workload === 'minimized' || workload === 'collapsed') {
+      return await hiddenOutput(app, page, { profile, capture, variant, saveImage, workload });
     }
     await terminalLine(page, linux ? `printf '%s_%s\\n' resources ready` : 'echo resources_ready', 'resources_ready');
     await settle(page);
@@ -628,12 +641,12 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
 
 const report = {
   platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
-  window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, minimizedBaselineCommit,
-  trials: [], interaction: [], palettes: [], covered: [], minimized: [],
+  window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, minimizedBaselineCommit, collapsedBaselineCommit,
+  trials: [], interaction: [], palettes: [], covered: [], minimized: [], collapsed: [],
 };
 const run = (workload, variant) => trial(workload, variant, variant === 'baseline' ? baselineBinary : binary);
 const publish = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
-for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimized', minimizedBaseline]]) {
+for (const [workload, hiddenBaseline] of [['covered', coveredBaseline], ['minimized', minimizedBaseline], ['collapsed', collapsedBaseline]]) {
   if (!hiddenBaseline) continue;
   for (const [index, variant] of ['baseline', 'candidate', 'candidate', 'baseline'].entries()) {
     const executable = variant === 'baseline' ? hiddenBaseline : binary;

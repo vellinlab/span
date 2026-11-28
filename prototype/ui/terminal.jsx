@@ -9,6 +9,7 @@ let generation = Math.trunc(performance.timeOrigin * 1_000);
 const ACK_BYTES = 64 * 1024;
 const OUTPUT_GAP_MS = 96;
 const OUTPUT_BATCH_MS = 64;
+const HIDDEN_OUTPUT_BATCH_MS = 160;
 const INPUT_PRIORITY_MS = 140;
 
 export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, renderer, collapsed, covered, focusRequest, onInsertSelection, onClose }) {
@@ -100,12 +101,6 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
         deferredSelection = undefined;
       };
     }
-    applyRenderVisibility.current = () => {
-      if (!hidden.current && fitPending) fitWhenVisible();
-      setIntersection?.(hidden.current ? outsideViewport : intersection);
-      if (!hidden.current) restoreSelection?.();
-    };
-    if (hidden.current) applyRenderVisibility.current();
     let closed = false;
     host.dataset.renderer = 'dom';
     if (renderer !== 'dom') {
@@ -168,6 +163,15 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
       queuedBytes = 0;
       writeOutput(batch);
     }
+    applyRenderVisibility.current = () => {
+      if (!hidden.current) {
+        flushOutput();
+        if (fitPending) fitWhenVisible();
+      }
+      setIntersection?.(hidden.current ? outsideViewport : intersection);
+      if (!hidden.current) restoreSelection?.();
+    };
+    if (hidden.current) applyRenderVisibility.current();
     const unsubscribe = window.span.onEvent(packet => {
       if (packet.generation !== source) return;
       if (packet.event === 'terminal') {
@@ -175,8 +179,10 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
         const now = performance.now();
         const continuous = now - lastOutput < OUTPUT_GAP_MS;
         lastOutput = now;
-        // Show the first output and interactive echo immediately. Coalesce only continuous DOM output.
-        const immediate = !continuous || now < prioritizeInputUntil || host.dataset.renderer === 'webgl';
+        // The hidden terminal keeps parsing, including enough output to acknowledge the PTY window.
+        // A visible terminal still shows the first output and key echoes immediately.
+        const paused = hidden.current;
+        const immediate = !paused && (!continuous || now < prioritizeInputUntil || host.dataset.renderer === 'webgl');
         if (immediate && !queuedBytes) {
           writeOutput(bytes);
         } else {
@@ -184,7 +190,7 @@ export const TerminalPanel = memo(function TerminalPanel({ workspace, ssh, rende
           queuedBytes += bytes.length;
           // xterm can parse the first write after a key synchronously. Include the reply in that write.
           if (immediate || queuedBytes >= ACK_BYTES) flushOutput();
-          else outputTimer ??= setTimeout(flushOutput, OUTPUT_BATCH_MS);
+          else outputTimer ??= setTimeout(flushOutput, paused ? HIDDEN_OUTPUT_BATCH_MS : OUTPUT_BATCH_MS);
         }
       }
       if (packet.event === 'terminal-closed') {

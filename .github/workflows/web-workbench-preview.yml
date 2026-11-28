@@ -15,6 +15,7 @@ env:
   TERMINAL_RENDERER_BASELINE: b4d95f68481e073da9fa4df344629a5b9d07f1b5
   TERMINAL_COVER_BASELINE: 6d3fe55dd6c192b162eec43c4f7bdb62c3db9b20
   TERMINAL_WINDOW_BASELINE: 127feffb69fbd7a752c49b7666f3198a3c0e8cb6
+  TERMINAL_COLLAPSE_BASELINE: 074cc7a5a1324fbf3840cddfd05c3d4fff1bff46
 
 concurrency:
   group: span-web-workbench-${{ github.ref }}
@@ -115,7 +116,8 @@ jobs:
             grouped-history:61fd4ff8aa9a25663864f9191c40c60090533e96 \
             terminal:"$TERMINAL_RENDERER_BASELINE" \
             terminal-cover:"$TERMINAL_COVER_BASELINE" \
-            terminal-window:"$TERMINAL_WINDOW_BASELINE"
+            terminal-window:"$TERMINAL_WINDOW_BASELINE" \
+            terminal-collapse:"$TERMINAL_COLLAPSE_BASELINE"
           do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
@@ -170,6 +172,7 @@ jobs:
             /tmp/span-workbench-artifacts/startup-loading-baseline-commit.txt
             /tmp/span-workbench-artifacts/grouped-history-baseline-commit.txt
             /tmp/span-workbench-artifacts/terminal-window-baseline-commit.txt
+            /tmp/span-workbench-artifacts/terminal-collapse-baseline-commit.txt
             /tmp/span-workbench-artifacts/streaming-output-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-baseline-commit.txt
             /tmp/span-workbench-artifacts/reasoning-details-baseline-commit.txt
@@ -231,7 +234,8 @@ jobs:
       - name: Prepare the baseline renderers for terminal, replies, command output and reasoning
         run: |
           for spec in terminal:"$TERMINAL_RENDERER_BASELINE" terminal-cover:"$TERMINAL_COVER_BASELINE" \
-            terminal-window:"$TERMINAL_WINDOW_BASELINE" following-reply:"$FOLLOWING_REPLY_BASELINE" \
+            terminal-window:"$TERMINAL_WINDOW_BASELINE" terminal-collapse:"$TERMINAL_COLLAPSE_BASELINE" \
+            following-reply:"$FOLLOWING_REPLY_BASELINE" \
             streaming-output:"$STREAMING_OUTPUT_BASELINE" reasoning:"$REASONING_BASELINE"; do
             target="${spec%%:*}-baseline"
             baseline="${spec#*:}"
@@ -275,7 +279,8 @@ jobs:
           node prototype/test/resource-isolation.mjs "$binary" "$PWD/windows-workbench-resource-isolation.json" \
             "$PWD/terminal-baseline/span-preview.exe" "$TERMINAL_RENDERER_BASELINE" \
             "$PWD/terminal-cover-baseline/span-preview.exe" "$TERMINAL_COVER_BASELINE" \
-            "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE"
+            "$PWD/terminal-window-baseline/span-preview.exe" "$TERMINAL_WINDOW_BASELINE" \
+            "$PWD/terminal-collapse-baseline/span-preview.exe" "$TERMINAL_COLLAPSE_BASELINE"
           if ((reasoning_result != 0)); then exit "$reasoning_result"; fi
           mv preview-under-test.zip span-web-windows-x86_64.zip
       - name: Compare native Windows wheel rendering with and without animation

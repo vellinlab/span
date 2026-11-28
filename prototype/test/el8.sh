@@ -146,7 +146,8 @@ taskset -c "$pressure_cpu" /artifacts/node prototype/test/resource-isolation.mjs
     /artifacts/linux/span-preview /artifacts/resource-isolation.json \
     /artifacts/terminal-baseline/span-preview "$(cat /artifacts/terminal-baseline-commit.txt)" \
     /artifacts/terminal-cover-baseline/span-preview "$(cat /artifacts/terminal-cover-baseline-commit.txt)" \
-    /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)" || result=$?
+    /artifacts/terminal-window-baseline/span-preview "$(cat /artifacts/terminal-window-baseline-commit.txt)" \
+    /artifacts/terminal-collapse-baseline/span-preview "$(cat /artifacts/terminal-collapse-baseline-commit.txt)" || result=$?
 
 widget_socket="$fixture/widgets.sock"
 /usr/libexec/platform-python packaging/test-widget.py --serve "$widget_socket" &

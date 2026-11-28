@@ -1,4 +1,5 @@
 const { existsSync } = require('node:fs');
+const filler = process.argv.includes('--bulk') ? 'review terminal output '.repeat(192) + '\r\n' : '';
 
 process.stdout.write('\x1b[32mspan_covered_ready\x1b[0m\r\n');
 const gate = setInterval(() => {
@@ -10,6 +11,8 @@ const gate = setInterval(() => {
     if (line === 80) {
       clearInterval(output);
       process.stdout.write('\x1b[32mspan_covered_done\x1b[0m\r\n');
+    } else if (filler) {
+      process.stdout.write(filler);
     }
   }, 45);
 }, 20);
