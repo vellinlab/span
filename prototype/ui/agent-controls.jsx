@@ -378,7 +378,7 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
     if (!open || !focusOnOpen.current) return;
     const entry = focusOnOpen.current > 0 ? menu.current?.firstElementChild : menu.current?.lastElementChild;
     focusOnOpen.current = 0;
-    entry?.focus({ preventScroll: true });
+    entry?.focus();
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -429,7 +429,7 @@ export const AgentMenu = memo(function AgentMenu({ api, hasGoal, models, modelId
       case 'Home': next = 0; break;
       case 'End': next = items.length - 1; break;
     }
-    items[next]?.focus({ preventScroll: true });
+    items[next]?.focus();
   }
   return <div className="agent-menu"
     onBlur={event => {

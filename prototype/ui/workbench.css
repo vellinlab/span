@@ -947,7 +947,7 @@ p { margin-block: 0 12px; }
 .composer-bar .jump-latest { flex: none; color: var(--accent); white-space: nowrap; }
 @container conversation (max-width: 456px) {
   .composer { padding-inline: 9px; }
-  .composer-bar { gap: 4px; }
+  .composer-bar { position: relative; gap: 4px; }
   .composer-bar :is(.connection, .agent-menu .composer-control, .jump-latest) {
     position: relative;
     display: grid;
@@ -968,7 +968,12 @@ p { margin-block: 0 12px; }
     height: 5px;
     box-shadow: 0 0 0 1px var(--composer);
   }
-  .composer-bar .agent-menu { flex: none; }
+  .composer-bar .agent-menu { position: static; flex: none; }
+  .composer-bar .agent-menu-entries {
+    max-width: min(232px, 100%);
+    max-height: max(40px, 100cqb - 62px);
+    overflow: auto;
+  }
 }
 @container conversation (max-width: 255px) {
   .composer { padding-inline: 7px; }
@@ -1202,11 +1207,8 @@ p { margin-block: 0 12px; }
 }
 .agent-menu { position: relative; flex: 0 1 auto; min-width: 0; }
 .agent-menu .composer-control { max-width: min(168px, 25vw); }
-@container (width > 440px) {
+@container conversation (width > 456px) {
   .agent-menu-label:has(+ .agent-menu-model) { display: none; }
-}
-@container (max-width: 440px) {
-  .agent-menu-model { display: none; }
 }
 .agent-menu .composer-control[aria-expanded="true"] { background: var(--hover); }
 .agent-menu [aria-expanded="true"] .agent-menu-chevron { transform: rotate(180deg); }

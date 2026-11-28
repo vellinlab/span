@@ -1983,6 +1983,24 @@ try {
     await preview.waitFor({ state: 'detached' });
     assert.equal(await composer.inputValue(), splitDraft);
     await composer.fill('');
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window.setContentSize(740, 520);
+      window.webContents.setZoomFactor(2);
+    });
+    await page.waitForFunction(() => innerWidth >= 360 && innerWidth < 395);
+    await agentToggle.press('ArrowUp');
+    const compactAgentMenu = page.getByRole('group', { name: 'Agent 操作' });
+    await compactAgentMenu.waitFor();
+    assert.ok(await compactAgentMenu.evaluate(menu => {
+      const bounds = menu.getBoundingClientRect();
+      const frame = menu.closest('.conversation').getBoundingClientRect();
+      const last = menu.lastElementChild.getBoundingClientRect();
+      return bounds.left >= frame.left && bounds.right <= frame.right && bounds.top >= frame.top &&
+        menu.lastElementChild === document.activeElement && last.bottom <= bounds.bottom + 1;
+    }));
+    await compactAgentMenu.locator('button').last().press('Escape');
+    await compactAgentMenu.waitFor({ state: 'detached' });
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
     await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), previousSize);
   }
