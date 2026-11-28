@@ -702,10 +702,21 @@ try {
   await compactProgress.getByText(currentProgress, { exact: true }).waitFor();
   await liveReasoning.waitFor({ state: 'hidden' });
   assert.ok(await reasoningPanel.evaluate(panel => {
-    const above = panel.getBoundingClientRect().top - document.querySelector('.timeline').getBoundingClientRect().top;
-    return above >= 30 && panel.querySelector('.agent-panel-content').clientHeight >= 42;
+    const bounds = panel.getBoundingClientRect();
+    const above = bounds.top - document.querySelector('.timeline').getBoundingClientRect().top;
+    const close = panel.querySelector('header button').getBoundingClientRect();
+    const send = document.querySelector('.composer .send').getBoundingClientRect();
+    return above >= 30 && panel.querySelector('.agent-panel-content').clientHeight >= 42
+      && bounds.right <= innerWidth && close.width > 0 && close.right <= bounds.right
+      && send.width > 0 && send.right <= innerWidth;
   }), 'Keep room for the conversation and the process details with the terminal open at 125%.');
-  if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-reasoning-compact-125.png') });
+  if (screenshot) {
+    const png = await app.evaluate(async ({ BrowserWindow }) => {
+      const image = await BrowserWindow.getAllWindows()[0].webContents.capturePage();
+      return image.toPNG().toString('base64');
+    });
+    await writeFile(screenshot.replace(/\.png$/, '-reasoning-compact-125.png'), Buffer.from(png, 'base64'));
+  }
   await reasoningBody.press('Escape');
   await liveReasoning.waitFor();
   assert.ok(await liveReasoning.evaluate(element => element === document.activeElement));
