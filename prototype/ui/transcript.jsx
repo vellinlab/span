@@ -707,7 +707,7 @@ export const Transcript = memo(function Transcript({
       <div className="reading-column rail" style={{ height, visibility: restore ? 'hidden' : undefined }}>
         {virtualRows.map(item => {
           const row = layout.rowAt(rows, item.index);
-          const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + Number(Boolean(layout.nested?.has(item.index)));
+          const depth = Math.max(0, Math.min(3, row.depth ?? 0)) + (layout.depthByIndex?.get(item.index) ?? 0);
           const show = row.key !== liveReasoningItem && Boolean(visibleRow(row));
           const activePlan = row.kind === 'plan' && Boolean(liveTurnId && row.turnId === liveTurnId);
           const streaming = row.kind === 'message' && !row.final && row.turnId === activeTurnId && Boolean(activeTurnId);

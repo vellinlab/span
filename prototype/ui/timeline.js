@@ -228,41 +228,62 @@ function updateTimelineLayout(layout, changes, groups, processes) {
   return createTimelineLayout(keys, sizes, groups, processes);
 }
 
-function visibleGroups(activity, processes, liveTurnId, ungroupedTurns) {
+function visibleGroups(activity, processes, liveTurnId, ungroupedTurns, openGroups) {
   const groups = activity.filter(group => {
     if (group.turnId === liveTurnId || ungroupedTurns.has(group.turnId)) return false;
     const process = processes.get(group.turnId);
-    return !process || group.end <= process.start || group.start >= process.end;
+    return !process || group.end <= process.start || group.start >= process.end || openGroups.has(process.key);
   });
   for (const process of processes.values()) {
     if (process.turnId !== liveTurnId && process.ranges.length) groups.push(process);
   }
-  groups.sort((a, b) => a.start - b.start);
+  groups.sort((a, b) => a.start - b.start || Number(b.kind === 'turn-process') - Number(a.kind === 'turn-process'));
   return groups;
 }
 
 function groupPrefix(groups, openGroups) {
   const entries = [];
-  const nested = new Set();
+  const depthByIndex = new Map();
   let nextRow = 0;
-  for (const group of groups) {
-    for (; nextRow < group.start; nextRow++) entries.push(nextRow);
-    entries.push(group);
+
+  function append(entry, depth) {
+    if (depth) depthByIndex.set(entries.length, depth);
+    entries.push(entry);
+  }
+
+  function appendRows(end, depth = 0) {
+    for (; nextRow < end; nextRow++) append(nextRow, depth);
+  }
+
+  function appendActivity(group, depth) {
+    appendRows(group.start, depth);
+    append(group, depth);
+    if (openGroups.has(group.key)) appendRows(group.end, depth + 1);
+    else nextRow = group.end;
+  }
+
+  for (let index = 0; index < groups.length; index++) {
+    const group = groups[index];
+    if (group.kind === 'activity-group') {
+      appendActivity(group, 0);
+      continue;
+    }
+    appendRows(group.start);
+    append(group, 0);
     const open = openGroups.has(group.key);
-    for (const range of group.ranges ?? [group]) {
-      // Keep results and failures at their original positions when the process is opened.
-      for (; nextRow < range.start; nextRow++) entries.push(nextRow);
-      if (open) {
-        for (; nextRow < range.end; nextRow++) {
-          nested.add(entries.length);
-          entries.push(nextRow);
-        }
-      } else {
-        nextRow = range.end;
+    for (const range of group.ranges) {
+      // A failure or result remains in the outer timeline between process ranges.
+      appendRows(range.start);
+      for (let child = groups[index + 1]; child?.kind === 'activity-group' && child.start >= range.start && child.end <= range.end;
+        child = groups[index + 1]) {
+        index++;
+        if (open) appendActivity(child, 1);
       }
+      if (open) appendRows(range.end, 1);
+      else nextRow = range.end;
     }
   }
-  return { groups, entries, nested, offset: entries.length - nextRow };
+  return { groups, entries, depthByIndex, offset: entries.length - nextRow };
 }
 
 export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGroups) {
@@ -270,7 +291,7 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
   const { groups: activity, processes } = layout;
   if (!prefix || prefix.activity !== activity || prefix.processes !== processes ||
     prefix.liveTurnId !== liveTurnId || prefix.ungroupedTurns !== ungroupedTurns) {
-    const groups = visibleGroups(activity, processes, liveTurnId, ungroupedTurns);
+    const groups = visibleGroups(activity, processes, liveTurnId, ungroupedTurns, openGroups);
     if (prefix?.groups.length !== groups.length || groups.some((group, index) => prefix.groups[index] !== group)) {
       prefix = groupPrefix(groups, openGroups);
     }
@@ -283,11 +304,11 @@ export function groupedTimelineLayout(layout, liveTurnId, ungroupedTurns, openGr
   if (prefix.source?.getItemKey === layout.getItemKey && prefix.source.estimateSize === layout.estimateSize) return prefix.view;
   // The ungrouped tail maps directly to source rows. Appending to a live
   // turn keeps the existing history map and does not allocate tail entries.
-  const { entries, offset, nested } = prefix;
+  const { entries, offset, depthByIndex } = prefix;
   const entryAt = index => index < entries.length ? entries[index] : index - offset;
   prefix.source = layout;
   prefix.view = {
-    count: layout.count + offset, nested,
+    count: layout.count + offset, depthByIndex,
     sourceIndex: index => entryAt(index),
     getItemKey(index) {
       const entry = entryAt(index);

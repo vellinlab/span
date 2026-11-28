@@ -1657,6 +1657,12 @@ try {
   assert.equal(await firstCommand.count(), 0);
   if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-activity-group.png') });
   await group.press('Enter');
+  const routine = transcript.getByRole('button', { name: '6 条命令 · 2 次工具调用', exact: true });
+  await routine.waitFor();
+  assert.equal(await routine.getAttribute('aria-expanded'), 'false');
+  assert.equal(await firstCommand.count(), 0);
+  await routine.press('Enter');
+  assert.equal(await routine.getAttribute('aria-expanded'), 'true');
   const fileTool = transcript.locator('[data-card="tool"]').filter({ hasText: '复核记录 2' });
   const fileTarget = 'review/checks/工作区检查-2.txt';
   const fileSummary = fileTool.locator('summary');

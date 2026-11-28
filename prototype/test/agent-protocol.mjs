@@ -372,7 +372,7 @@ test('completed activity groups preserve chronology and exclude failure, prose a
   const expanded = groupedTimelineLayout(layout, undefined, empty, new Set([group.key]));
   assert.equal(expanded.count, rows.length + 1);
   assert.deepEqual(Array.from({ length: rows.length }, (_, index) => expanded.rowAt(rows, index + 1)), rows);
-  assert.deepEqual([...expanded.nested], [1, 2, 3, 4]);
+  assert.deepEqual([...expanded.depthByIndex.keys()], [1, 2, 3, 4]);
 
   const update = item => applyTimeline(rows, [{ kind: 'item', item, final: true }]);
   assert.equal(timelineLayout(update({ ...prose, text: 'Changed prose' })), layout);
@@ -395,7 +395,7 @@ test('live commands reuse earlier group mappings until a history change affects 
   const view = groupedTimelineLayout(next, 'live', plain, open);
   assert.equal(next.groups.length, 2);
   assert.equal(next.groups[0], initial.groups[0]);
-  assert.equal(view.nested, opened.nested);
+  assert.equal(view.depthByIndex, opened.depthByIndex);
   assert.deepEqual(Array.from({ length: live.length }, (_, i) => view.rowAt(live, i + 1)), live);
   assert.deepEqual(Array.from({ length: live.length }, (_, i) => view.getItemKey(i + 1)), live.map(row => row.key));
 
@@ -440,7 +440,7 @@ test('a completed answer folds the turn process while keeping results and errors
   assert.deepEqual(group.ranges, [{ start: 1, end: 3 }, { start: 4, end: 5 }, { start: 6, end: 7 }]);
   const open = groupedTimelineLayout(layout, undefined, empty, new Set([group.key]));
   assert.deepEqual(ids(open, rows), ['question', 'turn-process', ...items.slice(1).map(row => row.id)]);
-  assert.deepEqual([...open.nested], [2, 3, 5, 7]);
+  assert.deepEqual([...open.depthByIndex.keys()], [2, 3, 5, 7]);
   const restored = historyRows([{ id: turnId, run, rows: items }]);
   assert.deepEqual(ids(groupedTimelineLayout(timelineLayout(restored), undefined, empty, empty), restored), ids(collapsed, rows));
 
@@ -462,6 +462,43 @@ test('a completed answer folds the turn process while keeping results and errors
   const processes = timelineLayout(next).processes;
   assert.equal(processes.get(turnId), group);
   assert.deepEqual(processes.get(nextRun.id).ranges, [{ start: rows.length, end: rows.length + 1 }]);
+});
+
+test('an expanded process summarizes consecutive activity without hiding its failures or outputs', () => {
+  const turnId = 'turn';
+  const row = (id, kind, fields) => ({ id, kind, turnId, ...fields });
+  const command = (id, exitCode = 0) => row(id, 'command', { status: 'completed', exitCode });
+  const tool = id => row(id, 'tool', { status: 'completed', name: 'Inspect' });
+  const items = [
+    row('question', 'user', { text: 'Check the report.' }),
+    command('a'), command('b'), command('c'), tool('read'),
+    command('failure', 1),
+    tool('d'), tool('e'), tool('f'), tool('g'),
+    row('done', 'message', { phase: 'final', text: 'Ready.' }),
+  ];
+  const next = { id: 'next', run: { id: 'next', status: 'completed' }, rows: [
+    { id: 'next-answer', kind: 'message', turnId: 'next', text: 'Next.' },
+  ] };
+  const rows = historyRows([{ id: turnId, run: { id: turnId, status: 'completed' }, rows: items }, next]);
+  const layout = timelineLayout(rows);
+  const [mixed, tools] = layout.groups;
+  const process = layout.processes.get(turnId);
+  const visible = (open, plain, active) => groupedTimelineLayout(layout, active, new Set(plain), new Set(open));
+  const ids = view => Array.from({ length: view.count }, (_, index) => {
+    const item = view.rowAt(rows, index);
+    assert.equal(view.getItemKey(index), item.key);
+    return item.id ?? item.kind;
+  });
+  assert.deepEqual(ids(visible([mixed.key])), ['question', 'turn-process', 'failure', 'done', 'next-answer']);
+  assert.deepEqual(ids(visible([process.key])),
+    ['question', 'turn-process', 'activity-group', 'failure', 'activity-group', 'done', 'next-answer']);
+  const expanded = visible([process.key, mixed.key]);
+  assert.deepEqual(ids(expanded),
+    ['question', 'turn-process', 'activity-group', 'a', 'b', 'c', 'read', 'failure', 'activity-group', 'done', 'next-answer']);
+  assert.deepEqual([...expanded.depthByIndex], [[2, 1], [3, 2], [4, 2], [5, 2], [6, 2], [8, 1]]);
+  assert.deepEqual([mixed.commands, tools.commands], [3, 0]);
+  assert.deepEqual(ids(visible([process.key], [turnId])), ['question', 'turn-process', ...items.slice(1).map(item => item.id), 'next-answer']);
+  assert.equal(visible([], [], turnId), layout);
 });
 
 test('the process includes image inspections and activity between or after final answer fragments', () => {
