@@ -1,0 +1,17 @@
+name: 功能建议
+description: 说明希望 Span 支持的操作或场景
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 你要完成什么任务？
+      description: 如果和某个平台、后端或 SSH 连接有关，请一并说明。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 你希望在 Span 中如何完成？
+    validations:
+      required: true
