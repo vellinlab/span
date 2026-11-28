@@ -2366,6 +2366,7 @@ try {
     const delivered = transcript.getByRole('button', { name: '预览 · ' + artifactName, exact: true });
     const answer = transcript.getByText('窗口复核完成，已附上截图。', { exact: true });
     await delivered.waitFor();
+    await page.locator('.breadcrumb-workspace').filter({ hasText: /^review-workspace$/ }).waitFor();
     assert.ok(await answer.evaluate((reply, filename) => {
       const rows = reply.closest('.rail');
       const file = [...rows.querySelectorAll('.artifact-result-file .file-reference-name')]
@@ -2376,6 +2377,8 @@ try {
     if (screenshot) await page.screenshot({ path: screenshot.replace(/\.png$/, '-delivered-artifact.png') });
     await delivered.press('Enter');
     const previewedImage = previewContent.getByRole('img', { name: artifactName, exact: true });
+    await page.waitForFunction(() => document.querySelector('.preview-content img, .composer-wrap .error-message'));
+    assert.deepEqual(await page.locator('.composer-wrap .error-message').allTextContents(), []);
     await previewedImage.waitFor();
     await page.waitForFunction(name => [...document.images].some(image => image.alt === name && image.naturalWidth > 0), artifactName);
     assert.ok(await previewContent.evaluate(content => content === document.activeElement));

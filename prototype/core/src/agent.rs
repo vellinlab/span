@@ -142,7 +142,7 @@ impl Backend {
 }
 
 enum Location {
-    Fixture,
+    Fixture(PathBuf),
     Local(PathBuf),
     Ssh(String),
 }
@@ -166,7 +166,7 @@ impl Agent {
             _ => return Err("未知的 Agent 后端。".into()),
         };
         let location = if params["demo"] == true {
-            Location::Fixture
+            Location::Fixture(process_directory(params)?)
         } else if let Some(target) = ssh_destination(params)? {
             Location::Ssh(target.to_owned())
         } else {
@@ -503,10 +503,11 @@ async fn serve(
                 Location::Local(cwd) => {
                     (pi::start_local(backend.binary(), &cwd)?, pi::Catalog::Local)
                 }
-                Location::Fixture => (
-                    spawn(Command::new(env::current_exe()?).arg("--pi-fixture"))?,
-                    pi::Catalog::Fixture,
-                ),
+                Location::Fixture(cwd) => {
+                    let mut command = Command::new(env::current_exe()?);
+                    command.current_dir(cwd).arg("--pi-fixture");
+                    (spawn(&mut command)?, pi::Catalog::Fixture)
+                }
             };
             let route = if matches!(catalog, pi::Catalog::Fixture) {
                 "fixture"
@@ -605,8 +606,10 @@ async fn serve(
                 })?;
             stdio(process, requests, output, generation, "stdio").await?;
         }
-        (_, Location::Fixture) => {
-            let process = spawn(Command::new(env::current_exe()?).arg("--fixture"))?;
+        (_, Location::Fixture(cwd)) => {
+            let mut command = Command::new(env::current_exe()?);
+            command.current_dir(cwd).arg("--fixture");
+            let process = spawn(&mut command)?;
             stdio(process, requests, output, generation, "fixture").await?;
         }
         (Backend::Codex, Location::Ssh(target)) => {
@@ -685,7 +688,7 @@ async fn serve(
                     command.current_dir(cwd);
                     command
                 }
-                Location::Fixture => unreachable!(),
+                Location::Fixture(_) => unreachable!(),
             };
             let process = spawn(command.arg("app-server"))
                 .map_err(|error| format!("无法启动 Clue App Server：{error}"))?;
