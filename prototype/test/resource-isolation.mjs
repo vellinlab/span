@@ -12,6 +12,7 @@ const [binary, reportPath, baselineBinary, baselineCommit, coveredBaseline, cove
   markdownBaseline, markdownBaselineCommit, reflowBaseline, reflowBaselineCommit] = process.argv.slice(2);
 const linux = process.platform === 'linux';
 const initialSize = [880, 640];
+const coveredSize = [800, initialSize[1]];
 const activeWindowMs = 7500;
 const interactionTimeoutMs = 10_000;
 const allocationSampling = {
@@ -813,7 +814,7 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
     }
     const page = await app.firstWindow();
     if (workload === 'interaction') page.setDefaultTimeout(interactionTimeoutMs);
-    await resize(app, page, initialSize);
+    await resize(app, page, workload === 'covered' ? coveredSize : initialSize);
     const tail = page.getByTestId('transcript').getByText('第 160 项', { exact: false });
     await tail.waitFor();
     const openTerminal = () => page.getByRole('button', { name: '切换终端' }).click();
@@ -888,7 +889,8 @@ async function trial(workload, variant, executable, recordEcho, saveImage) {
 
 const report = {
   platform: process.platform, osRelease: release(), availableCpus: availableParallelism(), terminalRenderer: 'dom',
-  window: initialSize, activeWindowMs, baselineCommit, coveredBaselineCommit, minimizedBaselineCommit, collapsedBaselineCommit,
+  window: initialSize, coveredWindow: coveredSize, activeWindowMs,
+  baselineCommit, coveredBaselineCommit, minimizedBaselineCommit, collapsedBaselineCommit,
   markdownBaselineCommit, reflowBaselineCommit, fileListBaselineCommit: reflowBaselineCommit,
   trials: [], interaction: [], palettes: [], covered: [], minimized: [], collapsed: [],
 };
