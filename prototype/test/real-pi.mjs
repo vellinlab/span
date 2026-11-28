@@ -364,9 +364,11 @@ export default function (pi) {
     const summaries = log.locator('[data-card="reasoning"]');
     await summaries.getByText(afterTool, { exact: true }).waitFor();
     assert.equal(await summaries.count(), 2);
-    assert.equal(await summaries.locator('.card-body').count(), 0);
-    const chronology = await log.locator('[data-card="reasoning"] .card-title, [data-card="command"] .card-title').allTextContents();
-    assert.deepEqual(chronology, [beforeTool, 'echo pi tool result', afterTool]);
+    assert.equal(await summaries.locator('summary').count(), 0);
+    const chronology = await log.locator('[data-card="reasoning"] .reasoning-text, [data-card="command"] .card-title').allTextContents();
+    assert.equal(chronology.length, 3);
+    assert.ok(chronology[0].includes('先核对 Pi 会话。') && chronology[0].includes(beforeTool));
+    assert.deepEqual(chronology.slice(1), ['echo pi tool result', afterTool]);
     const failed = log.locator('[data-card="tool"][data-failed="true"]').filter({ hasText: 'read' });
     await failed.getByText('失败', { exact: true }).waitFor();
     assert.equal(await failed.locator('summary .card-icon.lucide-circle-alert').count(), 1);

@@ -1665,8 +1665,12 @@ try {
   await routine.waitFor();
   assert.equal(await routine.getAttribute('aria-expanded'), 'false');
   assert.equal(await firstCommand.count(), 0);
+  const routineTop = await transcript.evaluate(element => element.scrollTop);
   await routine.press('Enter');
   assert.equal(await routine.getAttribute('aria-expanded'), 'true');
+  // Expanding keeps the heading in place. The last tool may need a scroll before it mounts.
+  await transcript.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await waitForTranscriptEnd();
   const fileTool = transcript.locator('[data-card="tool"]').filter({ hasText: '复核记录 2' });
   const fileTarget = 'review/checks/工作区检查-2.txt';
   const fileSummary = fileTool.locator('summary');
@@ -1679,6 +1683,7 @@ try {
   await fileTool.getByText('记录可读。', { exact: true }).waitFor();
   await fileSummary.press('Enter');
   await fileTool.locator('.tool-context').waitFor({ state: 'detached' });
+  await transcript.evaluate((element, top) => { element.scrollTop = top; }, routineTop);
   await firstCommand.locator('summary').press('Enter');
   await firstCommand.getByText('第 1 条命令的输出。', { exact: true }).waitFor();
   assert.equal(await group.getAttribute('aria-expanded'), 'true');
